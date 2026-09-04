@@ -4,7 +4,7 @@ import { lstat, open, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 export const GITHUB_LATEST_RELEASE_API =
-  "https://api.github.com/repos/mbaykam/Minke/releases/latest";
+  "https://api.github.com/repos/mbaykam/HUB/releases/latest";
 
 const GITHUB_API_VERSION = "2026-03-10";
 const MAX_RELEASE_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -283,7 +283,7 @@ export async function detectAppUpdateTarget(
 }
 
 function releaseAssetUrl(tag: string, assetName: string): string {
-  return `https://github.com/mbaykam/Minke/releases/download/${tag}/${assetName}`;
+  return `https://github.com/mbaykam/HUB/releases/download/${tag}/${assetName}`;
 }
 
 function trustedAsset(

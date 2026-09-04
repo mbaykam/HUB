@@ -58,7 +58,7 @@ test("README links directly to the AppImage installer", async () => {
 
   assert.ok(
     readme.includes(
-      `https://github.com/mbaykam/Minke/releases/latest/download/${appImageAssetName}`,
+      `https://github.com/mbaykam/HUB/releases/latest/download/${appImageAssetName}`,
     ),
   );
 });

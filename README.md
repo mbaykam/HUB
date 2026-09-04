@@ -29,8 +29,8 @@ by [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 Requires Node.js 24+, pnpm 11, and Git submodules.
 
 ```bash
-git clone --recurse-submodules https://github.com/mbaykam/Minke.git
-cd Minke
+git clone --recurse-submodules https://github.com/mbaykam/HUB.git
+cd HUB
 pnpm install
 pnpm run harness:stage
 pnpm start
@@ -44,12 +44,12 @@ pnpm run package
 
 ## Downloads
 
-- [macOS (Apple silicon)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-macos-arm64.dmg)
-- [macOS (Intel)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-macos-x64.dmg)
-- [Windows](https://github.com/mbaykam/Minke/releases/latest/download/HUB-windows-x64.exe)
-- [Linux (Debian/Ubuntu)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-linux-x64.deb)
-- [Linux (RPM)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-linux-x64.rpm)
-- [Linux (AppImage)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-linux-x64.AppImage)
+- [macOS (Apple silicon)](https://github.com/mbaykam/HUB/releases/latest/download/HUB-macos-arm64.dmg)
+- [macOS (Intel)](https://github.com/mbaykam/HUB/releases/latest/download/HUB-macos-x64.dmg)
+- [Windows](https://github.com/mbaykam/HUB/releases/latest/download/HUB-windows-x64.exe)
+- [Linux (Debian/Ubuntu)](https://github.com/mbaykam/HUB/releases/latest/download/HUB-linux-x64.deb)
+- [Linux (RPM)](https://github.com/mbaykam/HUB/releases/latest/download/HUB-linux-x64.rpm)
+- [Linux (AppImage)](https://github.com/mbaykam/HUB/releases/latest/download/HUB-linux-x64.AppImage)
 
 ## Privacy
 

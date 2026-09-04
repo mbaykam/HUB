@@ -265,7 +265,7 @@ test("README links directly to every latest installer", async () => {
   for (const assetName of releaseAssetNames) {
     assert.ok(
       readme.includes(
-        `https://github.com/mbaykam/Minke/releases/latest/download/${assetName}`,
+        `https://github.com/mbaykam/HUB/releases/latest/download/${assetName}`,
       ),
     );
   }
@@ -280,11 +280,11 @@ test("native makers receive required distribution metadata", async () => {
   assert.equal(manifest.license, "Apache-2.0");
   assert.equal(
     manifest.repository?.url,
-    "git+https://github.com/mbaykam/Minke.git",
+    "git+https://github.com/mbaykam/HUB.git",
   );
   assert.equal(
     manifest.homepage,
-    "https://github.com/mbaykam/Minke#readme",
+    "https://github.com/mbaykam/HUB#readme",
   );
   assert.equal(typeof manifest.description, "string");
   assert.notEqual(manifest.description, "");

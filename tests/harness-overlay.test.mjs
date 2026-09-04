@@ -713,7 +713,7 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
   assert.deepEqual(
     [MINKE_PROJECT_URL, DEEPSEEK_HARNESS_URL],
     [
-      "https://github.com/mbaykam/Minke",
+      "https://github.com/mbaykam/HUB",
       "https://github.com/deepseek-ai/deepseek-harness",
     ],
   );

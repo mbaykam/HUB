@@ -5,13 +5,13 @@
   "description": "HUB — a focused desktop and mobile AI workspace powered by DeepSeek Harness",
   "author": "mbaykam",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/mbaykam/Minke#readme",
+  "homepage": "https://github.com/mbaykam/HUB#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mbaykam/Minke.git"
+    "url": "git+https://github.com/mbaykam/HUB.git"
   },
   "bugs": {
-    "url": "https://github.com/mbaykam/Minke/issues"
+    "url": "https://github.com/mbaykam/HUB/issues"
   },
   "private": true,
   "version": "0.4.0",

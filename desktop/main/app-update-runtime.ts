@@ -555,7 +555,7 @@ export class AppUpdateRuntime {
     });
     if (choice.response !== 0 || this.#disposed) return;
     await shell.openExternal(
-      `https://github.com/mbaykam/Minke/releases/tag/${update.tag}`,
+      `https://github.com/mbaykam/HUB/releases/tag/${update.tag}`,
     );
   }
 

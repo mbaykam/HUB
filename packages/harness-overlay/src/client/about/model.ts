@@ -2,7 +2,7 @@ import type { DesktopAboutInfo } from "../desktop/index.ts";
 import type { AboutTranslate } from "./locales.ts";
 
 export const MINKE_PROJECT_URL =
-  "https://github.com/mbaykam/Minke";
+  "https://github.com/mbaykam/HUB";
 export const DEEPSEEK_HARNESS_URL =
   "https://github.com/deepseek-ai/deepseek-harness";
 

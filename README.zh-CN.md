@@ -22,8 +22,8 @@ HUB 是一个专注的桌面 AI 工作空间，并提供快速、移动优先的
 需要 Node.js 24+、pnpm 11 和 Git submodules。
 
 ```bash
-git clone --recurse-submodules https://github.com/mbaykam/Minke.git
-cd Minke
+git clone --recurse-submodules https://github.com/mbaykam/HUB.git
+cd HUB
 pnpm install
 pnpm run harness:stage
 pnpm start

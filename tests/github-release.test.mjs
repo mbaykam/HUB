@@ -51,7 +51,7 @@ function publishOptions(assets, runGh) {
     assets,
     packageVersion: "0.3.0",
     releaseTag: "v0.3.0",
-    repository: "mbaykam/Minke",
+    repository: "mbaykam/HUB",
     runGh,
   };
 }
@@ -128,7 +128,7 @@ test("release publication creates a draft and accepts only an immutable publishe
     "api",
     "-H",
     `X-GitHub-Api-Version: ${GITHUB_RELEASE_API_VERSION}`,
-    "repos/mbaykam/Minke/releases/tags/v0.3.0",
+    "repos/mbaykam/HUB/releases/tags/v0.3.0",
   ]);
 });
 

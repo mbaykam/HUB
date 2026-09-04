@@ -50,7 +50,7 @@ test("default network identities expose the product version", async () => {
   assert.equal(sanitizeBotAgent(undefined), `HUB/${version}`);
   assert.equal(
     MINKE_WEB_SEARCH_DEFAULT_USER_AGENT,
-    `HUB/${version} (+https://github.com/mbaykam/Minke)`,
+    `HUB/${version} (+https://github.com/mbaykam/HUB)`,
   );
 
   let discordUserAgent;
@@ -74,6 +74,6 @@ test("default network identities expose the product version", async () => {
   });
   assert.equal(
     discordUserAgent,
-    `DiscordBot (https://github.com/mbaykam/Minke, ${version})`,
+    `DiscordBot (https://github.com/mbaykam/HUB, ${version})`,
   );
 });

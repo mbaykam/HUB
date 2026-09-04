@@ -43,7 +43,7 @@ function releaseAsset(name) {
     size: fixture.byteLength,
     digest: `sha256:${fixtureDigest}`,
     browser_download_url:
-      `https://github.com/mbaykam/Minke/releases/download/v0.3.0/${name}`,
+      `https://github.com/mbaykam/HUB/releases/download/v0.3.0/${name}`,
   };
 }
 
@@ -251,7 +251,7 @@ test("desktop updater selects only a newer immutable release and exact platform 
         size: fixture.byteLength,
         sha256: fixtureDigest,
         url:
-          `https://github.com/mbaykam/Minke/releases/download/v0.3.0/${name}`,
+          `https://github.com/mbaykam/HUB/releases/download/v0.3.0/${name}`,
       },
     });
   }
@@ -349,7 +349,7 @@ test("release lookup uses the pinned GitHub API endpoint and refuses redirects",
   assert.equal(update?.version, "0.3.0");
   assert.equal(
     requests[0].input,
-    "https://api.github.com/repos/mbaykam/Minke/releases/latest",
+    "https://api.github.com/repos/mbaykam/HUB/releases/latest",
   );
   assert.equal(requests[0].init.redirect, "error");
   assert.equal(requests[0].init.cache, "no-store");
@@ -373,7 +373,7 @@ test("release lookup uses the pinned GitHub API endpoint and refuses redirects",
 
 test("download redirect policy accepts only GitHub's HTTPS release asset chain", () => {
   const assetUrl =
-    "https://github.com/mbaykam/Minke/releases/download/v0.3.0/HUB-macos-arm64.dmg";
+    "https://github.com/mbaykam/HUB/releases/download/v0.3.0/HUB-macos-arm64.dmg";
   assert.doesNotThrow(() =>
     assertTrustedDownloadUrlChain(assetUrl, [
       assetUrl,
@@ -399,7 +399,7 @@ test("download redirect policy accepts only GitHub's HTTPS release asset chain",
   assert.throws(
     () =>
       assertTrustedDownloadUrlChain(assetUrl, [
-        "https://github.com/mbaykam/Minke/releases/download/v0.3.0/other.dmg",
+        "https://github.com/mbaykam/HUB/releases/download/v0.3.0/other.dmg",
       ]),
     /initial download URL/u,
   );
@@ -414,7 +414,7 @@ test("download verification checks regular-file type, exact size, and SHA-256", 
     size: fixture.byteLength,
     sha256: fixtureDigest,
     url:
-      "https://github.com/mbaykam/Minke/releases/download/v0.3.0/HUB-macos-arm64.dmg",
+      "https://github.com/mbaykam/HUB/releases/download/v0.3.0/HUB-macos-arm64.dmg",
   };
 
   await assert.doesNotReject(
