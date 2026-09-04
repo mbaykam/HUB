@@ -86,8 +86,9 @@ test("mobile sidebar settles by distance or release velocity", () => {
 });
 
 test("mobile sidebar is a translucent, accessible motion layer", () => {
-  assert.match(styles, /backdrop-filter:\s*blur\(24px\)/u);
-  assert.match(styles, /background:\s*rgb\(10 14 24 \/ 68%\)/u);
+  assert.match(styles, /backdrop-filter:\s*blur\(34px\) saturate\(165%\)/u);
+  assert.match(styles, /rgb\(8 12 22 \/ 48%\)/u);
+  assert.match(styles, /minke-mobile-glass-drift/u);
   assert.match(styles, /prefers-reduced-motion:\s*reduce/u);
   assert.match(styles, /prefers-reduced-transparency:\s*reduce/u);
   assert.match(styles, /touch-action:\s*pan-y/u);

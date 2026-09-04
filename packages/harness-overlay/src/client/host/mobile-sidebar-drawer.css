@@ -13,6 +13,10 @@ html[data-minke-mobile-web] [data-minke-mobile-sidebar-frame] {
   --minke-mobile-sidebar-content-brightness: 0.92;
   --minke-mobile-sidebar-scrim-opacity: 0.32;
   --minke-mobile-sidebar-shadow-opacity: 0.32;
+  --minke-mobile-right-drawer-offset: 100vw;
+  --minke-mobile-right-drawer-progress: 0;
+  --minke-mobile-right-content-scale: 1;
+  --minke-mobile-right-content-brightness: 1;
   grid-template-columns:
     0px
     minmax(0, 1fr)
@@ -34,6 +38,14 @@ html[data-minke-mobile-web]
   --minke-mobile-sidebar-shadow-opacity: 0;
 }
 
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-right-drawer-open] {
+  --minke-mobile-right-drawer-offset: 0px;
+  --minke-mobile-right-drawer-progress: 1;
+  --minke-mobile-right-content-scale: 0.988;
+  --minke-mobile-right-content-brightness: 0.94;
+}
+
 html[data-minke-mobile-web] [data-minke-mobile-sidebar] {
   position: absolute !important;
   inset: 0 auto 0 0;
@@ -41,10 +53,19 @@ html[data-minke-mobile-web] [data-minke-mobile-sidebar] {
   width: var(--minke-mobile-sidebar-width) !important;
   min-width: 0;
   overflow: hidden;
-  background: rgb(244 248 252 / 74%);
-  border-right: 1px solid rgb(45 64 92 / 14%);
+  background:
+    linear-gradient(
+      145deg,
+      rgb(255 255 255 / 22%),
+      rgb(226 237 250 / 7%) 52%,
+      rgb(255 255 255 / 15%)
+    ),
+    rgb(244 248 252 / 56%);
+  border-right: 1px solid rgb(255 255 255 / 38%);
   box-shadow: 20px 0 50px
-    rgb(0 0 0 / var(--minke-mobile-sidebar-shadow-opacity));
+      rgb(0 0 0 / var(--minke-mobile-sidebar-shadow-opacity)),
+    inset -1px 0 rgb(255 255 255 / 14%),
+    inset 0 1px rgb(255 255 255 / 24%);
   transform: translate3d(
     var(--minke-mobile-sidebar-offset),
     0,
@@ -55,13 +76,37 @@ html[data-minke-mobile-web] [data-minke-mobile-sidebar] {
     box-shadow 260ms ease;
   touch-action: pan-y;
   will-change: transform;
-  -webkit-backdrop-filter: blur(24px) saturate(135%);
-  backdrop-filter: blur(24px) saturate(135%);
+  -webkit-backdrop-filter: blur(34px) saturate(165%);
+  backdrop-filter: blur(34px) saturate(165%);
 }
 
 body[data-ds-dark-theme] [data-minke-mobile-sidebar] {
-  background: rgb(10 14 24 / 68%);
-  border-right-color: rgb(255 255 255 / 11%);
+  background:
+    linear-gradient(
+      145deg,
+      rgb(130 170 255 / 10%),
+      rgb(30 39 65 / 5%) 50%,
+      rgb(188 118 255 / 8%)
+    ),
+    rgb(8 12 22 / 48%);
+  border-right-color: rgb(255 255 255 / 18%);
+}
+
+/* A low-contrast moving reflection gives the glass a material response
+ * without competing with dense session labels. */
+html[data-minke-mobile-web] [data-minke-mobile-sidebar]::after {
+  content: "";
+  position: absolute;
+  inset: -18% -45%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 10%,
+    rgb(255 255 255 / 18%),
+    transparent 55%
+  );
+  transform: translate3d(-8%, -2%, 0) rotate(-7deg);
+  animation: minke-mobile-glass-drift 13s ease-in-out infinite alternate;
 }
 
 /* The column owns the glass. Remove the upstream duplicate fill so two
@@ -157,6 +202,230 @@ html[data-minke-mobile-web]
   transition: none !important;
 }
 
+/* The secondary drawer owns the whole mobile canvas. It is intentionally
+ * denser than the left navigation glass while remaining clearer than the
+ * previous 68% sidebar surface. */
+html[data-minke-mobile-web] [data-minke-mobile-right-drawer] {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding:
+    max(14px, env(safe-area-inset-top))
+    max(14px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(14px, env(safe-area-inset-left));
+  box-sizing: border-box;
+  background:
+    linear-gradient(
+      145deg,
+      rgb(255 255 255 / 20%),
+      rgb(230 239 251 / 7%) 48%,
+      rgb(255 255 255 / 13%)
+    ),
+    rgb(244 248 252 / 66%);
+  border-left: 1px solid rgb(255 255 255 / 42%);
+  box-shadow:
+    -24px 0 64px rgb(0 0 0 / 28%),
+    inset 1px 0 rgb(255 255 255 / 22%),
+    inset 0 1px rgb(255 255 255 / 24%);
+  opacity: calc(0.82 + var(--minke-mobile-right-drawer-progress) * 0.18);
+  pointer-events: none;
+  transform: translate3d(
+    var(--minke-mobile-right-drawer-offset),
+    0,
+    0
+  );
+  transition:
+    transform 300ms cubic-bezier(0.22, 0.8, 0.24, 1),
+    opacity 220ms ease,
+    box-shadow 300ms ease;
+  touch-action: pan-y;
+  will-change: transform;
+  -webkit-backdrop-filter: blur(32px) saturate(155%);
+  backdrop-filter: blur(32px) saturate(155%);
+}
+
+body[data-ds-dark-theme] [data-minke-mobile-right-drawer] {
+  background:
+    linear-gradient(
+      145deg,
+      rgb(127 169 255 / 10%),
+      rgb(32 40 65 / 5%) 48%,
+      rgb(187 112 255 / 7%)
+    ),
+    rgb(8 12 22 / 60%);
+  border-left-color: rgb(255 255 255 / 19%);
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-right-drawer-open]
+  > [data-minke-mobile-right-drawer] {
+  pointer-events: auto;
+}
+
+html[data-minke-mobile-web] [data-minke-mobile-right-drawer]::before {
+  content: "";
+  position: absolute;
+  inset: -22% -35%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse at 78% 6%,
+      rgb(108 160 255 / 14%),
+      transparent 42%
+    ),
+    radial-gradient(
+      ellipse at 18% 84%,
+      rgb(160 94 255 / 10%),
+      transparent 48%
+    );
+  transform: translate3d(4%, -2%, 0) rotate(4deg);
+  animation: minke-mobile-glass-drift 15s ease-in-out infinite alternate-reverse;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-right-drawer-header] {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+html[data-minke-mobile-web]
+  :is(
+    [data-minke-mobile-right-drawer-settings],
+    [data-minke-mobile-right-drawer-close]
+  ) {
+  min-height: 50px;
+  border: 1px solid rgb(255 255 255 / 24%);
+  background: rgb(255 255 255 / 12%);
+  box-shadow:
+    0 8px 24px rgb(18 28 48 / 12%),
+    inset 0 1px rgb(255 255 255 / 21%);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-right-drawer-settings] {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 16px;
+  border-radius: 18px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-right-drawer-settings]
+  svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-right-drawer-close] {
+  flex: none;
+  width: 50px;
+  padding: 0;
+  border-radius: 50%;
+  font: 300 30px/1 system-ui, sans-serif;
+}
+
+body[data-ds-dark-theme]
+  :is(
+    [data-minke-mobile-right-drawer-settings],
+    [data-minke-mobile-right-drawer-close]
+  ) {
+  border-color: rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 8%);
+}
+
+html[data-minke-mobile-web]
+  :is(
+    [data-minke-mobile-right-drawer-settings],
+    [data-minke-mobile-right-drawer-close]
+  ):active {
+  background: rgb(255 255 255 / 19%);
+  transform: scale(0.985);
+}
+
+html[data-minke-mobile-web] [data-minke-mobile-right-drawer-body] {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Keep the real settings trigger mounted as the source of truth while its
+ * action is presented by the horizontal bar in the right drawer. */
+html[data-minke-mobile-web]
+  [data-minke-mobile-settings-source] {
+  display: none !important;
+}
+
+html[data-minke-mobile-web] [data-minke-mobile-right-drawer-edge] {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 19;
+  width: 24px;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-right-drawer-open]
+  > [data-minke-mobile-right-drawer-edge] {
+  pointer-events: none;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-right-drawer-open]
+  > [data-minke-mobile-sidebar-content] {
+  filter: brightness(
+    var(--minke-mobile-right-content-brightness)
+  );
+  transform: scale(var(--minke-mobile-right-content-scale));
+  transform-origin: left center;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-right-drawer-dragging]
+  > :is(
+    [data-minke-mobile-right-drawer],
+    [data-minke-mobile-sidebar-content]
+  ) {
+  transition: none !important;
+}
+
+@keyframes minke-mobile-glass-drift {
+  from {
+    transform: translate3d(-7%, -2%, 0) rotate(-6deg);
+  }
+
+  to {
+    transform: translate3d(7%, 3%, 0) rotate(5deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html[data-minke-mobile-web]
     [data-minke-mobile-sidebar-frame]
@@ -166,6 +435,14 @@ html[data-minke-mobile-web]
       [data-minke-mobile-sidebar-scrim]
     ) {
     transition-duration: 1ms !important;
+  }
+
+  html[data-minke-mobile-web]
+    :is(
+      [data-minke-mobile-sidebar]::after,
+      [data-minke-mobile-right-drawer]::before
+    ) {
+    animation: none !important;
   }
 }
 
@@ -179,6 +456,18 @@ html[data-minke-mobile-web]
   body[data-ds-dark-theme] [data-minke-mobile-sidebar] {
     background: rgb(10 14 24 / 97%);
   }
+
+  html[data-minke-mobile-web] [data-minke-mobile-right-drawer] {
+    background: rgb(244 248 252 / 97%);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  body[data-ds-dark-theme] [data-minke-mobile-right-drawer] {
+    background: rgb(10 14 24 / 97%);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 @supports not (backdrop-filter: blur(1px)) {
@@ -187,6 +476,14 @@ html[data-minke-mobile-web]
   }
 
   body[data-ds-dark-theme] [data-minke-mobile-sidebar] {
+    background: rgb(10 14 24 / 96%);
+  }
+
+  html[data-minke-mobile-web] [data-minke-mobile-right-drawer] {
+    background: rgb(244 248 252 / 96%);
+  }
+
+  body[data-ds-dark-theme] [data-minke-mobile-right-drawer] {
     background: rgb(10 14 24 / 96%);
   }
 }

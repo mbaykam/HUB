@@ -24,6 +24,9 @@ import {
   installMobileSidebarDrawerStyles,
 } from "../host/mobile-sidebar-drawer.styles.ts";
 import {
+  installMobileRightDrawer,
+} from "../host/mobile-right-drawer.ts";
+import {
   AppUpdateSettingsRuntime,
   PreferencesSection,
   WebSearchSettingsRuntime,
@@ -198,6 +201,10 @@ export function installTabs(
     ctx.effect(
       () => installMobileSidebarDrawer(ctx.layout, ctx.sessions.list),
       "minke-overlay: mobile sidebar drawer",
+    );
+    ctx.effect(
+      () => installMobileRightDrawer(),
+      "minke-overlay: mobile right drawer",
     );
   }
   ctx.on("theme/change", (snapshot) =>

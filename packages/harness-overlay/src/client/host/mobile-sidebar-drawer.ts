@@ -14,6 +14,12 @@ const MOBILE_SIDEBAR_OPEN_ATTRIBUTE =
   "data-minke-mobile-sidebar-open";
 const MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE =
   "data-minke-mobile-sidebar-dragging";
+const MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE =
+  "data-minke-mobile-right-drawer-open";
+const RIGHT_DRAWER_OPENING_EVENT =
+  "minke:mobile-right-drawer-opening";
+const LEFT_DRAWER_OPENING_EVENT =
+  "minke:mobile-left-drawer-opening";
 
 const MOBILE_WEB_ROOT_SELECTOR = "[data-minke-mobile-web]";
 const SIDEBAR_COLLAPSED_ATTRIBUTE = "data-sidebar-collapsed";
@@ -188,6 +194,10 @@ export class MobileSidebarDrawerRuntime {
     );
     this.#root.addEventListener("click", this.#onClick, true);
     this.#root.addEventListener("keydown", this.#onKeyDown, true);
+    this.#root.addEventListener(
+      RIGHT_DRAWER_OPENING_EVENT,
+      this.#onRightDrawerOpening,
+    );
     this.#view.addEventListener("resize", this.#scheduleReconcile, {
       passive: true,
     });
@@ -222,6 +232,10 @@ export class MobileSidebarDrawerRuntime {
     );
     this.#root.removeEventListener("click", this.#onClick, true);
     this.#root.removeEventListener("keydown", this.#onKeyDown, true);
+    this.#root.removeEventListener(
+      RIGHT_DRAWER_OPENING_EVENT,
+      this.#onRightDrawerOpening,
+    );
     this.#view.removeEventListener("resize", this.#scheduleReconcile);
     if (this.#reconcileFrame !== undefined) {
       this.#view.cancelAnimationFrame(this.#reconcileFrame);
@@ -423,6 +437,7 @@ export class MobileSidebarDrawerRuntime {
       target === undefined ||
       this.#gesture !== undefined ||
       !this.#enabled() ||
+      frame.hasAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE) ||
       !event.isPrimary ||
       event.button !== 0 ||
       target.closest(GESTURE_IGNORE_SELECTOR) !== null
@@ -483,6 +498,7 @@ export class MobileSidebarDrawerRuntime {
       }
 
       gesture.dragging = true;
+      this.#root.dispatchEvent(new Event(LEFT_DRAWER_OPENING_EVENT));
       frame.setAttribute(MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE, "");
       if (!gesture.startedOpen) {
         this.#syncOpenState(true);
@@ -623,6 +639,12 @@ export class MobileSidebarDrawerRuntime {
       return;
     }
     this.#settle(false, true);
+  };
+
+  readonly #onRightDrawerOpening = (): void => {
+    if (this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)) {
+      this.#settle(false, true);
+    }
   };
 
   readonly #onKeyDown = (event: KeyboardEvent): void => {

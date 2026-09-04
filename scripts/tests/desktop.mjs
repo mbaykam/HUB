@@ -70,6 +70,7 @@ const taskFiles = Object.freeze({
     "macos-window-css.test.mjs",
     "mobile-web-viewport.test.mjs",
     "mobile-sidebar-drawer.test.mjs",
+    "mobile-right-drawer.test.mjs",
     "minke-settings.test.mjs",
     "plugin-catalog.test.mjs",
     "pwa.test.mjs",
