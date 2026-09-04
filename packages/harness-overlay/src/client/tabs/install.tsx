@@ -18,6 +18,12 @@ import {
   installMobileWebViewportStyles,
 } from "../host/mobile-web-viewport.ts";
 import {
+  installMobileSidebarDrawer,
+} from "../host/mobile-sidebar-drawer.ts";
+import {
+  installMobileSidebarDrawerStyles,
+} from "../host/mobile-sidebar-drawer.styles.ts";
+import {
   AppUpdateSettingsRuntime,
   PreferencesSection,
   WebSearchSettingsRuntime,
@@ -184,6 +190,14 @@ export function installTabs(
     ctx.effect(
       () => installMobileWebViewport(),
       "minke-overlay: mobile Web viewport",
+    );
+    ctx.effect(
+      () => installMobileSidebarDrawerStyles(),
+      "minke-overlay: mobile sidebar drawer styles",
+    );
+    ctx.effect(
+      () => installMobileSidebarDrawer(ctx.layout),
+      "minke-overlay: mobile sidebar drawer",
     );
   }
   ctx.on("theme/change", (snapshot) =>

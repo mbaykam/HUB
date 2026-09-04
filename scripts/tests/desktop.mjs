@@ -69,6 +69,7 @@ const taskFiles = Object.freeze({
     "data-home-settings.test.mjs",
     "macos-window-css.test.mjs",
     "mobile-web-viewport.test.mjs",
+    "mobile-sidebar-drawer.test.mjs",
     "minke-settings.test.mjs",
     "plugin-catalog.test.mjs",
     "pwa.test.mjs",

@@ -1,0 +1,160 @@
+/* Mobile Web turns Harness's narrow sidebar into a direct-manipulation
+ * drawer. The compact 56px rail remains visible at rest; the remaining
+ * panel travels over the conversation instead of squeezing it. */
+
+html[data-minke-mobile-web] [data-minke-mobile-sidebar-frame] {
+  --minke-mobile-sidebar-width: min(280px, calc(100vw - 48px));
+  --minke-mobile-sidebar-rail: 56px;
+  --minke-mobile-sidebar-offset: 0px;
+  --minke-mobile-sidebar-progress: 1;
+  --minke-mobile-sidebar-content-shift: 18px;
+  --minke-mobile-sidebar-content-scale: 0.985;
+  --minke-mobile-sidebar-content-radius: 18px;
+  --minke-mobile-sidebar-content-brightness: 0.92;
+  --minke-mobile-sidebar-scrim-opacity: 0.38;
+  --minke-mobile-sidebar-shadow-opacity: 0.32;
+  grid-template-columns:
+    var(--minke-mobile-sidebar-rail)
+    minmax(0, 1fr)
+    0px !important;
+  isolation: isolate;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-sidebar-collapsed] {
+  --minke-mobile-sidebar-offset: calc(
+    var(--minke-mobile-sidebar-rail) - var(--minke-mobile-sidebar-width)
+  );
+  --minke-mobile-sidebar-progress: 0;
+  --minke-mobile-sidebar-content-shift: 0px;
+  --minke-mobile-sidebar-content-scale: 1;
+  --minke-mobile-sidebar-content-radius: 0px;
+  --minke-mobile-sidebar-content-brightness: 1;
+  --minke-mobile-sidebar-scrim-opacity: 0;
+  --minke-mobile-sidebar-shadow-opacity: 0;
+}
+
+html[data-minke-mobile-web] [data-minke-mobile-sidebar] {
+  position: absolute !important;
+  inset: 0 auto 0 0;
+  z-index: 12;
+  width: var(--minke-mobile-sidebar-width) !important;
+  min-width: 0;
+  overflow: hidden;
+  background: rgb(244 248 252 / 86%);
+  border-right: 1px solid rgb(45 64 92 / 14%);
+  box-shadow: 20px 0 50px
+    rgb(0 0 0 / var(--minke-mobile-sidebar-shadow-opacity));
+  transform: translate3d(
+    var(--minke-mobile-sidebar-offset),
+    0,
+    0
+  );
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
+    box-shadow 260ms ease;
+  touch-action: pan-y;
+  will-change: transform;
+  -webkit-backdrop-filter: blur(24px) saturate(135%);
+  backdrop-filter: blur(24px) saturate(135%);
+}
+
+body[data-ds-dark-theme] [data-minke-mobile-sidebar] {
+  background: rgb(10 14 24 / 84%);
+  border-right-color: rgb(255 255 255 / 11%);
+}
+
+/* The column owns the glass. Remove the upstream duplicate fill so two
+ * translucent layers do not accidentally become opaque. */
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar]
+  > [data-slot="sidebar"]
+  > * {
+  background: transparent !important;
+}
+
+html[data-minke-mobile-web] [data-minke-mobile-sidebar-content] {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: var(--minke-mobile-sidebar-content-radius);
+  filter: brightness(
+    var(--minke-mobile-sidebar-content-brightness)
+  );
+  transform: translate3d(
+      var(--minke-mobile-sidebar-content-shift),
+      0,
+      0
+    )
+    scale(var(--minke-mobile-sidebar-content-scale));
+  transform-origin: right center;
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
+    border-radius 260ms ease,
+    filter 260ms ease;
+  will-change: transform;
+}
+
+html[data-minke-mobile-web] [data-minke-mobile-sidebar-scrim] {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: rgb(0 0 0);
+  opacity: var(--minke-mobile-sidebar-scrim-opacity);
+  pointer-events: none;
+  touch-action: none;
+  transition: opacity 260ms ease;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-sidebar-open]
+  > [data-minke-mobile-sidebar-scrim] {
+  pointer-events: auto;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-sidebar-dragging]
+  > :is(
+    [data-minke-mobile-sidebar],
+    [data-minke-mobile-sidebar-content],
+    [data-minke-mobile-sidebar-scrim]
+  ) {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-minke-mobile-web]
+    [data-minke-mobile-sidebar-frame]
+    > :is(
+      [data-minke-mobile-sidebar],
+      [data-minke-mobile-sidebar-content],
+      [data-minke-mobile-sidebar-scrim]
+    ) {
+    transition-duration: 1ms !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  html[data-minke-mobile-web] [data-minke-mobile-sidebar] {
+    background: rgb(244 248 252 / 97%);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  body[data-ds-dark-theme] [data-minke-mobile-sidebar] {
+    background: rgb(10 14 24 / 97%);
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  html[data-minke-mobile-web] [data-minke-mobile-sidebar] {
+    background: rgb(244 248 252 / 96%);
+  }
+
+  body[data-ds-dark-theme] [data-minke-mobile-sidebar] {
+    background: rgb(10 14 24 / 96%);
+  }
+}
