@@ -229,7 +229,7 @@ test("mobile navigation separates unnamed recents from project folders", async (
                         <div><div role="tree" id="tree">
                           <div id="main-workspace">
                             <span><div role="treeitem" aria-expanded="true">
-                              <span>Minke</span><button>Actions</button><button>Add</button>
+                              <span>Minke</span><button>Actions</button><button id="main-new-session">Add</button>
                             </div></span>
                             <div role="treeitem" aria-selected="false">Existing chat</div>
                           </div>
@@ -253,7 +253,11 @@ test("mobile navigation separates unnamed recents from project folders", async (
               </div>
             </div>
           </aside>
-          <section id="content"></section>
+          <section id="content">
+            <button id="main-workspace-chip" aria-haspopup="menu">
+              <span>Minke</span>
+            </button>
+          </section>
           <section id="details"></section>
           <div data-shell-overlay></div>
         </main>
@@ -267,10 +271,25 @@ test("mobile navigation separates unnamed recents from project folders", async (
     configurable: true,
     value: 390,
   });
+  let globalSessionStarts = 0;
+  let mainSessionStarts = 0;
+  let workspaceStarts = 0;
+  view.document.querySelector("#new-session").addEventListener(
+    "click",
+    () => { globalSessionStarts += 1; },
+  );
+  view.document.querySelector("#main-new-session").addEventListener(
+    "click",
+    () => { mainSessionStarts += 1; },
+  );
+  view.document.querySelector("#add-workspace").addEventListener(
+    "click",
+    () => { workspaceStarts += 1; },
+  );
   const runtime = new MobileSidebarDrawerRuntime(
     { toggleSidebar: () => {} },
     {
-      getSnapshot: () => ({ current: undefined }),
+      getSnapshot: () => ({ current: "existing-session" }),
       subscribe: () => () => {},
     },
     view.document,
@@ -308,6 +327,18 @@ test("mobile navigation separates unnamed recents from project folders", async (
     false,
   );
   assert.equal(
+    view.document.querySelector("#new-session").hasAttribute(
+      "data-hub-mobile-nav-new-session-source",
+    ),
+    true,
+  );
+  assert.equal(
+    view.document.querySelector("#add-workspace").hasAttribute(
+      "data-hub-mobile-nav-add-workspace-source",
+    ),
+    true,
+  );
+  assert.equal(
     view.document.querySelector("#main-workspace").hasAttribute(
       "data-hub-mobile-nav-recents-section",
     ),
@@ -331,6 +362,26 @@ test("mobile navigation separates unnamed recents from project folders", async (
     ),
     null,
   );
+  assert.equal(
+    view.document.querySelector("#main-workspace-chip").hasAttribute(
+      "data-hub-mobile-main-workspace-chip",
+    ),
+    true,
+  );
+
+  const newWorkspace = view.document.querySelector(
+    "[data-hub-mobile-nav-footer-new-workspace]",
+  );
+  const newSession = view.document.querySelector(
+    "[data-hub-mobile-nav-footer-new-session]",
+  );
+  assert.equal(newWorkspace.textContent, "+New workspace");
+  assert.equal(newSession.textContent, "+New Session");
+  newWorkspace.click();
+  newSession.click();
+  assert.equal(workspaceStarts, 1);
+  assert.equal(mainSessionStarts, 1);
+  assert.equal(globalSessionStarts, 0);
 
   runtime.dispose();
   assert.equal(
@@ -339,6 +390,88 @@ test("mobile navigation separates unnamed recents from project folders", async (
     ),
     false,
   );
+  assert.equal(
+    view.document.querySelector("[data-hub-mobile-nav-footer]"),
+    null,
+  );
+  view.close();
+});
+
+test("mobile home defaults to the hidden main workspace once", async () => {
+  const dom = new JSDOM(`<!doctype html>
+    <html data-minke-mobile-web lang="en">
+      <body>
+        <main id="frame" data-sidebar-collapsed>
+          <aside id="sidebar">
+            <div data-slot="sidebar"><div>
+              <div><button>Toggle</button></div>
+              <button id="global-new">New Session</button>
+              <div><div data-slot="sidebar.workspaces"><div>
+                <div>
+                  <span>Workspaces</span>
+                  <div><button>Search</button></div>
+                  <div><button>View</button><button>Add workspace</button></div>
+                </div>
+                <div><div role="tree">
+                  <div>
+                    <span><div role="treeitem" aria-expanded="true">
+                      <span>Minke</span><button>Actions</button><button id="main-new">Add</button>
+                    </div></span>
+                    <div role="treeitem" aria-selected="false">Blank chat</div>
+                  </div>
+                </div></div>
+              </div></div></div>
+            </div></div>
+          </aside>
+          <section id="content">
+            <button id="main-chip" aria-haspopup="menu"><span>Minke</span></button>
+          </section>
+          <section id="details"></section>
+          <div data-shell-overlay></div>
+        </main>
+      </body>
+    </html>`, {
+    pretendToBeVisual: true,
+    url: "https://hub.test/",
+  });
+  const view = dom.window;
+  Object.defineProperty(view, "innerWidth", {
+    configurable: true,
+    value: 390,
+  });
+  let globalStarts = 0;
+  let mainStarts = 0;
+  view.document.querySelector("#global-new").addEventListener(
+    "click",
+    () => { globalStarts += 1; },
+  );
+  view.document.querySelector("#main-new").addEventListener(
+    "click",
+    () => { mainStarts += 1; },
+  );
+  const runtime = new MobileSidebarDrawerRuntime(
+    { toggleSidebar: () => {} },
+    {
+      getSnapshot: () => ({ current: undefined }),
+      subscribe: () => () => {},
+    },
+    view.document,
+  );
+
+  runtime.start();
+  await nextFrame(view);
+  await nextFrame(view);
+
+  assert.equal(mainStarts, 1);
+  assert.equal(globalStarts, 0);
+  assert.equal(
+    view.document.querySelector("#main-chip").hasAttribute(
+      "data-hub-mobile-main-workspace-chip",
+    ),
+    true,
+  );
+
+  runtime.dispose();
   view.close();
 });
 
@@ -353,6 +486,11 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
   assert.match(styles, /data-minke-tabs-layout-actions/u);
   assert.match(styles, /data-hub-mobile-nav-logo-row/u);
   assert.match(styles, /data-hub-mobile-nav-view-options/u);
+  assert.match(styles, /data-hub-mobile-nav-new-session-source/u);
+  assert.match(styles, /data-hub-mobile-nav-add-workspace-source/u);
+  assert.match(styles, /data-hub-mobile-nav-footer-new-workspace/u);
+  assert.match(styles, /data-hub-mobile-nav-footer-new-session/u);
+  assert.match(styles, /data-hub-mobile-main-workspace-chip/u);
   assert.match(styles, /data-hub-mobile-nav-recents-section/u);
   assert.match(
     styles,

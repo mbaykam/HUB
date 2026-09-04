@@ -16,6 +16,8 @@ const MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE =
   "data-minke-mobile-sidebar-dragging";
 const MOBILE_NAV_LOGO_ROW_ATTRIBUTE =
   "data-hub-mobile-nav-logo-row";
+const MOBILE_NAV_NEW_SESSION_SOURCE_ATTRIBUTE =
+  "data-hub-mobile-nav-new-session-source";
 const MOBILE_NAV_BROWSER_ATTRIBUTE =
   "data-hub-mobile-nav-browser";
 const MOBILE_NAV_SECTION_LABEL_ATTRIBUTE =
@@ -32,6 +34,16 @@ const MOBILE_NAV_RECENTS_HEADER_WRAPPER_ATTRIBUTE =
   "data-hub-mobile-nav-recents-header-wrapper";
 const MOBILE_NAV_WORKSPACE_SECTION_ATTRIBUTE =
   "data-hub-mobile-nav-workspace-section";
+const MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE =
+  "data-hub-mobile-nav-add-workspace-source";
+const MOBILE_NAV_FOOTER_ATTRIBUTE =
+  "data-hub-mobile-nav-footer";
+const MOBILE_NAV_FOOTER_NEW_WORKSPACE_ATTRIBUTE =
+  "data-hub-mobile-nav-footer-new-workspace";
+const MOBILE_NAV_FOOTER_NEW_SESSION_ATTRIBUTE =
+  "data-hub-mobile-nav-footer-new-session";
+const MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE =
+  "data-hub-mobile-main-workspace-chip";
 const MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE =
   "data-minke-mobile-right-drawer-open";
 const RIGHT_DRAWER_OPENING_EVENT =
@@ -103,6 +115,7 @@ interface SidebarGesture {
 
 type MobileSidebarView = Window & {
   readonly Element: typeof Element;
+  readonly HTMLButtonElement: typeof HTMLButtonElement;
   readonly HTMLElement: typeof HTMLElement;
   readonly MutationObserver: typeof MutationObserver;
 };
@@ -180,7 +193,14 @@ export class MobileSidebarDrawerRuntime {
   #currentSession: string | undefined;
   #unsubscribeSessionSelection: (() => void) | undefined;
   #mainWorkspaceSection: HTMLElement | undefined;
+  #mainWorkspaceLabel: string | undefined;
   #mainWorkspaceResolved = false;
+  #mainWorkspaceHomeInitialized = false;
+  #newSessionSource: HTMLButtonElement | undefined;
+  #addWorkspaceSource: HTMLButtonElement | undefined;
+  #navigationFooter: HTMLDivElement | undefined;
+  #newWorkspaceButton: HTMLButtonElement | undefined;
+  #newSessionButton: HTMLButtonElement | undefined;
   #disposed = false;
 
   constructor(
@@ -340,6 +360,7 @@ export class MobileSidebarDrawerRuntime {
       scrim.addEventListener("click", this.#onScrimClick);
       frame.append(scrim);
       this.#scrim = scrim;
+      this.#mountNavigationFooter(frame);
     }
 
     this.#decorateNavigation(sidebar);
@@ -374,8 +395,17 @@ export class MobileSidebarDrawerRuntime {
       }
     }
     this.#scrim?.removeEventListener("click", this.#onScrimClick);
+    this.#newWorkspaceButton?.removeEventListener(
+      "click",
+      this.#onNewWorkspaceClick,
+    );
+    this.#newSessionButton?.removeEventListener(
+      "click",
+      this.#onNewSessionClick,
+    );
     this.#edge?.remove();
     this.#scrim?.remove();
+    this.#navigationFooter?.remove();
     this.#clearNavigationDecoration();
     this.#frame = undefined;
     this.#sidebar = undefined;
@@ -384,7 +414,14 @@ export class MobileSidebarDrawerRuntime {
     this.#edge = undefined;
     this.#scrim = undefined;
     this.#mainWorkspaceSection = undefined;
+    this.#mainWorkspaceLabel = undefined;
     this.#mainWorkspaceResolved = false;
+    this.#mainWorkspaceHomeInitialized = false;
+    this.#newSessionSource = undefined;
+    this.#addWorkspaceSource = undefined;
+    this.#navigationFooter = undefined;
+    this.#newWorkspaceButton = undefined;
+    this.#newSessionButton = undefined;
     this.#gesture = undefined;
     this.#suppressClickTarget = undefined;
     this.#suppressClickUntil = 0;
@@ -403,7 +440,18 @@ export class MobileSidebarDrawerRuntime {
 
     const logoRow = sidebarRoot.firstElementChild;
     if (logoRow instanceof this.#view.HTMLElement) {
-      logoRow.setAttribute(MOBILE_NAV_LOGO_ROW_ATTRIBUTE, "");
+      this.#markOnly(MOBILE_NAV_LOGO_ROW_ATTRIBUTE, logoRow);
+    }
+
+    const newSessionSource = sidebarRoot.querySelector(
+      ":scope > button",
+    );
+    if (newSessionSource instanceof this.#view.HTMLButtonElement) {
+      this.#markOnly(
+        MOBILE_NAV_NEW_SESSION_SOURCE_ATTRIBUTE,
+        newSessionSource,
+      );
+      this.#newSessionSource = newSessionSource;
     }
 
     const workspaceSlot = sidebarRoot.querySelector(
@@ -417,9 +465,9 @@ export class MobileSidebarDrawerRuntime {
     if (sectionHeader instanceof this.#view.HTMLElement) {
       const sectionLabel = sectionHeader.firstElementChild;
       if (sectionLabel instanceof this.#view.HTMLElement) {
-        sectionLabel.setAttribute(
+        this.#markOnly(
           MOBILE_NAV_SECTION_LABEL_ATTRIBUTE,
-          "",
+          sectionLabel,
         );
       }
 
@@ -429,12 +477,24 @@ export class MobileSidebarDrawerRuntime {
       // Search is the first header button. When both trailing actions exist,
       // the penultimate one is the grouping/filter menu and the last is Add.
       if (actionButtons.length >= 3) {
-        actionButtons.at(-2)?.setAttribute(
+        this.#markOnly(
           MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE,
-          "",
+          actionButtons.at(-2),
         );
+      } else {
+        this.#markOnly(MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE);
+      }
+      const addWorkspaceSource = actionButtons.at(-1);
+      if (addWorkspaceSource instanceof this.#view.HTMLButtonElement) {
+        this.#markOnly(
+          MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE,
+          addWorkspaceSource,
+        );
+        this.#addWorkspaceSource = addWorkspaceSource;
       }
     }
+
+    this.#updateNavigationFooter();
 
     const tree = browser.querySelector('[role="tree"]');
     if (!(tree instanceof this.#view.HTMLElement)) return;
@@ -462,16 +522,18 @@ export class MobileSidebarDrawerRuntime {
       !namedSections.includes(this.#mainWorkspaceSection)
     ) {
       this.#mainWorkspaceSection = undefined;
+      this.#mainWorkspaceLabel = undefined;
       this.#mainWorkspaceResolved = false;
     }
     if (!this.#mainWorkspaceResolved && namedSections.length > 0) {
       this.#mainWorkspaceSection =
         namedSections.find((section) => {
-          const label = this.#groupHeader(section)?.textContent
-            ?.trim()
-            .toLocaleLowerCase();
+          const label = this.#groupLabel(section)?.toLocaleLowerCase();
           return label === "minke" || label === "hub";
         }) ?? namedSections[0];
+      this.#mainWorkspaceLabel = this.#groupLabel(
+        this.#mainWorkspaceSection,
+      );
       this.#mainWorkspaceResolved = true;
     } else if (
       !this.#mainWorkspaceResolved &&
@@ -514,6 +576,26 @@ export class MobileSidebarDrawerRuntime {
         );
       }
     }
+    this.#initializeMainWorkspaceHome();
+    this.#decorateMainWorkspaceChip();
+  }
+
+  #groupLabel(section: HTMLElement): string | undefined {
+    const header = this.#groupHeader(section);
+    if (header === undefined) return undefined;
+    for (const candidate of header.querySelectorAll("span")) {
+      const label = candidate.textContent?.trim();
+      if (label !== undefined && label !== "") return label;
+    }
+    const label = header.textContent?.trim();
+    return label === undefined || label === "" ? undefined : label;
+  }
+
+  #markOnly(attribute: string, target?: Element): void {
+    for (const candidate of this.#root.querySelectorAll(`[${attribute}]`)) {
+      if (candidate !== target) candidate.removeAttribute(attribute);
+    }
+    target?.setAttribute(attribute, "");
   }
 
   #groupHeader(section: HTMLElement): HTMLElement | undefined {
@@ -529,6 +611,7 @@ export class MobileSidebarDrawerRuntime {
   #clearNavigationDecoration(): void {
     for (const attribute of [
       MOBILE_NAV_LOGO_ROW_ATTRIBUTE,
+      MOBILE_NAV_NEW_SESSION_SOURCE_ATTRIBUTE,
       MOBILE_NAV_BROWSER_ATTRIBUTE,
       MOBILE_NAV_SECTION_LABEL_ATTRIBUTE,
       MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE,
@@ -537,11 +620,140 @@ export class MobileSidebarDrawerRuntime {
       MOBILE_NAV_RECENTS_HEADER_ATTRIBUTE,
       MOBILE_NAV_RECENTS_HEADER_WRAPPER_ATTRIBUTE,
       MOBILE_NAV_WORKSPACE_SECTION_ATTRIBUTE,
+      MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE,
+      MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE,
     ]) {
       for (const element of this.#root.querySelectorAll(`[${attribute}]`)) {
         element.removeAttribute(attribute);
       }
     }
+  }
+
+  #mountNavigationFooter(frame: HTMLElement): void {
+    const footer = this.#root.createElement("div");
+    footer.setAttribute(MOBILE_NAV_FOOTER_ATTRIBUTE, "");
+
+    const newWorkspace = this.#root.createElement("button");
+    newWorkspace.type = "button";
+    newWorkspace.setAttribute(
+      MOBILE_NAV_FOOTER_NEW_WORKSPACE_ATTRIBUTE,
+      "",
+    );
+    const workspaceIcon = this.#root.createElement("span");
+    workspaceIcon.setAttribute("aria-hidden", "true");
+    workspaceIcon.textContent = "+";
+    const workspaceLabel = this.#root.createElement("span");
+    newWorkspace.append(workspaceIcon, workspaceLabel);
+    newWorkspace.addEventListener("click", this.#onNewWorkspaceClick);
+
+    const newSession = this.#root.createElement("button");
+    newSession.type = "button";
+    newSession.setAttribute(MOBILE_NAV_FOOTER_NEW_SESSION_ATTRIBUTE, "");
+    const sessionIcon = this.#root.createElement("span");
+    sessionIcon.setAttribute("aria-hidden", "true");
+    sessionIcon.textContent = "+";
+    const sessionLabel = this.#root.createElement("span");
+    newSession.append(sessionIcon, sessionLabel);
+    newSession.addEventListener("click", this.#onNewSessionClick);
+
+    footer.append(newWorkspace, newSession);
+    frame.append(footer);
+    this.#navigationFooter = footer;
+    this.#newWorkspaceButton = newWorkspace;
+    this.#newSessionButton = newSession;
+    this.#updateNavigationFooter();
+  }
+
+  #updateNavigationFooter(): void {
+    const newWorkspaceLabel = this.#navigationLabel(
+      "New workspace",
+      "新建工作区",
+    );
+    const newSessionLabel = this.#navigationLabel(
+      "New Session",
+      "新建会话",
+    );
+    if (this.#newWorkspaceButton !== undefined) {
+      this.#newWorkspaceButton.lastElementChild!.textContent =
+        newWorkspaceLabel;
+      this.#newWorkspaceButton.setAttribute(
+        "aria-label",
+        newWorkspaceLabel,
+      );
+      this.#newWorkspaceButton.disabled =
+        this.#addWorkspaceSource === undefined ||
+        this.#addWorkspaceSource.disabled;
+    }
+    if (this.#newSessionButton !== undefined) {
+      this.#newSessionButton.lastElementChild!.textContent =
+        newSessionLabel;
+      this.#newSessionButton.setAttribute(
+        "aria-label",
+        newSessionLabel,
+      );
+      this.#newSessionButton.disabled =
+        this.#newSessionSource === undefined ||
+        this.#newSessionSource.disabled;
+    }
+  }
+
+  #navigationLabel(english: string, chinese: string): string {
+    return this.#root.documentElement.lang
+      .toLocaleLowerCase()
+      .startsWith("zh")
+      ? chinese
+      : english;
+  }
+
+  #decorateMainWorkspaceChip(): void {
+    for (const chip of this.#root.querySelectorAll(
+      `[${MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE}]`,
+    )) {
+      chip.removeAttribute(MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE);
+    }
+    const mainLabel = this.#mainWorkspaceLabel?.toLocaleLowerCase();
+    if (mainLabel === undefined) return;
+    for (const candidate of this.#root.querySelectorAll(
+      'button[aria-haspopup="menu"]',
+    )) {
+      const label = candidate.textContent?.trim().toLocaleLowerCase();
+      if (label === mainLabel) {
+        candidate.setAttribute(
+          MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE,
+          "",
+        );
+      }
+    }
+  }
+
+  #initializeMainWorkspaceHome(): void {
+    if (
+      this.#mainWorkspaceHomeInitialized ||
+      this.#mainWorkspaceSection === undefined
+    ) {
+      return;
+    }
+    this.#mainWorkspaceHomeInitialized = true;
+    if (this.#currentSession === undefined) {
+      this.#startMainWorkspaceSession();
+    }
+  }
+
+  #startMainWorkspaceSession(): boolean {
+    const header = this.#mainWorkspaceSection === undefined
+      ? undefined
+      : this.#groupHeader(this.#mainWorkspaceSection);
+    const mainWorkspaceNewSession = header === undefined
+      ? undefined
+      : [...header.querySelectorAll("button")].at(-1);
+    if (
+      !(mainWorkspaceNewSession instanceof this.#view.HTMLButtonElement) ||
+      mainWorkspaceNewSession.disabled
+    ) {
+      return false;
+    }
+    mainWorkspaceNewSession.click();
+    return true;
   }
 
   #enabled(): boolean {
@@ -563,6 +775,11 @@ export class MobileSidebarDrawerRuntime {
     const content = this.#content;
     if (frame === undefined || content === undefined) return;
     frame.toggleAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE, open);
+    this.#navigationFooter?.toggleAttribute("inert", !open);
+    this.#navigationFooter?.setAttribute(
+      "aria-hidden",
+      open ? "false" : "true",
+    );
     if (open) {
       if (!content.hasAttribute("inert")) {
         content.setAttribute("inert", "");
@@ -848,6 +1065,16 @@ export class MobileSidebarDrawerRuntime {
         this.#settle(false, true);
       }
     });
+  };
+
+  readonly #onNewWorkspaceClick = (): void => {
+    this.#addWorkspaceSource?.click();
+  };
+
+  readonly #onNewSessionClick = (): void => {
+    if (!this.#startMainWorkspaceSession()) {
+      this.#newSessionSource?.click();
+    }
   };
 
   readonly #onClick = (event: MouseEvent): void => {
