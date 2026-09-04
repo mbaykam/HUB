@@ -390,16 +390,12 @@ test("mobile navigation separates unnamed recents from project folders", async (
   const newSession = view.document.querySelector(
     "[data-hub-mobile-nav-footer-new-session]",
   );
-  assert.equal(
-    view.document.querySelector(
-      "[data-hub-mobile-nav-footer-new-workspace]",
-    ),
-    null,
+  const newWorkspace = view.document.querySelector(
+    "[data-hub-mobile-nav-footer-new-workspace]",
   );
+  assert.equal(newWorkspace.textContent, "+New workspace");
   assert.equal(newSession.textContent, "+New Session");
-  // Workspace creation stays on Harness's real button instead of forwarding
-  // through a detached footer proxy.
-  view.document.querySelector("#add-workspace").click();
+  newWorkspace.click();
   newSession.click();
   assert.equal(workspaceStarts, 1);
   assert.equal(mainSessionStarts, 1);
@@ -582,6 +578,7 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
   assert.match(styles, /data-hub-mobile-nav-view-options/u);
   assert.match(styles, /data-hub-mobile-nav-new-session-source/u);
   assert.match(styles, /data-hub-mobile-nav-add-workspace-source/u);
+  assert.match(styles, /data-hub-mobile-nav-footer-new-workspace/u);
   assert.match(styles, /data-hub-mobile-nav-footer-new-session/u);
   assert.match(styles, /data-hub-mobile-nav-pinned/u);
   assert.match(styles, /data-hub-mobile-nav-pin-current/u);

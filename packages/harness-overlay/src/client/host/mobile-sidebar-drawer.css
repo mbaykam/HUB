@@ -127,16 +127,10 @@ html[data-minke-mobile-web] [data-hub-mobile-nav-logo-row],
 html[data-minke-mobile-web] [data-minke-tabs-layout-actions],
 html[data-minke-mobile-web] [data-hub-mobile-nav-view-options],
 html[data-minke-mobile-web]
-  [data-hub-mobile-nav-new-session-source] {
-  display: none !important;
-}
-
-/* Keep Workspace creation on the original React control. The previous
- * footer proxy could lose its target during reconciliation on Mobile Safari. */
+  [data-hub-mobile-nav-new-session-source],
 html[data-minke-mobile-web]
   [data-hub-mobile-nav-add-workspace-source] {
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
+  display: none !important;
 }
 
 /* Mobile information architecture: ordinary chats are an unnamed Recents
@@ -149,7 +143,7 @@ html[data-minke-mobile-web] [data-hub-mobile-nav-browser] {
     max(10px, env(safe-area-inset-top)) +
       var(--hub-mobile-pinned-height) + 8px
   );
-  padding-bottom: 66px;
+  padding-bottom: 108px;
 }
 
 /* The unnamed general-chat area is backed by HUB's original Minke
@@ -416,9 +410,10 @@ body[data-ds-dark-theme] [data-hub-mobile-nav-pinned] {
   background: rgb(255 255 255 / 5%);
 }
 
-/* Mobile navigation ends in one stable action. It lives beside the
+/* Mobile navigation ends in two stable actions. They live beside the
  * animated sidebar rather than inside React's Workspace tree, so list
- * reconciliation cannot move or discard them. */
+ * reconciliation cannot move or discard them. The Workspace proxy resolves
+ * its live React target on every tap. */
 html[data-minke-mobile-web] [data-hub-mobile-nav-footer] {
   position: absolute;
   z-index: 13;
@@ -491,6 +486,11 @@ html[data-minke-mobile-web]
 }
 
 html[data-minke-mobile-web]
+  [data-hub-mobile-nav-footer-new-workspace] {
+  background: rgb(255 255 255 / 8%) !important;
+}
+
+html[data-minke-mobile-web]
   [data-hub-mobile-nav-footer-new-session] {
   min-height: 46px !important;
   background: rgb(255 255 255 / 17%) !important;
@@ -518,6 +518,11 @@ body[data-ds-dark-theme]
   > button {
   border-color: rgb(255 255 255 / 13%);
   background: rgb(255 255 255 / 6%);
+}
+
+body[data-ds-dark-theme]
+  [data-hub-mobile-nav-footer-new-workspace] {
+  background: rgb(255 255 255 / 6%) !important;
 }
 
 body[data-ds-dark-theme]

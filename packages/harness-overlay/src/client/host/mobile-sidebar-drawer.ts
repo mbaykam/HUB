@@ -38,6 +38,8 @@ const MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE =
   "data-hub-mobile-nav-add-workspace-source";
 const MOBILE_NAV_FOOTER_ATTRIBUTE =
   "data-hub-mobile-nav-footer";
+const MOBILE_NAV_FOOTER_NEW_WORKSPACE_ATTRIBUTE =
+  "data-hub-mobile-nav-footer-new-workspace";
 const MOBILE_NAV_FOOTER_NEW_SESSION_ATTRIBUTE =
   "data-hub-mobile-nav-footer-new-session";
 const MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE =
@@ -231,6 +233,7 @@ export class MobileSidebarDrawerRuntime {
   #mainWorkspaceHomeInitialized = false;
   #newSessionSource: HTMLButtonElement | undefined;
   #navigationFooter: HTMLDivElement | undefined;
+  #newWorkspaceButton: HTMLButtonElement | undefined;
   #newSessionButton: HTMLButtonElement | undefined;
   #pinnedPanel: HTMLElement | undefined;
   #pinnedSessionIds: string[] = [];
@@ -458,6 +461,10 @@ export class MobileSidebarDrawerRuntime {
       "click",
       this.#onNewSessionClick,
     );
+    this.#newWorkspaceButton?.removeEventListener(
+      "click",
+      this.#onNewWorkspaceClick,
+    );
     this.#edge?.remove();
     this.#scrim?.remove();
     this.#pinnedPanel?.remove();
@@ -475,6 +482,7 @@ export class MobileSidebarDrawerRuntime {
     this.#mainWorkspaceHomeInitialized = false;
     this.#newSessionSource = undefined;
     this.#navigationFooter = undefined;
+    this.#newWorkspaceButton = undefined;
     this.#newSessionButton = undefined;
     this.#pinnedPanel = undefined;
     this.#pinnedRenderKey = undefined;
@@ -688,6 +696,16 @@ export class MobileSidebarDrawerRuntime {
     const footer = this.#root.createElement("div");
     footer.setAttribute(MOBILE_NAV_FOOTER_ATTRIBUTE, "");
 
+    const newWorkspace = this.#root.createElement("button");
+    newWorkspace.type = "button";
+    newWorkspace.setAttribute(MOBILE_NAV_FOOTER_NEW_WORKSPACE_ATTRIBUTE, "");
+    const workspaceIcon = this.#root.createElement("span");
+    workspaceIcon.setAttribute("aria-hidden", "true");
+    workspaceIcon.textContent = "+";
+    const workspaceLabel = this.#root.createElement("span");
+    newWorkspace.append(workspaceIcon, workspaceLabel);
+    newWorkspace.addEventListener("click", this.#onNewWorkspaceClick);
+
     const newSession = this.#root.createElement("button");
     newSession.type = "button";
     newSession.setAttribute(MOBILE_NAV_FOOTER_NEW_SESSION_ATTRIBUTE, "");
@@ -698,14 +716,33 @@ export class MobileSidebarDrawerRuntime {
     newSession.append(sessionIcon, sessionLabel);
     newSession.addEventListener("click", this.#onNewSessionClick);
 
-    footer.append(newSession);
+    footer.append(newWorkspace, newSession);
     frame.append(footer);
     this.#navigationFooter = footer;
+    this.#newWorkspaceButton = newWorkspace;
     this.#newSessionButton = newSession;
     this.#updateNavigationFooter();
   }
 
   #updateNavigationFooter(): void {
+    const newWorkspaceLabel = this.#navigationLabel(
+      "New workspace",
+      "新建工作区",
+    );
+    if (this.#newWorkspaceButton !== undefined) {
+      this.#newWorkspaceButton.lastElementChild!.textContent =
+        newWorkspaceLabel;
+      this.#newWorkspaceButton.setAttribute(
+        "aria-label",
+        newWorkspaceLabel,
+      );
+      const source = this.#root.querySelector(
+        `[${MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE}]`,
+      );
+      this.#newWorkspaceButton.disabled =
+        !(source instanceof this.#view.HTMLButtonElement) || source.disabled;
+    }
+
     const newSessionLabel = this.#navigationLabel(
       "New Session",
       "新建会话",
@@ -1373,6 +1410,20 @@ export class MobileSidebarDrawerRuntime {
   readonly #onNewSessionClick = (): void => {
     if (!this.#startMainWorkspaceSession()) {
       this.#newSessionSource?.click();
+    }
+  };
+
+  readonly #onNewWorkspaceClick = (): void => {
+    // React may replace the Workspace header while its tree reconciles. Resolve
+    // the live control at tap time so this proxy never forwards to a stale node.
+    const source = this.#root.querySelector(
+      `[${MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE}]`,
+    );
+    if (
+      source instanceof this.#view.HTMLButtonElement &&
+      !source.disabled
+    ) {
+      source.click();
     }
   };
 
