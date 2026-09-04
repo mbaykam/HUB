@@ -109,10 +109,11 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
   );
   assert.match(
     runtime,
-    /SESSION_SELECTION_SELECTOR[\s\S]*target\.closest\(SESSION_SELECTION_SELECTOR\)[\s\S]*#settle\(false, true\)/u,
+    /#onSessionSelection[\s\S]*current === this\.#currentSession[\s\S]*#settle\(false, true\)/u,
   );
+  assert.doesNotMatch(runtime, /SESSION_SELECTION_SELECTOR/u);
   assert.match(
     installer,
-    /installMobileSidebarDrawerStyles\(\)[\s\S]*installMobileSidebarDrawer\(ctx\.layout\)/u,
+    /installMobileSidebarDrawerStyles\(\)[\s\S]*installMobileSidebarDrawer\(ctx\.layout, ctx\.sessions\.list\)/u,
   );
 });

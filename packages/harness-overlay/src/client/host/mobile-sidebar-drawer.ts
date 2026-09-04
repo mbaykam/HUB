@@ -26,9 +26,6 @@ const GESTURE_IGNORE_SELECTOR = [
   '[contenteditable="true"]',
   '[role="slider"]',
 ].join(",");
-const SESSION_SELECTION_SELECTOR =
-  '[role="treeitem"][aria-selected]';
-
 export const MOBILE_SIDEBAR_BREAKPOINT_PX = 1024;
 export const MOBILE_SIDEBAR_EDGE_PX = 24;
 export const MOBILE_SIDEBAR_DIRECTION_LOCK_PX = 9;
@@ -44,6 +41,13 @@ const SHADOW_OPACITY = 0.32;
 
 interface SidebarLayoutPort {
   toggleSidebar(): void;
+}
+
+interface SidebarSessionSelectionPort {
+  getSnapshot(): {
+    readonly current: string | undefined;
+  };
+  subscribe(listener: () => void): () => void;
 }
 
 interface SidebarGesture {
@@ -117,6 +121,7 @@ export class MobileSidebarDrawerRuntime {
   readonly #root: Document;
   readonly #view: MobileSidebarView;
   readonly #layout: SidebarLayoutPort;
+  readonly #sessionSelection: SidebarSessionSelectionPort;
   readonly #observer: MutationObserver;
   #frame: HTMLElement | undefined;
   #sidebar: HTMLElement | undefined;
@@ -129,10 +134,13 @@ export class MobileSidebarDrawerRuntime {
   #settleTimer: number | undefined;
   #suppressClickUntil = 0;
   #suppressClickTarget: Element | undefined;
+  #currentSession: string | undefined;
+  #unsubscribeSessionSelection: (() => void) | undefined;
   #disposed = false;
 
   constructor(
     layout: SidebarLayoutPort,
+    sessionSelection: SidebarSessionSelectionPort,
     root: Document = document,
   ) {
     this.#root = root;
@@ -142,12 +150,16 @@ export class MobileSidebarDrawerRuntime {
     }
     this.#view = view;
     this.#layout = layout;
+    this.#sessionSelection = sessionSelection;
+    this.#currentSession = sessionSelection.getSnapshot().current;
     this.#observer = new view.MutationObserver(
       () => this.#scheduleReconcile(),
     );
   }
 
   start(): void {
+    this.#unsubscribeSessionSelection =
+      this.#sessionSelection.subscribe(this.#onSessionSelection);
     this.#observer.observe(this.#root.documentElement, {
       attributes: true,
       attributeFilter: [SIDEBAR_COLLAPSED_ATTRIBUTE],
@@ -186,6 +198,8 @@ export class MobileSidebarDrawerRuntime {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#observer.disconnect();
+    this.#unsubscribeSessionSelection?.();
+    this.#unsubscribeSessionSelection = undefined;
     this.#root.removeEventListener(
       "pointerdown",
       this.#onPointerDown,
@@ -595,25 +609,20 @@ export class MobileSidebarDrawerRuntime {
     if (this.#view.performance.now() > this.#suppressClickUntil) {
       this.#suppressClickTarget = undefined;
     }
+  };
 
+  /** Close only after Harness confirms that a different session is current. */
+  readonly #onSessionSelection = (): void => {
+    const current = this.#sessionSelection.getSnapshot().current;
+    if (current === this.#currentSession) return;
+    this.#currentSession = current;
     if (
-      target === undefined ||
-      !this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE) ||
-      !this.#sidebar?.contains(target)
+      current === undefined ||
+      !this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)
     ) {
       return;
     }
-    const row = target.closest(SESSION_SELECTION_SELECTOR);
-    const button = target.closest("button");
-    if (row === null || (button !== null && button !== row)) return;
-
-    // Let the row's React handler commit the session selection before the
-    // drawer begins collapsing and its wide session tree unmounts.
-    this.#view.setTimeout(() => {
-      if (this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)) {
-        this.#settle(false, true);
-      }
-    }, 0);
+    this.#settle(false, true);
   };
 
   readonly #onKeyDown = (event: KeyboardEvent): void => {
@@ -630,9 +639,14 @@ export class MobileSidebarDrawerRuntime {
 
 export function installMobileSidebarDrawer(
   layout: SidebarLayoutPort,
+  sessionSelection: SidebarSessionSelectionPort,
   root: Document = document,
 ): () => void {
-  const runtime = new MobileSidebarDrawerRuntime(layout, root);
+  const runtime = new MobileSidebarDrawerRuntime(
+    layout,
+    sessionSelection,
+    root,
+  );
   runtime.start();
   return () => runtime.dispose();
 }

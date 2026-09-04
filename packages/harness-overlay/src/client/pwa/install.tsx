@@ -12,6 +12,7 @@ import {
   zh,
 } from "./locales.ts";
 import {
+  openPwaHomeOnLaunch,
   PwaInstallRuntime,
 } from "./runtime.ts";
 import {
@@ -28,6 +29,12 @@ export function installPwa(ctx: HarnessClientContext): void {
   if (desktopTabsPort().embeddedWebAvailable) return;
 
   const runtime = new PwaInstallRuntime();
+  ctx.effect(
+    () => {
+      openPwaHomeOnLaunch(ctx.sessions);
+    },
+    "minke-overlay: standalone PWA Home launch",
+  );
   ctx.effect(
     () => runtime.mount(),
     "minke-overlay: PWA install runtime",

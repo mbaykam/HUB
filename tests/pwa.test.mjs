@@ -10,6 +10,7 @@ import {
   MINKE_PWA_SERVICE_WORKER,
 } from "@minke/harness-overlay/host/pwa.ts";
 import {
+  openPwaHomeOnLaunch,
   PwaInstallRuntime,
 } from "@minke/harness-overlay/client/pwa/runtime.ts";
 
@@ -167,6 +168,23 @@ function pwaWindow({
     target,
   };
 }
+
+test("standalone PWA launches on the no-session Home view", () => {
+  let clears = 0;
+  const standalone = pwaWindow({ standalone: true }).target;
+  assert.equal(
+    openPwaHomeOnLaunch({ clear: () => { clears += 1; } }, standalone),
+    true,
+  );
+  assert.equal(clears, 1);
+
+  const browser = pwaWindow().target;
+  assert.equal(
+    openPwaHomeOnLaunch({ clear: () => { clears += 1; } }, browser),
+    false,
+  );
+  assert.equal(clears, 1);
+});
 
 function serviceWorkerNavigation(fetchImpl, language = "zh-CN") {
   const listeners = new Map();

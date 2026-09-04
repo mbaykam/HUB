@@ -196,7 +196,7 @@ export function installTabs(
       "minke-overlay: mobile sidebar drawer styles",
     );
     ctx.effect(
-      () => installMobileSidebarDrawer(ctx.layout),
+      () => installMobileSidebarDrawer(ctx.layout, ctx.sessions.list),
       "minke-overlay: mobile sidebar drawer",
     );
   }

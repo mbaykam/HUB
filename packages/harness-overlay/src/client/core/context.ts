@@ -203,6 +203,8 @@ export interface HarnessClientContext {
       };
       subscribe(listener: () => void): () => void;
     };
+    /** Clear the current selection into Harness's no-session Home view. */
+    clear(): void;
     binding(sessionId: string): {
       readonly session: {
         prompt(

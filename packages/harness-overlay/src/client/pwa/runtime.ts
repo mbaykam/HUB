@@ -87,6 +87,23 @@ export interface PwaWindow {
   removeEventListener(type: string, listener: EventListener): void;
 }
 
+interface PwaLaunchSessions {
+  clear(): void;
+}
+
+/** Land a standalone PWA launch on Harness's existing no-session Home view. */
+export function openPwaHomeOnLaunch(
+  sessions: PwaLaunchSessions,
+  source: PwaWindow = window as unknown as PwaWindow,
+): boolean {
+  const standalone =
+    source.matchMedia("(display-mode: standalone)").matches ||
+    source.navigator.standalone === true;
+  if (!standalone) return false;
+  sessions.clear();
+  return true;
+}
+
 const HIDDEN: PwaInstallSnapshot = { mode: "hidden" };
 const INSTALLED: PwaInstallSnapshot = { mode: "installed" };
 
