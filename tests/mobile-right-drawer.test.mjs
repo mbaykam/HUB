@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  JSDOM,
+} from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
+import {
   MOBILE_RIGHT_DRAWER_FLING_VELOCITY,
   MOBILE_RIGHT_DRAWER_OPEN_THRESHOLD,
   clampMobileRightDrawerProgress,
   mobileRightDrawerVisuals,
   resolveMobileRightDrawerOpen,
 } from "@minke/harness-overlay/client/host/mobile-right-drawer.ts";
+import {
+  MobileUsageMeterRuntime,
+} from "@minke/harness-overlay/client/host/mobile-usage-meter.ts";
 
 const styles = readFileSync(
   new URL(
@@ -131,6 +137,41 @@ test("mobile right drawer contains the live provider usage meter", () => {
   assert.match(usageRuntime, /"Codex", "Subscription limits"/u);
   assert.match(usageRuntime, /"OpenRouter",[\s\S]*"Shared API-key spend"/u);
   assert.match(usageRuntime, /REFRESH_INTERVAL_MS = 60_000/u);
+  assert.match(usageRuntime, /aria-expanded", "false"/u);
+  assert.match(usageRuntime, /content\.hidden = true/u);
+  assert.match(styles, /data-minke-usage-toggle[\s\S]*min-height:\s*50px/u);
+  assert.match(styles, /data-minke-usage-toggle[\s\S]*width:\s*calc\(100% - 58px\)/u);
   assert.match(styles, /data-minke-usage-card[\s\S]*backdrop-filter:\s*blur/u);
   assert.match(styles, /data-minke-usage-progress-track/u);
+});
+
+test("mobile usage stays compact until its dropdown is opened", () => {
+  const dom = new JSDOM("<!doctype html><main></main>", {
+    url: "https://minke.test/",
+  });
+  dom.window.fetch = () => new Promise(() => {});
+  const container = dom.window.document.querySelector("main");
+  const runtime = new MobileUsageMeterRuntime(
+    container,
+    dom.window.document,
+  );
+  runtime.start();
+
+  const toggle = container.querySelector("[data-minke-usage-toggle]");
+  const content = container.querySelector("[data-minke-usage-content]");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(content.hidden, true);
+
+  toggle.click();
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(content.hidden, false);
+
+  dom.window.document.dispatchEvent(
+    new dom.window.Event("minke:mobile-right-drawer-opening"),
+  );
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(content.hidden, true);
+
+  runtime.dispose();
+  dom.window.close();
 });

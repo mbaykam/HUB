@@ -377,36 +377,92 @@ html[data-minke-mobile-web] [data-minke-mobile-right-drawer-body] {
 
 html[data-minke-mobile-web] [data-minke-usage-meter] {
   display: flex;
-  height: 100%;
+  height: auto;
   min-height: 0;
   flex-direction: column;
   box-sizing: border-box;
-  padding: 26px 4px 4px;
+  padding: 8px 0 4px;
   color: var(--dsw-alias-label-primary);
 }
 
-html[data-minke-mobile-web] [data-minke-usage-heading] {
+html[data-minke-mobile-web]
+  [data-minke-usage-meter][data-expanded] {
+  height: 100%;
+}
+
+html[data-minke-mobile-web] [data-minke-usage-toggle] {
   display: flex;
   flex: none;
-  align-items: flex-start;
+  width: calc(100% - 58px);
+  min-height: 50px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 12%);
+  box-shadow:
+    0 8px 24px rgb(18 28 48 / 12%),
+    inset 0 1px rgb(255 255 255 / 21%);
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body[data-ds-dark-theme] [data-minke-usage-toggle] {
+  border-color: rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 8%);
+}
+
+html[data-minke-mobile-web] [data-minke-usage-toggle]:active {
+  background: rgb(255 255 255 / 19%);
+  transform: scale(0.985);
+}
+
+html[data-minke-mobile-web] [data-minke-usage-chevron] {
+  flex: none;
+  font: 400 24px/1 system-ui, sans-serif;
+  transform: translateY(-2px) rotate(0deg);
+  transition: transform 180ms ease;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-usage-meter][data-expanded]
+  [data-minke-usage-chevron] {
+  transform: translateY(2px) rotate(180deg);
+}
+
+html[data-minke-mobile-web] [data-minke-usage-content] {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  padding-top: 14px;
+}
+
+html[data-minke-mobile-web] [data-minke-usage-content][hidden] {
+  display: none;
+}
+
+html[data-minke-mobile-web] [data-minke-usage-tools] {
+  display: flex;
+  flex: none;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 4px 18px;
+  padding: 0 4px 12px;
 }
 
-html[data-minke-mobile-web] [data-minke-usage-heading] h2 {
-  margin: 0;
-  font: 650 24px/1.2 ui-sans-serif, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
-  letter-spacing: -0.025em;
-}
-
-html[data-minke-mobile-web] [data-minke-usage-heading] p {
+html[data-minke-mobile-web] [data-minke-usage-tools] p {
   max-width: 31ch;
-  margin: 6px 0 0;
+  margin: 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 html[data-minke-mobile-web] [data-minke-usage-refresh] {
@@ -444,7 +500,7 @@ html[data-minke-mobile-web] [data-minke-usage-providers] {
   gap: 12px;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 1px 2px 18px;
+  padding: 1px 2px 14px;
   overscroll-behavior: contain;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;

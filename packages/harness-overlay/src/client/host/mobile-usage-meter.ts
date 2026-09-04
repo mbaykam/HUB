@@ -290,6 +290,9 @@ export class MobileUsageMeterRuntime {
   readonly #root: Document;
   readonly #view: UsageMeterView;
   readonly #container: HTMLElement;
+  readonly #section: HTMLElement;
+  readonly #toggleButton: HTMLButtonElement;
+  readonly #content: HTMLDivElement;
   readonly #codexContent: HTMLDivElement;
   readonly #openRouterContent: HTMLDivElement;
   readonly #refreshButton: HTMLButtonElement;
@@ -307,22 +310,31 @@ export class MobileUsageMeterRuntime {
     this.#view = view;
 
     const section = element(root, "section", "data-minke-usage-meter");
-    section.setAttribute("aria-labelledby", "minke-mobile-usage-title");
-    const heading = element(root, "div", "data-minke-usage-heading");
-    const identity = element(root, "div");
-    const title = element(root, "h2");
-    title.id = "minke-mobile-usage-title";
+    const toggle = element(root, "button", "data-minke-usage-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", "minke-mobile-usage-content");
+    const title = element(root, "span", "data-minke-usage-toggle-label");
     title.textContent = "Usage";
+    const chevron = element(root, "span", "data-minke-usage-chevron");
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = "⌄";
+    toggle.append(title, chevron);
+    toggle.addEventListener("click", this.#onToggle);
+
+    const content = element(root, "div", "data-minke-usage-content");
+    content.id = "minke-mobile-usage-content";
+    content.hidden = true;
+    const tools = element(root, "div", "data-minke-usage-tools");
     const summary = element(root, "p");
     summary.textContent = "Limits and spend across your connected providers";
-    identity.append(title, summary);
     const refresh = element(root, "button", "data-minke-usage-refresh");
     refresh.type = "button";
     refresh.setAttribute("aria-label", "Refresh usage");
     refresh.title = "Refresh usage";
     refresh.textContent = "↻";
     refresh.addEventListener("click", this.#onRefresh);
-    heading.append(identity, refresh);
+    tools.append(summary, refresh);
 
     const providers = element(root, "div", "data-minke-usage-providers");
     const codex = providerCard(root, "Codex", "Subscription limits");
@@ -335,9 +347,13 @@ export class MobileUsageMeterRuntime {
     const updated = element(root, "p", "data-minke-usage-updated");
     updated.setAttribute("role", "status");
     updated.setAttribute("aria-live", "polite");
-    section.append(heading, providers, updated);
+    content.append(tools, providers, updated);
+    section.append(toggle, content);
     container.replaceChildren(section);
 
+    this.#section = section;
+    this.#toggleButton = toggle;
+    this.#content = content;
     this.#codexContent = codex.content;
     this.#openRouterContent = openRouter.content;
     this.#refreshButton = refresh;
@@ -361,6 +377,7 @@ export class MobileUsageMeterRuntime {
       this.#onDrawerOpening,
     );
     this.#refreshButton.removeEventListener("click", this.#onRefresh);
+    this.#toggleButton.removeEventListener("click", this.#onToggle);
     this.#controller?.abort();
     if (this.#refreshTimer !== undefined) {
       this.#view.clearTimeout(this.#refreshTimer);
@@ -445,7 +462,23 @@ export class MobileUsageMeterRuntime {
     void this.refresh();
   };
 
+  #setExpanded(expanded: boolean): void {
+    this.#section.toggleAttribute("data-expanded", expanded);
+    this.#toggleButton.setAttribute("aria-expanded", String(expanded));
+    this.#content.hidden = !expanded;
+    if (expanded && Date.now() - this.#lastUpdatedAt >= STALE_AFTER_MS) {
+      void this.refresh();
+    }
+  }
+
+  readonly #onToggle = (): void => {
+    this.#setExpanded(
+      this.#toggleButton.getAttribute("aria-expanded") !== "true",
+    );
+  };
+
   readonly #onDrawerOpening = (): void => {
+    this.#setExpanded(false);
     if (Date.now() - this.#lastUpdatedAt >= STALE_AFTER_MS) {
       void this.refresh();
     }
