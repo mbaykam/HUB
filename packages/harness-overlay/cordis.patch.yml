@@ -3,7 +3,19 @@
   # nested instance keeps the same settings namespace and user-settings layer.
   disabled: true
 
+# HUB is commonly controlled from its mobile PWA while the Windows host is
+# unattended. Pin the directory interaction to Harness's in-app browser so
+# Add workspace never opens an invisible OS chooser on the host machine.
+- id: directory-picker
+  disabled: true
+
 - insert:
+    - id: hub-directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+
+    - id: hub-directory-picker-browse-ui
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
     # DSH ships Schedule as an explicit Web opt-in. HUB enables the durable
     # host runtime and read-only conversation-header catalog together.
     - id: time-context

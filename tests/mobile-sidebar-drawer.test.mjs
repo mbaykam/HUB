@@ -47,6 +47,13 @@ const installer = readFileSync(
   ),
   "utf8",
 );
+const overlayPatch = readFileSync(
+  new URL(
+    "../packages/harness-overlay/cordis.patch.yml",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("mobile sidebar visuals fully retract and track the finger", () => {
   assert.equal(clampMobileSidebarProgress(-1), 0);
@@ -231,7 +238,7 @@ test("mobile navigation separates unnamed recents from project folders", async (
                             <span><div role="treeitem" aria-expanded="true">
                               <span>Minke</span><button>Actions</button><button id="main-new-session">Add</button>
                             </div></span>
-                            <div role="treeitem" aria-selected="false">Existing chat</div>
+                            <div id="existing-chat" role="treeitem" aria-selected="true">Existing chat</div>
                           </div>
                           <div id="project-workspace">
                             <span><div role="treeitem" aria-expanded="true">
@@ -271,9 +278,11 @@ test("mobile navigation separates unnamed recents from project folders", async (
     configurable: true,
     value: 390,
   });
+  view.matchMedia = () => ({ matches: true });
   let globalSessionStarts = 0;
   let mainSessionStarts = 0;
   let workspaceStarts = 0;
+  const openedSessions = [];
   view.document.querySelector("#new-session").addEventListener(
     "click",
     () => { globalSessionStarts += 1; },
@@ -289,10 +298,19 @@ test("mobile navigation separates unnamed recents from project folders", async (
   const runtime = new MobileSidebarDrawerRuntime(
     { toggleSidebar: () => {} },
     {
-      getSnapshot: () => ({ current: "existing-session" }),
+      getSnapshot: () => ({
+        current: "existing-session",
+        byId: {
+          "existing-session": {
+            title: "Existing chat",
+            cwd: "C:\\Minke",
+          },
+        },
+      }),
       subscribe: () => () => {},
     },
     view.document,
+    (sessionId) => { openedSessions.push(sessionId); },
   );
 
   runtime.start();
@@ -369,19 +387,79 @@ test("mobile navigation separates unnamed recents from project folders", async (
     true,
   );
 
-  const newWorkspace = view.document.querySelector(
-    "[data-hub-mobile-nav-footer-new-workspace]",
-  );
   const newSession = view.document.querySelector(
     "[data-hub-mobile-nav-footer-new-session]",
   );
-  assert.equal(newWorkspace.textContent, "+New workspace");
+  assert.equal(
+    view.document.querySelector(
+      "[data-hub-mobile-nav-footer-new-workspace]",
+    ),
+    null,
+  );
   assert.equal(newSession.textContent, "+New Session");
-  newWorkspace.click();
+  // Workspace creation stays on Harness's real button instead of forwarding
+  // through a detached footer proxy.
+  view.document.querySelector("#add-workspace").click();
   newSession.click();
   assert.equal(workspaceStarts, 1);
   assert.equal(mainSessionStarts, 1);
   assert.equal(globalSessionStarts, 0);
+
+  const pinnedPanel = view.document.querySelector(
+    "[data-hub-mobile-nav-pinned]",
+  );
+  const pinnedToggle = view.document.querySelector(
+    "[data-hub-mobile-nav-pinned-toggle]",
+  );
+  const pinCurrent = view.document.querySelector(
+    "[data-hub-mobile-nav-pin-current]",
+  );
+  assert.equal(pinnedToggle.textContent, "›Pinned0");
+  assert.equal(pinCurrent.getAttribute("aria-pressed"), "false");
+  assert.equal(
+    view.document.querySelector(
+      "[data-hub-mobile-nav-current-bookmark]",
+    ).textContent,
+    "☆",
+  );
+  pinCurrent.click();
+  assert.equal(
+    pinnedPanel.hasAttribute("data-hub-mobile-nav-pinned-expanded"),
+    true,
+  );
+  assert.deepEqual(
+    JSON.parse(
+      view.localStorage.getItem("hub.mobile.pinned-sessions.v1"),
+    ),
+    ["existing-session"],
+  );
+  const pinnedSession = view.document.querySelector(
+    "[data-hub-mobile-nav-pinned-session]",
+  );
+  assert.equal(pinnedSession.textContent, "Existing chat");
+  assert.equal(
+    view.document.querySelector(
+      "[data-hub-mobile-nav-current-bookmark]",
+    ).textContent,
+    "★",
+  );
+  pinnedToggle.click();
+  assert.equal(pinnedToggle.getAttribute("aria-expanded"), "false");
+  pinnedToggle.click();
+  view.document.querySelector(
+    "[data-hub-mobile-nav-pinned-session]",
+  ).click();
+  await nextFrame(view);
+  assert.deepEqual(openedSessions, ["existing-session"]);
+  view.document.querySelector(
+    "[data-hub-mobile-nav-unpin-session]",
+  ).click();
+  assert.deepEqual(
+    JSON.parse(
+      view.localStorage.getItem("hub.mobile.pinned-sessions.v1"),
+    ),
+    [],
+  );
 
   runtime.dispose();
   assert.equal(
@@ -392,6 +470,10 @@ test("mobile navigation separates unnamed recents from project folders", async (
   );
   assert.equal(
     view.document.querySelector("[data-hub-mobile-nav-footer]"),
+    null,
+  );
+  assert.equal(
+    view.document.querySelector("[data-hub-mobile-nav-pinned]"),
     null,
   );
   view.close();
@@ -476,6 +558,18 @@ test("mobile home defaults to the hidden main workspace once", async () => {
 });
 
 test("mobile sidebar is a translucent, accessible motion layer", () => {
+  assert.match(
+    overlayPatch,
+    /- id: directory-picker\s+disabled: true/u,
+  );
+  assert.match(
+    overlayPatch,
+    /- id: hub-directory-picker-browse\s+name: '@deepseek-ai\/dsh-host-directory-picker-browse'/u,
+  );
+  assert.match(
+    overlayPatch,
+    /- id: hub-directory-picker-browse-ui\s+name: '@deepseek-ai\/dsh-client-ui-directory-picker-browse'/u,
+  );
   assert.match(styles, /backdrop-filter:\s*blur\(34px\) saturate\(165%\)/u);
   assert.match(styles, /rgb\(8 12 22 \/ 48%\)/u);
   assert.match(styles, /minke-mobile-glass-drift/u);
@@ -488,8 +582,11 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
   assert.match(styles, /data-hub-mobile-nav-view-options/u);
   assert.match(styles, /data-hub-mobile-nav-new-session-source/u);
   assert.match(styles, /data-hub-mobile-nav-add-workspace-source/u);
-  assert.match(styles, /data-hub-mobile-nav-footer-new-workspace/u);
   assert.match(styles, /data-hub-mobile-nav-footer-new-session/u);
+  assert.match(styles, /data-hub-mobile-nav-pinned/u);
+  assert.match(styles, /data-hub-mobile-nav-pin-current/u);
+  assert.match(styles, /data-hub-mobile-nav-pinned-session/u);
+  assert.match(styles, /data-hub-mobile-nav-current-bookmark/u);
   assert.match(styles, /data-hub-mobile-main-workspace-chip/u);
   assert.match(styles, /data-hub-mobile-nav-recents-section/u);
   assert.match(
@@ -538,6 +635,6 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
   );
   assert.match(
     installer,
-    /installMobileSidebarDrawerStyles\(\)[\s\S]*installMobileSidebarDrawer\(ctx\.layout, ctx\.sessions\.list\)/u,
+    /installMobileSidebarDrawerStyles\(\)[\s\S]*installMobileSidebarDrawer\(ctx\.layout, ctx\.sessions\)/u,
   );
 });

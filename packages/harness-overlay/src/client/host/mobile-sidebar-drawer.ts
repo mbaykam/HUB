@@ -38,12 +38,26 @@ const MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE =
   "data-hub-mobile-nav-add-workspace-source";
 const MOBILE_NAV_FOOTER_ATTRIBUTE =
   "data-hub-mobile-nav-footer";
-const MOBILE_NAV_FOOTER_NEW_WORKSPACE_ATTRIBUTE =
-  "data-hub-mobile-nav-footer-new-workspace";
 const MOBILE_NAV_FOOTER_NEW_SESSION_ATTRIBUTE =
   "data-hub-mobile-nav-footer-new-session";
 const MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE =
   "data-hub-mobile-main-workspace-chip";
+const MOBILE_NAV_PINNED_ATTRIBUTE =
+  "data-hub-mobile-nav-pinned";
+const MOBILE_NAV_PINNED_EXPANDED_ATTRIBUTE =
+  "data-hub-mobile-nav-pinned-expanded";
+const MOBILE_NAV_PINNED_TOGGLE_ATTRIBUTE =
+  "data-hub-mobile-nav-pinned-toggle";
+const MOBILE_NAV_PIN_CURRENT_ATTRIBUTE =
+  "data-hub-mobile-nav-pin-current";
+const MOBILE_NAV_PINNED_LIST_ATTRIBUTE =
+  "data-hub-mobile-nav-pinned-list";
+const MOBILE_NAV_PINNED_SESSION_ATTRIBUTE =
+  "data-hub-mobile-nav-pinned-session";
+const MOBILE_NAV_UNPIN_SESSION_ATTRIBUTE =
+  "data-hub-mobile-nav-unpin-session";
+const MOBILE_NAV_CURRENT_BOOKMARK_ATTRIBUTE =
+  "data-hub-mobile-nav-current-bookmark";
 const MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE =
   "data-minke-mobile-right-drawer-open";
 const RIGHT_DRAWER_OPENING_EVENT =
@@ -86,6 +100,11 @@ const CONTENT_SHIFT_PX = 18;
 const CONTENT_SCALE_DELTA = 0.015;
 const SCRIM_OPACITY = 0.32;
 const SHADOW_OPACITY = 0.32;
+const PINNED_SESSIONS_STORAGE_KEY =
+  "hub.mobile.pinned-sessions.v1";
+const PINNED_EXPANDED_STORAGE_KEY =
+  "hub.mobile.pinned-expanded.v1";
+const PINNED_VISIBLE_ROW_LIMIT = 4;
 
 interface SidebarLayoutPort {
   toggleSidebar(): void;
@@ -94,8 +113,22 @@ interface SidebarLayoutPort {
 interface SidebarSessionSelectionPort {
   getSnapshot(): {
     readonly current: string | undefined;
+    readonly byId?: Readonly<
+      Record<
+        string,
+        {
+          readonly cwd?: string;
+          readonly title?: string;
+        } | undefined
+      >
+    >;
   };
   subscribe(listener: () => void): () => void;
+}
+
+interface SidebarSessionsPort {
+  readonly list: SidebarSessionSelectionPort;
+  open(sessionId: string): void;
 }
 
 interface SidebarGesture {
@@ -197,16 +230,20 @@ export class MobileSidebarDrawerRuntime {
   #mainWorkspaceResolved = false;
   #mainWorkspaceHomeInitialized = false;
   #newSessionSource: HTMLButtonElement | undefined;
-  #addWorkspaceSource: HTMLButtonElement | undefined;
   #navigationFooter: HTMLDivElement | undefined;
-  #newWorkspaceButton: HTMLButtonElement | undefined;
   #newSessionButton: HTMLButtonElement | undefined;
+  #pinnedPanel: HTMLElement | undefined;
+  #pinnedSessionIds: string[] = [];
+  #pinnedExpanded = false;
+  #pinnedRenderKey: string | undefined;
+  #openSession: ((sessionId: string) => void) | undefined;
   #disposed = false;
 
   constructor(
     layout: SidebarLayoutPort,
     sessionSelection: SidebarSessionSelectionPort,
     root: Document = document,
+    openSession?: (sessionId: string) => void,
   ) {
     this.#root = root;
     const view = root.defaultView as MobileSidebarView | null;
@@ -216,7 +253,10 @@ export class MobileSidebarDrawerRuntime {
     this.#view = view;
     this.#layout = layout;
     this.#sessionSelection = sessionSelection;
+    this.#openSession = openSession;
     this.#currentSession = sessionSelection.getSnapshot().current;
+    this.#pinnedSessionIds = this.#readPinnedSessionIds();
+    this.#pinnedExpanded = this.#readPinnedExpanded();
     this.#observer = new view.MutationObserver(
       () => this.#scheduleReconcile(),
     );
@@ -360,10 +400,13 @@ export class MobileSidebarDrawerRuntime {
       scrim.addEventListener("click", this.#onScrimClick);
       frame.append(scrim);
       this.#scrim = scrim;
+      this.#mountPinnedPanel(frame);
       this.#mountNavigationFooter(frame);
     }
 
     this.#decorateNavigation(sidebar);
+    this.#renderPinnedPanel();
+    this.#decorateCurrentSessionBookmark();
 
     if (
       !frame.hasAttribute(MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE) &&
@@ -384,6 +427,7 @@ export class MobileSidebarDrawerRuntime {
       frame.removeAttribute(MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE);
       frame.removeAttribute("data-minke-mobile-sidebar-settling");
       this.#clearVisuals(frame);
+      frame.style.removeProperty("--hub-mobile-pinned-height");
     }
     this.#sidebar?.removeAttribute(MOBILE_SIDEBAR_ATTRIBUTE);
     this.#details?.removeAttribute(MOBILE_DETAILS_COLUMN_ATTRIBUTE);
@@ -395,16 +439,28 @@ export class MobileSidebarDrawerRuntime {
       }
     }
     this.#scrim?.removeEventListener("click", this.#onScrimClick);
-    this.#newWorkspaceButton?.removeEventListener(
+    this.#pinnedPanel?.removeEventListener(
       "click",
-      this.#onNewWorkspaceClick,
+      this.#onPinnedPanelClick,
     );
+    for (const button of this.#root.querySelectorAll(
+      `[${MOBILE_NAV_CURRENT_BOOKMARK_ATTRIBUTE}]`,
+    )) {
+      if (button instanceof this.#view.HTMLButtonElement) {
+        button.removeEventListener(
+          "click",
+          this.#onCurrentBookmarkClick,
+        );
+      }
+      button.remove();
+    }
     this.#newSessionButton?.removeEventListener(
       "click",
       this.#onNewSessionClick,
     );
     this.#edge?.remove();
     this.#scrim?.remove();
+    this.#pinnedPanel?.remove();
     this.#navigationFooter?.remove();
     this.#clearNavigationDecoration();
     this.#frame = undefined;
@@ -418,10 +474,10 @@ export class MobileSidebarDrawerRuntime {
     this.#mainWorkspaceResolved = false;
     this.#mainWorkspaceHomeInitialized = false;
     this.#newSessionSource = undefined;
-    this.#addWorkspaceSource = undefined;
     this.#navigationFooter = undefined;
-    this.#newWorkspaceButton = undefined;
     this.#newSessionButton = undefined;
+    this.#pinnedPanel = undefined;
+    this.#pinnedRenderKey = undefined;
     this.#gesture = undefined;
     this.#suppressClickTarget = undefined;
     this.#suppressClickUntil = 0;
@@ -490,7 +546,6 @@ export class MobileSidebarDrawerRuntime {
           MOBILE_NAV_ADD_WORKSPACE_SOURCE_ATTRIBUTE,
           addWorkspaceSource,
         );
-        this.#addWorkspaceSource = addWorkspaceSource;
       }
     }
 
@@ -633,19 +688,6 @@ export class MobileSidebarDrawerRuntime {
     const footer = this.#root.createElement("div");
     footer.setAttribute(MOBILE_NAV_FOOTER_ATTRIBUTE, "");
 
-    const newWorkspace = this.#root.createElement("button");
-    newWorkspace.type = "button";
-    newWorkspace.setAttribute(
-      MOBILE_NAV_FOOTER_NEW_WORKSPACE_ATTRIBUTE,
-      "",
-    );
-    const workspaceIcon = this.#root.createElement("span");
-    workspaceIcon.setAttribute("aria-hidden", "true");
-    workspaceIcon.textContent = "+";
-    const workspaceLabel = this.#root.createElement("span");
-    newWorkspace.append(workspaceIcon, workspaceLabel);
-    newWorkspace.addEventListener("click", this.#onNewWorkspaceClick);
-
     const newSession = this.#root.createElement("button");
     newSession.type = "button";
     newSession.setAttribute(MOBILE_NAV_FOOTER_NEW_SESSION_ATTRIBUTE, "");
@@ -656,34 +698,18 @@ export class MobileSidebarDrawerRuntime {
     newSession.append(sessionIcon, sessionLabel);
     newSession.addEventListener("click", this.#onNewSessionClick);
 
-    footer.append(newWorkspace, newSession);
+    footer.append(newSession);
     frame.append(footer);
     this.#navigationFooter = footer;
-    this.#newWorkspaceButton = newWorkspace;
     this.#newSessionButton = newSession;
     this.#updateNavigationFooter();
   }
 
   #updateNavigationFooter(): void {
-    const newWorkspaceLabel = this.#navigationLabel(
-      "New workspace",
-      "新建工作区",
-    );
     const newSessionLabel = this.#navigationLabel(
       "New Session",
       "新建会话",
     );
-    if (this.#newWorkspaceButton !== undefined) {
-      this.#newWorkspaceButton.lastElementChild!.textContent =
-        newWorkspaceLabel;
-      this.#newWorkspaceButton.setAttribute(
-        "aria-label",
-        newWorkspaceLabel,
-      );
-      this.#newWorkspaceButton.disabled =
-        this.#addWorkspaceSource === undefined ||
-        this.#addWorkspaceSource.disabled;
-    }
     if (this.#newSessionButton !== undefined) {
       this.#newSessionButton.lastElementChild!.textContent =
         newSessionLabel;
@@ -703,6 +729,283 @@ export class MobileSidebarDrawerRuntime {
       .startsWith("zh")
       ? chinese
       : english;
+  }
+
+  #readPinnedSessionIds(): string[] {
+    try {
+      const stored = this.#view.localStorage.getItem(
+        PINNED_SESSIONS_STORAGE_KEY,
+      );
+      if (stored === null) return [];
+      const parsed: unknown = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return [];
+      return [...new Set(parsed.filter(
+        (value): value is string =>
+          typeof value === "string" && value !== "",
+      ))];
+    } catch {
+      return [];
+    }
+  }
+
+  #readPinnedExpanded(): boolean {
+    try {
+      return this.#view.localStorage.getItem(
+        PINNED_EXPANDED_STORAGE_KEY,
+      ) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  #persistPinnedSessions(): void {
+    try {
+      this.#view.localStorage.setItem(
+        PINNED_SESSIONS_STORAGE_KEY,
+        JSON.stringify(this.#pinnedSessionIds),
+      );
+      this.#view.localStorage.setItem(
+        PINNED_EXPANDED_STORAGE_KEY,
+        String(this.#pinnedExpanded),
+      );
+    } catch {
+      // Pinning remains available for this runtime when storage is blocked.
+    }
+  }
+
+  #mountPinnedPanel(frame: HTMLElement): void {
+    const panel = this.#root.createElement("section");
+    panel.setAttribute(MOBILE_NAV_PINNED_ATTRIBUTE, "");
+
+    const header = this.#root.createElement("div");
+    const toggle = this.#root.createElement("button");
+    toggle.type = "button";
+    toggle.setAttribute(MOBILE_NAV_PINNED_TOGGLE_ATTRIBUTE, "");
+    const chevron = this.#root.createElement("span");
+    chevron.setAttribute("aria-hidden", "true");
+    const label = this.#root.createElement("span");
+    const count = this.#root.createElement("span");
+    count.setAttribute("aria-hidden", "true");
+    toggle.append(chevron, label, count);
+
+    const pinCurrent = this.#root.createElement("button");
+    pinCurrent.type = "button";
+    pinCurrent.setAttribute(MOBILE_NAV_PIN_CURRENT_ATTRIBUTE, "");
+
+    const list = this.#root.createElement("div");
+    list.setAttribute(MOBILE_NAV_PINNED_LIST_ATTRIBUTE, "");
+    header.append(toggle, pinCurrent);
+    panel.append(header, list);
+    panel.addEventListener("click", this.#onPinnedPanelClick);
+    frame.append(panel);
+    this.#pinnedPanel = panel;
+    this.#renderPinnedPanel();
+  }
+
+  #renderPinnedPanel(): void {
+    const panel = this.#pinnedPanel;
+    if (panel === undefined) return;
+    const snapshot = this.#sessionSelection.getSnapshot();
+    const byId = snapshot.byId ?? {};
+    const available = this.#pinnedSessionIds.flatMap((sessionId) => {
+      const session = byId[sessionId];
+      return session === undefined ? [] : [{ sessionId, session }];
+    });
+    const current = snapshot.current;
+    const currentPinned =
+      current !== undefined && this.#pinnedSessionIds.includes(current);
+    const renderKey = JSON.stringify({
+      available: available.map(({ sessionId, session }) => [
+        sessionId,
+        session.title,
+        session.cwd,
+      ]),
+      current,
+      currentPinned,
+      expanded: this.#pinnedExpanded,
+      lang: this.#root.documentElement.lang,
+    });
+    if (renderKey === this.#pinnedRenderKey) return;
+    this.#pinnedRenderKey = renderKey;
+
+    panel.toggleAttribute(
+      MOBILE_NAV_PINNED_EXPANDED_ATTRIBUTE,
+      this.#pinnedExpanded,
+    );
+    const toggle = panel.querySelector(
+      `[${MOBILE_NAV_PINNED_TOGGLE_ATTRIBUTE}]`,
+    );
+    if (toggle instanceof this.#view.HTMLButtonElement) {
+      toggle.setAttribute(
+        "aria-expanded",
+        String(this.#pinnedExpanded),
+      );
+      toggle.setAttribute(
+        "aria-label",
+        this.#navigationLabel(
+          this.#pinnedExpanded
+            ? "Collapse pinned sessions"
+            : "Expand pinned sessions",
+          this.#pinnedExpanded
+            ? "收起已固定会话"
+            : "展开已固定会话",
+        ),
+      );
+      const [chevron, label, count] = toggle.children;
+      if (chevron !== undefined) {
+        chevron.textContent = this.#pinnedExpanded ? "⌄" : "›";
+      }
+      if (label !== undefined) {
+        label.textContent = this.#navigationLabel("Pinned", "已固定");
+      }
+      if (count !== undefined) {
+        count.textContent = String(available.length);
+      }
+    }
+
+    const pinCurrent = panel.querySelector(
+      `[${MOBILE_NAV_PIN_CURRENT_ATTRIBUTE}]`,
+    );
+    if (pinCurrent instanceof this.#view.HTMLButtonElement) {
+      const canPin = current !== undefined && byId[current] !== undefined;
+      pinCurrent.disabled = !canPin;
+      pinCurrent.textContent = currentPinned ? "★" : "☆";
+      pinCurrent.setAttribute("aria-pressed", String(currentPinned));
+      pinCurrent.setAttribute(
+        "aria-label",
+        this.#navigationLabel(
+          currentPinned
+            ? "Unpin current session"
+            : "Pin current session",
+          currentPinned ? "取消固定当前会话" : "固定当前会话",
+        ),
+      );
+    }
+
+    const list = panel.querySelector(
+      `[${MOBILE_NAV_PINNED_LIST_ATTRIBUTE}]`,
+    );
+    if (!(list instanceof this.#view.HTMLElement)) return;
+    const children: HTMLElement[] = [];
+    if (available.length === 0) {
+      const empty = this.#root.createElement("p");
+      empty.textContent = this.#navigationLabel(
+        "No pinned sessions",
+        "暂无已固定会话",
+      );
+      children.push(empty);
+    } else {
+      for (const { sessionId, session } of available) {
+        const row = this.#root.createElement("div");
+        const open = this.#root.createElement("button");
+        open.type = "button";
+        open.setAttribute(MOBILE_NAV_PINNED_SESSION_ATTRIBUTE, sessionId);
+        open.textContent = this.#sessionTitle(session);
+        const unpin = this.#root.createElement("button");
+        unpin.type = "button";
+        unpin.setAttribute(MOBILE_NAV_UNPIN_SESSION_ATTRIBUTE, sessionId);
+        unpin.textContent = "★";
+        unpin.setAttribute(
+          "aria-label",
+          this.#navigationLabel(
+            `Unpin ${open.textContent}`,
+            `取消固定 ${open.textContent}`,
+          ),
+        );
+        row.append(open, unpin);
+        children.push(row);
+      }
+    }
+    list.replaceChildren(...children);
+
+    const visibleRows = this.#pinnedExpanded
+      ? Math.min(
+          Math.max(available.length, 1),
+          PINNED_VISIBLE_ROW_LIMIT,
+        )
+      : 0;
+    const panelHeight = this.#pinnedExpanded
+      ? 48 + visibleRows * 36
+      : 44;
+    this.#frame?.style.setProperty(
+      "--hub-mobile-pinned-height",
+      `${String(panelHeight)}px`,
+    );
+  }
+
+  #sessionTitle(session: {
+    readonly cwd?: string;
+    readonly title?: string;
+  }): string {
+    const title = session.title?.trim();
+    if (title !== undefined && title !== "") return title;
+    return this.#navigationLabel("New Session", "新建会话");
+  }
+
+  #togglePinnedSession(sessionId: string): void {
+    const index = this.#pinnedSessionIds.indexOf(sessionId);
+    if (index === -1) {
+      this.#pinnedSessionIds = [
+        sessionId,
+        ...this.#pinnedSessionIds,
+      ];
+      this.#pinnedExpanded = true;
+    } else {
+      this.#pinnedSessionIds = this.#pinnedSessionIds.filter(
+        (candidate) => candidate !== sessionId,
+      );
+    }
+    this.#persistPinnedSessions();
+    this.#pinnedRenderKey = undefined;
+    this.#renderPinnedPanel();
+    this.#decorateCurrentSessionBookmark();
+  }
+
+  #decorateCurrentSessionBookmark(): void {
+    const selected = this.#root.querySelector(
+      `${SESSION_SELECTION_SELECTOR}[aria-selected="true"]`,
+    );
+    const selectedRow =
+      selected instanceof this.#view.HTMLElement &&
+      !(selected instanceof this.#view.HTMLButtonElement)
+        ? selected
+        : undefined;
+    for (const candidate of this.#root.querySelectorAll(
+      `[${MOBILE_NAV_CURRENT_BOOKMARK_ATTRIBUTE}]`,
+    )) {
+      if (candidate.parentElement === selectedRow) continue;
+      if (candidate instanceof this.#view.HTMLButtonElement) {
+        candidate.removeEventListener(
+          "click",
+          this.#onCurrentBookmarkClick,
+        );
+      }
+      candidate.remove();
+    }
+    const current = this.#currentSession;
+    if (selectedRow === undefined || current === undefined) return;
+    let button = selectedRow.querySelector(
+      `[${MOBILE_NAV_CURRENT_BOOKMARK_ATTRIBUTE}]`,
+    );
+    if (!(button instanceof this.#view.HTMLButtonElement)) {
+      const created = this.#root.createElement("button");
+      created.type = "button";
+      created.setAttribute(MOBILE_NAV_CURRENT_BOOKMARK_ATTRIBUTE, "");
+      created.addEventListener("click", this.#onCurrentBookmarkClick);
+      selectedRow.append(created);
+      button = created;
+    }
+    if (!(button instanceof this.#view.HTMLButtonElement)) return;
+    const pinned = this.#pinnedSessionIds.includes(current);
+    button.textContent = pinned ? "★" : "☆";
+    button.setAttribute("aria-pressed", String(pinned));
+    button.setAttribute(
+      "aria-label",
+      this.#navigationLabel(
+        pinned ? "Unpin this session" : "Pin this session",
+        pinned ? "取消固定此会话" : "固定此会话",
+      ),
+    );
   }
 
   #decorateMainWorkspaceChip(): void {
@@ -1067,13 +1370,76 @@ export class MobileSidebarDrawerRuntime {
     });
   };
 
-  readonly #onNewWorkspaceClick = (): void => {
-    this.#addWorkspaceSource?.click();
-  };
-
   readonly #onNewSessionClick = (): void => {
     if (!this.#startMainWorkspaceSession()) {
       this.#newSessionSource?.click();
+    }
+  };
+
+  readonly #onPinnedPanelClick = (event: MouseEvent): void => {
+    const target = asElement(event.target, this.#view);
+    if (target === undefined) return;
+
+    const toggle = target.closest(
+      `[${MOBILE_NAV_PINNED_TOGGLE_ATTRIBUTE}]`,
+    );
+    if (toggle !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#pinnedExpanded = !this.#pinnedExpanded;
+      this.#persistPinnedSessions();
+      this.#pinnedRenderKey = undefined;
+      this.#renderPinnedPanel();
+      return;
+    }
+
+    const pinCurrent = target.closest(
+      `[${MOBILE_NAV_PIN_CURRENT_ATTRIBUTE}]`,
+    );
+    if (pinCurrent !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.#currentSession !== undefined) {
+        this.#togglePinnedSession(this.#currentSession);
+      }
+      return;
+    }
+
+    const unpin = target.closest(
+      `[${MOBILE_NAV_UNPIN_SESSION_ATTRIBUTE}]`,
+    );
+    const unpinId = unpin?.getAttribute(
+      MOBILE_NAV_UNPIN_SESSION_ATTRIBUTE,
+    );
+    if (unpinId !== null && unpinId !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#togglePinnedSession(unpinId);
+      return;
+    }
+
+    const session = target.closest(
+      `[${MOBILE_NAV_PINNED_SESSION_ATTRIBUTE}]`,
+    );
+    const sessionId = session?.getAttribute(
+      MOBILE_NAV_PINNED_SESSION_ATTRIBUTE,
+    );
+    if (sessionId === null || sessionId === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.#openSession?.(sessionId);
+    this.#view.requestAnimationFrame(() => {
+      if (this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)) {
+        this.#settle(false, true);
+      }
+    });
+  };
+
+  readonly #onCurrentBookmarkClick = (event: MouseEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.#currentSession !== undefined) {
+      this.#togglePinnedSession(this.#currentSession);
     }
   };
 
@@ -1105,8 +1471,13 @@ export class MobileSidebarDrawerRuntime {
   /** Close only after Harness confirms that a different session is current. */
   readonly #onSessionSelection = (): void => {
     const current = this.#sessionSelection.getSnapshot().current;
-    if (current === this.#currentSession) return;
+    this.#renderPinnedPanel();
+    if (current === this.#currentSession) {
+      this.#decorateCurrentSessionBookmark();
+      return;
+    }
     this.#currentSession = current;
+    this.#decorateCurrentSessionBookmark();
     if (
       current === undefined ||
       !this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)
@@ -1136,13 +1507,14 @@ export class MobileSidebarDrawerRuntime {
 
 export function installMobileSidebarDrawer(
   layout: SidebarLayoutPort,
-  sessionSelection: SidebarSessionSelectionPort,
+  sessions: SidebarSessionsPort,
   root: Document = document,
 ): () => void {
   const runtime = new MobileSidebarDrawerRuntime(
     layout,
-    sessionSelection,
+    sessions.list,
     root,
+    sessions.open.bind(sessions),
   );
   runtime.start();
   return () => runtime.dispose();

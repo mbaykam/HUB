@@ -17,6 +17,7 @@ html[data-minke-mobile-web] [data-minke-mobile-sidebar-frame] {
   --minke-mobile-right-drawer-progress: 0;
   --minke-mobile-right-content-scale: 1;
   --minke-mobile-right-content-brightness: 1;
+  --hub-mobile-pinned-height: 44px;
   grid-template-columns:
     0px
     minmax(0, 1fr)
@@ -126,10 +127,16 @@ html[data-minke-mobile-web] [data-hub-mobile-nav-logo-row],
 html[data-minke-mobile-web] [data-minke-tabs-layout-actions],
 html[data-minke-mobile-web] [data-hub-mobile-nav-view-options],
 html[data-minke-mobile-web]
-  [data-hub-mobile-nav-new-session-source],
+  [data-hub-mobile-nav-new-session-source] {
+  display: none !important;
+}
+
+/* Keep Workspace creation on the original React control. The previous
+ * footer proxy could lose its target during reconciliation on Mobile Safari. */
 html[data-minke-mobile-web]
   [data-hub-mobile-nav-add-workspace-source] {
-  display: none !important;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Mobile information architecture: ordinary chats are an unnamed Recents
@@ -138,8 +145,11 @@ html[data-minke-mobile-web]
  * which conversations the assistant can access. */
 html[data-minke-mobile-web] [data-hub-mobile-nav-browser] {
   box-sizing: border-box;
-  padding-top: max(10px, env(safe-area-inset-top));
-  padding-bottom: 108px;
+  padding-top: calc(
+    max(10px, env(safe-area-inset-top)) +
+      var(--hub-mobile-pinned-height) + 8px
+  );
+  padding-bottom: 66px;
 }
 
 /* The unnamed general-chat area is backed by HUB's original Minke
@@ -211,7 +221,202 @@ body[data-ds-dark-theme]
   border-top-color: rgb(255 255 255 / 10%);
 }
 
-/* Mobile navigation ends in two stable actions. They live beside the
+/* Pinned sessions are a small device-persistent projection above Recents.
+ * The panel is a frame sibling so React can freely refresh the Workspace
+ * tree without discarding the bookmark controls. */
+html[data-minke-mobile-web] [data-hub-mobile-nav-pinned] {
+  position: absolute;
+  z-index: 13;
+  top: max(10px, env(safe-area-inset-top));
+  left: 12px;
+  width: calc(var(--minke-mobile-sidebar-width) - 24px);
+  height: var(--hub-mobile-pinned-height);
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 7%);
+  opacity: var(--minke-mobile-sidebar-progress);
+  transform: translate3d(
+    var(--minke-mobile-sidebar-offset),
+    0,
+    0
+  );
+  transition:
+    height 180ms ease,
+    transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
+    opacity 180ms ease;
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned]
+  > :first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 42px;
+  padding: 0 6px 0 4px;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned]
+  button {
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-toggle] {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 8px;
+  text-align: left;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-toggle]
+  > :first-child {
+  width: 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 18px;
+  line-height: 1;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-toggle]
+  > :last-child {
+  margin-left: auto;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+html[data-minke-mobile-web] [data-hub-mobile-nav-pin-current] {
+  display: grid;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px !important;
+  color: rgb(127 174 255) !important;
+  font-size: 19px !important;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pin-current]:active:not(:disabled) {
+  background: rgb(255 255 255 / 12%);
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pin-current]:disabled {
+  opacity: 0.3;
+}
+
+html[data-minke-mobile-web] [data-hub-mobile-nav-pinned-list] {
+  max-height: 144px;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-list]::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-list]
+  > div {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  border-radius: 9px;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-list]
+  > div:active {
+  background: rgb(255 255 255 / 10%);
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-session] {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  overflow: hidden;
+  padding: 0 8px !important;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px !important;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-unpin-session] {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  color: rgb(127 174 255) !important;
+  font-size: 15px !important;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-pinned-list]
+  > p {
+  height: 36px;
+  margin: 0;
+  padding: 8px;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-current-bookmark] {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px 2px -4px 0;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(127 174 255);
+  font-size: 17px;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-sidebar-collapsed]
+  > [data-hub-mobile-nav-pinned],
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-settings-open]
+  > [data-hub-mobile-nav-pinned] {
+  pointer-events: none;
+}
+
+body[data-ds-dark-theme] [data-hub-mobile-nav-pinned] {
+  border-color: rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 5%);
+}
+
+/* Mobile navigation ends in one stable action. It lives beside the
  * animated sidebar rather than inside React's Workspace tree, so list
  * reconciliation cannot move or discard them. */
 html[data-minke-mobile-web] [data-hub-mobile-nav-footer] {
@@ -283,11 +488,6 @@ html[data-minke-mobile-web]
   font-size: 16px;
   font-weight: 400;
   line-height: 16px;
-}
-
-html[data-minke-mobile-web]
-  [data-hub-mobile-nav-footer-new-workspace] {
-  background: rgb(255 255 255 / 5%);
 }
 
 html[data-minke-mobile-web]
@@ -405,6 +605,7 @@ html[data-minke-mobile-web]
     [data-minke-mobile-sidebar],
     [data-minke-mobile-sidebar-content],
     [data-minke-mobile-sidebar-scrim],
+    [data-hub-mobile-nav-pinned],
     [data-hub-mobile-nav-footer]
   ) {
   transition: none !important;
@@ -1090,6 +1291,7 @@ html[data-minke-mobile-web]
       [data-minke-mobile-sidebar],
       [data-minke-mobile-sidebar-content],
       [data-minke-mobile-sidebar-scrim],
+      [data-hub-mobile-nav-pinned],
       [data-hub-mobile-nav-footer]
     ) {
     transition-duration: 1ms !important;
