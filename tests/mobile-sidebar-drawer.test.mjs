@@ -112,6 +112,14 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
     runtime,
     /#onSessionSelection[\s\S]*current === this\.#currentSession[\s\S]*#settle\(false, true\)/u,
   );
+  assert.match(
+    runtime,
+    /#selectionCloseFrame = this\.#view\.requestAnimationFrame[\s\S]*#settle\(false, true\)/u,
+  );
+  assert.match(
+    runtime,
+    /this\.#settleTimer = this\.#view\.setTimeout[\s\S]*logicalOpen !== open[\s\S]*toggleSidebar/u,
+  );
   assert.doesNotMatch(runtime, /SESSION_SELECTION_SELECTOR/u);
   assert.match(
     installer,

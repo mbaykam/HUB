@@ -137,6 +137,7 @@ export class MobileSidebarDrawerRuntime {
   #scrim: HTMLDivElement | undefined;
   #gesture: SidebarGesture | undefined;
   #reconcileFrame: number | undefined;
+  #selectionCloseFrame: number | undefined;
   #settleTimer: number | undefined;
   #suppressClickUntil = 0;
   #suppressClickTarget: Element | undefined;
@@ -239,6 +240,9 @@ export class MobileSidebarDrawerRuntime {
     this.#view.removeEventListener("resize", this.#scheduleReconcile);
     if (this.#reconcileFrame !== undefined) {
       this.#view.cancelAnimationFrame(this.#reconcileFrame);
+    }
+    if (this.#selectionCloseFrame !== undefined) {
+      this.#view.cancelAnimationFrame(this.#selectionCloseFrame);
     }
     if (this.#settleTimer !== undefined) {
       this.#view.clearTimeout(this.#settleTimer);
@@ -437,6 +441,7 @@ export class MobileSidebarDrawerRuntime {
       target === undefined ||
       this.#gesture !== undefined ||
       !this.#enabled() ||
+      frame.hasAttribute("data-minke-mobile-sidebar-settling") ||
       frame.hasAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE) ||
       !event.isPrimary ||
       event.button !== 0 ||
@@ -579,13 +584,13 @@ export class MobileSidebarDrawerRuntime {
     frame.removeAttribute(MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE);
     frame.setAttribute("data-minke-mobile-sidebar-settling", "");
     this.#syncOpenState(open);
-    if (logicalOpen !== open) this.#layout.toggleSidebar();
     this.#applyVisuals(open ? 1 : 0);
     const reducedMotion = this.#view.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
     this.#settleTimer = this.#view.setTimeout(() => {
       this.#settleTimer = undefined;
+      if (logicalOpen !== open) this.#layout.toggleSidebar();
       frame.removeAttribute("data-minke-mobile-sidebar-settling");
       this.#clearVisuals(frame);
       this.#scheduleReconcile();
@@ -600,7 +605,19 @@ export class MobileSidebarDrawerRuntime {
     ) {
       return;
     }
-    this.#settle(false, true);
+    if (this.#selectionCloseFrame !== undefined) {
+      this.#view.cancelAnimationFrame(this.#selectionCloseFrame);
+    }
+    // Session selection notifies synchronously from inside the row's React
+    // handler. Give React one paint boundary to bind the new conversation,
+    // then animate the drawer while keeping its wide tree mounted until the
+    // transition completes.
+    this.#selectionCloseFrame = this.#view.requestAnimationFrame(() => {
+      this.#selectionCloseFrame = undefined;
+      if (this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)) {
+        this.#settle(false, true);
+      }
+    });
   };
 
   readonly #onClick = (event: MouseEvent): void => {

@@ -112,6 +112,7 @@ export class MobileRightDrawerRuntime {
   #closeButton: HTMLButtonElement | undefined;
   #settingsSourceRow: HTMLElement | undefined;
   #settingsSignature = "";
+  #settingsOpen = false;
   #gesture: RightDrawerGesture | undefined;
   #reconcileFrame: number | undefined;
   #settleTimer: number | undefined;
@@ -312,6 +313,7 @@ export class MobileRightDrawerRuntime {
     this.#closeButton = undefined;
     this.#settingsSourceRow = undefined;
     this.#settingsSignature = "";
+    this.#settingsOpen = false;
     this.#gesture = undefined;
     this.#suppressClickUntil = 0;
     this.#suppressClickTarget = undefined;
@@ -338,8 +340,7 @@ export class MobileRightDrawerRuntime {
     );
     const target = this.#settingsButton;
     if (source === null || target === undefined) return;
-    this.#frame?.toggleAttribute(
-      MOBILE_SETTINGS_OPEN_ATTRIBUTE,
+    this.#syncSettingsOpen(
       source.getAttribute("aria-expanded") === "true",
     );
     const sourceRow = source.parentElement;
@@ -378,9 +379,32 @@ export class MobileRightDrawerRuntime {
     const drawer = this.#drawer;
     if (frame === undefined || drawer === undefined) return;
     frame.toggleAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE, open);
-    drawer.setAttribute("aria-hidden", String(!open));
-    drawer.toggleAttribute("inert", !open);
-    this.#setBackgroundInert(open);
+    drawer.setAttribute(
+      "aria-hidden",
+      String(!open || this.#settingsOpen),
+    );
+    drawer.toggleAttribute("inert", !open || this.#settingsOpen);
+    this.#setBackgroundInert(open && !this.#settingsOpen);
+  }
+
+  #syncSettingsOpen(open: boolean): void {
+    const frame = this.#frame;
+    const drawer = this.#drawer;
+    if (frame === undefined || drawer === undefined) return;
+    const changed = open !== this.#settingsOpen;
+    this.#settingsOpen = open;
+    frame.toggleAttribute(MOBILE_SETTINGS_OPEN_ATTRIBUTE, open);
+    const rightOpen = frame.hasAttribute(
+      MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE,
+    );
+    drawer.setAttribute("aria-hidden", String(!rightOpen || open));
+    drawer.toggleAttribute("inert", !rightOpen || open);
+    this.#setBackgroundInert(rightOpen && !open);
+    if (changed && !open && rightOpen) {
+      this.#view.requestAnimationFrame(() => {
+        this.#settingsButton?.focus({ preventScroll: true });
+      });
+    }
   }
 
   #setBackgroundInert(inert: boolean): void {
@@ -623,8 +647,12 @@ export class MobileRightDrawerRuntime {
     const source = this.#root.querySelector<HTMLButtonElement>(
       SETTINGS_TRIGGER_SELECTOR,
     );
-    this.#settle(false);
-    source?.click();
+    if (source === null) return;
+    // Keep the right drawer logically open beneath Settings. The Settings
+    // state observer temporarily releases the background and hides this
+    // drawer, then restores it when the dialog alone closes.
+    this.#syncSettingsOpen(true);
+    source.click();
   };
 
   readonly #onCloseClick = (): void => {
@@ -641,6 +669,7 @@ export class MobileRightDrawerRuntime {
     if (!this.#frame?.hasAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE)) {
       return;
     }
+    if (this.#settingsOpen) return;
     if (event.key === "Escape") {
       event.preventDefault();
       this.#settle(false);

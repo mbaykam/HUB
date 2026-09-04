@@ -83,11 +83,22 @@ test("mobile right drawer owns Settings and accessible dismissal", () => {
     /data-minke-mobile-right-drawer-open[\s\S]*--minke-mobile-right-drawer-offset:\s*0px/u,
   );
   assert.match(styles, /data-minke-mobile-settings-source[\s\S]*display:\s*none !important/u);
-  assert.match(runtime, /SETTINGS_TRIGGER_SELECTOR[\s\S]*source\?\.click\(\)/u);
+  assert.match(runtime, /SETTINGS_TRIGGER_SELECTOR[\s\S]*source\.click\(\)/u);
   assert.match(runtime, /data-minke-mobile-right-drawer-label/u);
   assert.match(runtime, /data-minke-mobile-settings-open/u);
   assert.match(runtime, /aria-modal[\s\S]*Close panel/u);
-  assert.match(runtime, /drawer\.toggleAttribute\("inert", !open\)/u);
+  assert.match(
+    runtime,
+    /drawer\.toggleAttribute\("inert", !open \|\| this\.#settingsOpen\)/u,
+  );
+  assert.match(
+    runtime,
+    /#onSettingsClick[\s\S]*#syncSettingsOpen\(true\)[\s\S]*source\.click\(\)/u,
+  );
+  assert.doesNotMatch(
+    runtime,
+    /#onSettingsClick[\s\S]{0,240}#settle\(false\)/u,
+  );
   assert.match(runtime, /minke:mobile-left-drawer-opening/u);
   assert.match(
     styles,
