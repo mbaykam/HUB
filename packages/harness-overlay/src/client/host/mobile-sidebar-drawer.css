@@ -381,6 +381,112 @@ html[data-minke-mobile-web]
   display: none !important;
 }
 
+/* Harness renders its Settings overlay inside the sidebar slot. The drawer's
+ * transform makes that sidebar the overlay's fixed-position containing block,
+ * so a closed 280px drawer otherwise clips the dialog exactly as if it were
+ * ordinary sidebar content. Offset the overlay back onto the viewport and
+ * let only this modal escape the drawer's clip. */
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-settings-open]
+  > [data-minke-mobile-sidebar] {
+  overflow: visible;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-settings-open]
+  [data-slot="sidebar.settings"]
+  > [role="presentation"] {
+  inset: 0 auto auto var(--minke-mobile-sidebar-width) !important;
+  width: 100vw;
+  height: 100%;
+}
+
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame]:not([data-sidebar-collapsed])[data-minke-mobile-settings-open]
+  [data-slot="sidebar.settings"]
+  > [role="presentation"] {
+  left: 0 !important;
+}
+
+/* Settings takes over immediately instead of waiting behind the outgoing
+ * secondary drawer's 300ms glass animation. */
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-settings-open]
+  > [data-minke-mobile-right-drawer] {
+  opacity: 0 !important;
+  transform: translate3d(100%, 0, 0) !important;
+  transition: none !important;
+}
+
+/* Reflow the desktop settings split view into a compact mobile sheet. The
+ * section rail becomes a horizontally scrolling strip, leaving the full
+ * width below it for controls. */
+html[data-minke-mobile-web]
+  [data-slot="sidebar.settings"]
+  [role="dialog"] {
+  flex-direction: column;
+  width: calc(100vw - 20px) !important;
+  height: calc(100% - 20px) !important;
+  max-width: none !important;
+  border-radius: 24px;
+}
+
+html[data-minke-mobile-web]
+  [data-slot="sidebar.settings"]
+  [role="dialog"]
+  > nav {
+  flex: none;
+  width: 100%;
+  gap: 12px;
+  padding: 18px 14px 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+html[data-minke-mobile-web]
+  [data-slot="sidebar.settings"]
+  [role="dialog"]
+  > nav
+  > :last-child {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-minke-mobile-web]
+  [data-slot="sidebar.settings"]
+  [role="dialog"]
+  > nav
+  > :last-child::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-minke-mobile-web]
+  [data-slot="sidebar.settings"]
+  [role="dialog"]
+  > nav
+  button {
+  flex: none;
+  width: auto;
+  white-space: nowrap;
+}
+
+html[data-minke-mobile-web]
+  [data-slot="sidebar.settings"]
+  [role="dialog"]
+  > nav
+  + div {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+
 html[data-minke-mobile-web] [data-minke-mobile-right-drawer-edge] {
   position: absolute;
   inset: 0 0 0 auto;

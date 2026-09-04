@@ -85,9 +85,18 @@ test("mobile right drawer owns Settings and accessible dismissal", () => {
   assert.match(styles, /data-minke-mobile-settings-source[\s\S]*display:\s*none !important/u);
   assert.match(runtime, /SETTINGS_TRIGGER_SELECTOR[\s\S]*source\?\.click\(\)/u);
   assert.match(runtime, /data-minke-mobile-right-drawer-label/u);
+  assert.match(runtime, /data-minke-mobile-settings-open/u);
   assert.match(runtime, /aria-modal[\s\S]*Close panel/u);
   assert.match(runtime, /drawer\.toggleAttribute\("inert", !open\)/u);
   assert.match(runtime, /minke:mobile-left-drawer-opening/u);
+  assert.match(
+    styles,
+    /data-minke-mobile-settings-open[\s\S]*role="presentation"[\s\S]*width:\s*100vw/u,
+  );
+  assert.match(
+    styles,
+    /role="dialog"[\s\S]*flex-direction:\s*column[\s\S]*overflow-x:\s*auto/u,
+  );
   assert.match(
     installer,
     /installMobileSidebarDrawer[\s\S]*installMobileRightDrawer\(\)/u,

@@ -14,6 +14,8 @@ const MOBILE_RIGHT_DRAWER_SETTINGS_ATTRIBUTE =
   "data-minke-mobile-right-drawer-settings";
 const MOBILE_RIGHT_DRAWER_CLOSE_ATTRIBUTE =
   "data-minke-mobile-right-drawer-close";
+const MOBILE_SETTINGS_OPEN_ATTRIBUTE =
+  "data-minke-mobile-settings-open";
 const SETTINGS_TRIGGER_SELECTOR =
   '[data-slot="sidebar.settings"] button[aria-haspopup="dialog"]';
 const GESTURE_IGNORE_SELECTOR = [
@@ -288,6 +290,7 @@ export class MobileRightDrawerRuntime {
     this.#frame?.removeAttribute(
       "data-minke-mobile-right-drawer-settling",
     );
+    this.#frame?.removeAttribute(MOBILE_SETTINGS_OPEN_ATTRIBUTE);
     this.#clearVisuals();
     this.#settingsButton?.removeEventListener(
       "click",
@@ -335,6 +338,10 @@ export class MobileRightDrawerRuntime {
     );
     const target = this.#settingsButton;
     if (source === null || target === undefined) return;
+    this.#frame?.toggleAttribute(
+      MOBILE_SETTINGS_OPEN_ATTRIBUTE,
+      source.getAttribute("aria-expanded") === "true",
+    );
     const sourceRow = source.parentElement;
     if (
       sourceRow instanceof this.#view.HTMLElement &&
