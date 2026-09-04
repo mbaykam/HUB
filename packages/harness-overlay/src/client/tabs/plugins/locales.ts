@@ -3,7 +3,7 @@ export const pluginsZh = {
   "plugins.tab.title": "插件",
   "plugins.install.title": "安装插件",
   "plugins.install.body":
-    "粘贴插件仓库提供的安装命令。Minke 只会解析并安装一个 web profile 插件。",
+    "粘贴插件仓库提供的安装命令。HUB 只会解析并安装一个 web profile 插件。",
   "plugins.install.label": "插件安装命令",
   "plugins.install.placeholder":
     "dsh plugin --profile web add <package-or-github-repo>",
@@ -13,7 +13,7 @@ export const pluginsZh = {
     "仅支持 dsh plugin --profile web add <包名或 github:仓库>。",
   "plugins.install.trust":
     "第三方插件可在安装时运行脚本，并在每次启动时以受信任的 Host/Client 代码运行；它可访问 DSH 数据、工作区与已授权服务。请只安装并保留你完全信任的来源。",
-  "plugins.install.success": "安装完成。重启 Minke 后插件生效。",
+  "plugins.install.success": "安装完成。重启 HUB 后插件生效。",
   "plugins.install.failed": "安装失败：{message}",
   "plugins.view.label": "插件管理视图",
   "plugins.view.installed": "已安装",
@@ -31,7 +31,7 @@ export const pluginsZh = {
   "plugins.installed.active": "运行中",
   "plugins.installed.failed": "加载失败",
   "plugins.installed.failedBody":
-    "dsh 已隔离此次加载失败，Minke 可继续运行。请检查启动日志，修复或卸载后重启。",
+    "dsh 已隔离此次加载失败，HUB 可继续运行。请检查启动日志，修复或卸载后重启。",
   "plugins.installed.disabled": "已禁用",
   "plugins.installed.disabledBody":
     "此插件当前在 dsh loader 中处于禁用状态。",
@@ -40,7 +40,7 @@ export const pluginsZh = {
     "dsh loader 尚未完成此插件的加载或卸载。",
   "plugins.installed.unobserved": "未检测到",
   "plugins.installed.unobservedBody":
-    "运行时清单中未发现同名插件入口；如果刚完成安装，请重启 Minke。",
+    "运行时清单中未发现同名插件入口；如果刚完成安装，请重启 HUB。",
   "plugins.installed.unknown": "状态未知",
   "plugins.installed.unknownBody":
     "插件文件已安装，但当前无法确认 dsh loader 状态。",
@@ -59,14 +59,14 @@ export const pluginsZh = {
   "plugins.installed.uninstallLabel": "卸载 {name}",
   "plugins.installed.uninstalling": "正在卸载 {name}",
   "plugins.installed.uninstallConfirm":
-    "确定卸载 {name} 吗？卸载成功后 Minke 将自动重启。",
+    "确定卸载 {name} 吗？卸载成功后 HUB 将自动重启。",
   "plugins.installed.uninstallSuccess":
-    "已卸载 {name}，正在重启 Minke…",
+    "已卸载 {name}，正在重启 HUB…",
   "plugins.installed.uninstallFailed": "卸载失败：{message}",
   "plugins.installed.runtimeUnavailable":
     "无法读取 dsh loader 运行状态：{message}",
   "plugins.installed.failedNotice":
-    "一个或多个插件加载失败，但失败已被隔离，不会阻止 Minke 启动。",
+    "一个或多个插件加载失败，但失败已被隔离，不会阻止 HUB 启动。",
   "plugins.installed.safeMode": "安全模式",
   "plugins.installed.safeModeBody":
     "安全模式会在启动时跳过所有第三方插件，但保留安装记录，便于排查和恢复。",
@@ -77,9 +77,9 @@ export const pluginsZh = {
   "plugins.installed.safeModeFailed": "无法更新安全模式：{message}",
   "plugins.installed.unobservedNotice":
     "部分已安装插件尚未出现在运行时清单中，可能需要重启后加载。",
-  "plugins.installed.restart": "重启 Minke",
+  "plugins.installed.restart": "重启 HUB",
   "plugins.installed.restarting": "正在重启…",
-  "plugins.installed.restartFailed": "无法重启 Minke：{message}",
+  "plugins.installed.restartFailed": "无法重启 HUB：{message}",
   "plugins.browser.title": "在 GitHub 上浏览插件",
   "plugins.browser.topic": "github.com/topics/dsh-plugin",
   "plugins.browser.searchLabel": "搜索 GitHub 插件仓库",
@@ -109,7 +109,7 @@ export const pluginsEn: Record<PluginsLocaleKey, string> = {
   "plugins.tab.title": "Plugins",
   "plugins.install.title": "Install a plugin",
   "plugins.install.body":
-    "Paste the install command from a plugin repository. Minke parses and installs one web-profile plugin.",
+    "Paste the install command from a plugin repository. HUB parses and installs one web-profile plugin.",
   "plugins.install.label": "Plugin install command",
   "plugins.install.placeholder":
     "dsh plugin --profile web add <package-or-github-repo>",
@@ -119,7 +119,7 @@ export const pluginsEn: Record<PluginsLocaleKey, string> = {
     "Use dsh plugin --profile web add <package or github:repository>.",
   "plugins.install.trust":
     "Third-party plugins may run install scripts and execute as trusted Host/Client code on every launch; they can access DSH data, workspaces, and authorized services. Install and keep only sources you fully trust.",
-  "plugins.install.success": "Installed. Restart Minke to activate the plugin.",
+  "plugins.install.success": "Installed. Restart HUB to activate the plugin.",
   "plugins.install.failed": "Installation failed: {message}",
   "plugins.view.label": "Plugin management view",
   "plugins.view.installed": "Installed",
@@ -137,7 +137,7 @@ export const pluginsEn: Record<PluginsLocaleKey, string> = {
   "plugins.installed.active": "Active",
   "plugins.installed.failed": "Load failed",
   "plugins.installed.failedBody":
-    "dsh isolated this load failure so Minke can keep running. Check the startup log, then fix or uninstall the plugin and restart.",
+    "dsh isolated this load failure so HUB can keep running. Check the startup log, then fix or uninstall the plugin and restart.",
   "plugins.installed.disabled": "Disabled",
   "plugins.installed.disabledBody":
     "This plugin is currently disabled in the dsh loader.",
@@ -146,7 +146,7 @@ export const pluginsEn: Record<PluginsLocaleKey, string> = {
     "The dsh loader has not finished loading or unloading this plugin.",
   "plugins.installed.unobserved": "Not observed",
   "plugins.installed.unobservedBody":
-    "No same-name entry appears in the runtime inventory. Restart Minke if the plugin was just installed.",
+    "No same-name entry appears in the runtime inventory. Restart HUB if the plugin was just installed.",
   "plugins.installed.unknown": "Status unknown",
   "plugins.installed.unknownBody":
     "The plugin files are installed, but the current dsh loader state could not be confirmed.",
@@ -167,14 +167,14 @@ export const pluginsEn: Record<PluginsLocaleKey, string> = {
   "plugins.installed.uninstallLabel": "Uninstall {name}",
   "plugins.installed.uninstalling": "Uninstalling {name}",
   "plugins.installed.uninstallConfirm":
-    "Uninstall {name}? Minke will restart automatically after removal.",
+    "Uninstall {name}? HUB will restart automatically after removal.",
   "plugins.installed.uninstallSuccess":
-    "Uninstalled {name}. Restarting Minke…",
+    "Uninstalled {name}. Restarting HUB…",
   "plugins.installed.uninstallFailed": "Uninstall failed: {message}",
   "plugins.installed.runtimeUnavailable":
     "The dsh loader state could not be read: {message}",
   "plugins.installed.failedNotice":
-    "One or more plugins failed to load, but the failures were isolated and did not stop Minke.",
+    "One or more plugins failed to load, but the failures were isolated and did not stop HUB.",
   "plugins.installed.safeMode": "Safe mode",
   "plugins.installed.safeModeBody":
     "Safe mode skips every third-party plugin at startup without removing its installation, making recovery reversible.",
@@ -187,10 +187,10 @@ export const pluginsEn: Record<PluginsLocaleKey, string> = {
     "Safe mode could not be updated: {message}",
   "plugins.installed.unobservedNotice":
     "Some installed plugins are not yet visible in the runtime inventory and may need a restart.",
-  "plugins.installed.restart": "Restart Minke",
+  "plugins.installed.restart": "Restart HUB",
   "plugins.installed.restarting": "Restarting…",
   "plugins.installed.restartFailed":
-    "Minke could not restart: {message}",
+    "HUB could not restart: {message}",
   "plugins.browser.title": "Browse plugins on GitHub",
   "plugins.browser.topic": "github.com/topics/dsh-plugin",
   "plugins.browser.searchLabel": "Search GitHub plugin repositories",

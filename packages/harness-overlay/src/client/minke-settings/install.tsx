@@ -23,7 +23,7 @@ import {
 
 const MINKE_SETTINGS_NAMESPACE = "minke.settings";
 
-/** Install one unified Minke section inside the existing DSH Settings shell. */
+/** Install one unified HUB section inside the existing DSH Settings shell. */
 export function installMinkeSettings(
   ctx: HarnessClientContext,
   runtime: MinkeSettingsRuntime,
@@ -34,22 +34,22 @@ export function installMinkeSettings(
         zh: minkeSettingsZh,
         en: minkeSettingsEn,
       }),
-    "minke-overlay: Minke Settings dictionaries",
+    "minke-overlay: HUB Settings dictionaries",
   );
   const t = ctx.locale.bind<MinkeSettingsLocaleKey>(
     MINKE_SETTINGS_NAMESPACE,
   ) as MinkeSettingsTranslate;
   ctx.effect(
     () => installMinkeSettingsStyles(),
-    "minke-overlay: Minke Settings styles",
+    "minke-overlay: HUB Settings styles",
   );
   ctx.effect(
     () => installMinkeSettingsNavigationLogo(() => t("nav")),
-    "minke-overlay: Minke Settings navigation logo",
+    "minke-overlay: HUB Settings navigation logo",
   );
   ctx.effect(
     () => () => runtime.dispose(),
-    "minke-overlay: Minke Settings runtime",
+    "minke-overlay: HUB Settings runtime",
   );
 
   ctx.slots.inject("settings.section", () =>

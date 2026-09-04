@@ -5,7 +5,7 @@ import SESSION_HEADER_ACTION_STYLES from "./HeaderActions.css";
 
 export { SESSION_HEADER_ACTION_STYLES };
 
-/** Install styles shared by Minke-owned Session Header utilities. */
+/** Install styles shared by HUB-owned Session Header utilities. */
 export const installSessionHeaderActionStyles =
   defineOverlayStyle(
     "session-header-actions",

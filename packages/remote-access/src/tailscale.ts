@@ -769,7 +769,7 @@ implements RemoteAccessLifecycle {
       this.#publishError("direct-bind");
       throw new RemoteAccessError(
         "direct-bind",
-        "Minke could not bind its direct proxy to the Tailscale IPv4 address",
+        "HUB could not bind its direct proxy to the Tailscale IPv4 address",
       );
     }
     const authority = this.#authority();
@@ -797,7 +797,7 @@ implements RemoteAccessLifecycle {
       this.#publishError("direct-bind");
       throw new RemoteAccessError(
         "direct-bind",
-        "Minke could not rebind its direct Tailscale proxy",
+        "HUB could not rebind its direct Tailscale proxy",
       );
     }
     this.#target = target;

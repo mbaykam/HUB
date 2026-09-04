@@ -104,7 +104,7 @@ function stalledBodyResponse(_input, init) {
 
 function transportOptions(fetch, overrides = {}) {
   return {
-    botAgent: "Minke/0.2.0",
+    botAgent: "HUB/0.2.0",
     credential: {
       accountId: "bot-account",
       baseUrl: "https://ilinkai.weixin.qq.com",
@@ -137,7 +137,7 @@ test("QR authorization is UI-driven and ends with a grant to persist", async () 
   );
 
   const flow = await beginWeixinLogin({
-    botAgent: "Minke/0.2.0",
+    botAgent: "HUB/0.2.0",
     fetch,
     knownBotTokens: ["older-token"],
   });
@@ -841,7 +841,7 @@ test("text delivery uses the stable outbox operation id", async () => {
     { type: 1, text_item: { text: "answer" } },
   ]);
   assert.deepEqual(send.body.base_info, {
-    bot_agent: "Minke/0.2.0",
+    bot_agent: "HUB/0.2.0",
     channel_version: "2.4.6",
   });
   assert.equal(

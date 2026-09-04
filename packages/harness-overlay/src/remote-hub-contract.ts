@@ -1,4 +1,4 @@
-/** Renderer-safe contract for Minke's desktop Remote Capability Hub. */
+/** Renderer-safe contract for HUB's desktop Remote Capability Hub. */
 export const REMOTE_HUB_READ_CHANNEL = "minke:remote-hub:read";
 export const REMOTE_HUB_COMMAND_CHANNEL = "minke:remote-hub:command";
 export const REMOTE_HUB_CHANGED_CHANNEL = "minke:remote-hub:changed";

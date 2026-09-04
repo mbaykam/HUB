@@ -17,12 +17,12 @@ const harnessRuntimeContractUrl = new URL(
   import.meta.url,
 );
 const releaseAssetNames = [
-  "Minke-macos-arm64.dmg",
-  "Minke-macos-x64.dmg",
-  "Minke-windows-x64.exe",
-  "Minke-linux-x64.deb",
-  "Minke-linux-x64.rpm",
-  "Minke-linux-x64.AppImage",
+  "HUB-macos-arm64.dmg",
+  "HUB-macos-x64.dmg",
+  "HUB-windows-x64.exe",
+  "HUB-linux-x64.deb",
+  "HUB-linux-x64.rpm",
+  "HUB-linux-x64.AppImage",
 ];
 
 function assertMatrixEntry(source, runner, platform, arch) {
@@ -193,7 +193,7 @@ test("GitHub Actions packages each supported desktop platform", async () => {
   );
   assert.match(
     source,
-    /name:\s*minke-\$\{\{\s*matrix\.platform\s*\}\}-\$\{\{\s*matrix\.arch\s*\}\}/u,
+    /name:\s*hub-\$\{\{\s*matrix\.platform\s*\}\}-\$\{\{\s*matrix\.arch\s*\}\}/u,
   );
   assert.match(source, /path:\s*out\/make\/\*\*\/\*/u);
   assert.match(source, /if-no-files-found:\s*error/u);
@@ -214,12 +214,12 @@ test("GitHub Actions packages each supported desktop platform", async () => {
     releaseJob,
     /uses:\s*actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c\s+# v8\.0\.1/u,
   );
-  assert.match(releaseJob, /pattern:\s*minke-\*/u);
+  assert.match(releaseJob, /pattern:\s*hub-\*/u);
   assert.match(releaseJob, /merge-multiple:\s*false/u);
   for (const assetName of releaseAssetNames) {
     assert.ok(releaseJob.includes(`stage_asset ${assetName}`));
   }
-  assert.match(releaseJob, /sha256sum Minke-\* > SHA256SUMS/u);
+  assert.match(releaseJob, /sha256sum HUB-\* > SHA256SUMS/u);
   assert.match(releaseJob, /GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/u);
   assert.match(
     releaseJob,
@@ -265,7 +265,7 @@ test("README links directly to every latest installer", async () => {
   for (const assetName of releaseAssetNames) {
     assert.ok(
       readme.includes(
-        `https://github.com/lencx/Minke/releases/latest/download/${assetName}`,
+        `https://github.com/mbaykam/Minke/releases/latest/download/${assetName}`,
       ),
     );
   }
@@ -276,15 +276,15 @@ test("native makers receive required distribution metadata", async () => {
     await readFile(packageManifestUrl, "utf8"),
   );
 
-  assert.equal(manifest.author, "lencx <lencx.me@gmail.com>");
+  assert.equal(manifest.author, "mbaykam");
   assert.equal(manifest.license, "Apache-2.0");
   assert.equal(
     manifest.repository?.url,
-    "git+https://github.com/lencx/Minke.git",
+    "git+https://github.com/mbaykam/Minke.git",
   );
   assert.equal(
     manifest.homepage,
-    "https://github.com/lencx/Minke#readme",
+    "https://github.com/mbaykam/Minke#readme",
   );
   assert.equal(typeof manifest.description, "string");
   assert.notEqual(manifest.description, "");

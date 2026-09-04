@@ -515,7 +515,7 @@ test("LM Studio follows the context of an externally loaded model", async () => 
   await prepared.dispose();
 });
 
-test("LM Studio expands an undersized model only when Minke started the service", async () => {
+test("LM Studio expands an undersized model only when HUB started the service", async () => {
   const model = "qwen/qwen3.8-27b";
   let running = false;
   let loadedContext = 4_608;

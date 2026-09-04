@@ -474,7 +474,7 @@ test("Telegram driver uses the injected desktop network stack throughout startup
       JSON.stringify({
         ok: true,
         result: {
-          first_name: "Minke",
+          first_name: "HUB",
           id: 123456789,
           is_bot: true,
           username: "minke_test_bot",
@@ -1390,9 +1390,9 @@ test("an unknown Telegram DM creates a pairing reply and approval authorizes onl
     payload: {
       kind: "text",
       text:
-        "Minke 收到了你的 Telegram 私聊配对请求。\n"
+        "HUB 收到了你的 Telegram 私聊配对请求。\n"
         + "配对码：ABCDEFGH\n"
-        + "请在 Minke 的「远端 → Telegram」中确认。"
+        + "请在 HUB 的「远端 → Telegram」中确认。"
         + "这条消息尚未交给 Agent。",
     },
   });
@@ -1424,7 +1424,7 @@ test("an unknown Discord DM creates an approvable pairing request", async (t) =>
     provider: "discord",
     stored: {
       accountId: "transactional-bot-id",
-      accountLabel: "Minke (@minke)",
+      accountLabel: "HUB (@minke)",
       generation: 1,
       token: "discord-private-token-value-123456789",
     },
@@ -1497,7 +1497,7 @@ test("an unknown Discord DM creates an approvable pairing request", async (t) =>
   assert.equal(await ingressDecision.promise, true);
   assert.deepEqual(withoutActivity(runtime.getSnapshot()), {
     state: "pairing",
-    accountLabel: "Minke (@minke)",
+    accountLabel: "HUB (@minke)",
     request: {
       code: "ABCDEFGH",
       expiresAt: now + 60 * 60 * 1_000,
@@ -1510,9 +1510,9 @@ test("an unknown Discord DM creates an approvable pairing request", async (t) =>
     payload: {
       kind: "text",
       text:
-        "Minke 收到了你的 Discord 私聊配对请求。\n"
+        "HUB 收到了你的 Discord 私聊配对请求。\n"
         + "配对码：ABCDEFGH\n"
-        + "请在 Minke 的「远端 → Discord」中确认。"
+        + "请在 HUB 的「远端 → Discord」中确认。"
         + "这条消息尚未交给 Agent。",
     },
   });
@@ -1526,7 +1526,7 @@ test("an unknown Discord DM creates an approvable pairing request", async (t) =>
   );
   assert.deepEqual(withoutActivity(runtime.getSnapshot()), {
     state: "connected",
-    accountLabel: "Minke (@minke)",
+    accountLabel: "HUB (@minke)",
   });
 });
 
@@ -1539,13 +1539,13 @@ test("an unpaired Discord server mention cannot create an authorization request"
     provider: "discord",
     stored: {
       accountId: botId,
-      accountLabel: "Minke (@minke)",
+      accountLabel: "HUB (@minke)",
       generation: 1,
       token: "discord-private-token-value-123456789",
     },
     validate: async () => ({
       id: botId,
-      label: "Minke (@minke)",
+      label: "HUB (@minke)",
     }),
     inspectMessage: discordDriver.inspectMessage,
     async pollProviderOnce({
@@ -1585,7 +1585,7 @@ test("an unpaired Discord server mention cannot create an authorization request"
   assert.equal(await ingressDecision.promise, false);
   assert.deepEqual(withoutActivity(runtime.getSnapshot()), {
     state: "pairing",
-    accountLabel: "Minke (@minke)",
+    accountLabel: "HUB (@minke)",
   });
 });
 
@@ -1735,7 +1735,7 @@ test("authorized Telegram DMs route through Agent and durable reply dispatch", a
         return {
           outcome: "completed",
           sessionId: input.sessionId,
-          text: "# Minke reply\n\n**Ready**",
+          text: "# HUB reply\n\n**Ready**",
           turn: 1,
           endReason: "completed",
         };
@@ -1753,7 +1753,7 @@ test("authorized Telegram DMs route through Agent and durable reply dispatch", a
     status: "reply",
     payload: {
       kind: "rich-markdown",
-      markdown: "# Minke reply\n\n**Ready**",
+      markdown: "# HUB reply\n\n**Ready**",
     },
   });
   assert.equal(agentInputs.length, 1);
@@ -1793,7 +1793,7 @@ test("authorized Discord DMs route through Agent and durable reply dispatch", as
     provider: "discord",
     stored: {
       accountId: "transactional-bot-id",
-      accountLabel: "Minke (@minke)",
+      accountLabel: "HUB (@minke)",
       authorizedUserId: directMessage.senderId,
       generation: 1,
       token: "discord-private-token-value-123456789",
@@ -1909,14 +1909,14 @@ test("authorized Discord server mentions route in the channel and reply to the t
     provider: "discord",
     stored: {
       accountId: botId,
-      accountLabel: "Minke (@minke)",
+      accountLabel: "HUB (@minke)",
       authorizedUserId: guildMessage.senderId,
       generation: 1,
       token: "discord-private-token-value-123456789",
     },
     validate: async () => ({
       id: botId,
-      label: "Minke (@minke)",
+      label: "HUB (@minke)",
     }),
     inspectMessage,
     agentReplyPayload: discordDriver.agentReplyPayload,
@@ -6134,7 +6134,7 @@ test("Remote Hub vault encrypts IM tokens with one OS-wrapped AEAD key", async (
     };
     const discordCredential = {
       accountId: "987654321",
-      accountLabel: "Minke Discord",
+      accountLabel: "HUB Discord",
       generation: 3,
       token: "discord-private-token-value-123456789",
     };
@@ -7559,11 +7559,11 @@ test("Remote Hub uses grouped sidebar navigation and stable detail panels", asyn
   );
   assert.match(
     cloudflareDialog,
-    /Choose Disable remote access in Minke/u,
+    /Choose Disable remote access in HUB/u,
   );
   assert.match(
     cloudflareDialog,
-    /cloudflared process started by Minke has exited/u,
+    /cloudflared process started by HUB has exited/u,
   );
   assert.match(
     cloudflareDialog,
@@ -7855,7 +7855,7 @@ test("Remote Hub keeps channel navigation compact and actions in the detail pane
       },
       discord: {
         state: "pairing",
-        accountLabel: "Minke (@minke_bot)",
+        accountLabel: "HUB (@minke_bot)",
         request: {
           code: "ABCDEFGH",
           expiresAt: 1_900_000_000_000,
@@ -7912,7 +7912,7 @@ test("Remote Hub keeps channel navigation compact and actions in the detail pane
   assert.match(dialog, /Sent/u);
   assert.match(
     dialog,
-    /Counts cover this connection and reset after reconnecting or quitting Minke/u,
+    /Counts cover this connection and reset after reconnecting or quitting HUB/u,
   );
   assert.match(
     dialog,

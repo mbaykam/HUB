@@ -12,7 +12,7 @@ const harnessRoot = new URL(
   projectRoot,
 );
 
-test("Minke declares every local Harness runtime patch", () => {
+test("HUB declares every local Harness runtime patch", () => {
   const patchDirectory = new URL("patches/deepseek-harness/", projectRoot);
   const files = readdirSync(patchDirectory)
     .filter((name) => name.endsWith(".patch"))

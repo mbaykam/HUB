@@ -99,7 +99,7 @@ test("app update settings use one exact boolean contract", () => {
   );
 });
 
-test("app update preference persists in the unified Minke config", async () => {
+test("app update preference persists in the unified HUB config", async () => {
   const { path, store } = await fixture();
   assert.deepEqual(
     await store.read(),
@@ -263,7 +263,7 @@ test("About renders stable localized update action and status slots", () => {
       iconUrl: "data:image/png;base64,AA==",
       info: {
         available: true,
-        productName: "Minke",
+        productName: "HUB",
         version: "0.2.0",
         platform: "linux",
         arch: "x64",

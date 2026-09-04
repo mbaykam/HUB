@@ -1,5 +1,5 @@
 /**
- * Live, per-runtime reconciliation for Minke's local model services.
+ * Live, per-runtime reconciliation for HUB's local model services.
  * @module @lencx/minke-model-runtime/live
  */
 import {
@@ -142,7 +142,7 @@ function desiredRuntimeConfig(
   const next = cloneConfig(current);
   const runtime = next[id];
   if (runtime === undefined) return next;
-  // Minke's preference controls process ownership, not whether the adapter
+  // HUB's preference controls process ownership, not whether the adapter
   // participates in external discovery. Reassert this invariant here rather
   // than relying on the boot-time Cordis projection to keep `enabled: true`.
   runtime.enabled = true;
@@ -592,7 +592,7 @@ function controlRequestId(
     : undefined;
 }
 
-/** Bind Minke's private process channel to live provider reconciliation. */
+/** Bind HUB's private process channel to live provider reconciliation. */
 export function installModelRuntimeControl(
   ctx: ModelRuntimeControlContext,
   runtime: Pick<LiveModelRuntime, "reconfigure">,

@@ -28,7 +28,7 @@ function botIdentity(overrides = {}) {
   return {
     can_join_groups: true,
     can_read_all_group_messages: false,
-    first_name: "Minke",
+    first_name: "HUB",
     id: 123456789,
     is_bot: true,
     supports_inline_queries: false,
@@ -39,7 +39,7 @@ function botIdentity(overrides = {}) {
 
 function sentMessage(overrides = {}) {
   return {
-    chat: { id: -10042, title: "Minke", type: "supergroup" },
+    chat: { id: -10042, title: "HUB", type: "supergroup" },
     date: 1_723_456_789,
     message_id: 501,
     ...overrides,
@@ -269,7 +269,7 @@ function inboundMessage(messageId, content = {}, overrides = {}) {
     chat: {
       id: -10042,
       is_forum: true,
-      title: "Minke",
+      title: "HUB",
       type: "supergroup",
       username: "minke_group",
     },
@@ -302,7 +302,7 @@ test("getMe validates a bot token without exposing it through the public transpo
     canConnectToBusiness: undefined,
     canJoinGroups: true,
     canReadAllGroupMessages: false,
-    firstName: "Minke",
+    firstName: "HUB",
     id: "123456789",
     supportsInlineQueries: false,
     username: "minke_test_bot",
@@ -483,7 +483,7 @@ test("receive replays one durable offset and normalizes supported message conten
           file_name: "song.mp3",
           file_unique_id: "audio-unique",
           mime_type: "audio/mpeg",
-          performer: "Minke",
+          performer: "HUB",
           title: "Song",
         },
       }),
@@ -1264,7 +1264,7 @@ function gatewayMessage() {
   return Object.freeze({
     chat: Object.freeze({
       id: "-10042",
-      title: "Minke",
+      title: "HUB",
       type: "supergroup",
     }),
     content: Object.freeze({ kind: "text", text: "hello" }),
@@ -1421,7 +1421,7 @@ test("Gateway provider preserves Telegram payloads and binds prepared delivery t
 
 test("Gateway preserves Telegram rich Markdown through durable preparation", async () => {
   const markdown =
-    "# Minke\n\n| State | Value |\n| --- | --- |\n| IM | ready |";
+    "# HUB\n\n| State | Value |\n| --- | --- |\n| IM | ready |";
   const preparation = await prepareTelegramDelivery(
     gatewayPreparation({
       payload: {
@@ -1664,7 +1664,7 @@ test("Gateway provider rejects a durable account key for another Telegram bot", 
         generation: 1,
         transport: {
           identity: {
-            firstName: "Minke",
+            firstName: "HUB",
             id: "123456789",
           },
         },

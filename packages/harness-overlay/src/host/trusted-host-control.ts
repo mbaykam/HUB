@@ -48,7 +48,7 @@ function requestIdFrom(value: unknown): number | undefined {
     : undefined;
 }
 
-/** Bind Minke's private process channel to DSH's live trust policy. */
+/** Bind HUB's private process channel to DSH's live trust policy. */
 export function installTrustedHostControl(
   ctx: TrustedHostControlContext,
   port: HarnessControlProcess = process,

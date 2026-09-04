@@ -1,6 +1,6 @@
 export function runtimeEntrySource(cliPackageName) {
   return `if (process.env.ELECTRON_RUN_AS_NODE !== "1") {
-  throw new Error("Minke staged Harness entry requires embedded Node mode");
+  throw new Error("HUB staged Harness entry requires embedded Node mode");
 }
 
 await import("./bin/node-environment-bootstrap.cjs");

@@ -278,7 +278,7 @@ function configuredRoot(config: Config | undefined): string {
     return resolve(homedir());
   }
   if (!isAbsolute(candidate)) {
-    throw new TypeError("Minke Host rootPath must be absolute");
+    throw new TypeError("HUB Host rootPath must be absolute");
   }
   return resolve(candidate);
 }
@@ -292,7 +292,7 @@ function configuredPreviewStore(
   }
   if (!isAbsolute(candidate)) {
     throw new TypeError(
-      "Minke Host previewStorePath must be absolute",
+      "HUB Host previewStorePath must be absolute",
     );
   }
   return resolve(candidate);
@@ -322,7 +322,7 @@ function failure(error: unknown): HostRpcResult {
 }
 
 /**
- * Mount portable Minke capabilities on DSH's trusted browser transport seam.
+ * Mount portable HUB capabilities on DSH's trusted browser transport seam.
  * Browser Files and Terminal adapters keep native-only Web views and OS path
  * opening behind Electron preload.
  */
@@ -382,7 +382,7 @@ export function apply(
   const files = new FileManagerRuntime({
     rootPath,
     openPath: async () =>
-      "native path opening is unavailable through Minke Host",
+      "native path opening is unavailable through HUB Host",
   });
   const terminalShell = defaultHostTerminalShell();
   const terminal = new HostTerminalRuntime({
@@ -467,7 +467,7 @@ export function apply(
           ok: false,
           error: {
             code: "bad-request",
-            message: `unknown Minke Host endpoint: ${endpoint}`,
+            message: `unknown HUB Host endpoint: ${endpoint}`,
             details: { issues: [] },
           },
         };

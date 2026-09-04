@@ -6,7 +6,7 @@ import TERMINAL_TAB_STYLES from "./styles.css";
 
 export { TERMINAL_TAB_STYLES };
 
-/** Install xterm and Minke's Terminal tab styles as one capability. */
+/** Install xterm and HUB's Terminal tab styles as one capability. */
 export const installTerminalTabStyles = defineOverlayStyle(
   "tabs-terminal",
   [XTERM_STYLES, TERMINAL_TAB_STYLES],

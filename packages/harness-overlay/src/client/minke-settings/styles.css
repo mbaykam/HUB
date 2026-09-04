@@ -1,4 +1,4 @@
-/* One Minke section inside the existing DSH Settings surface. */
+/* One HUB section inside the existing DSH Settings surface. */
 [data-minke-settings-navigation-logo] > svg:first-child {
   display: none;
 }

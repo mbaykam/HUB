@@ -32,7 +32,7 @@ function resolveInside(root, value, label) {
     absolute === root ||
     !absolute.startsWith(`${root}${sep}`)
   ) {
-    throw new Error(`${label} escapes the Minke project: ${value}`);
+    throw new Error(`${label} escapes the HUB project: ${value}`);
   }
   return absolute;
 }
@@ -154,18 +154,18 @@ async function verifyWebAccessContract(harnessRoot) {
     requireSourceSeam(
       baseBundlePatchSource,
       `- id: ${pluginId}\n      name: '${packageName}'`,
-      `Harness base bundle no longer mounts ${packageName} required by Minke web_search.`,
+      `Harness base bundle no longer mounts ${packageName} required by HUB web_search.`,
     );
   }
   requireSourceSeam(
     baseBundlePatchSource,
     "- id: web-fetch-http\n      name: '@deepseek-ai/dsh-web-fetch-http'",
-    "Harness base bundle no longer mounts the SSRF-safe provider required by Minke web_fetch.",
+    "Harness base bundle no longer mounts the SSRF-safe provider required by HUB web_fetch.",
   );
   requireSourceSeam(
     baseBundlePatchSource,
     "fetchProvider: http",
-    "Harness web_fetch provider selection changed; review Minke's SSRF boundary.",
+    "Harness web_fetch provider selection changed; review HUB's SSRF boundary.",
   );
   requireSourceSeam(
     baseBundlePatchSource,
@@ -186,7 +186,7 @@ async function verifyWebAccessContract(harnessRoot) {
   requireSourceSeam(
     webRuntimeSource,
     "this.searchProviderId = config.searchProvider ?? process.env.DSH_WEB_SEARCH_PROVIDER",
-    "Harness web search-provider selection changed; review Minke's explicit provider route.",
+    "Harness web search-provider selection changed; review HUB's explicit provider route.",
   );
   requireSourceSeam(
     webRuntimeSource,
@@ -210,7 +210,7 @@ async function verifyWebAccessContract(harnessRoot) {
     requireSourceSeam(
       toolWebPluginSource,
       fragment,
-      "Harness tool-web configuration changed; review Minke's bounded web_search config.",
+      "Harness tool-web configuration changed; review HUB's bounded web_search config.",
     );
   }
   requireSourceSeam(
@@ -226,22 +226,22 @@ async function verifyWebAccessContract(harnessRoot) {
   requireSourceSeam(
     webFetchNetworkSource,
     "if (!isPublicIpAddress(entry.address)) {",
-    "Harness web_fetch public-address rejection seam changed; review Minke's SSRF boundary.",
+    "Harness web_fetch public-address rejection seam changed; review HUB's SSRF boundary.",
   );
   requireSourceSeam(
     webFetchNetworkSource,
     "if (translatedIpv4 !== undefined && !isPublicIpAddress(translatedIpv4)) {",
-    "Harness web_fetch NAT64 rejection seam changed; review Minke's SSRF boundary.",
+    "Harness web_fetch NAT64 rejection seam changed; review HUB's SSRF boundary.",
   );
   requireSourceSeam(
     webFetchNetworkSource,
     "connect: { lookup: createPinnedLookup(addresses) }",
-    "Harness web_fetch connection-pinning seam changed; review Minke's DNS-rebinding boundary.",
+    "Harness web_fetch connection-pinning seam changed; review HUB's DNS-rebinding boundary.",
   );
   requireSourceSeam(
     webFetchProviderSource,
     "if (!isSameOrigin(validatedTarget, currentUrl)) {",
-    "Harness web_fetch same-origin redirect seam changed; review Minke's SSRF boundary.",
+    "Harness web_fetch same-origin redirect seam changed; review HUB's SSRF boundary.",
   );
   for (const [index, preset] of ["standard", "ptc", "cordis"].entries()) {
     requireSourceSeam(
@@ -253,7 +253,7 @@ async function verifyWebAccessContract(harnessRoot) {
         "    fetch: true",
         "    searchTimeoutMs: 60000",
       ].join("\n"),
-      `Harness ${preset} Agent Preset no longer exposes Minke's bounded web_search and SSRF-safe web_fetch tools.`,
+      `Harness ${preset} Agent Preset no longer exposes HUB's bounded web_search and SSRF-safe web_fetch tools.`,
     );
   }
 }
@@ -398,7 +398,7 @@ async function verifyProductBundle(projectRoot, harnessRoot, contract) {
     );
   }
   if (!bundle.packageName.startsWith("@lencx/")) {
-    throw new Error("Minke product packages must use the @lencx scope.");
+    throw new Error("HUB product packages must use the @lencx scope.");
   }
   const packageRoot = resolveInside(
     projectRoot,
@@ -410,13 +410,13 @@ async function verifyProductBundle(projectRoot, harnessRoot, contract) {
     packageRoot.startsWith(`${harnessRoot}${sep}`)
   ) {
     throw new Error(
-      "Minke productBundle must live outside vendor/deepseek-harness.",
+      "HUB productBundle must live outside vendor/deepseek-harness.",
     );
   }
   const manifest = await readJson(join(packageRoot, "package.json"));
   if (manifest.name !== bundle.packageName) {
     throw new Error(
-      `Minke bundle name changed: expected ${bundle.packageName}, found ${String(manifest.name)}`,
+      `HUB bundle name changed: expected ${bundle.packageName}, found ${String(manifest.name)}`,
     );
   }
   if (manifest.dsh?.bundle?.patch !== `./${bundle.patch}`) {
@@ -496,7 +496,7 @@ async function verifyProductBundle(projectRoot, harnessRoot, contract) {
         runtimePackageRoot.startsWith(`${harnessRoot}${sep}`)
       ) {
         throw new Error(
-          `Minke workspace runtime package ${entry.packageName} must live outside vendor/deepseek-harness.`,
+          `HUB workspace runtime package ${entry.packageName} must live outside vendor/deepseek-harness.`,
         );
       }
       const runtimeManifest = await readJson(
@@ -504,7 +504,7 @@ async function verifyProductBundle(projectRoot, harnessRoot, contract) {
       );
       if (runtimeManifest.name !== entry.packageName) {
         throw new Error(
-          `Minke workspace runtime package name changed: expected ${entry.packageName}, found ${String(runtimeManifest.name)}`,
+          `HUB workspace runtime package name changed: expected ${entry.packageName}, found ${String(runtimeManifest.name)}`,
         );
       }
       if (
@@ -595,7 +595,7 @@ export async function verifyHarnessContract(projectRoot) {
       [
         "DeepSeek Harness must remain an unmodified pinned dependency.",
         status,
-        "Move Minke behavior to packages/harness-overlay or desktop adapters.",
+        "Move HUB behavior to packages/harness-overlay or desktop adapters.",
       ].join("\n"),
     );
   }
@@ -948,7 +948,7 @@ export async function verifyHarnessContract(projectRoot) {
   requireSourceSeam(
     webServerSource,
     "return this.applyIndexTaps(renderIndexInjections(html, this.collectIndexInjections()))",
-    "Harness structured index pipeline changed; review Minke PWA injection ordering.",
+    "Harness structured index pipeline changed; review HUB PWA injection ordering.",
   );
   requireSourceSeam(
     frontendStaticSource,
@@ -968,7 +968,7 @@ export async function verifyHarnessContract(projectRoot) {
   requireSourceSeam(
     settingsControllerSource,
     "namespaces: settings.describe({ redactSecrets: true }).map(namespaceView),",
-    "Harness settings namespace exposure changed; review every registered Minke namespace.",
+    "Harness settings namespace exposure changed; review every registered HUB namespace.",
   );
   forbidSourceSeam(
     settingsControllerSource,
@@ -1013,12 +1013,12 @@ export async function verifyHarnessContract(projectRoot) {
   requireSourceSeam(
     localeRuntimeSource,
     "ctx.slots.installLocale(locale)",
-    "Harness locale installation seam changed; review Minke i18n integration.",
+    "Harness locale installation seam changed; review HUB i18n integration.",
   );
   requireSourceSeam(
     localeRuntimeSource,
     "register<N extends Extract<keyof LocaleNamespaceMap, string>>(ns: N, dicts: Record<BuiltInLocaleId, LocaleDictOf<N>>): () => void",
-    "Harness bilingual dictionary registration changed; review Minke i18n integration.",
+    "Harness bilingual dictionary registration changed; review HUB i18n integration.",
   );
   requireSourceSeam(
     localeRuntimeSource,
@@ -1033,12 +1033,12 @@ export async function verifyHarnessContract(projectRoot) {
   requireSourceSeam(
     slotRendererSource,
     "kit['t'] = localeSeat(face, entry.locale)",
-    "Harness locale-aware slot rendering changed; review Minke i18n integration.",
+    "Harness locale-aware slot rendering changed; review HUB i18n integration.",
   );
   requireSourceSeam(
     slotRendererSource,
     "useLocaleRevision(host.locale)",
-    "Harness locale revision subscription changed; review Minke i18n integration.",
+    "Harness locale revision subscription changed; review HUB i18n integration.",
   );
   requireSourceSeam(
     themeRuntimeSource,
@@ -1078,12 +1078,12 @@ export async function verifyHarnessContract(projectRoot) {
   requireSourceSeam(
     pluginInventorySource,
     "super(ctx, 'pluginInventory')",
-    "Harness Loader inventory service changed; review the Minke plugin lifecycle adapter.",
+    "Harness Loader inventory service changed; review the HUB plugin lifecycle adapter.",
   );
   requireSourceSeam(
     pluginInventorySource,
     "@Remote('list')",
-    "Harness Loader inventory Remote changed; review the Minke plugin lifecycle adapter.",
+    "Harness Loader inventory Remote changed; review the HUB plugin lifecycle adapter.",
   );
   requireSourceSeam(
     pluginInventorySource,
@@ -1111,12 +1111,12 @@ export async function verifyHarnessContract(projectRoot) {
       "unloading",
       null,
     ],
-    "Harness Loader inventory phases changed; review the Minke plugin lifecycle adapter.",
+    "Harness Loader inventory phases changed; review the HUB plugin lifecycle adapter.",
   );
   requireSourceSeam(
     webAppBundlePatchSource,
     "name: '@deepseek-ai/dsh-host-plugin-inventory'",
-    "Harness Web bundle no longer mounts the Loader inventory required by Minke.",
+    "Harness Web bundle no longer mounts the Loader inventory required by HUB.",
   );
   await verifyWebAccessContract(harnessRoot);
   await verifyTurnNavigationContract(harnessRoot);

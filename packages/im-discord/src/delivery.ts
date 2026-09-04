@@ -323,7 +323,7 @@ function preparedMessages(
       ? Object.freeze({
           bytes: new TextEncoder().encode(sourceText),
           contentType: "text/markdown; charset=utf-8",
-          description: "Complete Minke response",
+          description: "Complete HUB response",
           fileName: COMPLETE_RESPONSE_FILE_NAME,
         })
       : undefined;

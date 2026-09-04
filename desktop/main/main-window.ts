@@ -55,7 +55,7 @@ import {
 import { bindWindowLocale } from "./window-locale";
 import { bindWindowTheme } from "./window-theme";
 
-const PRODUCT_NAME = "Minke";
+const PRODUCT_NAME = "HUB";
 const BACKGROUND_COLOR = "#0b1220";
 const MAIN_WINDOW_PARTITION = "minke-main-window";
 

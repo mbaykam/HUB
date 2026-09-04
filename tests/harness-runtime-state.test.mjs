@@ -36,7 +36,7 @@ async function withTemporaryDirectory(callback) {
   }
 }
 
-test("the Harness client build uses Minke product branding", () => {
+test("the Harness client build uses HUB product branding", () => {
   const environment = minkeHarnessClientBuildEnvironment({
     DSH_BUILD_CLIENT_PROFILE: "official",
     DSH_CLIENT_BUILD_PROFILE: "official",
@@ -44,7 +44,7 @@ test("the Harness client build uses Minke product branding", () => {
     PRESERVED: "yes",
   });
 
-  assert.equal(environment.DSH_CLIENT_TITLE, "Minke");
+  assert.equal(environment.DSH_CLIENT_TITLE, "HUB");
   assert.equal(environment.DSH_BUILD_CLIENT_PROFILE, undefined);
   assert.equal(environment.DSH_CLIENT_BUILD_PROFILE, undefined);
   assert.equal(environment.PRESERVED, "yes");

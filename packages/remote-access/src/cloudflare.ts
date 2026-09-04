@@ -463,7 +463,7 @@ export class CloudflareAccessGateway {
         "content-type": "text/plain; charset=utf-8",
         "retry-after": "1",
       });
-      response.end("Minke is starting");
+      response.end("HUB is starting");
       return;
     }
     if (

@@ -63,7 +63,7 @@ function aboutBundle() {
         iconUrl="data:image/gif;base64,R0lGODlhAQABAAAAACw="
         info={{
           available: true,
-          productName: "Minke",
+          productName: "HUB",
           version: "0.2.0",
           platform: "darwin",
           arch: "arm64",

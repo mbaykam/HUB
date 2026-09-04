@@ -239,12 +239,12 @@ test("the applied Harness patch scrubs ambient Node launch controls", async () =
       await loadPatchedHarnessScrubbedParentEnv(runtimeRoot);
     const runtimeEnvironment = harnessRuntimeEnvironment(
       {
-        pnpmEntry: "C:\\Minke\\runtime\\pnpm.cjs",
-        runtimeBin: "C:\\Minke\\runtime\\bin",
+        pnpmEntry: "C:\\HUB\\runtime\\pnpm.cjs",
+        runtimeBin: "C:\\HUB\\runtime\\bin",
       },
       {
         dshHome: "C:\\Users\\tester\\.dsh",
-        electronExecutable: "C:\\Program Files\\Minke\\Minke.exe",
+        electronExecutable: "C:\\Program Files\\HUB\\HUB.exe",
         modelRuntimes: {
           lmStudio: { enabled: false },
           ollama: { enabled: false },
@@ -278,11 +278,11 @@ test("the applied Harness patch scrubs ambient Node launch controls", async () =
       const descendantEnvironment = scrubbedParentEnv();
       assert.equal(
         descendantEnvironment.MINKE_NODE_EXECUTABLE,
-        "C:\\Program Files\\Minke\\Minke.exe",
+        "C:\\Program Files\\HUB\\HUB.exe",
       );
       assert.equal(
         descendantEnvironment.MINKE_PNPM_ENTRY,
-        "C:\\Minke\\runtime\\pnpm.cjs",
+        "C:\\HUB\\runtime\\pnpm.cjs",
       );
       for (const name of [
         "ELECTRON_RUN_AS_NODE",

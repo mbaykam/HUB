@@ -42,7 +42,7 @@ function appendBounded(
   const next = current + chunk.toString();
   if (Buffer.byteLength(next, "utf8") > HELPER_OUTPUT_LIMIT) {
     throw new Error(
-      "Minke credential helper returned too much data",
+      "HUB credential helper returned too much data",
     );
   }
   return next;
@@ -65,7 +65,7 @@ function parseHelperResponse(
   }
   if (line === undefined) {
     throw new Error(
-      "Minke credential helper returned no response",
+      "HUB credential helper returned no response",
     );
   }
   const candidate = JSON.parse(
@@ -79,7 +79,7 @@ function parseHelperResponse(
     typeof (candidate as { ok?: unknown }).ok !== "boolean"
   ) {
     throw new TypeError(
-      "Minke credential helper returned an invalid response",
+      "HUB credential helper returned an invalid response",
     );
   }
   if ((candidate as { ok: boolean }).ok) {
@@ -94,7 +94,7 @@ function parseHelperResponse(
         typeof response.shouldReEncrypt !== "boolean")
     ) {
       throw new TypeError(
-        "Minke credential helper returned an invalid result",
+        "HUB credential helper returned an invalid result",
       );
     }
     return {
@@ -117,7 +117,7 @@ function parseHelperResponse(
     response.error.length > 1_024
   ) {
     throw new TypeError(
-      "Minke credential helper returned an invalid error",
+      "HUB credential helper returned an invalid error",
     );
   }
   return { error: response.error, ok: false };
@@ -176,7 +176,7 @@ function runHelper(
     const timeout = setTimeout(() => {
       fail(
         new Error(
-          "Minke credential authorization timed out",
+          "HUB credential authorization timed out",
         ),
       );
     }, options.timeoutMs ?? HELPER_TIMEOUT_MS);
@@ -193,7 +193,7 @@ function runHelper(
       if (stderrBytes > HELPER_OUTPUT_LIMIT) {
         fail(
           new Error(
-            "Minke credential helper returned too much diagnostic data",
+            "HUB credential helper returned too much diagnostic data",
           ),
         );
       }
@@ -237,7 +237,7 @@ export function createCredentialStorage(
   }
   if (options.macOSHelper === undefined) {
     throw new Error(
-      "Minke macOS credential helper is unavailable",
+      "HUB macOS credential helper is unavailable",
     );
   }
   const helper = options.macOSHelper;

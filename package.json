@@ -1,17 +1,17 @@
 {
-  "name": "minke",
-  "productName": "Minke",
-  "desktopName": "minke.desktop",
-  "description": "Minke desktop agent powered by DeepSeek Harness",
-  "author": "lencx <lencx.me@gmail.com>",
+  "name": "hub",
+  "productName": "HUB",
+  "desktopName": "hub.desktop",
+  "description": "HUB — a focused desktop and mobile AI workspace powered by DeepSeek Harness",
+  "author": "mbaykam",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/lencx/Minke#readme",
+  "homepage": "https://github.com/mbaykam/Minke#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lencx/Minke.git"
+    "url": "git+https://github.com/mbaykam/Minke.git"
   },
   "bugs": {
-    "url": "https://github.com/lencx/Minke/issues"
+    "url": "https://github.com/mbaykam/Minke/issues"
   },
   "private": true,
   "version": "0.4.0",
@@ -64,6 +64,7 @@
     "ws": "8.21.3"
   },
   "optionalDependencies": {
+    "@typescript/typescript-win32-x64": "7.0.2",
     "sys": "workspace:*"
   },
   "devDependencies": {

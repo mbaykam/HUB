@@ -1,4 +1,4 @@
-/** Public interface of the Minke remote-access module. */
+/** Public interface of the HUB remote-access module. */
 export {
   createDefaultRemoteSettings,
   createRemoteHostnameLabel,

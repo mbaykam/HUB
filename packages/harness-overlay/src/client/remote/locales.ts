@@ -1,7 +1,7 @@
 export const remoteZh = {
   title: "远程访问",
   description:
-    "从手机或另一台设备安全地打开当前 Minke；同一时间只启用一条访问链路。",
+    "从手机或另一台设备安全地打开当前 HUB；同一时间只启用一条访问链路。",
   methodTitle: "访问方式",
   tailscaleTitle: "私有网络",
   tailscaleDescription:
@@ -34,7 +34,7 @@ export const remoteZh = {
   tailscaleRemoveDeviceReference: "从 tailnet 移除设备",
   cloudflareSetupTitle: "Named Tunnel + Access",
   cloudflareSetupDescription:
-    "配置文件只需提供 Tunnel 与凭据，不要定义 ingress；Minke 会把 Origin 固定到本机 JWT 网关。",
+    "配置文件只需提供 Tunnel 与凭据，不要定义 ingress；HUB 会把 Origin 固定到本机 JWT 网关。",
   cloudflareReferencesTitle: "配置参考",
   cloudflareTunnelReference: "创建本地管理 Tunnel",
   cloudflareAccessAppReference:
@@ -61,15 +61,15 @@ export const remoteZh = {
   tunnelName: "Tunnel 名称或 UUID",
   configPath: "cloudflared 配置文件绝对路径",
   originPort: "本地 Origin 端口",
-  originAddress: "Minke 固定的 Tunnel Origin",
+  originAddress: "HUB 固定的 Tunnel Origin",
   cloudflareAccessRequired:
-    "Cloudflare 中必须先为最终主机名创建 Access 应用与身份策略。Minke 会在本机再次验证 Access JWT 的签名、Issuer 和 AUD。",
+    "Cloudflare 中必须先为最终主机名创建 Access 应用与身份策略。HUB 会在本机再次验证 Access JWT 的签名、Issuer 和 AUD。",
   enable: "启用远程访问",
   disable: "停用远程访问",
   configurationLocked:
     "远程访问运行时无法修改配置，请先停用后再调整。",
   lifecycle:
-    "Minke 只在应用运行期间持有前台代理；退出时会停止。切换方式不会自动降级到另一条链路。",
+    "HUB 只在应用运行期间持有前台代理；退出时会停止。切换方式不会自动降级到另一条链路。",
   statusDisabled: "未启用",
   statusUnavailable: "未安装",
   statusStarting: "正在连接",
@@ -88,7 +88,7 @@ export const remoteZh = {
   copiedAddress: "已复制",
   copyAddressError: "复制失败，请选中地址后手动复制。",
   unavailableTailscale:
-    "未检测到 Tailscale 命令。安装并登录后请刷新状态；若已启用，Minke 会在后台继续探测。",
+    "未检测到 Tailscale 命令。安装并登录后请刷新状态；若已启用，HUB 会在后台继续探测。",
   unavailableCloudflare:
     "未检测到 cloudflared 命令。请安装 cloudflared，并准备 Named Tunnel 配置后刷新状态。",
   statusErrorHelp:
@@ -107,7 +107,7 @@ export const remoteZh = {
   directIpErrorHelp:
     "配置的 Tailscale IP 未分配给当前设备，或格式无效。请清空后自动检测，或填写 tailscale ip -4 返回的地址。",
   harnessControlErrorHelp:
-    "Harness 未接受远程主机更新。远程链路保持关闭，请重新启动 Minke 后重试。",
+    "Harness 未接受远程主机更新。远程链路保持关闭，请重新启动 HUB 后重试。",
   cloudflareConfigErrorHelp:
     "Cloudflare 配置无效，或 Origin 端口已被占用。请核对主机名、团队名、AUD、Tunnel 和配置文件。",
   cloudflareAccessErrorHelp:
@@ -117,16 +117,16 @@ export const remoteZh = {
   savingChange: "正在保存更改…",
   securityTitle: "远程访问注意事项",
   securityBody:
-    "远程页面可以启动代理任务并使用 Minke 已授权的本机工具。公网链路必须由 Cloudflare Access 身份策略保护，并且只允许预期的身份访问。",
+    "远程页面可以启动代理任务并使用 HUB 已授权的本机工具。公网链路必须由 Cloudflare Access 身份策略保护，并且只允许预期的身份访问。",
   tailscaleSecurityBody:
-    "远程页面可以启动代理任务并使用 Minke 已授权的本机工具。Minke 不会为 Tailscale 链路增加第二层登录；请通过 Access controls 与设备共享，只允许预期的用户和设备连接。",
+    "远程页面可以启动代理任务并使用 HUB 已授权的本机工具。HUB 不会为 Tailscale 链路增加第二层登录；请通过 Access controls 与设备共享，只允许预期的用户和设备连接。",
   securityCleanupTitle: "不再使用公网访问时，请完整撤销",
   securityCleanupIntro:
-    "仅在 Minke 中停用会停止本机代理，但不会自动删除 Cloudflare 中的 DNS、Access 应用或 Tunnel。请按以下顺序清理，避免遗留可被发现的入口或造成后续误配置：",
+    "仅在 HUB 中停用会停止本机代理，但不会自动删除 Cloudflare 中的 DNS、Access 应用或 Tunnel。请按以下顺序清理，避免遗留可被发现的入口或造成后续误配置：",
   securityCleanupStepDisable:
-    "在 Minke 中选择“停用远程访问”，等待状态变为“未启用”。",
+    "在 HUB 中选择“停用远程访问”，等待状态变为“未启用”。",
   securityCleanupStepProcess:
-    "确认原远程地址已无法连接，并在系统进程列表中确认由 Minke 启动的 cloudflared 已退出。",
+    "确认原远程地址已无法连接，并在系统进程列表中确认由 HUB 启动的 cloudflared 已退出。",
   securityCleanupStepDns:
     "进入 Cloudflare 的 DNS Records，找到最终主机名对应的 CNAME，选择 Edit → Delete 并确认。",
   securityCleanupStepAccess:
@@ -137,17 +137,17 @@ export const remoteZh = {
     "完成后再次访问原地址，确认新请求已无法到达服务且不再出现 Access 登录页。DNS 缓存可能在 TTL 到期前继续解析；删除资源也无法抹除已经进入证书透明度日志的历史主机名。",
   tailscaleCleanupTitle: "不再使用私有网络访问时，请完成检查",
   tailscaleCleanupIntro:
-    "Minke 停用后会关闭自己启动的前台 Serve 进程或 Direct IP 本地监听，但不会修改 Tailscale 的 Access controls、设备共享或设备注册。请按当前连接方式检查：",
+    "HUB 停用后会关闭自己启动的前台 Serve 进程或 Direct IP 本地监听，但不会修改 Tailscale 的 Access controls、设备共享或设备注册。请按当前连接方式检查：",
   tailscaleCleanupStepDisable:
-    "在 Minke 中选择“停用远程访问”，等待状态变为“未启用”，并确认原远程地址已无法连接。",
+    "在 HUB 中选择“停用远程访问”，等待状态变为“未启用”，并确认原远程地址已无法连接。",
   tailscaleCleanupStepServe:
-    "若使用 HTTPS Serve，运行 tailscale serve status，确认没有活动映射指向 Minke 本地端口。若仍有映射，请先确认归属，再按 Tailscale 的 Disable Serve 流程只关闭对应项。",
+    "若使用 HTTPS Serve，运行 tailscale serve status，确认没有活动映射指向 HUB 本地端口。若仍有映射，请先确认归属，再按 Tailscale 的 Disable Serve 流程只关闭对应项。",
   tailscaleCleanupStepDirect:
-    "若使用 Direct IP，确认原 100.x 地址和端口已无法连接。此方式不会创建 Serve 配置或 DNS 记录；设备保持注册时仍会保留 Tailscale IP，这不表示 Minke 仍在监听。",
+    "若使用 Direct IP，确认原 100.x 地址和端口已无法连接。此方式不会创建 Serve 配置或 DNS 记录；设备保持注册时仍会保留 Tailscale IP，这不表示 HUB 仍在监听。",
   tailscaleCleanupStepAccess:
-    "检查 Tailscale 管理后台的 Access controls 和设备 Share 设置。共享可以授权 tailnet 外部用户访问；仅保留预期的用户、设备与端口，并只移除专为 Minke 添加且未被其他服务复用的 Grant、ACL 或共享邀请。",
+    "检查 Tailscale 管理后台的 Access controls 和设备 Share 设置。共享可以授权 tailnet 外部用户访问；仅保留预期的用户、设备与端口，并只移除专为 HUB 添加且未被其他服务复用的 Grant、ACL 或共享邀请。",
   tailscaleCleanupStepDevice:
-    "仅当整台设备以后都不需要加入 tailnet 时，才从 Machines 中移除该设备；这会切断该设备的全部 Tailscale 访问，而不只是 Minke。",
+    "仅当整台设备以后都不需要加入 tailnet 时，才从 Machines 中移除该设备；这会切断该设备的全部 Tailscale 访问，而不只是 HUB。",
   tailscaleCleanupNote:
     "不要把 tailscale serve reset 当作默认清理命令，它会清空该设备的全部 Serve 配置。卸载 Tailscale 也不会自动从 tailnet 中移除该设备。",
   readError: "无法读取远程访问设置。",
@@ -159,7 +159,7 @@ export type RemoteLocaleKey = keyof typeof remoteZh;
 export const remoteEn: Record<RemoteLocaleKey, string> = {
   title: "Remote access",
   description:
-    "Open this Minke safely from a phone or another device. Only one access route can be active at a time.",
+    "Open this HUB safely from a phone or another device. Only one access route can be active at a time.",
   methodTitle: "Access method",
   tailscaleTitle: "Private network",
   tailscaleDescription:
@@ -193,7 +193,7 @@ export const remoteEn: Record<RemoteLocaleKey, string> = {
     "Remove a device from the tailnet",
   cloudflareSetupTitle: "Named Tunnel + Access",
   cloudflareSetupDescription:
-    "The config file should provide only the Tunnel and credentials, with no ingress rules. Minke pins the origin to its local JWT gateway.",
+    "The config file should provide only the Tunnel and credentials, with no ingress rules. HUB pins the origin to its local JWT gateway.",
   cloudflareReferencesTitle: "Configuration references",
   cloudflareTunnelReference:
     "Create a locally managed Tunnel",
@@ -221,15 +221,15 @@ export const remoteEn: Record<RemoteLocaleKey, string> = {
   tunnelName: "Tunnel name or UUID",
   configPath: "Absolute cloudflared config path",
   originPort: "Local origin port",
-  originAddress: "Minke-pinned Tunnel origin",
+  originAddress: "HUB-pinned Tunnel origin",
   cloudflareAccessRequired:
-    "Create an Access application and identity policy for the final hostname first. Minke also verifies the Access JWT signature, issuer, and AUD at the origin.",
+    "Create an Access application and identity policy for the final hostname first. HUB also verifies the Access JWT signature, issuer, and AUD at the origin.",
   enable: "Enable remote access",
   disable: "Disable remote access",
   configurationLocked:
     "Disable remote access before changing the connection configuration.",
   lifecycle:
-    "Minke owns the foreground proxy only while the app is open and stops it on exit. A failed method never silently falls back to another route.",
+    "HUB owns the foreground proxy only while the app is open and stops it on exit. A failed method never silently falls back to another route.",
   statusDisabled: "Off",
   statusUnavailable: "Not installed",
   statusStarting: "Connecting",
@@ -249,11 +249,11 @@ export const remoteEn: Record<RemoteLocaleKey, string> = {
   copyAddressError:
     "Could not copy the address. Select it and copy it manually.",
   unavailableTailscale:
-    "The Tailscale command was not found. Install and sign in, then refresh; if already enabled, Minke keeps detecting it in the background.",
+    "The Tailscale command was not found. Install and sign in, then refresh; if already enabled, HUB keeps detecting it in the background.",
   unavailableCloudflare:
     "The cloudflared command was not found. Install cloudflared, prepare a Named Tunnel configuration, then refresh the status.",
   statusErrorHelp:
-    "Minke could not read a connected Tailscale node. Confirm that Tailscale is signed in and Running.",
+    "HUB could not read a connected Tailscale node. Confirm that Tailscale is signed in and Running.",
   serveErrorHelp:
     "Tailscale Serve failed to start. Confirm that this version supports Serve and your tailnet policy allows HTTPS.",
   serveConflictErrorHelp:
@@ -264,11 +264,11 @@ export const remoteEn: Record<RemoteLocaleKey, string> = {
     "Tailscale Standalone could not save the Serve configuration to macOS Keychain.",
   servePermissionIssue: "View the known Tailscale issue",
   directBindErrorHelp:
-    "Minke could not bind only to the Tailscale IPv4 address. Check that Tailscale is online and the port is available.",
+    "HUB could not bind only to the Tailscale IPv4 address. Check that Tailscale is online and the port is available.",
   directIpErrorHelp:
     "The configured Tailscale IP is invalid or is not assigned to this device. Clear it to auto-detect, or enter the address returned by tailscale ip -4.",
   harnessControlErrorHelp:
-    "Harness did not accept the remote-host update. The remote route remains closed; restart Minke and try again.",
+    "Harness did not accept the remote-host update. The remote route remains closed; restart HUB and try again.",
   cloudflareConfigErrorHelp:
     "The Cloudflare profile is invalid or its origin port is occupied. Check the hostname, team, AUD, Tunnel, and config file.",
   cloudflareAccessErrorHelp:
@@ -278,17 +278,17 @@ export const remoteEn: Record<RemoteLocaleKey, string> = {
   savingChange: "Saving your change…",
   securityTitle: "Remote access notes",
   securityBody:
-    "The remote page can start agent tasks and use local tools already authorized in Minke. Protect the internet route with a Cloudflare Access identity policy and allow only intended identities.",
+    "The remote page can start agent tasks and use local tools already authorized in HUB. Protect the internet route with a Cloudflare Access identity policy and allow only intended identities.",
   tailscaleSecurityBody:
-    "The remote page can start agent tasks and use local tools already authorized in Minke. Minke adds no second sign-in layer to the Tailscale route; use access controls and device sharing to allow only intended users and devices.",
+    "The remote page can start agent tasks and use local tools already authorized in HUB. HUB adds no second sign-in layer to the Tailscale route; use access controls and device sharing to allow only intended users and devices.",
   securityCleanupTitle:
     "Remove public access completely when you no longer use it",
   securityCleanupIntro:
-    "Turning it off in Minke stops the local proxy, but does not remove Cloudflare DNS, the Access application, or the Tunnel. Clean them up in this order to avoid leaving a discoverable entry point or causing a future misconfiguration:",
+    "Turning it off in HUB stops the local proxy, but does not remove Cloudflare DNS, the Access application, or the Tunnel. Clean them up in this order to avoid leaving a discoverable entry point or causing a future misconfiguration:",
   securityCleanupStepDisable:
-    "Choose Disable remote access in Minke and wait for the status to change to Off.",
+    "Choose Disable remote access in HUB and wait for the status to change to Off.",
   securityCleanupStepProcess:
-    "Confirm that the old remote address no longer connects and that the cloudflared process started by Minke has exited in your system process list.",
+    "Confirm that the old remote address no longer connects and that the cloudflared process started by HUB has exited in your system process list.",
   securityCleanupStepDns:
     "Open Cloudflare DNS Records, find the CNAME for the final hostname, then choose Edit → Delete and confirm.",
   securityCleanupStepAccess:
@@ -300,17 +300,17 @@ export const remoteEn: Record<RemoteLocaleKey, string> = {
   tailscaleCleanupTitle:
     "Complete these checks when you stop using private access",
   tailscaleCleanupIntro:
-    "Disabling Minke closes the foreground Serve process or Direct IP listener that it started, but does not change Tailscale access controls, device shares, or device registration. Check the active connection type:",
+    "Disabling HUB closes the foreground Serve process or Direct IP listener that it started, but does not change Tailscale access controls, device shares, or device registration. Check the active connection type:",
   tailscaleCleanupStepDisable:
-    "Choose Disable remote access in Minke, wait for the status to change to Off, and confirm that the old remote address no longer connects.",
+    "Choose Disable remote access in HUB, wait for the status to change to Off, and confirm that the old remote address no longer connects.",
   tailscaleCleanupStepServe:
-    "For HTTPS Serve, run tailscale serve status and confirm that no active mapping points to Minke's local port. If one remains, identify its owner first, then use Tailscale's Disable Serve procedure to turn off only that mapping.",
+    "For HTTPS Serve, run tailscale serve status and confirm that no active mapping points to HUB's local port. If one remains, identify its owner first, then use Tailscale's Disable Serve procedure to turn off only that mapping.",
   tailscaleCleanupStepDirect:
-    "For Direct IP, confirm that the old 100.x address and port no longer connect. This mode creates no Serve configuration or DNS record. The device keeps its Tailscale IP while it remains registered; that does not mean Minke is still listening.",
+    "For Direct IP, confirm that the old 100.x address and port no longer connect. This mode creates no Serve configuration or DNS record. The device keeps its Tailscale IP while it remains registered; that does not mean HUB is still listening.",
   tailscaleCleanupStepAccess:
-    "Review Access controls and the device's Share settings in the Tailscale admin console. A share can authorize users outside your tailnet; keep only intended users, devices, and ports, and remove only Grants, ACLs, or share invitations created solely for Minke and not reused elsewhere.",
+    "Review Access controls and the device's Share settings in the Tailscale admin console. A share can authorize users outside your tailnet; keep only intended users, devices, and ports, and remove only Grants, ACLs, or share invitations created solely for HUB and not reused elsewhere.",
   tailscaleCleanupStepDevice:
-    "Remove the device from Machines only if the entire device no longer needs the tailnet. This revokes all Tailscale access for the device, not just Minke.",
+    "Remove the device from Machines only if the entire device no longer needs the tailnet. This revokes all Tailscale access for the device, not just HUB.",
   tailscaleCleanupNote:
     "Do not use tailscale serve reset as routine cleanup; it clears every Serve configuration on the device. Uninstalling Tailscale also does not remove the device from the tailnet.",
   readError: "Could not read remote access settings.",

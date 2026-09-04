@@ -101,7 +101,7 @@ export function parseTabsLayoutStateUpdate(
 }
 
 /**
- * Accept only browser resources that can safely live in Minke's isolated
+ * Accept only browser resources that can safely live in HUB's isolated
  * guest partition. Embedded credentials are rejected so the panel never
  * turns a visually hidden user-info segment into an accidental secret sink.
  */

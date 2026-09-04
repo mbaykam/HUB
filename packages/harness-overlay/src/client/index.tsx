@@ -32,7 +32,7 @@ export const inject = [
   "layout",
 ];
 
-/** Compose Minke features through Harness's public services and slots. */
+/** Compose HUB features through Harness's public services and slots. */
 export function apply(ctx: HarnessClientContext): void {
   const minkeSettings = new MinkeSettingsRuntime();
   installAmbientTheme(ctx);

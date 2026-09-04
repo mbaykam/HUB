@@ -100,7 +100,7 @@ function terminalEnvironment(
   );
   environment.TERM = "xterm-256color";
   environment.COLORTERM = "truecolor";
-  environment.TERM_PROGRAM = "Minke";
+  environment.TERM_PROGRAM = "HUB";
   return environment;
 }
 

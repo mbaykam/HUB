@@ -77,7 +77,7 @@ const STALE_TARGET_ERROR =
 const UNAVAILABLE_CHAT: AgentBrowserChatPort = {
   currentTarget: () => undefined,
   async sendScreenshot() {
-    throw new Error("Minke Chat is unavailable");
+    throw new Error("HUB Chat is unavailable");
   },
 };
 

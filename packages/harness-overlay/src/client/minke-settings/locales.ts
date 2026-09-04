@@ -1,8 +1,8 @@
 export const minkeSettingsZh = {
-  nav: "Minke",
-  title: "Minke 设置",
-  empty: "当前环境没有可用的 Minke 设置。",
-  pageError: "此设置页暂时无法显示，其他 Minke 设置仍可使用。",
+  nav: "HUB",
+  title: "HUB 设置",
+  empty: "当前环境没有可用的 HUB 设置。",
+  pageError: "此设置页暂时无法显示，其他 HUB 设置仍可使用。",
   retry: "重试",
 } as const;
 
@@ -13,11 +13,11 @@ export const minkeSettingsEn: Record<
   MinkeSettingsLocaleKey,
   string
 > = {
-  nav: "Minke",
-  title: "Minke Settings",
-  empty: "No Minke settings are available in this environment.",
+  nav: "HUB",
+  title: "HUB Settings",
+  empty: "No HUB settings are available in this environment.",
   pageError:
-    "This settings page could not be displayed. Other Minke settings remain available.",
+    "This settings page could not be displayed. Other HUB settings remain available.",
   retry: "Retry",
 };
 

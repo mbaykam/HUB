@@ -5,7 +5,7 @@ const HARNESS_CLIENT_PROFILE_SELECTOR = "DSH_BUILD_CLIENT_PROFILE";
  * Build the environment inherited by the pinned Harness client build.
  *
  * Harness client values are compiled into browser artifacts. Remove any
- * inherited upstream profile or client values before selecting Minke's title
+ * inherited upstream profile or client values before selecting HUB's title
  * so a developer or release environment cannot rebrand the desktop window.
  */
 export function minkeHarnessClientBuildEnvironment(
@@ -20,6 +20,6 @@ export function minkeHarnessClientBuildEnvironment(
       delete environment[name];
     }
   }
-  environment.DSH_CLIENT_TITLE = "Minke";
+  environment.DSH_CLIENT_TITLE = "HUB";
   return environment;
 }

@@ -94,7 +94,7 @@ async function providerJson(
       accept: "application/json",
       authorization: `Bearer ${apiKey}`,
       "cache-control": "no-store",
-      "user-agent": "Minke usage meter",
+      "user-agent": "HUB usage meter",
     },
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });

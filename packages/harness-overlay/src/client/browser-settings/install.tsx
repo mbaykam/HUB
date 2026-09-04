@@ -25,7 +25,7 @@ import {
 
 const BROWSER_SETTINGS_NAMESPACE = "minke.browser-settings";
 
-/** Install browser identity as an independent Minke Settings module. */
+/** Install browser identity as an independent HUB Settings module. */
 export function installBrowserSettings(
   ctx: HarnessClientContext,
   settings: MinkeSettingsRuntime,
@@ -69,6 +69,6 @@ export function installBrowserSettings(
           <BrowserSettingsSection runtime={runtime} t={t} />
         ),
       }),
-    "minke-overlay: Browser Minke Settings page",
+    "minke-overlay: Browser HUB Settings page",
   );
 }

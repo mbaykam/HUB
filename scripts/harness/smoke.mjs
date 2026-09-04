@@ -351,12 +351,12 @@ async function callMinkeHost(server, endpoint, payload) {
     envelope.rpcId !== rpcId
   ) {
     throw new Error(
-      `Minke Host returned an invalid ${endpoint} envelope: ${JSON.stringify(envelope)}`,
+      `HUB Host returned an invalid ${endpoint} envelope: ${JSON.stringify(envelope)}`,
     );
   }
   if (envelope.result?.ok !== true) {
     throw new Error(
-      `Minke Host ${endpoint} failed: ${JSON.stringify(envelope.result?.error)}`,
+      `HUB Host ${endpoint} failed: ${JSON.stringify(envelope.result?.error)}`,
     );
   }
   return envelope.result.value;
@@ -379,7 +379,7 @@ async function fetchMinkeHostCapabilities(server) {
     capabilities.terminal?.transport !== "long-poll"
   ) {
     throw new Error(
-      `Minke Host returned unexpected capabilities: ${JSON.stringify(capabilities)}`,
+      `HUB Host returned unexpected capabilities: ${JSON.stringify(capabilities)}`,
     );
   }
   return capabilities;
@@ -390,9 +390,9 @@ async function smokeMinkePwa(server) {
     await Promise.all([
       server.fetch(`${server.baseUrl}/`),
       server.fetch(`${server.baseUrl}/manifest.webmanifest`),
-      server.fetch(`${server.baseUrl}/minke-sw.js`),
+      server.fetch(`${server.baseUrl}/hub-sw.js`),
       server.fetch(
-        `${server.baseUrl}/minke-pwa/icon-fullbleed-192.png`,
+        `${server.baseUrl}/hub-pwa/icon-fullbleed-192.png`,
       ),
     ]);
   for (const [label, response] of [
@@ -403,7 +403,7 @@ async function smokeMinkePwa(server) {
   ]) {
     if (!response.ok) {
       throw new Error(
-        `Minke PWA ${label} failed with HTTP ${String(response.status)}`,
+        `HUB PWA ${label} failed with HTTP ${String(response.status)}`,
       );
     }
   }
@@ -415,9 +415,9 @@ async function smokeMinkePwa(server) {
   ]);
   if (
     !index.includes('data-minke-pwa="head"') ||
-    !index.includes('/minke-pwa/bootstrap.js') ||
-    !index.includes('/minke-pwa/apple-touch-icon-fullbleed.png') ||
-    manifest?.name !== "Minke" ||
+    !index.includes('/hub-pwa/bootstrap.js') ||
+    !index.includes('/hub-pwa/apple-touch-icon-fullbleed.png') ||
+    manifest?.name !== "HUB" ||
     manifest?.display !== "standalone" ||
     !Array.isArray(manifest.icons) ||
     !manifest.icons.some((entry) => entry?.sizes === "192x192") ||
@@ -427,7 +427,7 @@ async function smokeMinkePwa(server) {
     workerResponse.headers.get("service-worker-allowed") !== "/" ||
     Buffer.from(icon).toString("ascii", 1, 4) !== "PNG"
   ) {
-    throw new Error("Minke PWA resources are incomplete or unsafe");
+    throw new Error("HUB PWA resources are incomplete or unsafe");
   }
 }
 
@@ -445,7 +445,7 @@ async function smokeMinkeHostTerminal(server) {
   const sessionId = created?.sessionId;
   if (typeof sessionId !== "string" || sessionId === "") {
     throw new Error(
-      `Minke Host returned an invalid Terminal session: ${JSON.stringify(created)}`,
+      `HUB Host returned an invalid Terminal session: ${JSON.stringify(created)}`,
     );
   }
   let cursor = 0;
@@ -481,7 +481,7 @@ async function smokeMinkeHostTerminal(server) {
         result.truncated === true
       ) {
         throw new Error(
-          `Minke Host returned invalid Terminal output: ${JSON.stringify(result)}`,
+          `HUB Host returned invalid Terminal output: ${JSON.stringify(result)}`,
         );
       }
       cursor = result.cursor;
@@ -500,7 +500,7 @@ async function smokeMinkeHostTerminal(server) {
   }
   if (!output.includes(marker) || !exited) {
     throw new Error(
-      `Minke Host Terminal smoke failed: ${JSON.stringify({ output, exited })}`,
+      `HUB Host Terminal smoke failed: ${JSON.stringify({ output, exited })}`,
     );
   }
 }
@@ -1001,8 +1001,8 @@ async function main() {
         `  Web plugins:   ${String(manifest.entries.length)}`,
         `  product overlay: ${productPackageName}`,
         `  isolated plugin failure: ${failingPluginId}`,
-        `  Minke Host RPC: files=${String(minkeCapabilities.files.available)}, tabs=${String(minkeCapabilities.tabs.available)}, terminal=${String(minkeCapabilities.terminal.available)}`,
-        "  Minke PWA: standalone manifest/icons/service worker",
+        `  HUB Host RPC: files=${String(minkeCapabilities.files.available)}, tabs=${String(minkeCapabilities.tabs.available)}, terminal=${String(minkeCapabilities.terminal.available)}`,
+        "  HUB PWA: standalone manifest/icons/service worker",
         `  external plugin install/load/HMR: ${server.baseUrl}`,
         "  ambient dsh/Node/pnpm dependency: none",
         `  runtime source: ${packaged ? "packaged app" : "staged development host"}`,

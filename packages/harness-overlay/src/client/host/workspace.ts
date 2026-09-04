@@ -72,7 +72,7 @@ function browserStorage(): BrowserStorage | undefined {
 function rpcValue(result: HarnessRpcResult, endpoint: string): unknown {
   if (result.ok) return result.value;
   throw new Error(
-    `Minke Host ${endpoint} failed (${result.error.code}): ` +
+    `HUB Host ${endpoint} failed (${result.error.code}): ` +
       result.error.message,
   );
 }
@@ -269,7 +269,7 @@ interface BrowserTerminalPoll {
   cursor: number;
 }
 
-/** Long-poll adapter for interactive Minke Host Terminal sessions. */
+/** Long-poll adapter for interactive HUB Host Terminal sessions. */
 export function browserTerminalPort(
   connection: Connection,
 ): DesktopTerminalPort {
@@ -325,7 +325,7 @@ export function browserTerminalPort(
         );
         if (result.cursor < state.cursor) {
           throw new Error(
-            "Minke Host Terminal cursor moved backwards",
+            "HUB Host Terminal cursor moved backwards",
           );
         }
         if (result.truncated) {
@@ -401,7 +401,7 @@ export function browserTerminalPort(
   };
 }
 
-/** Prefer native preload capabilities and fall back to Minke Host. */
+/** Prefer native preload capabilities and fall back to HUB Host. */
 export function minkeWorkspacePorts(
   connection: Connection,
   desktopTabs: DesktopTabsPort = desktopTabsPort(),

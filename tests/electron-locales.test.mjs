@@ -22,7 +22,7 @@ async function assertMissing(path) {
 
 test("macOS packaging keeps mainstream Browser locales", async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "minke-locales-"));
-  const appRoot = join(temporaryRoot, "Minke.app");
+  const appRoot = join(temporaryRoot, "HUB.app");
   const contentsRoot = join(appRoot, "Contents");
   const appResources = join(contentsRoot, "Resources");
   const frameworkResources = join(

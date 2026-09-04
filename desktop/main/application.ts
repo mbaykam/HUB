@@ -195,7 +195,7 @@ class DesktopApplication {
       });
     } catch (error) {
       console.warn(
-        "Minke Agent Browser history is unavailable:",
+        "HUB Agent Browser history is unavailable:",
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -700,7 +700,7 @@ class DesktopApplication {
         appUpdate.start();
       } catch (error) {
         console.warn(
-          "Minke application updates are unavailable:",
+          "HUB application updates are unavailable:",
           error instanceof Error
             ? error.message
             : String(error),
@@ -764,7 +764,7 @@ class DesktopApplication {
 
   reportStartupFailure(error: unknown): void {
     if (this.#quitting) return;
-    console.error("Minke startup failed:", error);
+    console.error("HUB startup failed:", error);
     dialog.showErrorBox(
       this.#desktopText("runtime.startupFailedTitle"),
       error instanceof Error

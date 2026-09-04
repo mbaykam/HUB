@@ -2,7 +2,7 @@ import {
   HarnessError,
 } from "@deepseek-ai/dsh-llm";
 
-/** Stable provider id selected by Minke's product overlay. */
+/** Stable provider id selected by HUB's product overlay. */
 export const MINKE_WEB_SEARCH_PROVIDER_ID = "minke-public-search";
 
 /**
@@ -16,7 +16,7 @@ export const MINKE_WEB_SEARCH_DEFAULT_BASE_URL =
 export const MINKE_WEB_SEARCH_DEFAULT_TIMEOUT_MS = 15_000;
 export const MINKE_WEB_SEARCH_DEFAULT_MAX_RESPONSE_BYTES = 512 * 1024;
 export const MINKE_WEB_SEARCH_DEFAULT_USER_AGENT =
-  "Minke/0.4.0 (+https://github.com/lencx/Minke)";
+  "HUB/0.4.0 (+https://github.com/mbaykam/Minke)";
 
 const MAX_QUERY_CHARS = 2_048;
 const MAX_REQUEST_URL_BYTES = 8_192;
@@ -101,7 +101,7 @@ export class MinkeWebSearchProvider {
     const endpoint = searchEndpoint(this.options.baseURL);
     if (endpoint === undefined) {
       throw new MinkeWebSearchError(
-        "Minke web search endpoint is invalid",
+        "HUB web search endpoint is invalid",
         "WEB_PROVIDER_CONFIGURED_UNAVAILABLE",
       );
     }
@@ -124,7 +124,7 @@ export class MinkeWebSearchProvider {
 
     const timeout = new AbortController();
     const timer = setTimeout(
-      () => timeout.abort(new Error("Minke web search timed out")),
+      () => timeout.abort(new Error("HUB web search timed out")),
       this.options.timeoutMs,
     );
     timer.unref?.();

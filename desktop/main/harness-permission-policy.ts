@@ -15,7 +15,7 @@ export interface HarnessPermissionRequest {
 }
 
 /**
- * Grant the one browser permission Minke needs only to the active Harness
+ * Grant the one browser permission HUB needs only to the active Harness
  * renderer. Same-origin popups and every other permission remain untrusted.
  */
 export function canGrantHarnessPermission(

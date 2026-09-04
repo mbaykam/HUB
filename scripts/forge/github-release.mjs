@@ -15,12 +15,12 @@ import { fileURLToPath } from "node:url";
 
 export const GITHUB_RELEASE_API_VERSION = "2026-03-10";
 export const RELEASE_ASSET_NAMES = Object.freeze([
-  "Minke-linux-x64.AppImage",
-  "Minke-linux-x64.deb",
-  "Minke-linux-x64.rpm",
-  "Minke-macos-arm64.dmg",
-  "Minke-macos-x64.dmg",
-  "Minke-windows-x64.exe",
+  "HUB-linux-x64.AppImage",
+  "HUB-linux-x64.deb",
+  "HUB-linux-x64.rpm",
+  "HUB-macos-arm64.dmg",
+  "HUB-macos-x64.dmg",
+  "HUB-windows-x64.exe",
   "SHA256SUMS",
 ]);
 
@@ -198,7 +198,7 @@ export async function publishGithubRelease({
       "--verify-tag",
       "--generate-notes",
       "--title",
-      `Minke ${releaseTag}`,
+      `HUB ${releaseTag}`,
     ]),
     "creating the draft release",
   );

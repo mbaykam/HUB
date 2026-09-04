@@ -1,4 +1,4 @@
-/** Shared trusted-host filesystem runtime for Electron IPC and Minke Host. */
+/** Shared trusted-host filesystem runtime for Electron IPC and HUB Host. */
 import {
   chmod,
   open as openFile,

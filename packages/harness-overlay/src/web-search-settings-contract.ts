@@ -1,5 +1,5 @@
 /**
- * Shared desktop/host contract for Minke's credential-free fallback tool.
+ * Shared desktop/host contract for HUB's credential-free fallback tool.
  * The persisted `fallbackEnabled` key and environment name remain stable for
  * existing installations; they no longer imply a `ctx.web` provider override.
  */

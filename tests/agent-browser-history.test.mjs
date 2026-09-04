@@ -268,7 +268,7 @@ test("Agent Browser history path stays inside the desktop user-data root", () =>
   );
 });
 
-test("Agent Browser history stores page titles and derives Minke search queries", async (t) => {
+test("Agent Browser history stores page titles and derives HUB search queries", async (t) => {
   const directory = await mkdtemp(
     join(tmpdir(), "minke-agent-browser-history-title-"),
   );

@@ -171,7 +171,7 @@ export class AppUpdateRuntime {
   #runAutomaticCheck(): void {
     void this.#checkForUpdates(false).catch((error: unknown) => {
       if (!this.#disposed) {
-        console.error("Minke update check failed:", error);
+        console.error("HUB update check failed:", error);
       }
     });
   }
@@ -221,7 +221,7 @@ export class AppUpdateRuntime {
     void this.#offerUpdate(update)
       .catch((error: unknown) => {
         if (!this.#disposed) {
-          console.error("Minke update flow failed:", error);
+          console.error("HUB update flow failed:", error);
         }
       })
       .finally(() => {
@@ -386,7 +386,7 @@ export class AppUpdateRuntime {
       });
     } catch (error) {
       console.error(
-        "Unable to remove discarded Minke update:",
+        "Unable to remove discarded HUB update:",
         error,
       );
     }
@@ -507,7 +507,7 @@ export class AppUpdateRuntime {
         this.#downloadSession.downloadURL(update.asset.url, {
           headers: {
             Accept: "application/octet-stream",
-            "User-Agent": `Minke/${this.#options.currentVersion}`,
+            "User-Agent": `HUB/${this.#options.currentVersion}`,
           },
         });
       } catch (error) {
@@ -537,7 +537,7 @@ export class AppUpdateRuntime {
     update: AppUpdate,
     error: unknown,
   ): Promise<void> {
-    console.error("Minke update download failed:", error);
+    console.error("HUB update download failed:", error);
     const choice = await this.#showMessageBox({
       type: "error",
       title: this.#options.text("update.failedTitle"),
@@ -555,7 +555,7 @@ export class AppUpdateRuntime {
     });
     if (choice.response !== 0 || this.#disposed) return;
     await shell.openExternal(
-      `https://github.com/lencx/Minke/releases/tag/${update.tag}`,
+      `https://github.com/mbaykam/Minke/releases/tag/${update.tag}`,
     );
   }
 

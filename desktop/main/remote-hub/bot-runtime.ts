@@ -1800,7 +1800,7 @@ export class BotCapabilityRuntime<Identity> {
         return {
           status: "reply",
           payload: this.#agentReplyPayload(
-            "Minke 当前需要文本内容。",
+            "HUB 当前需要文本内容。",
             input.lease,
             message,
           ),
@@ -1808,7 +1808,7 @@ export class BotCapabilityRuntime<Identity> {
       }
       const route = this.#agentRoute;
       if (route === undefined) {
-        throw new Error("Minke Agent route is unavailable");
+        throw new Error("HUB Agent route is unavailable");
       }
       const accountKeyValue = input.lease.accountKey;
       if (accountKeyValue === undefined) {
@@ -1835,7 +1835,7 @@ export class BotCapabilityRuntime<Identity> {
         return {
           status: "reply",
           payload: this.#agentReplyPayload(
-            "Minke 未能生成回复，请稍后再试。",
+            "HUB 未能生成回复，请稍后再试。",
             input.lease,
             message,
           ),
@@ -1867,9 +1867,9 @@ export class BotCapabilityRuntime<Identity> {
       payload: {
         kind: "text",
         text:
-          `Minke 收到了你的 ${this.#providerLabel()} 私聊配对请求。\n`
+          `HUB 收到了你的 ${this.#providerLabel()} 私聊配对请求。\n`
           + `配对码：${pairing.code}\n`
-          + `请在 Minke 的「远端 → ${this.#providerLabel()}」中确认。`
+          + `请在 HUB 的「远端 → ${this.#providerLabel()}」中确认。`
           + "这条消息尚未交给 Agent。",
       },
     };

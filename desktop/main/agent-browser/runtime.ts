@@ -2516,7 +2516,7 @@ export class AgentBrowserRuntime {
       if (this.#historyWriteFailureReported) return;
       this.#historyWriteFailureReported = true;
       console.warn(
-        "Minke could not record browsing history:",
+        "HUB could not record browsing history:",
         error instanceof Error ? error.message : String(error),
       );
       return undefined;
@@ -2532,7 +2532,7 @@ export class AgentBrowserRuntime {
       if (this.#historyWriteFailureReported) return;
       this.#historyWriteFailureReported = true;
       console.warn(
-        "Minke could not update browsing history title:",
+        "HUB could not update browsing history title:",
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -2555,7 +2555,7 @@ export class AgentBrowserRuntime {
       if (this.#historyWriteFailureReported) return;
       this.#historyWriteFailureReported = true;
       console.warn(
-        "Minke could not update browsing history favicon:",
+        "HUB could not update browsing history favicon:",
         error instanceof Error ? error.message : String(error),
       );
     }

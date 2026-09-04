@@ -69,20 +69,20 @@ switch (outcome.kind) {
       resolve(outcome.owner.workspace) === resolve(process.cwd())
     ) {
       console.log(
-        `Minke development is already running for this workspace (PID ${String(outcome.owner.pid)}).`,
+        `HUB development is already running for this workspace (PID ${String(outcome.owner.pid)}).`,
       );
       process.exitCode = 0;
       break;
     }
     throw new Error(
       outcome.owner === undefined
-        ? `Minke development control port ${String(FORGE_DEVELOPMENT_LEASE_PORT)} is already in use`
-        : `Minke development is already running from ${outcome.owner.workspace} (PID ${String(outcome.owner.pid)})`,
+        ? `HUB development control port ${String(FORGE_DEVELOPMENT_LEASE_PORT)} is already in use`
+        : `HUB development is already running from ${outcome.owner.workspace} (PID ${String(outcome.owner.pid)})`,
     );
   }
   case "renderer-running":
     console.log(
-      `Minke development is already running on renderer port ${String(FORGE_DEVELOPMENT_RENDERER_PORT)}.`,
+      `HUB development is already running on renderer port ${String(FORGE_DEVELOPMENT_RENDERER_PORT)}.`,
     );
     process.exitCode = 0;
     break;

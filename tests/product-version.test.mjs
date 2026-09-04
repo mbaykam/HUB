@@ -47,10 +47,10 @@ test("all product manifests declare the 0.4.0 release", () => {
 
 test("default network identities expose the product version", async () => {
   const version = readManifest("package.json").version;
-  assert.equal(sanitizeBotAgent(undefined), `Minke/${version}`);
+  assert.equal(sanitizeBotAgent(undefined), `HUB/${version}`);
   assert.equal(
     MINKE_WEB_SEARCH_DEFAULT_USER_AGENT,
-    `Minke/${version} (+https://github.com/lencx/Minke)`,
+    `HUB/${version} (+https://github.com/mbaykam/Minke)`,
   );
 
   let discordUserAgent;
@@ -63,7 +63,7 @@ test("default network identities expose the product version", async () => {
         avatar: null,
         bot: true,
         discriminator: "0",
-        global_name: "Minke Bot",
+        global_name: "HUB Bot",
         id: "100000000000000001",
         username: "minke",
       }), {
@@ -74,6 +74,6 @@ test("default network identities expose the product version", async () => {
   });
   assert.equal(
     discordUserAgent,
-    `DiscordBot (https://github.com/lencx/Minke, ${version})`,
+    `DiscordBot (https://github.com/mbaykam/Minke, ${version})`,
   );
 });

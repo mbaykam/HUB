@@ -27,7 +27,7 @@ export {
   installAboutStyles,
 } from "./styles.ts";
 
-/** Bind the packaged Minke icon to the generic About surface. */
+/** Bind the packaged HUB icon to the generic About surface. */
 export function MinkeAboutDialog(
   props: Omit<AboutDialogProps, "iconUrl">,
 ): ReactNode {

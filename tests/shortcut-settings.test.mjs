@@ -69,7 +69,7 @@ function assertDefaultRemoteSettings(settings) {
   });
 }
 
-test("the desktop store writes the shared Minke config", async () => {
+test("the desktop store writes the shared HUB config", async () => {
   const { path, store } = await fixture();
   assert.deepEqual(await store.read(), {});
 

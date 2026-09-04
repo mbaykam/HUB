@@ -70,7 +70,7 @@ export function desktopAppUpdatePort(
       },
       async write() {
         throw new Error(
-          "Minke desktop app update settings bridge is unavailable",
+          "HUB desktop app update settings bridge is unavailable",
         );
       },
     };
@@ -114,7 +114,7 @@ export function desktopWebSearchSettingsStore(
       },
       async write() {
         throw new Error(
-          "Minke desktop web search settings bridge is unavailable",
+          "HUB desktop web search settings bridge is unavailable",
         );
       },
     };
@@ -144,7 +144,7 @@ export function desktopBrowserSettingsStore(
       },
       async write() {
         throw new Error(
-          "Minke desktop browser settings bridge is unavailable",
+          "HUB desktop browser settings bridge is unavailable",
         );
       },
     };
@@ -163,7 +163,7 @@ export function desktopBrowserSettingsStore(
 /**
  * Keep desktop-owned Settings entries discoverable across preload upgrades.
  *
- * An older preload can expose the Minke desktop namespace without a newly
+ * An older preload can expose the HUB desktop namespace without a newly
  * added capability. The Settings section should render its unavailable state
  * instead of disappearing without explanation.
  */
@@ -185,22 +185,22 @@ export function desktopDataHomeSettingsPort(
       available: false,
       async read() {
         throw new Error(
-          "Minke desktop data-home bridge is unavailable",
+          "HUB desktop data-home bridge is unavailable",
         );
       },
       async chooseDirectory() {
         throw new Error(
-          "Minke desktop data-home bridge is unavailable",
+          "HUB desktop data-home bridge is unavailable",
         );
       },
       async plan() {
         throw new Error(
-          "Minke desktop data-home bridge is unavailable",
+          "HUB desktop data-home bridge is unavailable",
         );
       },
       async schedule() {
         throw new Error(
-          "Minke desktop data-home bridge is unavailable",
+          "HUB desktop data-home bridge is unavailable",
         );
       },
     };
@@ -257,7 +257,7 @@ export function desktopModelRuntimeSettingsStore(
       },
       async write() {
         throw new Error(
-          "Minke desktop model runtime bridge is unavailable",
+          "HUB desktop model runtime bridge is unavailable",
         );
       },
     };
@@ -304,7 +304,7 @@ export function desktopRemoteSettingsStore(
       },
       async write() {
         throw new Error(
-          "Minke desktop remote settings bridge is unavailable",
+          "HUB desktop remote settings bridge is unavailable",
         );
       },
     };
@@ -368,7 +368,7 @@ export function desktopRemoteHubPort(
       },
       async dispatch() {
         throw new Error(
-          "Minke desktop Remote Hub bridge is unavailable",
+          "HUB desktop Remote Hub bridge is unavailable",
         );
       },
       subscribe() {
@@ -405,12 +405,12 @@ export function desktopTerminalSettingsStore(
       available: false,
       async read() {
         throw new Error(
-          "Minke desktop Terminal settings bridge is unavailable",
+          "HUB desktop Terminal settings bridge is unavailable",
         );
       },
       async write() {
         throw new Error(
-          "Minke desktop Terminal settings bridge is unavailable",
+          "HUB desktop Terminal settings bridge is unavailable",
         );
       },
     };

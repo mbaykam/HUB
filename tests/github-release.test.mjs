@@ -51,7 +51,7 @@ function publishOptions(assets, runGh) {
     assets,
     packageVersion: "0.3.0",
     releaseTag: "v0.3.0",
-    repository: "lencx/Minke",
+    repository: "mbaykam/Minke",
     runGh,
   };
 }
@@ -84,7 +84,7 @@ test("release asset discovery rejects symbolic links", async () => {
   const root = await releaseAssetFixture();
   await rm(join(root, "SHA256SUMS"));
   await symlink(
-    join(root, "Minke-linux-x64.deb"),
+    join(root, "HUB-linux-x64.deb"),
     join(root, "SHA256SUMS"),
   );
   await assert.rejects(
@@ -128,7 +128,7 @@ test("release publication creates a draft and accepts only an immutable publishe
     "api",
     "-H",
     `X-GitHub-Api-Version: ${GITHUB_RELEASE_API_VERSION}`,
-    "repos/lencx/Minke/releases/tags/v0.3.0",
+    "repos/mbaykam/Minke/releases/tags/v0.3.0",
   ]);
 });
 

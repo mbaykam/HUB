@@ -175,7 +175,7 @@ export function parseLocalModelRuntimePreference(
   };
 }
 
-/** Validate the fixed two-runtime Minke configuration section. */
+/** Validate the fixed two-runtime HUB configuration section. */
 export function parseModelRuntimeSettings(
   value: unknown,
 ): ModelRuntimeSettings {

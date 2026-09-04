@@ -2,7 +2,7 @@ export const browserSettingsZh = {
   "browser.nav": "浏览器",
   "browser.title": "浏览器标识",
   "browser.description":
-    "分别设置普通网页与 Agent 浏览会话使用的 User-Agent。输入框默认使用与当前 Chromium 内核匹配的推荐 Chrome UA，不包含 Minke 或 Electron 标识，也可以直接自定义。",
+    "分别设置普通网页与 Agent 浏览会话使用的 User-Agent。输入框默认使用与当前 Chromium 内核匹配的推荐 Chrome UA，不包含 HUB 或 Electron 标识，也可以直接自定义。",
   // Compatibility for an older view retained during renderer hot updates.
   "browser.automatic.label": "推荐 Chrome UA",
   "browser.web.label": "普通访问",
@@ -39,7 +39,7 @@ export const browserSettingsEn: Record<
   "browser.nav": "Browser",
   "browser.title": "Browser identity",
   "browser.description":
-    "Set separate User-Agent values for ordinary pages and Agent browser sessions. Each field starts with the recommended Chrome UA for the embedded Chromium runtime, without Minke or Electron tokens, and remains fully editable.",
+    "Set separate User-Agent values for ordinary pages and Agent browser sessions. Each field starts with the recommended Chrome UA for the embedded Chromium runtime, without HUB or Electron tokens, and remains fully editable.",
   "browser.automatic.label": "Recommended Chrome UA",
   "browser.web.label": "Ordinary browsing",
   "browser.web.help":

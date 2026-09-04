@@ -43,7 +43,7 @@ function releaseAsset(name) {
     size: fixture.byteLength,
     digest: `sha256:${fixtureDigest}`,
     browser_download_url:
-      `https://github.com/lencx/Minke/releases/download/v0.3.0/${name}`,
+      `https://github.com/mbaykam/Minke/releases/download/v0.3.0/${name}`,
   };
 }
 
@@ -251,7 +251,7 @@ test("desktop updater selects only a newer immutable release and exact platform 
         size: fixture.byteLength,
         sha256: fixtureDigest,
         url:
-          `https://github.com/lencx/Minke/releases/download/v0.3.0/${name}`,
+          `https://github.com/mbaykam/Minke/releases/download/v0.3.0/${name}`,
       },
     });
   }
@@ -299,7 +299,7 @@ test("desktop updater rejects release metadata that cannot be trusted", () => {
             {
               ...releaseAsset(appUpdateAssetName(macTarget)),
               browser_download_url:
-                "https://attacker.invalid/Minke-macos-arm64.dmg",
+                "https://attacker.invalid/HUB-macos-arm64.dmg",
             },
           ],
         }),
@@ -322,13 +322,13 @@ test("desktop updater rejects release metadata that cannot be trusted", () => {
       selectAppUpdate(
         releaseDocument(macTarget, {
           assets: [
-            releaseAsset("Minke-windows-x64.exe"),
+            releaseAsset("HUB-windows-x64.exe"),
           ],
         }),
         "0.2.0",
         macTarget,
       ),
-    /exactly one Minke-macos-arm64.dmg/u,
+    /exactly one HUB-macos-arm64.dmg/u,
   );
 });
 
@@ -349,7 +349,7 @@ test("release lookup uses the pinned GitHub API endpoint and refuses redirects",
   assert.equal(update?.version, "0.3.0");
   assert.equal(
     requests[0].input,
-    "https://api.github.com/repos/lencx/Minke/releases/latest",
+    "https://api.github.com/repos/mbaykam/Minke/releases/latest",
   );
   assert.equal(requests[0].init.redirect, "error");
   assert.equal(requests[0].init.cache, "no-store");
@@ -373,7 +373,7 @@ test("release lookup uses the pinned GitHub API endpoint and refuses redirects",
 
 test("download redirect policy accepts only GitHub's HTTPS release asset chain", () => {
   const assetUrl =
-    "https://github.com/lencx/Minke/releases/download/v0.3.0/Minke-macos-arm64.dmg";
+    "https://github.com/mbaykam/Minke/releases/download/v0.3.0/HUB-macos-arm64.dmg";
   assert.doesNotThrow(() =>
     assertTrustedDownloadUrlChain(assetUrl, [
       assetUrl,
@@ -399,7 +399,7 @@ test("download redirect policy accepts only GitHub's HTTPS release asset chain",
   assert.throws(
     () =>
       assertTrustedDownloadUrlChain(assetUrl, [
-        "https://github.com/lencx/Minke/releases/download/v0.3.0/other.dmg",
+        "https://github.com/mbaykam/Minke/releases/download/v0.3.0/other.dmg",
       ]),
     /initial download URL/u,
   );
@@ -407,14 +407,14 @@ test("download redirect policy accepts only GitHub's HTTPS release asset chain",
 
 test("download verification checks regular-file type, exact size, and SHA-256", async () => {
   const root = await temporaryRoot();
-  const installer = join(root, "Minke.dmg");
+  const installer = join(root, "HUB.dmg");
   await writeFile(installer, fixture);
   const asset = {
-    name: "Minke-macos-arm64.dmg",
+    name: "HUB-macos-arm64.dmg",
     size: fixture.byteLength,
     sha256: fixtureDigest,
     url:
-      "https://github.com/lencx/Minke/releases/download/v0.3.0/Minke-macos-arm64.dmg",
+      "https://github.com/mbaykam/Minke/releases/download/v0.3.0/HUB-macos-arm64.dmg",
   };
 
   await assert.doesNotReject(
@@ -446,7 +446,7 @@ test("mac updater requires a quarantine attribute and never removes it", async (
   await assert.doesNotReject(
     assertMacFileQuarantined("/private/tmp/Minke.dmg", async (args) => {
       calls.push(args);
-      return "0081;65f00abc;Minke;";
+      return "0081;65f00abc;HUB;";
     }),
   );
   assert.deepEqual(calls, [
@@ -466,7 +466,7 @@ test("Windows updater requires and preserves an Internet-zone Mark-of-the-Web", 
   const calls = [];
   await assert.doesNotReject(
     assertWindowsFileQuarantined(
-      "C:\\Users\\Minke\\Minke.exe",
+      "C:\\Users\\HUB\\HUB.exe",
       async (path) => {
         calls.push(path);
         return "[ZoneTransfer]\r\nZoneId=3\r\n";
@@ -474,24 +474,24 @@ test("Windows updater requires and preserves an Internet-zone Mark-of-the-Web", 
     ),
   );
   assert.deepEqual(calls, [
-    "C:\\Users\\Minke\\Minke.exe:Zone.Identifier",
+    "C:\\Users\\HUB\\HUB.exe:Zone.Identifier",
   ]);
   await assert.doesNotReject(
     assertWindowsFileQuarantined(
-      "C:\\Minke.exe",
+      "C:\\HUB.exe",
       async () => "[ZoneTransfer]\nZoneId=4\n",
     ),
   );
   await assert.rejects(
     assertWindowsFileQuarantined(
-      "C:\\Minke.exe",
+      "C:\\HUB.exe",
       async () => "[ZoneTransfer]\nZoneId=2\n",
     ),
     /trusted Internet-zone/u,
   );
   await assert.rejects(
     assertWindowsFileQuarantined(
-      "C:\\Minke.exe",
+      "C:\\HUB.exe",
       async () => {
         throw new Error("missing stream");
       },

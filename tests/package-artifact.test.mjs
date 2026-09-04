@@ -27,7 +27,7 @@ test("the packaged bootstrap resolves its logo beside the renderer document", as
   const logoSource = source.match(
     /<img[\s\S]*?src="([^"]+minke\.svg)"/u,
   )?.[1];
-  assert.ok(logoSource, "the bootstrap must render the Minke logo");
+  assert.ok(logoSource, "the bootstrap must render the HUB logo");
   const documentUrl = new URL(
     "file:///app.asar/.vite/renderer/main_window/index.html",
   );
@@ -85,9 +85,9 @@ async function withPackagedApp(platform, callback) {
   const temporaryRoot = await mkdtemp(
     join(tmpdir(), "minke-package-artifact-"),
   );
-  const outputRoot = join(temporaryRoot, `Minke-${platform}-arm64`);
+  const outputRoot = join(temporaryRoot, `HUB-${platform}-arm64`);
   const appRoot =
-    platform === "darwin" ? join(outputRoot, "Minke.app") : outputRoot;
+    platform === "darwin" ? join(outputRoot, "HUB.app") : outputRoot;
   const resourcesRoot =
     platform === "darwin"
       ? join(appRoot, "Contents", "Resources")
@@ -112,8 +112,8 @@ async function withPackagedApp(platform, callback) {
   );
   const executable =
     platform === "darwin"
-      ? join(appRoot, "Contents", "MacOS", "Minke")
-      : join(appRoot, platform === "win32" ? "Minke.exe" : "Minke");
+      ? join(appRoot, "Contents", "MacOS", "HUB")
+      : join(appRoot, platform === "win32" ? "HUB.exe" : "HUB");
   const adapterSuffix = platform === "win32" ? ".cmd" : "";
   const nativeAssets = nativeAssetPaths(hostRoot, platform);
   try {

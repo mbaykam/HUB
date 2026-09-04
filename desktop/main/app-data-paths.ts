@@ -2,7 +2,7 @@ import type { App } from "electron";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-/** Pin all durable Electron data below the user's Minke home. */
+/** Pin all durable Electron data below the user's HUB home. */
 export function configureAppDataPaths(
   app: Pick<App, "getPath" | "setPath">,
 ): void {

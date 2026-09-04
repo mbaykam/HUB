@@ -5,7 +5,7 @@ export const remoteHubZh = {
   triggerActive: "远端：已有能力运行",
   triggerAttention: "远端：需要处理",
   title: "连接",
-  description: "连接消息应用，或从其他设备访问 Minke。",
+  description: "连接消息应用，或从其他设备访问 HUB。",
   close: "关闭连接设置",
   channelsTitle: "消息",
   deviceAccessTitle: "设备访问",
@@ -13,24 +13,24 @@ export const remoteHubZh = {
   systemReady: "系统就绪",
   weixinTitle: "微信",
   weixinDescription:
-    "扫码连接微信；仅扫码账号的一对一消息会进入 Minke Agent。",
+    "扫码连接微信；仅扫码账号的一对一消息会进入 HUB Agent。",
   telegramTitle: "Telegram",
   telegramDescription: "使用 Bot Token 连接 Telegram Bot API。",
   discordTitle: "Discord",
   discordDescription:
-    "连接 Discord Bot；完成私聊配对后，可在服务器中 @Bot 或回复 Bot 触发 Minke。需启用 Message Content Intent。",
+    "连接 Discord Bot；完成私聊配对后，可在服务器中 @Bot 或回复 Bot 触发 HUB。需启用 Message Content Intent。",
   botTokenLabel: "{provider} Bot Token",
   botTokenPlaceholder: "粘贴 Bot Token",
   telegramTokenHelp:
-    "Token 由 BotFather 提供，仅加密保存在本机。连接后 Minke 会保留待处理更新并接管 long polling，请勿让另一个实例同时使用该 Token 接收。",
+    "Token 由 BotFather 提供，仅加密保存在本机。连接后 HUB 会保留待处理更新并接管 long polling，请勿让另一个实例同时使用该 Token 接收。",
   telegramProxyLabel: "Telegram HTTP 代理",
   telegramProxyPlaceholder: "http://127.0.0.1:7897",
   telegramProxyHelp:
-    "可选的 HTTP CONNECT 代理；必须填写 http://主机:端口，留空则使用系统网络设置。Minke 不会自动探测本机代理。",
+    "可选的 HTTP CONNECT 代理；必须填写 http://主机:端口，留空则使用系统网络设置。HUB 不会自动探测本机代理。",
   applyTelegramProxy: "应用代理",
   discordProxyLabel: "Discord HTTP 代理（手动备用）",
   discordProxyHelp:
-    "Minke 已自动尝试系统代理，并在可用时复用 Telegram 代理。仅在自动连接仍失败时填写 http://主机:端口；留空可恢复自动选择。",
+    "HUB 已自动尝试系统代理，并在可用时复用 Telegram 代理。仅在自动连接仍失败时填写 http://主机:端口；留空可恢复自动选择。",
   discordProxyDirect: "网络路径：自动使用系统网络",
   discordProxySystem: "网络路径：自动使用检测到的系统代理",
   discordProxyTelegram: "网络路径：自动代理",
@@ -95,7 +95,7 @@ export const remoteHubZh = {
   verifyCode: "提交验证码",
   verificationCodeLabel: "手机端显示的验证码",
   verificationCodePlaceholder: "输入数字验证码",
-  qrAlt: "用于连接 Minke 的微信二维码",
+  qrAlt: "用于连接 HUB 的微信二维码",
   qrPreparing: "正在生成二维码…",
   qrRenderError: "二维码无法生成，请取消后重新连接。",
   qrInstruction: "使用微信扫描二维码，然后在手机上确认。",
@@ -112,7 +112,7 @@ export const remoteHubZh = {
   activityLast: "最近活动",
   activityNone: "暂无",
   activitySessionNote:
-    "统计仅包含本次连接，重新连接或退出 Minke 后重置。",
+    "统计仅包含本次连接，重新连接或退出 HUB 后重置。",
   activityUnderMinute: "不足 1 分钟",
   activityMinutes: "{count} 分钟",
   activityHoursMinutes: "{hours} 小时 {minutes} 分钟",
@@ -122,7 +122,7 @@ export const remoteHubZh = {
   authorizationMissing:
     "微信未返回扫码用户身份，消息入口保持关闭。请解除连接后重新扫码。",
   agentIssue:
-    "消息已安全保留，但 Minke Agent 当前不可用，正在后台重试。",
+    "消息已安全保留，但 HUB Agent 当前不可用，正在后台重试。",
   deliveryIssue:
     "Agent 已生成回复，但微信投递未完成。Gateway 已保留待发送消息。",
   receiveIssue:
@@ -130,7 +130,7 @@ export const remoteHubZh = {
   botReceiveIssue:
     "{provider} 连接仍在运行，但最近一次收取失败，正在后台重试。",
   botAgentIssue:
-    "{provider} 消息已安全保留，但 Minke Agent 当前不可用，正在后台重试。",
+    "{provider} 消息已安全保留，但 HUB Agent 当前不可用，正在后台重试。",
   botDeliveryIssue:
     "Agent 已生成回复，但 {provider} 投递未完成。Gateway 已保留待发送消息。",
   vaultUnavailable:
@@ -171,15 +171,15 @@ export const remoteHubZh = {
   authorizationRequiredShort: "需要授权",
   credentialAuthorizationTitle: "授权安全凭据存储",
   credentialAuthorizationDescription:
-    "Minke 需要访问系统的受保护凭据存储，才能加密保存连接凭据。只有点击按钮后，系统才可能请求解锁钥匙串或密钥环。",
+    "HUB 需要访问系统的受保护凭据存储，才能加密保存连接凭据。只有点击按钮后，系统才可能请求解锁钥匙串或密钥环。",
   credentialAuthorizationMacInstruction:
     "macOS：在系统弹窗中输入 Mac 登录密码，然后选择“始终允许”（Always Allow）；不要选择“拒绝”。",
   credentialAuthorizationPending:
-    "暂不授权也可继续使用 Minke；消息连接和远程访问会保持关闭。",
+    "暂不授权也可继续使用 HUB；消息连接和远程访问会保持关闭。",
   credentialAuthorizationFailed:
     "系统未授予凭据访问权限，请重试。",
   credentialAuthorizationMacFailed:
-    "macOS 未授予访问权限。请再次点击按钮；Minke 会在当前会话中发起全新的授权请求，无需重启或删除凭据。",
+    "macOS 未授予访问权限。请再次点击按钮；HUB 会在当前会话中发起全新的授权请求，无需重启或删除凭据。",
   authorizeCredentialVault: "授权凭据访问",
   authorizingCredentialVault: "正在请求授权…",
   retryCredentialVault: "重新请求授权",
@@ -197,7 +197,7 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   triggerActive: "Remote: capability active",
   triggerAttention: "Remote: needs attention",
   title: "Connections",
-  description: "Connect Minke to messaging apps and other devices.",
+  description: "Connect HUB to messaging apps and other devices.",
   close: "Close connection settings",
   channelsTitle: "Messaging",
   deviceAccessTitle: "Device access",
@@ -205,7 +205,7 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   systemReady: "System ready",
   weixinTitle: "WeChat",
   weixinDescription:
-    "Connect WeChat. Only direct messages from the account that scanned the QR code reach Minke Agent.",
+    "Connect WeChat. Only direct messages from the account that scanned the QR code reach HUB Agent.",
   telegramTitle: "Telegram",
   telegramDescription: "Connect Telegram through a Bot API token.",
   discordTitle: "Discord",
@@ -214,15 +214,15 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   botTokenLabel: "{provider} Bot Token",
   botTokenPlaceholder: "Paste Bot Token",
   telegramTokenHelp:
-    "BotFather provides this token and Minke encrypts it locally. Connecting preserves queued updates and takes long-poll ownership; do not receive with the same token elsewhere.",
+    "BotFather provides this token and HUB encrypts it locally. Connecting preserves queued updates and takes long-poll ownership; do not receive with the same token elsewhere.",
   telegramProxyLabel: "Telegram HTTP proxy",
   telegramProxyPlaceholder: "http://127.0.0.1:7897",
   telegramProxyHelp:
-    "Optional HTTP CONNECT proxy. Enter http://host:port, or leave it blank to use system network settings. Minke never auto-detects local proxies.",
+    "Optional HTTP CONNECT proxy. Enter http://host:port, or leave it blank to use system network settings. HUB never auto-detects local proxies.",
   applyTelegramProxy: "Apply proxy",
   discordProxyLabel: "Discord HTTP proxy (manual fallback)",
   discordProxyHelp:
-    "Minke already tries the system proxy and reuses the Telegram proxy when available. Enter http://host:port only if automatic connection still fails; clear it to restore automatic selection.",
+    "HUB already tries the system proxy and reuses the Telegram proxy when available. Enter http://host:port only if automatic connection still fails; clear it to restore automatic selection.",
   discordProxyDirect: "Network route: automatic system network",
   discordProxySystem:
     "Network route: automatically detected system proxy",
@@ -289,10 +289,10 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   verifyCode: "Submit code",
   verificationCodeLabel: "Code shown on your phone",
   verificationCodePlaceholder: "Enter the numeric code",
-  qrAlt: "WeChat QR code for connecting Minke",
+  qrAlt: "WeChat QR code for connecting HUB",
   qrPreparing: "Generating QR code…",
   qrRenderError:
-    "Minke could not render this QR code. Cancel and start linking again.",
+    "HUB could not render this QR code. Cancel and start linking again.",
   qrInstruction: "Scan with WeChat, then confirm on your phone.",
   scannedInstruction: "Scanned. Continue the confirmation on your phone.",
   verificationInstruction:
@@ -307,7 +307,7 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   activityLast: "Last activity",
   activityNone: "None yet",
   activitySessionNote:
-    "Counts cover this connection and reset after reconnecting or quitting Minke.",
+    "Counts cover this connection and reset after reconnecting or quitting HUB.",
   activityUnderMinute: "Under 1 min",
   activityMinutes: "{count} min",
   activityHoursMinutes: "{hours} hr {minutes} min",
@@ -317,7 +317,7 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   authorizationMissing:
     "WeChat did not return the scanning user's identity, so ingress remains closed. Disconnect and scan again.",
   agentIssue:
-    "The message is safely retained, but Minke Agent is unavailable and will retry in the background.",
+    "The message is safely retained, but HUB Agent is unavailable and will retry in the background.",
   deliveryIssue:
     "Agent produced a reply, but WeChat delivery did not complete. Gateway retained the pending delivery.",
   receiveIssue:
@@ -325,7 +325,7 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   botReceiveIssue:
     "{provider} remains connected, but the latest receive failed and is retrying.",
   botAgentIssue:
-    "{provider} messages are safely retained while Minke Agent is unavailable and retries in the background.",
+    "{provider} messages are safely retained while HUB Agent is unavailable and retries in the background.",
   botDeliveryIssue:
     "Agent produced a reply, but {provider} delivery did not complete. Gateway retained the pending delivery.",
   vaultUnavailable:
@@ -335,7 +335,7 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   botCredentialInvalid:
     "The {provider} token is invalid or revoked. Paste a new token.",
   botCredentialRead:
-    "Minke could not read the saved {provider} credential.",
+    "HUB could not read the saved {provider} credential.",
   botCredentialStore:
     "The {provider} token was verified but could not be saved securely. Try again.",
   botNetwork:
@@ -350,20 +350,20 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
     "The {provider} token was verified, but its receive connection could not start. Check the bot permissions and intents.",
   alreadyBound:
     "This WeChat account is already bound remotely, but this device received no usable credential. Start linking again.",
-  credentialRead: "Minke could not read the saved WeChat credential.",
+  credentialRead: "HUB could not read the saved WeChat credential.",
   credentialStore:
-    "WeChat authorized the device, but Minke could not save the credential safely. Scan again.",
+    "WeChat authorized the device, but HUB could not save the credential safely. Scan again.",
   gatewayStore:
     "The shared IM Gateway storage cannot be opened. You can recreate it after confirming the impact on every messaging channel.",
   loginNetwork:
     "The WeChat login service is temporarily unreachable. Check the network and retry.",
   loginProtocol:
-    "Minke could not understand the WeChat login response. Scan again.",
+    "HUB could not understand the WeChat login response. Scan again.",
   transportStart:
     "The WeChat credential is saved, but the receive connection could not start.",
   sessionStale: "The WeChat session expired. Scan again.",
   commandError: "The operation did not complete. Try again.",
-  readError: "Minke could not read messaging-channel status.",
+  readError: "HUB could not read messaging-channel status.",
   busy: "Working…",
   dependencyTitle: "Runtime dependencies",
   vaultReady: "System credential protection",
@@ -372,15 +372,15 @@ export const remoteHubEn: Record<RemoteHubLocaleKey, string> = {
   credentialAuthorizationTitle:
     "Authorize secure credential storage",
   credentialAuthorizationDescription:
-    "Minke needs access to your system's protected credential store before it can encrypt and save connection credentials. Authorization starts only when you choose the button.",
+    "HUB needs access to your system's protected credential store before it can encrypt and save connection credentials. Authorization starts only when you choose the button.",
   credentialAuthorizationMacInstruction:
     "macOS: Enter your Mac login password in the system dialog, then choose Always Allow. Do not choose Deny.",
   credentialAuthorizationPending:
-    "You can keep using Minke without authorizing; messaging and remote access remain off.",
+    "You can keep using HUB without authorizing; messaging and remote access remain off.",
   credentialAuthorizationFailed:
     "Credential access was not granted. Try again.",
   credentialAuthorizationMacFailed:
-    "macOS did not grant access. Choose the button again; Minke starts a fresh authorization request in the current session without restarting or deleting credentials.",
+    "macOS did not grant access. Choose the button again; HUB starts a fresh authorization request in the current session without restarting or deleting credentials.",
   authorizeCredentialVault: "Authorize credential access",
   authorizingCredentialVault: "Requesting authorization…",
   retryCredentialVault: "Request authorization again",

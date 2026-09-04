@@ -159,7 +159,7 @@ function sessionEvent(
     return undefined;
   }
   // SessionController owns persistence compatibility and validates the full
-  // event vocabulary before exposing an inspection. Minke only validates the
+  // event vocabulary before exposing an inspection. HUB only validates the
   // payloads it interprets; unrelated events may legitimately carry scalar
   // data and must remain forward compatible.
   if (

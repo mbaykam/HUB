@@ -33,7 +33,7 @@ import {
 const ELECTRON_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
   + "AppleWebKit/537.36 (KHTML, like Gecko) "
-  + "Minke/0.2.0 Chrome/150.0.7871.224 "
+  + "HUB/0.2.0 Chrome/150.0.7871.224 "
   + "Electron/43.4.0 Safari/537.36";
 const CHROME_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -221,7 +221,7 @@ test("browser identity renders as a standalone multiline module", async () => {
   assert.equal(html.includes("Agent 访问"), true);
   assert.equal(html.includes("当前自动 Chrome UA"), false);
   assert.equal(html.includes("Chrome/150.0.0.0"), true);
-  assert.equal(html.includes("Minke/0.2.0"), false);
+  assert.equal(html.includes("HUB/0.2.0"), false);
   assert.equal(html.includes("Electron/43.4.0"), false);
   assert.equal(html.match(/maxLength="512"/gu)?.length, 2);
   assert.equal(html.match(/恢复推荐 UA/gu)?.length, 2);
@@ -310,7 +310,7 @@ test("browser identity copy is complete in both locales", () => {
   );
   assert.match(
     browserSettingsEn["browser.description"],
-    /without Minke or Electron tokens[\s\S]*fully editable/u,
+    /without HUB or Electron tokens[\s\S]*fully editable/u,
   );
   assert.equal(browserSettingsZh["browser.nav"], "浏览器");
   assert.match(

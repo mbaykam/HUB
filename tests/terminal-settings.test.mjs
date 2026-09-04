@@ -310,7 +310,7 @@ test("Terminal viewport covers the FitAddon row remainder with the active theme"
   );
 });
 
-test("the desktop store writes Terminal settings into Minke config", async () => {
+test("the desktop store writes Terminal settings into HUB config", async () => {
   const { path, store } = await fixture();
   assert.deepEqual(await store.read(), DEFAULT_TERMINAL_SETTINGS);
 

@@ -44,7 +44,7 @@ export function SessionLogHeaderAction({
     setBusy(true);
     void exportSession(sessionId)
       .catch((error: unknown) => {
-        console.warn("Minke Session export failed:", error);
+        console.warn("HUB Session export failed:", error);
       })
       .finally(() => {
         setBusy(false);

@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
  * Harness intentionally strips ambient DSH_* identity before launching
  * managed subprocesses. These MINKE_* capabilities must survive that scrub
  * so product-owned launch seams can resolve `dsh`, `node`, `pnpm`, and
- * `pnpx` back to the runtime and executable owned by Minke. Interactive
+ * `pnpx` back to the runtime and executable owned by HUB. Interactive
  * login-shell startup files remain authoritative over their final PATH.
  */
 export const embeddedNodeEnvironment = Object.freeze({
@@ -88,7 +88,7 @@ function runtimePath(
 }
 
 /**
- * Expose Minke's Node wrappers without changing how the immediate process
+ * Expose HUB's Node wrappers without changing how the immediate process
  * interprets its executable. Shells and arbitrary CLIs use this capability
  * environment; each wrapper opts into Electron-as-Node only for itself.
  * The runtime bin starts at the front of inherited PATH, while an interactive

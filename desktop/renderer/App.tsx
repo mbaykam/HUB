@@ -14,7 +14,7 @@ export default function App({ locale }: AppProps) {
         <img
           className="size-20 rounded-[22%] shadow-2xl shadow-black/30"
           src="./minke.svg"
-          alt="Minke"
+          alt="HUB"
         />
         <div className="minke-bootstrap__status flex items-center gap-2.5 text-sm">
           <span className="minke-bootstrap__pulse size-1.5 animate-pulse rounded-full" />

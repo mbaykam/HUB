@@ -69,6 +69,6 @@ export function installDataHome(
           />
         ),
       }),
-    "minke-overlay: data-home Minke Settings page",
+    "minke-overlay: data-home HUB Settings page",
   );
 }

@@ -1,5 +1,5 @@
 /**
- * Public interface of the Minke Weixin transport module.
+ * Public interface of the HUB Weixin transport module.
  *
  * Protocol semantics were reimplemented from
  * @tencent-weixin/openclaw-weixin@2.4.6 (MIT).
@@ -126,7 +126,7 @@ export interface WeixinNetworkPolicy {
 }
 
 export interface WeixinClientMetadata {
-  /** Observability-only bot identity, for example `Minke/0.4.0`. */
+  /** Observability-only bot identity, for example `HUB/0.4.0`. */
   readonly botAgent?: string;
   /** Wire-compatible channel release. Defaults to the audited upstream release. */
   readonly channelVersion?: string;

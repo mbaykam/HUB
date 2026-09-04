@@ -5,7 +5,7 @@ export interface MinkeBrandMarkProps {
   readonly className?: string;
 }
 
-/** Exact Minke app mark projected into Harness brand slots. */
+/** Exact HUB app mark projected into Harness brand slots. */
 export function MinkeBrandMark({
   size,
   className,
@@ -14,25 +14,25 @@ export function MinkeBrandMark({
     <svg
       width={size}
       height={size}
-      viewBox="0 0 832 832"
+      viewBox="0 0 1024 1024"
       className={className}
       aria-hidden="true"
       focusable="false"
     >
       <rect
-        width="832"
-        height="832"
-        rx="182.8125"
-        fill="#0e1324"
+        width="1024"
+        height="1024"
+        rx="224"
+        fill="#f5f2ea"
       />
       <path
-        fill="#fdfdfd"
-        d="m437.587907 430.95442c15.012837-181.35846 261.147481-260.086019 265.280306-219.57142 10.612789 106.033587-114.385179 248.339993-192.070113 303.515172l.018949-.010111c110.042287 93.901273 147.48881 177.076689 308.234255 201.952791l.024955-.006984c-26.891831 67.477663-92.821175 115.166132-169.888759 115.166132l-207.150884-.003613c-25.845619-105.919985-34.937273-202.960069-28.886832-265.849738.530231-5.511349 1.371363-10.786918 2.489501-15.801176-74.031621 5.595025-235.312747-32.653886-291.556232-126.150813-20.691818-34.591122 199.819647-128.261366 313.534918 6.793542z"
+        fill="#0b0e17"
+        d="M282 226c-22.1 0-40 17.9-40 40v492c0 22.1 17.9 40 40 40h80c22.1 0 40-17.9 40-40V590h220v168c0 22.1 17.9 40 40 40h80c22.1 0 40-17.9 40-40V266c0-22.1-17.9-40-40-40h-80c-22.1 0-40 17.9-40 40v164H402V266c0-22.1-17.9-40-40-40h-80Z"
       />
     </svg>
   );
 }
 
 export function MinkeBrandName(): ReactNode {
-  return <span>Minke</span>;
+  return <span>HUB</span>;
 }

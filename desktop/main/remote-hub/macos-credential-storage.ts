@@ -35,7 +35,7 @@ export interface MacOSCredentialStorageHelperPort {
 }
 
 /**
- * Route every macOS safeStorage operation through a fresh, short-lived Minke
+ * Route every macOS safeStorage operation through a fresh, short-lived HUB
  * process. Chromium keeps a failed asynchronous Keychain initialization for
  * the lifetime of one process; ending the helper discards that state so the
  * next explicit click can request authorization again without restarting the

@@ -79,7 +79,7 @@ const ACTION_ID_PATTERN = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
 /**
  * Owns shortcut registration, collision handling, one keydown listener, and
  * the async desktop persistence port. Harness features remain upstream-clean;
- * Minke product actions register against this local runtime.
+ * HUB product actions register against this local runtime.
  */
 export class ShortcutRuntime {
   readonly store: ShortcutStore;

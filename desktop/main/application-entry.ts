@@ -1,7 +1,7 @@
 import type { App } from "electron";
 import { configureAppDataPaths } from "./app-data-paths.ts";
 
-export const PRODUCT_NAME = "Minke";
+export const PRODUCT_NAME = "HUB";
 
 /**
  * Claims the desktop process before Electron acquires durable state. Returns

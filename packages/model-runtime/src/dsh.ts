@@ -1,5 +1,5 @@
 /**
- * DeepSeek Harness adapter for the Minke model-runtime module.
+ * DeepSeek Harness adapter for the HUB model-runtime module.
  * @module @lencx/minke-model-runtime/dsh
  */
 import type { Context, Fiber } from "@deepseek-ai/cordis";

@@ -210,7 +210,7 @@ function maxRetainedVisits(value: unknown): number {
   );
 }
 
-/** Resolve the private browsing-footprint database below Minke user data. */
+/** Resolve the private browsing-footprint database below HUB user data. */
 export function agentBrowserHistoryFilePath(
   userDataPath: string,
 ): string {
@@ -929,7 +929,7 @@ export class SqliteAgentBrowserHistory
       this.#database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } catch (error) {
       console.warn(
-        "Minke could not compact cleared browsing history:",
+        "HUB could not compact cleared browsing history:",
         error instanceof Error ? error.message : String(error),
       );
     }

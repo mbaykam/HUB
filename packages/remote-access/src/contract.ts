@@ -1,4 +1,4 @@
-/** Renderer-safe contracts for Minke's optional remote-access module. */
+/** Renderer-safe contracts for HUB's optional remote-access module. */
 export const REMOTE_SETTINGS_READ_CHANNEL =
   "minke:remote:settings:read";
 export const REMOTE_SETTINGS_WRITE_CHANNEL =

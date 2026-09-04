@@ -92,9 +92,9 @@ const config: ForgeConfig = {
     },
   },
   packagerConfig: {
-    name: "Minke",
-    executableName: "Minke",
-    appBundleId: "me.lencx.minke",
+    name: "HUB",
+    executableName: "HUB",
+    appBundleId: "io.github.mbaykam.hub",
     appCategoryType: "public.app-category.developer-tools",
     osxSign: {
       // A stable certificate keeps the Keychain ACL valid across updates.
@@ -184,7 +184,7 @@ const config: ForgeConfig = {
           callback();
           return;
         }
-        void pruneMacElectronLocales(join(buildPath, "Minke.app")).then(
+        void pruneMacElectronLocales(join(buildPath, "HUB.app")).then(
           (result) => {
             console.log(
               `Pruned ${String(result.removed.length)} unused Electron locales`,
@@ -233,7 +233,7 @@ const config: ForgeConfig = {
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({
-      name: "Minke",
+      name: "HUB",
       setupIcon: join(iconRoot, "icon.ico"),
     }),
     new MakerZIP({}, ["darwin"]),
@@ -243,13 +243,13 @@ const config: ForgeConfig = {
     }),
     new MakerRpm({
       options: {
-        bin: "Minke",
+        bin: "HUB",
         icon: appIcon,
       },
     }),
     new MakerDeb({
       options: {
-        bin: "Minke",
+        bin: "HUB",
         icon: appIcon,
       },
     }),

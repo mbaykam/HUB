@@ -509,7 +509,7 @@ function CodeThemePreview({
           &quot;active&quot;
         </span>
         {"; "}
-        <span style={{ color: palette.comment }}>// Minke</span>
+        <span style={{ color: palette.comment }}>// HUB</span>
       </code>
     </div>
   );
@@ -818,11 +818,11 @@ function TerminalPreferences({
             </span>
             {" echo "}
             <span className="minke-terminal-settings__preview-string">
-              &quot;Hello, Minke&quot;
+              &quot;Hello, HUB&quot;
             </span>
           </span>
           <span className="minke-terminal-settings__preview-output">
-            Hello, Minke
+            Hello, HUB
           </span>
         </code>
       </div>

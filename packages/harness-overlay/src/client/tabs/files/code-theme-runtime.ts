@@ -44,7 +44,7 @@ function freezeThemes(
 }
 
 /**
- * Owns one independently selected code theme for each Minke appearance and
+ * Owns one independently selected code theme for each HUB appearance and
  * exposes the theme for the currently active appearance.
  */
 export class CodeThemeSettingsRuntime {

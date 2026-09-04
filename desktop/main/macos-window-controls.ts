@@ -42,7 +42,7 @@ let cachedNativeAdapter: MacOSWindowButtonNativeAdapter | null | undefined;
 function sysEntryPath(): string {
   // Node's deprecated built-in `sys` module wins bare-specifier resolution.
   // Resolve the workspace/package entry explicitly so this always reaches
-  // Minke's native package in development and inside app.asar when packaged.
+  // HUB's native package in development and inside app.asar when packaged.
   return join(app.getAppPath(), "node_modules", "sys", "index.js");
 }
 

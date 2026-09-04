@@ -9,7 +9,7 @@ const workflowUrl = new URL(
 const readmeUrl = new URL("../README.md", import.meta.url);
 const scriptUrl = new URL("../scripts/forge/appimage.mjs", import.meta.url);
 
-const appImageAssetName = "Minke-linux-x64.AppImage";
+const appImageAssetName = "HUB-linux-x64.AppImage";
 
 test("AppImage script exists and is an executable ESM entry", async () => {
   const script = await readFile(scriptUrl, "utf8");
@@ -49,8 +49,8 @@ test("release job stages and checksums the AppImage", async () => {
     releaseJob.includes(`stage_asset ${appImageAssetName}`),
     "release job must stage the AppImage asset",
   );
-  assert.match(releaseJob, /'Minke-\*\.AppImage'/u);
-  assert.match(releaseJob, /sha256sum Minke-\* > SHA256SUMS/u);
+  assert.match(releaseJob, /'HUB-\*\.AppImage'/u);
+  assert.match(releaseJob, /sha256sum HUB-\* > SHA256SUMS/u);
 });
 
 test("README links directly to the AppImage installer", async () => {
@@ -58,7 +58,7 @@ test("README links directly to the AppImage installer", async () => {
 
   assert.ok(
     readme.includes(
-      `https://github.com/lencx/Minke/releases/latest/download/${appImageAssetName}`,
+      `https://github.com/mbaykam/Minke/releases/latest/download/${appImageAssetName}`,
     ),
   );
 });

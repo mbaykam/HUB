@@ -37,7 +37,7 @@ async function close(server) {
   });
 }
 
-test("Minke RSS search parsing is bounded and rejects unsafe XML", () => {
+test("HUB RSS search parsing is bounded and rejects unsafe XML", () => {
   const longSnippet = "x".repeat(3_000);
   const result = parseRssSearchResult(`<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -129,7 +129,7 @@ test("minke_web_search renders guarded citation-ready output", () => {
 });
 
 test(
-  "Minke registers an independent minke_web_search without replacing native web tools",
+  "HUB registers an independent minke_web_search without replacing native web tools",
   async () => {
     const requests = [];
     const server = createServer((request, response) => {
@@ -211,7 +211,7 @@ test(
       assert.equal(
         Object.hasOwn(ctx, "web"),
         false,
-        "the Minke plugin must not depend on or mutate ctx.web",
+        "the HUB plugin must not depend on or mutate ctx.web",
       );
       const routingGuidance =
         typeof sections[0]?.text === "function"

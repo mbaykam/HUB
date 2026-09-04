@@ -84,11 +84,11 @@ test("desktop dictionaries are complete and interpolate native details", () => {
   );
   assert.equal(
     translateDesktop("zh-Hant-TW", "bootstrap.loading"),
-    "正在启动 Minke",
+    "正在启动 HUB",
   );
   assert.equal(
     translateDesktop("fr-FR", "bootstrap.loading"),
-    "Starting Minke",
+    "Starting HUB",
   );
 });
 
@@ -98,14 +98,14 @@ test("desktop locale runtime preserves language-pack ids and projects native cop
     active: "fr-FR",
     revision: 0,
   });
-  assert.equal(runtime.t("bootstrap.loading"), "Starting Minke");
+  assert.equal(runtime.t("bootstrap.loading"), "Starting HUB");
 
   runtime.setLocale("zh-Hant");
   assert.deepEqual(runtime.getSnapshot(), {
     active: "zh-Hant",
     revision: 1,
   });
-  assert.equal(runtime.t("bootstrap.loading"), "正在启动 Minke");
+  assert.equal(runtime.t("bootstrap.loading"), "正在启动 HUB");
 
   runtime.setLocale("not_a_tag");
   assert.equal(runtime.getSnapshot().active, "zh-Hant");
@@ -135,7 +135,7 @@ test("only authorized, valid Harness locale messages update desktop state", () =
     active: "fr-FR",
     revision: 1,
   });
-  assert.equal(runtime.t("bootstrap.loading"), "Starting Minke");
+  assert.equal(runtime.t("bootstrap.loading"), "Starting HUB");
   assert.equal(notifications, 1);
 
   ipc.emit(WINDOW_LOCALE_CHANNEL, "allowed", "zh-Hant");
@@ -145,7 +145,7 @@ test("only authorized, valid Harness locale messages update desktop state", () =
   });
   assert.equal(
     runtime.t("bootstrap.loading"),
-    "正在启动 Minke",
+    "正在启动 HUB",
   );
   assert.equal(notifications, 2);
 

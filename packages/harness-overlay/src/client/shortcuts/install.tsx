@@ -231,7 +231,7 @@ export function installShortcuts(
         },
         run: () => {
           if (!openHarnessSettings()) {
-            console.warn("Minke could not find the Harness Settings trigger");
+            console.warn("HUB could not find the Harness Settings trigger");
           }
         },
       }),
@@ -258,7 +258,7 @@ export function installShortcuts(
         run: () => {
           if (!focusComposerInput()) {
             console.warn(
-              "Minke could not find an editable Harness composer",
+              "HUB could not find an editable Harness composer",
             );
           }
         },
@@ -390,7 +390,7 @@ export function installShortcuts(
               .export(sessionId)
               .catch((error: unknown) => {
                 console.warn(
-                  "Minke could not export the current Session",
+                  "HUB could not export the current Session",
                   error,
                 );
               });
@@ -407,7 +407,7 @@ export function installShortcuts(
       (candidate) => candidate.id === creatorId,
     );
     if (creator === undefined) {
-      console.warn(`Minke could not find the ${creatorId} tab creator`);
+      console.warn(`HUB could not find the ${creatorId} tab creator`);
       return;
     }
     const sessions = ctx.sessions.list.getSnapshot();
@@ -543,6 +543,6 @@ export function installShortcuts(
           />
         ),
       }),
-    "minke-overlay: shortcuts Minke Settings page",
+    "minke-overlay: shortcuts HUB Settings page",
   );
 }

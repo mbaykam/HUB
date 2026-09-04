@@ -301,7 +301,7 @@ export function installTabs(
             />
           ),
         }),
-      "minke-overlay: Personal preferences Minke Settings page",
+      "minke-overlay: Personal preferences HUB Settings page",
     );
   }
   if (tabsPort.available || sessionLogsPort.available) {
@@ -434,7 +434,7 @@ export function installTabs(
 
   const openRightHost = ctx.layout.openDetails.bind(ctx.layout);
   const closeRightHost = ctx.layout.closeDetails.bind(ctx.layout);
-  // alpha.2 owns native Details in its top-level slot. Minke only uses the
+  // alpha.2 owns native Details in its top-level slot. HUB only uses the
   // public layout transitions to reserve that track for its right Tabs.
   const rightHost = new ResponsiveRightTabsHost({
     openDetails: openRightHost,

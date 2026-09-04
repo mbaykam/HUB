@@ -1,4 +1,4 @@
-/** Transport-neutral contract shared by the Minke Host and browser adapter. */
+/** Transport-neutral contract shared by the HUB Host and browser adapter. */
 import type {
   FileManagerDiffRequest,
   FileManagerDiffResult,
@@ -131,18 +131,18 @@ function record(
 export function parseMinkeHostCapabilities(
   value: unknown,
 ): MinkeHostCapabilities {
-  const candidate = record(value, "Minke Host capabilities");
+  const candidate = record(value, "HUB Host capabilities");
   const files = record(
     candidate.files,
-    "Minke Host Files capabilities",
+    "HUB Host Files capabilities",
   );
   const tabs = record(
     candidate.tabs,
-    "Minke Host Tabs capabilities",
+    "HUB Host Tabs capabilities",
   );
   const terminal = record(
     candidate.terminal,
-    "Minke Host Terminal capabilities",
+    "HUB Host Terminal capabilities",
   );
   if (
     candidate.protocolVersion !== MINKE_HOST_PROTOCOL_VERSION ||
@@ -159,7 +159,7 @@ export function parseMinkeHostCapabilities(
     terminal.resize !== true ||
     terminal.transport !== "long-poll"
   ) {
-    throw new TypeError("Minke Host capabilities are incompatible");
+    throw new TypeError("HUB Host capabilities are incompatible");
   }
   return {
     protocolVersion: MINKE_HOST_PROTOCOL_VERSION,

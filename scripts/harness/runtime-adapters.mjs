@@ -23,7 +23,7 @@ function cmdReference(name) {
 
 /**
  * Generate the complete cross-platform adapter set staged with Harness.
- * Every adapter delegates to Minke's Electron binary and reasserts Node mode;
+ * Every adapter delegates to HUB's Electron binary and reasserts Node mode;
  * no ambient or standalone Node installation participates. The dsh adapter
  * exposes Node internals so Harness can resolve bare plugins from the active
  * profile instead of from its bundled loader package.

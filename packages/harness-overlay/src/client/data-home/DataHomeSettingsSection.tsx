@@ -462,7 +462,7 @@ function TargetOption({
         <span className="minke-data-home__target-heading">
           {label}
           {recommended && (
-            <span className="minke-data-home__badge">Minke</span>
+            <span className="minke-data-home__badge">HUB</span>
           )}
         </span>
         <code className="minke-data-home__target-path">{path}</code>

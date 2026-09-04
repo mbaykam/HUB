@@ -742,7 +742,7 @@ test("the installation runtime forwards a validated target without a shell", asy
   const installation = new PluginInstallationRuntime({
     runtimeRoot: join(root, "runtime"),
     dshHome,
-    electronExecutable: join(root, "Minke"),
+    electronExecutable: join(root, "HUB"),
     environment: {
       Path: "/usr/bin",
       dsh_home: "/ambient/dsh",
@@ -760,7 +760,7 @@ test("the installation runtime forwards a validated target without a shell", asy
 
   await installation.install("dsh-status-rotator");
   assert.equal(commands.length, 1);
-  assert.equal(commands[0].command, join(root, "Minke"));
+  assert.equal(commands[0].command, join(root, "HUB"));
   assert.deepEqual(commands[0].args, [
     "--expose-internals",
     layout.entryPath,
@@ -778,7 +778,7 @@ test("the installation runtime forwards a validated target without a shell", asy
   );
   assert.equal(
     commands[0].options.env.MINKE_NODE_EXECUTABLE,
-    join(root, "Minke"),
+    join(root, "HUB"),
   );
   assert.equal(
     commands[0].options.env.MINKE_PNPM_ENTRY,
@@ -806,7 +806,7 @@ test("the installation runtime forwards a validated target without a shell", asy
   );
   await installation.uninstall("dsh-status-rotator");
   assert.equal(commands.length, 2);
-  assert.equal(commands[1].command, join(root, "Minke"));
+  assert.equal(commands[1].command, join(root, "HUB"));
   assert.deepEqual(commands[1].args, [
     "--expose-internals",
     layout.entryPath,
@@ -882,7 +882,7 @@ test("the installation runtime lists only active web-profile plugins", async () 
   const installation = new PluginInstallationRuntime({
     runtimeRoot: join(root, "runtime"),
     dshHome,
-    electronExecutable: join(root, "Minke"),
+    electronExecutable: join(root, "HUB"),
     settings: {
       async read() {
         return pluginSettings;
@@ -927,7 +927,7 @@ test("the installation runtime treats a missing web profile as empty", async () 
   const installation = new PluginInstallationRuntime({
     runtimeRoot: join(root, "runtime"),
     dshHome: join(root, "dsh-home"),
-    electronExecutable: join(root, "Minke"),
+    electronExecutable: join(root, "HUB"),
   });
 
   assert.deepEqual(await installation.listInstalled(), {
@@ -1658,7 +1658,7 @@ test("the Plugins view renders installed recovery and GitHub discovery states", 
   );
   assert.match(
     pluginsEn["plugins.installed.uninstallSuccess"],
-    /Restarting Minke/u,
+    /Restarting HUB/u,
   );
   assert.equal(
     pluginsEn["plugins.install.placeholder"],

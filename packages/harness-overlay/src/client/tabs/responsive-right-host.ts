@@ -26,7 +26,7 @@ export interface ResponsiveRightTabsHostOptions {
 }
 
 /**
- * Owns the responsive seam between Minke's right Tabs panel and DSH's
+ * Owns the responsive seam between HUB's right Tabs panel and DSH's
  * desktop Details grid track. A mobile drawer keeps the upstream Details
  * subtree mounted while forcing its layout track closed.
  */

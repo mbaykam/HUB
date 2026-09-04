@@ -333,7 +333,7 @@ function protectedBackend(
  * by the selected OS-backed credential storage.
  *
  * The file contains ciphertext only and is never folded into the ordinary
- * Minke configuration document.
+ * HUB configuration document.
  */
 export class RemoteHubCredentialVault {
   readonly #gatewayKeyPath: string;

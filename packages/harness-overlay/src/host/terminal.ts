@@ -97,7 +97,7 @@ function terminalEnvironment(
   );
   environment.TERM = "xterm-256color";
   environment.COLORTERM = "truecolor";
-  environment.TERM_PROGRAM = "Minke";
+  environment.TERM_PROGRAM = "HUB";
   return environment;
 }
 
@@ -166,10 +166,10 @@ export class HostTerminalRuntime {
     request: TerminalCreateRequest,
   ): Promise<TerminalCreateResult> {
     if (this.#disposed) {
-      throw new Error("Minke Host Terminal is disposed");
+      throw new Error("HUB Host Terminal is disposed");
     }
     if (this.#sessions.size >= MAX_ACTIVE_TERMINALS) {
-      throw new Error("Minke Host Terminal session limit reached");
+      throw new Error("HUB Host Terminal session limit reached");
     }
     const cwd = await (
       this.#options.resolveCwd ?? resolveHostTerminalCwd

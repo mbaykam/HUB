@@ -20,7 +20,7 @@ export function desktopShortcutStore(
         return {};
       },
       async write() {
-        throw new Error("Minke desktop shortcut bridge is unavailable");
+        throw new Error("HUB desktop shortcut bridge is unavailable");
       },
       subscribe() {
         return () => {};

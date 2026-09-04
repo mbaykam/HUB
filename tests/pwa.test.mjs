@@ -39,9 +39,14 @@ function pngDimensions(buffer) {
 function pngAlphaAt(buffer, x, y) {
   const { width, height } = pngDimensions(buffer);
   assert.equal(buffer[24], 8, "PWA icons must use 8-bit channels");
-  assert.equal(buffer[25], 6, "PWA icons must use RGBA pixels");
+  const colorType = buffer[25];
+  assert.ok(
+    colorType === 2 || colorType === 6,
+    "PWA icons must use RGB or RGBA pixels",
+  );
   assert.ok(x >= 0 && x < width);
   assert.ok(y >= 0 && y < height);
+  if (colorType === 2) return 255;
   const chunks = [];
   let offset = 8;
   while (offset < buffer.length) {
@@ -236,11 +241,11 @@ function serviceWorkerNavigation(fetchImpl, language = "zh-CN") {
   };
 }
 
-test("Minke PWA manifest owns standalone branding and install icons", () => {
+test("HUB PWA manifest owns standalone branding and install icons", () => {
   const manifest = JSON.parse(MINKE_PWA_MANIFEST);
   assert.equal(manifest.id, "/");
-  assert.equal(manifest.name, "Minke");
-  assert.equal(manifest.short_name, "Minke");
+  assert.equal(manifest.name, "HUB");
+  assert.equal(manifest.short_name, "HUB");
   assert.equal(manifest.start_url, "/");
   assert.equal(manifest.scope, "/");
   assert.equal(manifest.display, "standalone");
@@ -389,7 +394,7 @@ test("PWA index metadata is branded, early, and idempotent", () => {
   );
   assert.match(
     once,
-    /name="apple-mobile-web-app-title" content="Minke"/u,
+    /name="apple-mobile-web-app-title" content="HUB"/u,
   );
   assert.match(
     once,
@@ -411,7 +416,7 @@ test("PWA index metadata is branded, early, and idempotent", () => {
   assert.doesNotMatch(once, /href="\/favicon\.svg"/u);
 });
 
-test("Minke service worker never caches authenticated app traffic", () => {
+test("HUB service worker never caches authenticated app traffic", () => {
   assert.match(
     MINKE_PWA_SERVICE_WORKER,
     /request\.mode !== "navigate"/u,
@@ -420,7 +425,7 @@ test("Minke service worker never caches authenticated app traffic", () => {
     MINKE_PWA_SERVICE_WORKER,
     /fetch\(request,\{signal:controller\.signal\}\)/u,
   );
-  assert.match(MINKE_PWA_SERVICE_WORKER, /Minke Host/u);
+  assert.match(MINKE_PWA_SERVICE_WORKER, /HUB Host/u);
   assert.doesNotMatch(
     MINKE_PWA_SERVICE_WORKER,
     /\bcaches\.(?:open|match)|cache\.put/u,
@@ -448,12 +453,12 @@ test("a slow installed-PWA navigation shows connecting feedback promptly", async
   assert.equal(result.status, 503);
   const body = await result.text();
   assert.match(body, /data-minke-pwa-connecting/u);
-  assert.match(body, /正在连接 Minke Host/u);
+  assert.match(body, /正在连接 HUB Host/u);
   assert.match(body, /fetch\(location\.href/u);
 });
 
 test("PWA navigation preserves fast responses and explicit offline feedback", async () => {
-  const networkResponse = new Response("<p>Minke</p>", {
+  const networkResponse = new Response("<p>HUB</p>", {
     status: 200,
   });
   const online = serviceWorkerNavigation(
@@ -472,7 +477,7 @@ test("PWA navigation preserves fast responses and explicit offline feedback", as
   assert.equal(offlineResponse.status, 503);
   assert.match(
     await offlineResponse.text(),
-    /无法连接到 Minke Host/u,
+    /无法连接到 HUB Host/u,
   );
 });
 

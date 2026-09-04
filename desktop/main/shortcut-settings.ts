@@ -17,7 +17,7 @@ export interface ShortcutSettingsBinding {
   dispose(): void;
 }
 
-/** Shortcut section supplied by the unified Minke configuration store. */
+/** Shortcut section supplied by the unified HUB configuration store. */
 export interface ShortcutSettingsStore {
   read(): Promise<ShortcutBindings>;
   write(value: unknown): Promise<void>;

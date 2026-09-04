@@ -11,6 +11,10 @@ const iconGeneratorSource = readFileSync(
   new URL("../scripts/forge/generate-icons.mjs", import.meta.url),
   "utf8",
 );
+const iconRendererSource = readFileSync(
+  new URL("../scripts/forge/render-icons.cjs", import.meta.url),
+  "utf8",
+);
 const trayTemplateUrl = new URL(
   "../resources/icons/trayTemplate.png",
   import.meta.url,
@@ -113,14 +117,14 @@ function assertTemplateMask(url, expectedSize) {
 test("macOS Tray assets use a black-alpha template image pair", () => {
   assert.match(forgeSource, /trayTemplate\.png/);
   assert.match(forgeSource, /trayTemplate@2x\.png/);
-  assert.match(iconGeneratorSource, /"minke-tray\.png"/);
+  assert.match(iconRendererSource, /"minke-tray\.png"/);
   assert.doesNotMatch(
-    iconGeneratorSource,
+    iconRendererSource,
     /colorkey|colorchannelmixer/,
     "the supplied black-alpha source must not be recolored",
   );
-  assert.match(iconGeneratorSource, /trayTemplate\.png/);
-  assert.match(iconGeneratorSource, /trayTemplate@2x\.png/);
+  assert.match(iconRendererSource, /trayTemplate\.png/);
+  assert.match(iconRendererSource, /trayTemplate@2x\.png/);
   assert.equal(existsSync(trayTemplateUrl), true);
   assert.equal(existsSync(trayTemplate2xUrl), true);
   assertTemplateMask(trayTemplateUrl, 16);

@@ -64,7 +64,7 @@ afterEach(async () => {
   );
 });
 
-test("Minke resolves one stable DSH home and child environment", () => {
+test("HUB resolves one stable DSH home and child environment", () => {
   const home = join(tmpdir(), "minke-home-contract");
   const userData = join(home, ".minke");
   assert.equal(
@@ -97,7 +97,7 @@ test("Minke resolves one stable DSH home and child environment", () => {
   );
 });
 
-test("initial active home inherits DSH while retaining existing Minke data", async () => {
+test("initial active home inherits DSH while retaining existing HUB data", async () => {
   const home = await temporaryRoot("minke-data-home-precedence-");
   const userData = join(home, ".minke");
   const environmentHome = join(home, "custom-dsh");

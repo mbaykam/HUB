@@ -7,7 +7,7 @@ export interface ConversationFilesTarget {
 }
 
 /**
- * Route Harness conversation file links into the Minke Files reader.
+ * Route Harness conversation file links into the HUB Files reader.
  *
  * The original workspace opener remains the fallback for unsupported paths
  * and is restored without overwriting a later interceptor.

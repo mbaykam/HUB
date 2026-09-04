@@ -15,7 +15,7 @@ const secretToken = "private.discord.bot-token";
 const bot = Object.freeze({
   avatar: "avatar-hash",
   discriminator: "0",
-  globalName: "Minke Bot",
+  globalName: "HUB Bot",
   id: "100000000000000001",
   username: "minke",
 });

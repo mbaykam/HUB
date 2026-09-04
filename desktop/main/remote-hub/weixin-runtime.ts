@@ -1332,13 +1332,13 @@ export class WeixinCapabilityRuntime {
         status: "reply",
         payload: {
           kind: "text",
-          text: "Minke 当前仅支持微信文本消息。",
+          text: "HUB 当前仅支持微信文本消息。",
         },
       };
     }
     const route = this.#agentRoute;
     if (route === undefined) {
-      throw new Error("Minke Agent route is unavailable");
+      throw new Error("HUB Agent route is unavailable");
     }
     const result = await route.runAgentTurn(
       {
@@ -1359,7 +1359,7 @@ export class WeixinCapabilityRuntime {
         status: "reply",
         payload: {
           kind: "text",
-          text: "Minke 未能生成回复，请稍后再试。",
+          text: "HUB 未能生成回复，请稍后再试。",
         },
       };
     }

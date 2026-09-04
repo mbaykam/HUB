@@ -480,7 +480,7 @@ function fixture(options = {}) {
   git(
     harnessRoot,
     "-c",
-    "user.name=Minke Test",
+    "user.name=HUB Test",
     "-c",
     "user.email=minke@example.test",
     "commit",
@@ -544,7 +544,7 @@ test("the Harness contract accepts a clean pin plus an external bundle", async (
   );
 });
 
-test("the product bundle composes declared Minke runtime packages", async () => {
+test("the product bundle composes declared HUB runtime packages", async () => {
   const { commit, projectRoot } = fixture();
   write(
     projectRoot,
@@ -826,7 +826,7 @@ test("the Harness contract requires the web_search plugin topology", async () =>
 
   await assert.rejects(
     verifyHarnessContract(projectRoot),
-    /dsh-tool-web required by Minke web_search/u,
+    /dsh-tool-web required by HUB web_search/u,
   );
 });
 
@@ -834,7 +834,7 @@ test("the Harness contract requires the SSRF-safe web_fetch topology", async () 
   for (const [options, expected] of [
     [
       { webFetchTopology: false },
-      /SSRF-safe provider required by Minke web_fetch/u,
+      /SSRF-safe provider required by HUB web_fetch/u,
     ],
     [
       { webFetchProviderSelection: false },
@@ -924,7 +924,7 @@ test("the Harness contract requires bounded web tools in shipped Agent Presets",
 
   await assert.rejects(
     verifyHarnessContract(projectRoot),
-    /standard Agent Preset no longer exposes Minke's bounded web_search and SSRF-safe web_fetch tools/u,
+    /standard Agent Preset no longer exposes HUB's bounded web_search and SSRF-safe web_fetch tools/u,
   );
 
   const { projectRoot: disabledFetchRoot } = fixture({
@@ -932,7 +932,7 @@ test("the Harness contract requires bounded web tools in shipped Agent Presets",
   });
   await assert.rejects(
     verifyHarnessContract(disabledFetchRoot),
-    /standard Agent Preset no longer exposes Minke's bounded web_search and SSRF-safe web_fetch tools/u,
+    /standard Agent Preset no longer exposes HUB's bounded web_search and SSRF-safe web_fetch tools/u,
   );
 });
 

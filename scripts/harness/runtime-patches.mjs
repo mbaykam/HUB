@@ -10,7 +10,7 @@ const forbiddenPatchOperations =
 function resolveInside(root, relativePath, label) {
   const absolute = resolve(root, ...relativePath.split("/"));
   if (absolute === root || !absolute.startsWith(`${root}${sep}`)) {
-    throw new Error(`${label} escapes the Minke project: ${relativePath}`);
+    throw new Error(`${label} escapes the HUB project: ${relativePath}`);
   }
   return absolute;
 }

@@ -61,7 +61,7 @@ export type {
   MinkeConfigDocument,
 } from "./minke-config/document.ts";
 
-/** Resolve the unified desktop config path below Minke's user-data root. */
+/** Resolve the unified desktop config path below HUB's user-data root. */
 export function minkeConfigFilePath(userDataPath: string): string {
   return join(
     userDataPath,
@@ -77,7 +77,7 @@ export interface MinkeConfigSection<T> {
 }
 
 /**
- * Owns the single Minke desktop configuration document and serializes section
+ * Owns the single HUB desktop configuration document and serializes section
  * updates so independent settings surfaces cannot overwrite one another.
  */
 export class MinkeConfigStore {

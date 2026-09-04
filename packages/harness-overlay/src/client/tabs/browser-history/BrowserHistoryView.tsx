@@ -377,7 +377,7 @@ export function BrowserHistoryView({
         generationRef.current !== generation
       ) return;
       console.warn(
-        "Minke Browser History could not load visits.",
+        "HUB Browser History could not load visits.",
         loadError,
       );
       setStatus("error");
@@ -429,7 +429,7 @@ export function BrowserHistoryView({
         generationRef.current !== generation
       ) return;
       console.warn(
-        "Minke Browser History could not load more visits.",
+        "HUB Browser History could not load more visits.",
         loadError,
       );
       setAppendStatus("error");
@@ -649,7 +649,7 @@ export function BrowserHistoryView({
         clearRequestId.current !== currentRequest
       ) return;
       console.warn(
-        "Minke Browser History could not clear visits.",
+        "HUB Browser History could not clear visits.",
         clearError,
       );
       setClearError(true);
@@ -727,7 +727,7 @@ export function BrowserHistoryView({
         deleteRequestId.current !== requestId
       ) return;
       console.warn(
-        "Minke Browser History could not delete a visit.",
+        "HUB Browser History could not delete a visit.",
         deleteError,
       );
       setDeleteErrorVisitId(visit.visitId);

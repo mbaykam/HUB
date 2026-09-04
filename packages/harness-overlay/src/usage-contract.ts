@@ -1,4 +1,4 @@
-/** Secret-free usage data shared between the Minke Host and mobile client. */
+/** Secret-free usage data shared between the HUB Host and mobile client. */
 
 export const MINKE_USAGE_ROUTE = "/minke/api/usage";
 
@@ -257,10 +257,10 @@ export function parseOpenRouterUsage(value: unknown): OpenRouterUsage {
 
 /** Validate all data before it reaches either side of the browser boundary. */
 export function parseMinkeUsageSnapshot(value: unknown): MinkeUsageSnapshot {
-  const snapshot = record(value, "Minke usage snapshot");
-  const updatedAt = text(snapshot.updatedAt, "Minke usage timestamp");
+  const snapshot = record(value, "HUB usage snapshot");
+  const updatedAt = text(snapshot.updatedAt, "HUB usage timestamp");
   if (!Number.isFinite(Date.parse(updatedAt))) {
-    throw new TypeError("Minke usage timestamp is invalid");
+    throw new TypeError("HUB usage timestamp is invalid");
   }
   return {
     updatedAt,

@@ -137,7 +137,7 @@ export function createReplaceTrustedHostsRequest(
   };
 }
 
-/** Whether a process message belongs to Minke's private Harness channel. */
+/** Whether a process message belongs to HUB's private Harness channel. */
 export function isMinkeHarnessControlMessage(
   value: unknown,
 ): boolean {

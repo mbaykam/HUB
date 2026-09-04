@@ -353,7 +353,7 @@ const tabs = Object.freeze({
   openExternal(candidate: string): void {
     const url = normalizeWebTabUrl(candidate);
     if (url === undefined) {
-      throw new TypeError("invalid Minke Web tab URL");
+      throw new TypeError("invalid HUB Web tab URL");
     }
     ipcRenderer.send(TABS_OPEN_EXTERNAL_CHANNEL, url);
   },

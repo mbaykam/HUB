@@ -132,7 +132,7 @@ test("declared Harness runtime patches apply to a disposable runtime", async () 
   });
 });
 
-test("runtime patches apply inside the Minke Git worktree", async () => {
+test("runtime patches apply inside the HUB Git worktree", async () => {
   await withFixture(
     async ({ projectRoot, runtimeRoot, target }) => {
       const patches = await resolveHarnessRuntimePatches(projectRoot, [

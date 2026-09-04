@@ -103,7 +103,7 @@ test("Windows batch adapters run through ComSpec without enabling a global shell
 test("every long-lived Windows batch process uses the shared ComSpec boundary", () => {
   const calls = [];
   const options = {
-    cwd: "D:\\a\\Minke\\Minke",
+    cwd: "D:\\a\\HUB\\HUB",
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   };
@@ -218,7 +218,7 @@ test("node-pty smoke uses a real Windows console command", () => {
   assert.deepEqual(
     nodePtyProbeInvocation({
       comspec: "C:\\Windows\\System32\\cmd.exe",
-      execPath: "C:\\Minke\\electron.exe",
+      execPath: "C:\\HUB\\electron.exe",
       platform: "win32",
     }),
     {
@@ -346,11 +346,11 @@ test("macOS packaging prefers a stable configured signing identity", () => {
   assert.deepEqual(
     resolveMacOSSigningConfig({
       CSC_NAME: "fallback identity",
-      MINKE_MACOS_SIGN_IDENTITY: " Developer ID Application: Minke ",
+      MINKE_MACOS_SIGN_IDENTITY: " Developer ID Application: HUB ",
       MINKE_MACOS_SIGN_KEYCHAIN: " /tmp/minke-signing.keychain-db ",
     }),
     {
-      identity: "Developer ID Application: Minke",
+      identity: "Developer ID Application: HUB",
       identityValidation: true,
       keychain: "/tmp/minke-signing.keychain-db",
     },
@@ -515,7 +515,7 @@ test("Linux makers target the packaged executable with matching case", async () 
     assert.ok(makerEnd > makerStart, `${maker} config must be complete`);
     assert.match(
       forgeSource.slice(makerStart, makerEnd),
-      /options:\s*\{[\s\S]*?\bbin:\s*"Minke",/u,
+      /options:\s*\{[\s\S]*?\bbin:\s*"HUB",/u,
       `${maker} must use the case-sensitive packaged executable name`,
     );
   }
@@ -526,30 +526,30 @@ test("Electron uses the Linux package desktop entry", async () => {
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   );
 
-  assert.equal(manifest.desktopName, "minke.desktop");
+  assert.equal(manifest.desktopName, "hub.desktop");
 });
 
 for (const platform of ["darwin", "win32", "linux"]) {
   test(`packaged application layout supports ${platform}`, () => {
     const layout = packagedApplicationLayout("/project", platform, "arm64");
-    const outputRoot = join("/project", "out", `Minke-${platform}-arm64`);
+    const outputRoot = join("/project", "out", `HUB-${platform}-arm64`);
     assert.equal(layout.outputRoot, outputRoot);
     if (platform === "darwin") {
-      assert.equal(layout.appRoot, join(outputRoot, "Minke.app"));
+      assert.equal(layout.appRoot, join(outputRoot, "HUB.app"));
       assert.equal(
         layout.resourcesRoot,
-        join(outputRoot, "Minke.app", "Contents", "Resources"),
+        join(outputRoot, "HUB.app", "Contents", "Resources"),
       );
       assert.equal(
         layout.executablePath,
-        join(outputRoot, "Minke.app", "Contents", "MacOS", "Minke"),
+        join(outputRoot, "HUB.app", "Contents", "MacOS", "HUB"),
       );
     } else {
       assert.equal(layout.appRoot, outputRoot);
       assert.equal(layout.resourcesRoot, join(outputRoot, "resources"));
       assert.equal(
         layout.executablePath,
-        join(outputRoot, platform === "win32" ? "Minke.exe" : "Minke"),
+        join(outputRoot, platform === "win32" ? "HUB.exe" : "HUB"),
       );
     }
   });

@@ -4,7 +4,7 @@ export const WINDOW_LOCALE_CHANNEL = "minke:window-locale";
 /** Open BCP 47-style locale identifier projected from DeepSeek Harness. */
 export type DesktopLocale = string;
 
-/** The two native-copy dictionaries owned by Minke. */
+/** The two native-copy dictionaries owned by HUB. */
 export type DesktopDictionaryLocale = "zh" | "en";
 
 /** Keep preload/main validation aligned with Harness alpha.2 LocaleId. */
@@ -20,7 +20,7 @@ export function isDesktopLocale(value: unknown): value is DesktopLocale {
 }
 
 /**
- * Resolve any system or Harness locale to one of Minke's native dictionaries.
+ * Resolve any system or Harness locale to one of HUB's native dictionaries.
  * Chinese variants stay Chinese; every other or absent value falls back to
  * English.
  */

@@ -17,7 +17,7 @@ export interface TerminalSettingsBinding {
   dispose(): void;
 }
 
-/** Terminal section supplied by the unified Minke configuration store. */
+/** Terminal section supplied by the unified HUB configuration store. */
 export interface TerminalSettingsStore {
   read(): Promise<TerminalSettings>;
   write(value: unknown): Promise<void>;

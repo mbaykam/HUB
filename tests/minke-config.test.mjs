@@ -330,7 +330,7 @@ test("Tabs panel dimensions persist beside minke.config.json", async () => {
   });
 });
 
-test("desktop settings share one versioned Minke config", async () => {
+test("desktop settings share one versioned HUB config", async () => {
   await withStore(async ({ root, store }) => {
     assert.equal(
       store.path,
@@ -607,7 +607,7 @@ test("the store rejects unsupported unified config documents", async () => {
 
     await assert.rejects(
       store.shortcuts.read(),
-      /unsupported Minke config document/u,
+      /unsupported HUB config document/u,
     );
   });
 });

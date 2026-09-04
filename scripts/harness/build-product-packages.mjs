@@ -69,36 +69,36 @@ const overlayPackageId = overlayManifest.name;
 const modelRuntimePackageId = modelRuntimeManifest.name;
 if (overlayPackageId !== "@lencx/minke-harness-overlay") {
   throw new Error(
-    "Minke Harness overlay package name must be @lencx/minke-harness-overlay",
+    "HUB Harness overlay package name must be @lencx/minke-harness-overlay",
   );
 }
 if (modelRuntimePackageId !== "@lencx/minke-model-runtime") {
   throw new Error(
-    "Minke model runtime package name must be @lencx/minke-model-runtime",
+    "HUB model runtime package name must be @lencx/minke-model-runtime",
   );
 }
 const imGatewayPackageId = imGatewayManifest.name;
 if (imGatewayPackageId !== "@lencx/minke-im-gateway") {
   throw new Error(
-    "Minke IM Gateway package name must be @lencx/minke-im-gateway",
+    "HUB IM Gateway package name must be @lencx/minke-im-gateway",
   );
 }
 const weixinPackageId = weixinManifest.name;
 if (weixinPackageId !== "@lencx/minke-im-weixin") {
   throw new Error(
-    "Minke Weixin package name must be @lencx/minke-im-weixin",
+    "HUB Weixin package name must be @lencx/minke-im-weixin",
   );
 }
 const telegramPackageId = telegramManifest.name;
 if (telegramPackageId !== "@lencx/minke-im-telegram") {
   throw new Error(
-    "Minke Telegram package name must be @lencx/minke-im-telegram",
+    "HUB Telegram package name must be @lencx/minke-im-telegram",
   );
 }
 const discordPackageId = discordManifest.name;
 if (discordPackageId !== "@lencx/minke-im-discord") {
   throw new Error(
-    "Minke Discord package name must be @lencx/minke-im-discord",
+    "HUB Discord package name must be @lencx/minke-im-discord",
   );
 }
 
@@ -338,12 +338,12 @@ const clientBundle = await readFile(
 );
 if (!clientBundle.startsWith("window.__ModuleLoader__.load(")) {
   throw new Error(
-    "Minke overlay client bundle is missing its Harness loader wrapper",
+    "HUB overlay client bundle is missing its Harness loader wrapper",
   );
 }
 if (/require\(["']@deepseek-ai\//u.test(clientBundle)) {
   throw new Error(
-    "Minke overlay client bundle leaked a non-platform Harness value import",
+    "HUB overlay client bundle leaked a non-platform Harness value import",
   );
 }
 

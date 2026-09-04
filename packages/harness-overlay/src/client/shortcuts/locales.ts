@@ -2,7 +2,7 @@
 export const zh = {
   nav: "快捷键",
   title: "快捷键",
-  description: "选择一个操作，然后按下新的组合键。设置由 Minke 保存。",
+  description: "选择一个操作，然后按下新的组合键。设置由 HUB 保存。",
   record: "录制快捷键",
   recording: "请按下组合键…",
   unassigned: "未设置",
@@ -28,8 +28,8 @@ export const zh = {
   "action.openBottomBrowserHistory": "在底栏打开浏览历史",
   "action.openRightPlugins": "在右栏打开插件",
   "action.openBottomPlugins": "在底栏打开插件",
-  "error.unavailable": "当前页面没有连接到 Minke 桌面设置。",
-  "error.read": "无法读取快捷键设置，请重新启动 Minke 后重试。",
+  "error.unavailable": "当前页面没有连接到 HUB 桌面设置。",
+  "error.read": "无法读取快捷键设置，请重新启动 HUB 后重试。",
   "error.write": "快捷键暂时无法保存，请再次修改以重试。",
 } as const;
 
@@ -43,7 +43,7 @@ export const en: Record<ShortcutLocaleKey, string> = {
   nav: "Shortcuts",
   title: "Keyboard shortcuts",
   description:
-    "Select an action, then press its new key combination. Minke saves these settings.",
+    "Select an action, then press its new key combination. HUB saves these settings.",
   record: "Record shortcut",
   recording: "Press a shortcut…",
   unassigned: "Unassigned",
@@ -73,9 +73,9 @@ export const en: Record<ShortcutLocaleKey, string> = {
   "action.openRightPlugins": "Open Plugins in Right Panel",
   "action.openBottomPlugins": "Open Plugins in Bottom Panel",
   "error.unavailable":
-    "This page is not connected to Minke desktop settings.",
+    "This page is not connected to HUB desktop settings.",
   "error.read":
-    "Minke could not read shortcut settings. Restart Minke and try again.",
+    "HUB could not read shortcut settings. Restart HUB and try again.",
   "error.write":
-    "Minke could not save this shortcut. Change it again to retry.",
+    "HUB could not save this shortcut. Change it again to retry.",
 };

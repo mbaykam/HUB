@@ -62,9 +62,9 @@ function defaultMenu() {
   return applicationMenu([
     {
       role: "appMenu",
-      label: "Minke",
+      label: "HUB",
       submenu: [
-        { role: "about", label: "About Minke" },
+        { role: "about", label: "About HUB" },
         { type: "separator" },
         { role: "services", label: "Services" },
         { role: "quit", label: "Quit" },

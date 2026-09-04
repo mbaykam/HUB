@@ -261,7 +261,7 @@ function requestRendererDocument({
   });
 }
 
-/** Distinguish a legacy Minke renderer from an unrelated port owner. */
+/** Distinguish a legacy HUB renderer from an unrelated port owner. */
 export async function inspectForgeDevelopmentRenderer({
   port = FORGE_DEVELOPMENT_RENDERER_PORT,
   timeoutMs = 750,
@@ -274,7 +274,7 @@ export async function inspectForgeDevelopmentRenderer({
     });
     if (!result.reachable) continue;
     return (
-      result.source.includes("<title>Minke</title>") &&
+      result.source.includes("<title>HUB</title>") &&
         result.source.includes('src="/main.tsx"')
     )
       ? "minke"

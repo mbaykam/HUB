@@ -30,7 +30,7 @@ export function desktopAboutInfo(
   ) {
     return {
       available: false,
-      productName: "Minke",
+      productName: "HUB",
       version: "",
       platform: "",
       arch: "",

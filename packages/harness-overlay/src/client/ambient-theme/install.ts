@@ -37,7 +37,7 @@ const AMBIENT_THEME_TOKENS: HarnessThemeTokenOverrides = Object.freeze({
   },
 });
 
-/** Install Minke's animated screenshot-inspired ambient glass canvas. */
+/** Install HUB's animated screenshot-inspired ambient glass canvas. */
 export function installAmbientTheme(
   ctx: HarnessClientContext,
 ): void {

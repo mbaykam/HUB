@@ -78,43 +78,43 @@ export function desktopAgentBrowserPort(
       },
       async setControl() {
         throw new Error(
-          "Minke desktop Agent Browser bridge is unavailable",
+          "HUB desktop Agent Browser bridge is unavailable",
         );
       },
       async navigate() {
         throw new Error(
-          "Minke desktop Agent Browser bridge is unavailable",
+          "HUB desktop Agent Browser bridge is unavailable",
         );
       },
       async readHistory() {
         throw new Error(
-          "Minke desktop Agent Browser history bridge is unavailable",
+          "HUB desktop Agent Browser history bridge is unavailable",
         );
       },
       async clearHistory() {
         throw new Error(
-          "Minke desktop Agent Browser history bridge is unavailable",
+          "HUB desktop Agent Browser history bridge is unavailable",
         );
       },
       async deleteHistory() {
         throw new Error(
-          "Minke desktop Agent Browser history bridge is unavailable",
+          "HUB desktop Agent Browser history bridge is unavailable",
         );
       },
       async startAnnotation() {
         throw new Error(
-          "Minke desktop Agent Browser bridge is unavailable",
+          "HUB desktop Agent Browser bridge is unavailable",
         );
       },
       async stopAnnotation() {},
       async refreshAnnotation() {
         throw new Error(
-          "Minke desktop Agent Browser bridge is unavailable",
+          "HUB desktop Agent Browser bridge is unavailable",
         );
       },
       async commitAnnotation() {
         throw new Error(
-          "Minke desktop Agent Browser bridge is unavailable",
+          "HUB desktop Agent Browser bridge is unavailable",
         );
       },
       close() {},
@@ -229,32 +229,32 @@ export function desktopPluginInstallerPort(
       available: false,
       async install() {
         throw new Error(
-          "Minke desktop plugin installer bridge is unavailable",
+          "HUB desktop plugin installer bridge is unavailable",
         );
       },
       async restart() {
         throw new Error(
-          "Minke desktop plugin installer bridge is unavailable",
+          "HUB desktop plugin installer bridge is unavailable",
         );
       },
       async uninstall() {
         throw new Error(
-          "Minke desktop plugin installer bridge is unavailable",
+          "HUB desktop plugin installer bridge is unavailable",
         );
       },
       async setEnabled() {
         throw new Error(
-          "Minke desktop plugin installer bridge is unavailable",
+          "HUB desktop plugin installer bridge is unavailable",
         );
       },
       async setSafeMode() {
         throw new Error(
-          "Minke desktop plugin installer bridge is unavailable",
+          "HUB desktop plugin installer bridge is unavailable",
         );
       },
       async readInstalled() {
         throw new Error(
-          "Minke desktop plugin installer bridge is unavailable",
+          "HUB desktop plugin installer bridge is unavailable",
         );
       },
     };
@@ -295,7 +295,7 @@ export function desktopSessionLogsPort(
       available: false,
       async export() {
         throw new Error(
-          "Minke desktop Session export bridge is unavailable",
+          "HUB desktop Session export bridge is unavailable",
         );
       },
     };
@@ -360,27 +360,27 @@ export function desktopFilesPort(
       watchAvailable: false,
       async diff() {
         throw new Error(
-          "Minke desktop Files bridge is unavailable",
+          "HUB desktop Files bridge is unavailable",
         );
       },
       async list() {
         throw new Error(
-          "Minke desktop Files bridge is unavailable",
+          "HUB desktop Files bridge is unavailable",
         );
       },
       async open() {
         throw new Error(
-          "Minke desktop Files bridge is unavailable",
+          "HUB desktop Files bridge is unavailable",
         );
       },
       async preview() {
         throw new Error(
-          "Minke desktop Files bridge is unavailable",
+          "HUB desktop Files bridge is unavailable",
         );
       },
       async write() {
         throw new Error(
-          "Minke desktop Files bridge is unavailable",
+          "HUB desktop Files bridge is unavailable",
         );
       },
       watch() {
@@ -461,7 +461,7 @@ export function desktopTerminalPort(
       available: false,
       async create() {
         throw new Error(
-          "Minke desktop Terminal bridge is unavailable",
+          "HUB desktop Terminal bridge is unavailable",
         );
       },
       write() {},

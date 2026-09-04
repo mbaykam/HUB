@@ -35,7 +35,7 @@ function comparePages(
 }
 
 /**
- * Owns the unified Minke Settings directory and active secondary tab.
+ * Owns the unified HUB Settings directory and active secondary tab.
  *
  * Feature installers retain their settings runtimes and contribute only a
  * render seam, while the existing DSH Settings shell owns modal behavior.
@@ -65,10 +65,10 @@ export class MinkeSettingsRuntime {
     if (this.#disposed) return () => {};
     const id = page.id.trim();
     if (id === "") {
-      throw new Error("Minke Settings page ids must not be empty");
+      throw new Error("HUB Settings page ids must not be empty");
     }
     if (this.#pages.has(id)) {
-      throw new Error(`Minke Settings page "${id}" is already registered`);
+      throw new Error(`HUB Settings page "${id}" is already registered`);
     }
     const registered = Object.freeze({
       ...page,

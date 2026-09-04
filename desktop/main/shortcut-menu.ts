@@ -105,7 +105,7 @@ export type ShortcutMenuBinding = Readonly<{
   dispose(): void;
 }>;
 
-/** Convert Minke's canonical binding grammar to Electron accelerator syntax. */
+/** Convert HUB's canonical binding grammar to Electron accelerator syntax. */
 export function shortcutBindingToAccelerator(
   binding: string | null,
   platform: NodeJS.Platform = process.platform,
@@ -130,7 +130,7 @@ export function shortcutBindingToAccelerator(
 }
 
 /**
- * Add Minke actions to the native application menu without owning or
+ * Add HUB actions to the native application menu without owning or
  * replacing Electron's standard role-based menu.
  */
 export function bindShortcutMenu(
@@ -208,7 +208,7 @@ function injectActions(
     appMenu = {
       kind: "app",
       template: {
-        label: "Minke",
+        label: "HUB",
         submenu: [],
       },
     };

@@ -4,7 +4,7 @@ import { lstat, open, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 export const GITHUB_LATEST_RELEASE_API =
-  "https://api.github.com/repos/lencx/Minke/releases/latest";
+  "https://api.github.com/repos/mbaykam/Minke/releases/latest";
 
 const GITHUB_API_VERSION = "2026-03-10";
 const MAX_RELEASE_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -148,15 +148,15 @@ export function appUpdateAssetName(
 ): string {
   const target = normalizedTarget(value);
   if (target.platform === "darwin") {
-    return `Minke-macos-${target.architecture}.dmg`;
+    return `HUB-macos-${target.architecture}.dmg`;
   }
   if (target.platform === "win32") {
-    return "Minke-windows-x64.exe";
+    return "HUB-windows-x64.exe";
   }
   if (target.installer === "appimage") {
-    return "Minke-linux-x64.AppImage";
+    return "HUB-linux-x64.AppImage";
   }
-  return `Minke-linux-x64.${target.installer}`;
+  return `HUB-linux-x64.${target.installer}`;
 }
 
 function parseOsReleaseFamily(source: string): "deb" | "rpm" | undefined {
@@ -283,7 +283,7 @@ export async function detectAppUpdateTarget(
 }
 
 function releaseAssetUrl(tag: string, assetName: string): string {
-  return `https://github.com/lencx/Minke/releases/download/${tag}/${assetName}`;
+  return `https://github.com/mbaykam/Minke/releases/download/${tag}/${assetName}`;
 }
 
 function trustedAsset(
@@ -379,7 +379,7 @@ export async function fetchAppUpdate(
     headers: {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": GITHUB_API_VERSION,
-      "User-Agent": `Minke/${currentVersion}`,
+      "User-Agent": `HUB/${currentVersion}`,
     },
   });
   if (!response.ok) {

@@ -33,7 +33,7 @@ function page(id, order, label = id) {
   };
 }
 
-test("Minke Settings owns a sorted directory and one secondary tab", () => {
+test("HUB Settings owns a sorted directory and one secondary tab", () => {
   const runtime = new MinkeSettingsRuntime();
   const revisions = [];
   const unsubscribe = runtime.subscribe(() => {
@@ -93,7 +93,7 @@ test("Minke Settings owns a sorted directory and one secondary tab", () => {
   runtime.dispose();
 });
 
-test("the installer exposes only one Minke section in DSH Settings", () => {
+test("the installer exposes only one HUB section in DSH Settings", () => {
   const runtime = new MinkeSettingsRuntime();
   const registrations = [];
   const cleanups = [];
@@ -189,7 +189,7 @@ test("remote access is configured only through Connections", () => {
   );
 });
 
-test("the Minke Settings row uses an adaptive SVG logo", () => {
+test("the HUB Settings row uses an adaptive SVG logo", () => {
   const marker = "data-minke-settings-navigation-logo";
   const variable = "--minke-settings-navigation-logo";
   const createButton = (label) => {
@@ -211,7 +211,7 @@ test("the Minke Settings row uses an adaptive SVG logo", () => {
     };
   };
   const general = createButton("General");
-  const minke = createButton("Minke");
+  const minke = createButton("HUB");
   let reconcile;
   const root = {
     defaultView: {
@@ -229,12 +229,12 @@ test("the Minke Settings row uses an adaptive SVG logo", () => {
     querySelectorAll: () => [general, minke],
   };
 
-  reconcileMinkeSettingsNavigationLogo(root, "Minke");
+  reconcileMinkeSettingsNavigationLogo(root, "HUB");
   assert.equal(general.attributes.has(marker), false);
   assert.equal(minke.attributes.has(marker), true);
 
   const dispose = installMinkeSettingsNavigationLogo(
-    () => "Minke",
+    () => "HUB",
     root,
   );
   assert.equal(typeof reconcile, "function");
@@ -252,11 +252,11 @@ test("the Minke Settings row uses an adaptive SVG logo", () => {
   );
   assert.match(
     svg,
-    /<svg[^>]*viewBox="0 0 832 832"/u,
+    /<svg[^>]*viewBox="0 0 1024 1024"/u,
   );
   assert.match(
     svg,
-    /<rect width="832" height="832" rx="182\.8125"/u,
+    /<rect width="1024" height="1024" rx="224"/u,
   );
   assert.match(svg, /<mask id="minke-logo-cutout">/u);
   assert.match(svg, /<path fill="black"/u);

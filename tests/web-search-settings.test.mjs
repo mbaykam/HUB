@@ -184,7 +184,7 @@ test("web search fallback renders native-tool routing and restart boundary", asy
   );
   assert.equal(html.includes("web_search 失败"), true);
   assert.equal(html.includes("web_fetch 失败"), true);
-  assert.equal(html.includes("重启 Minke 后生效"), true);
+  assert.equal(html.includes("重启 HUB 后生效"), true);
   assert.equal(
     html.includes("data-minke-web-search-settings"),
     true,

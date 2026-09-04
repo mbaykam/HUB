@@ -8,7 +8,7 @@ export const BROWSER_USER_AGENT_MAX_LENGTH = 512;
 export interface BrowserSettings {
   /**
    * Empty means: derive a reduced Chrome UA from the embedded Chromium
-   * runtime, without Minke or Electron product tokens.
+   * runtime, without HUB or Electron product tokens.
    */
   webUserAgent: string;
   agentUserAgent: string;
@@ -21,7 +21,7 @@ export const DEFAULT_BROWSER_SETTINGS: Readonly<BrowserSettings> =
   });
 
 const USER_AGENT_PRODUCT_TOKEN =
-  /(?:^|\s+)(?:Minke|Electron)\/[^\s]+/giu;
+  /(?:^|\s+)(?:HUB|Minke|Electron)\/[^\s]+/giu;
 const CHROME_VERSION_TOKEN =
   /\bChrome\/(\d+)(?:\.\d+){3}\b/u;
 const VISIBLE_ASCII = /^[\x20-\x7e]*$/u;
@@ -59,7 +59,7 @@ export function defaultChromeUserAgent(source: string): string {
   return normalized;
 }
 
-/** Resolve an optional custom value against Minke's automatic Chrome UA. */
+/** Resolve an optional custom value against HUB's automatic Chrome UA. */
 export function resolveBrowserUserAgent(
   configured: string,
   source: string,

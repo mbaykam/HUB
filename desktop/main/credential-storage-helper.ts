@@ -23,7 +23,7 @@ function parseRequest(
     Object.keys(value).length !== 2
   ) {
     throw new TypeError(
-      "Minke credential helper request is invalid",
+      "HUB credential helper request is invalid",
     );
   }
   const candidate = value as {
@@ -38,7 +38,7 @@ function parseRequest(
       HELPER_INPUT_LIMIT
   ) {
     throw new TypeError(
-      "Minke credential helper request is invalid",
+      "HUB credential helper request is invalid",
     );
   }
   return {
@@ -58,7 +58,7 @@ async function readRequest(
       HELPER_INPUT_LIMIT
     ) {
       throw new Error(
-        "Minke credential helper request is too large",
+        "HUB credential helper request is too large",
       );
     }
   }

@@ -119,7 +119,7 @@ const LOCAL_MODEL_ENVIRONMENT = [
   command: string;
 }[];
 
-/** Build the explicit child environment without inheriting stale Minke flags. */
+/** Build the explicit child environment without inheriting stale HUB flags. */
 export function harnessRuntimeEnvironment(
   layout: Pick<HarnessRuntimeLayout, "pnpmEntry" | "runtimeBin">,
   options: HarnessRuntimeEnvironmentOptions,

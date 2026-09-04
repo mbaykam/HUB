@@ -83,7 +83,7 @@ export function interactiveShellEnvironment(
 }
 
 /**
- * Native and third-party commands must not inherit Minke's Node bootstrap
+ * Native and third-party commands must not inherit HUB's Node bootstrap
  * controls. Callers add only command-specific variables after this boundary.
  */
 export function externalCommandEnvironment(

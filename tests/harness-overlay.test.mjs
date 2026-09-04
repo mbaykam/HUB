@@ -482,7 +482,7 @@ test("the product overlay leaves product subagents on demand and composes the mo
   );
 });
 
-test("Minke registers minke_web_search without replacing native web tools", () => {
+test("HUB registers minke_web_search without replacing native web tools", () => {
   assert.match(
     patch,
     /id: minke-web-search[\s\S]*name: '@lencx\/minke-harness-overlay\/web-search'[\s\S]*disabled: !!js process\.env\.MINKE_WEB_SEARCH_FALLBACK_ENABLED === '0'/u,
@@ -496,12 +496,12 @@ test("Minke registers minke_web_search without replacing native web tools", () =
   assert.doesNotMatch(
     patch,
     /- id: web-search-deepseek\s+disabled: true/u,
-    "Minke must preserve the native web_search provider",
+    "HUB must preserve the native web_search provider",
   );
   assert.doesNotMatch(
     patch,
     /- id: web\s+config:\s+\{\}/u,
-    "Minke must not clear native web provider selection",
+    "HUB must not clear native web provider selection",
   );
 });
 
@@ -636,7 +636,7 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
   const info = desktopAboutInfo({
     minkeDesktop: {
       about: {
-        productName: "Minke",
+        productName: "HUB",
         version: "0.1.0",
         platform: "darwin",
         arch: "arm64",
@@ -645,7 +645,7 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
   });
   assert.deepEqual(info, {
     available: true,
-    productName: "Minke",
+    productName: "HUB",
     version: "0.1.0",
     platform: "darwin",
     arch: "arm64",
@@ -692,8 +692,8 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
     /icon=\{ExternalLink\}|t\("license"\)/u,
   );
 
-  assert.equal(aboutEn.trigger, "About Minke");
-  assert.equal(aboutZh.trigger, "关于 Minke");
+  assert.equal(aboutEn.trigger, "About HUB");
+  assert.equal(aboutZh.trigger, "关于 HUB");
   assert.equal(
     aboutEn.tagline,
     "A native desktop workspace for {harness}",
@@ -702,8 +702,8 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
     aboutZh.tagline,
     "为 {harness} 打造的原生桌面工作空间",
   );
-  assert.equal(aboutEn.project, "Minke");
-  assert.equal(aboutZh.project, "Minke");
+  assert.equal(aboutEn.project, "HUB");
+  assert.equal(aboutZh.project, "HUB");
   assert.equal(Object.hasOwn(aboutEn, "title"), false);
   assert.equal(Object.hasOwn(aboutZh, "title"), false);
   assert.equal(Object.hasOwn(aboutEn, "description"), false);
@@ -713,7 +713,7 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
   assert.deepEqual(
     [MINKE_PROJECT_URL, DEEPSEEK_HARNESS_URL],
     [
-      "https://github.com/lencx/Minke",
+      "https://github.com/mbaykam/Minke",
       "https://github.com/deepseek-ai/deepseek-harness",
     ],
   );
@@ -762,7 +762,7 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
 test("About stays hidden when desktop metadata is unavailable", () => {
   assert.deepEqual(desktopAboutInfo({}), {
     available: false,
-    productName: "Minke",
+    productName: "HUB",
     version: "",
     platform: "",
     arch: "",
@@ -771,7 +771,7 @@ test("About stays hidden when desktop metadata is unavailable", () => {
     desktopAboutInfo({
       minkeDesktop: {
         about: {
-          productName: "Minke",
+          productName: "HUB",
           version: "",
           platform: "darwin",
           arch: "arm64",
@@ -780,7 +780,7 @@ test("About stays hidden when desktop metadata is unavailable", () => {
     }),
     {
       available: false,
-      productName: "Minke",
+      productName: "HUB",
       version: "",
       platform: "",
       arch: "",
@@ -800,7 +800,7 @@ test("Tabs stays generic while content types register as adapters", () => {
   assert.doesNotMatch(
     tabsInstallSource,
     /installConversationFileRouter|ctx\.workspaces/u,
-    "alpha.2 owns tool-file link routing; Minke must not monkeypatch the removed workspaces service",
+    "alpha.2 owns tool-file link routing; HUB must not monkeypatch the removed workspaces service",
   );
   assert.match(
     tabsInstallSource,
@@ -1003,7 +1003,7 @@ test("the global command palette maps product actions without replacing slash co
   assert.match(bundle, /Mod\+K/u);
 });
 
-test("Minke bypasses the upstream internal-testing notice through slot shadowing", () => {
+test("HUB bypasses the upstream internal-testing notice through slot shadowing", () => {
   assert.match(
     onboardingInstallSource,
     /ctx\.slots\.inject\("settings\.onboarding"/u,

@@ -86,7 +86,7 @@ function hostCapabilities(root = "/host/home") {
   };
 }
 
-test("Minke Host applies trusted-host replacements over its private process channel", () => {
+test("HUB Host applies trusted-host replacements over its private process channel", () => {
   const port = new EventEmitter();
   const responses = [];
   const replacements = [];
@@ -132,7 +132,7 @@ test("Minke Host applies trusted-host replacements over its private process chan
 });
 
 function agentTurnHistory(operationId, {
-  answer = "Minke answer",
+  answer = "HUB answer",
   endReason = { kind: "completed" },
   turn = 2,
   userText = "incoming",
@@ -264,7 +264,7 @@ function agentTurnHistoryWithProducedFiles(operationId) {
           name: "write",
           arguments: JSON.stringify({
             file_path: "demo.html",
-            content: "<h1>Minke</h1>",
+            content: "<h1>HUB</h1>",
           }),
         },
       },
@@ -341,7 +341,7 @@ function agentTurnHistoryWithProducedFiles(operationId) {
             command: "insert",
             path: "notes.txt",
             insert_line: 0,
-            new_str: "Minke",
+            new_str: "HUB",
           }),
         },
       },
@@ -486,7 +486,7 @@ async function waitUntil(predicate) {
   throw new Error("condition did not become true");
 }
 
-test("Minke Host recovers a completed Agent turn before prompting again", async () => {
+test("HUB Host recovers a completed Agent turn before prompting again", async () => {
   const operationId = "weixin:account-1:message-7";
   const calls = [];
   const port = new EventEmitter();
@@ -561,7 +561,7 @@ test("Minke Host recovers a completed Agent turn before prompting again", async 
   assert.deepEqual(response.result, {
     outcome: "completed",
     sessionId: "session-im-account-1-peer-2",
-    text: "Minke answer",
+    text: "HUB answer",
     turn: 2,
     endReason: "completed",
   });
@@ -585,7 +585,7 @@ test("Minke Host recovers a completed Agent turn before prompting again", async 
   dispose();
 });
 
-test("Minke Host skips alpha.2 ignorable external Session events with non-object data", async () => {
+test("HUB Host skips alpha.2 ignorable external Session events with non-object data", async () => {
   const operationId = "weixin:account-1:message-ignorable";
   const base = agentTurnHistory(operationId, {
     answer: "compatible reply",
@@ -646,7 +646,7 @@ test("Minke Host skips alpha.2 ignorable external Session events with non-object
   });
 });
 
-test("Minke Host ignores unconsumed events validated by SessionController", async () => {
+test("HUB Host ignores unconsumed events validated by SessionController", async () => {
   const operationId = "weixin:account-1:message-required";
   const base = agentTurnHistory(operationId, {
     answer: "forward-compatible reply",
@@ -694,7 +694,7 @@ test("Minke Host ignores unconsumed events validated by SessionController", asyn
   });
 });
 
-test("Minke Host scans a long Session once and follows its event tail without polling", async () => {
+test("HUB Host scans a long Session once and follows its event tail without polling", async () => {
   const operationId = "weixin:account-1:message-long-history";
   const prefixLength = 2_048;
   const events = Array.from(
@@ -819,7 +819,7 @@ test("Minke Host scans a long Session once and follows its event tail without po
   );
 });
 
-test("Minke Host reconciles a truncated follow opening before deciding to prompt", async () => {
+test("HUB Host reconciles a truncated follow opening before deciding to prompt", async () => {
   const operationId = "weixin:account-1:message-follow-gap";
   const input = {
     operationId,
@@ -930,7 +930,7 @@ test("Minke Host reconciles a truncated follow opening before deciding to prompt
   });
 });
 
-test("Minke Host writes operationId to prompt requestId without exposing slash commands", async () => {
+test("HUB Host writes operationId to prompt requestId without exposing slash commands", async () => {
   const operationId = "telegram:account-1:update-9";
   const calls = [];
   let inspectionReads = 0;
@@ -1048,7 +1048,7 @@ test("Minke Host writes operationId to prompt requestId without exposing slash c
   dispose();
 });
 
-test("Minke Host publishes previews only for successful produced files", async () => {
+test("HUB Host publishes previews only for successful produced files", async () => {
   const operationId = "weixin:account-1:message-preview";
   const published = [];
   const result = await runAgentTurnInHarness(
@@ -1106,7 +1106,7 @@ test("Minke Host publishes previews only for successful produced files", async (
   });
 });
 
-test("Minke Host cancellation detaches while an operation remains single-flight", async () => {
+test("HUB Host cancellation detaches while an operation remains single-flight", async () => {
   const operationId = "discord:account-1:event-1";
   const delayedInspection = Promise.withResolvers();
   let inspectionReads = 0;
@@ -1326,7 +1326,7 @@ test("Agent turn control-plane failures reject instead of becoming terminal resu
   );
 });
 
-test("Minke Host calibrates identity only for external IM agents", async (t) => {
+test("HUB Host calibrates identity only for external IM agents", async (t) => {
   const cleanups = [];
   let onAgentCreated;
   t.after(async () => {
@@ -1414,7 +1414,7 @@ test("Remote preview snapshots HTML behind a durable capability route", async (t
   });
   await writeFile(
     join(root, "demo.html"),
-    "<!doctype html><style>body{color:hotpink}</style><h1>Minke</h1>",
+    "<!doctype html><style>body{color:hotpink}</style><h1>HUB</h1>",
     "utf8",
   );
 
@@ -1460,7 +1460,7 @@ test("Remote preview snapshots HTML behind a durable capability route", async (t
     first[0].route,
   );
   assert.equal(served.status, 200);
-  assert.match(served.body, /<h1>Minke<\/h1>/u);
+  assert.match(served.body, /<h1>HUB<\/h1>/u);
   assert.match(
     served.headers["content-security-policy"],
     /(?:^|;\s*)sandbox(?:;|$)/u,
@@ -1586,7 +1586,7 @@ test("Remote preview recovers JSON-escaped near-limit snapshots after restart", 
   assert.equal(routes.length, 2);
 });
 
-test("Minke Host mounts Files RPC on the trusted DSH connection", async (t) => {
+test("HUB Host mounts Files RPC on the trusted DSH connection", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "minke-host-root-"));
   const outside = await mkdtemp(join(tmpdir(), "minke-host-outside-"));
   t.after(async () => {
@@ -1708,7 +1708,7 @@ test("Minke Host mounts Files RPC on the trusted DSH connection", async (t) => {
   const unknown = await call("files.watch", {});
   assert.equal(unknown.ok, false);
   assert.equal(unknown.error.code, "bad-request");
-  assert.match(unknown.error.message, /unknown Minke Host endpoint/u);
+  assert.match(unknown.error.message, /unknown HUB Host endpoint/u);
 });
 
 test("browser workspace adapters project Host Files without Electron", async () => {

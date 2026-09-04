@@ -144,14 +144,14 @@ export function resolveDshHomePath(
   );
 }
 
-/** Minke's recommended explicit DSH home below its own user-data root. */
+/** HUB's recommended explicit DSH home below its own user-data root. */
 export function recommendedMinkeDshHome(
   userDataPath: string,
 ): string {
   return resolve(userDataPath, "harness");
 }
 
-/** Give every Minke-owned DSH process the same authoritative home. */
+/** Give every HUB-owned DSH process the same authoritative home. */
 export function buildDshChildEnvironment(
   activeDshHome: string,
   inherited: NodeJS.ProcessEnv = process.env,

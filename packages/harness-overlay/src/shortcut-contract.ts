@@ -1,4 +1,4 @@
-/** Shared desktop/client contract for durable Minke keyboard shortcuts. */
+/** Shared desktop/client contract for durable HUB keyboard shortcuts. */
 
 export const SHORTCUT_SETTINGS_READ_CHANNEL =
   "minke:shortcut-settings:read";
@@ -183,7 +183,7 @@ export const SHORTCUT_BINDING_PATTERN = new RegExp(
 
 export type ShortcutBindings = Record<string, string>;
 
-/** Narrow untrusted native-menu messages to Minke-owned shortcut actions. */
+/** Narrow untrusted native-menu messages to HUB-owned shortcut actions. */
 export function isProductShortcutActionId(
   value: unknown,
 ): value is ProductShortcutActionId {

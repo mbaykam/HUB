@@ -50,11 +50,11 @@ import {
   type TelegramNetworkSettings,
 } from "@minke/harness-overlay/remote-hub-contract.ts";
 
-/** Current schema version of the unified Minke desktop configuration. */
+/** Current schema version of the unified HUB desktop configuration. */
 export const MINKE_CONFIG_VERSION = 5;
 const LEGACY_MINKE_CONFIG_VERSIONS = new Set([1, 2, 3, 4]);
 
-/** Complete Minke-owned desktop configuration stored on disk. */
+/** Complete HUB-owned desktop configuration stored on disk. */
 export interface MinkeConfigDocument {
   version: typeof MINKE_CONFIG_VERSION;
   shortcuts: ShortcutBindings;
@@ -138,7 +138,7 @@ function parseStoredRemoteSettings(
   }
 }
 
-/** Validate and copy one unified Minke desktop configuration document. */
+/** Validate and copy one unified HUB desktop configuration document. */
 export function parseMinkeConfigDocument(
   value: unknown,
 ): MinkeConfigDocument {
@@ -147,7 +147,7 @@ export function parseMinkeConfigDocument(
     value === null ||
     Array.isArray(value)
   ) {
-    throw new TypeError("Minke config document must be an object");
+    throw new TypeError("HUB config document must be an object");
   }
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
@@ -163,7 +163,7 @@ export function parseMinkeConfigDocument(
       )
     )
   ) {
-    throw new TypeError("unsupported Minke config document");
+    throw new TypeError("unsupported HUB config document");
   }
   return {
     version: MINKE_CONFIG_VERSION,

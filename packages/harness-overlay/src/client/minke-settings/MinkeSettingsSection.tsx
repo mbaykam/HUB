@@ -97,7 +97,7 @@ interface MinkeSettingsPageBoundaryState {
   failed: boolean;
 }
 
-/** Keep one failing contribution from taking down every Minke settings page. */
+/** Keep one failing contribution from taking down every HUB settings page. */
 class MinkeSettingsPageBoundary extends Component<
   MinkeSettingsPageBoundaryProps,
   MinkeSettingsPageBoundaryState
@@ -112,7 +112,7 @@ class MinkeSettingsPageBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error(
-      `Minke Settings page "${this.props.label}" failed`,
+      `HUB Settings page "${this.props.label}" failed`,
       error,
       info.componentStack,
     );
@@ -141,7 +141,7 @@ export interface MinkeSettingsSectionProps {
 }
 
 /**
- * Keep all Minke-owned configuration in one DSH Settings section.
+ * Keep all HUB-owned configuration in one DSH Settings section.
  *
  * Compact labeled tabs keep each product settings area discoverable while
  * preserving keyboard navigation and stable positions.

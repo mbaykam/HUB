@@ -64,7 +64,7 @@ test("desktop configures data paths before claiming the process", async () => {
       true,
     );
     assert.deepEqual(calls, [
-      ["name", "Minke"],
+      ["name", "HUB"],
       ["getPath", "home"],
       ["setPath", "userData", join(homePath, ".minke")],
       ["setPath", "sessionData", join(homePath, ".minke")],

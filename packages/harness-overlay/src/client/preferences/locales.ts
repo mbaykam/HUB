@@ -2,7 +2,7 @@ export const preferencesZh = {
   "preferences.nav": "偏好设置",
   "preferences.title": "偏好设置",
   "preferences.description":
-    "自定义 Minke 在当前设备上的显示与运行方式。",
+    "自定义 HUB 在当前设备上的显示与运行方式。",
   "preferences.category.workspace.title": "工作区",
   "preferences.category.workspace.description":
     "设置代码视图与终端的显示方式。",
@@ -14,10 +14,10 @@ export const preferencesZh = {
     "文件视图与终端共享代码配色。为浅色和深色模式分别选择主题。",
   "preferences.codeTheme.light.label": "浅色模式",
   "preferences.codeTheme.light.help":
-    "Minke 使用浅色外观时应用，可选择任意明暗配色。",
+    "HUB 使用浅色外观时应用，可选择任意明暗配色。",
   "preferences.codeTheme.dark.label": "深色模式",
   "preferences.codeTheme.dark.help":
-    "Minke 使用深色外观时应用，可选择任意明暗配色。",
+    "HUB 使用深色外观时应用，可选择任意明暗配色。",
   "preferences.codeTheme.preview": "{mode} · {theme}",
   "preferences.codeTheme.active": "当前",
   "preferences.code.error.unavailable":
@@ -53,11 +53,11 @@ export const preferencesZh = {
     "行高必须在 {min} 到 {max} 之间。",
   "preferences.webSearch.title": "网页搜索",
   "preferences.webSearch.description":
-    "设置 Minke 在原生网页工具失败时的后备行为。",
+    "设置 HUB 在原生网页工具失败时的后备行为。",
   "preferences.webSearch.fallback.label":
     "搜索失败时尝试备用来源",
   "preferences.webSearch.fallback.help":
-    "原生 web_search 失败时使用相同查询重试；web_fetch 失败时搜索替代来源并保留原错误。重启 Minke 后生效。",
+    "原生 web_search 失败时使用相同查询重试；web_fetch 失败时搜索替代来源并保留原错误。重启 HUB 后生效。",
   "preferences.webSearch.error.unavailable":
     "当前环境无法保存网页搜索设置。",
   "preferences.webSearch.error.read":
@@ -66,7 +66,7 @@ export const preferencesZh = {
     "网页搜索设置尚未保存，请检查磁盘权限后重试。",
   "preferences.update.title": "软件更新",
   "preferences.update.description":
-    "控制 Minke 获取并验证新版本的方式。",
+    "控制 HUB 获取并验证新版本的方式。",
   "preferences.update.autoDownload.label": "自动下载更新",
   "preferences.update.autoDownload.help":
     "在后台下载并验证可信新版本；打开安装程序或显示 AppImage 前仍会请求确认。",
@@ -91,7 +91,7 @@ export const preferencesEn: Record<
   "preferences.nav": "Preferences",
   "preferences.title": "Preferences",
   "preferences.description":
-    "Customize how Minke looks and behaves on this device.",
+    "Customize how HUB looks and behaves on this device.",
   "preferences.category.workspace.title": "Workspace",
   "preferences.category.workspace.description":
     "Control how code and Terminal content are displayed.",
@@ -103,10 +103,10 @@ export const preferencesEn: Record<
     "Files and Terminal share code colors. Choose a theme for light and dark mode.",
   "preferences.codeTheme.light.label": "Light mode",
   "preferences.codeTheme.light.help":
-    "Used when Minke has a light appearance. Any light or dark palette can be selected.",
+    "Used when HUB has a light appearance. Any light or dark palette can be selected.",
   "preferences.codeTheme.dark.label": "Dark mode",
   "preferences.codeTheme.dark.help":
-    "Used when Minke has a dark appearance. Any light or dark palette can be selected.",
+    "Used when HUB has a dark appearance. Any light or dark palette can be selected.",
   "preferences.codeTheme.preview": "{mode} · {theme}",
   "preferences.codeTheme.active": "Current",
   "preferences.code.error.unavailable":
@@ -142,11 +142,11 @@ export const preferencesEn: Record<
     "Line height must be between {min} and {max}.",
   "preferences.webSearch.title": "Web search",
   "preferences.webSearch.description":
-    "Choose what Minke does when native web tools cannot complete.",
+    "Choose what HUB does when native web tools cannot complete.",
   "preferences.webSearch.fallback.label":
     "Try alternate sources when search fails",
   "preferences.webSearch.fallback.help":
-    "Retry the same query when native web_search fails. If web_fetch fails, search for alternate sources and preserve the original error. Restart Minke to apply changes.",
+    "Retry the same query when native web_search fails. If web_fetch fails, search for alternate sources and preserve the original error. Restart HUB to apply changes.",
   "preferences.webSearch.error.unavailable":
     "Web search settings cannot be saved in this environment.",
   "preferences.webSearch.error.read":
@@ -155,11 +155,11 @@ export const preferencesEn: Record<
     "Web search settings were not saved. Check disk permissions and try again.",
   "preferences.update.title": "Software updates",
   "preferences.update.description":
-    "Control how Minke gets and verifies new versions.",
+    "Control how HUB gets and verifies new versions.",
   "preferences.update.autoDownload.label":
     "Download updates automatically",
   "preferences.update.autoDownload.help":
-    "Download and verify trusted versions in the background. Minke still asks before opening an installer or revealing an AppImage.",
+    "Download and verify trusted versions in the background. HUB still asks before opening an installer or revealing an AppImage.",
   "preferences.update.error.unavailable":
     "Application updates are unavailable for this build or platform.",
   "preferences.update.error.read":

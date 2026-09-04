@@ -28,7 +28,7 @@ function deleteEnvironmentName(
   }
 }
 
-/** Build an external-service environment without Minke's Node bootstrap. */
+/** Build an external-service environment without HUB's Node bootstrap. */
 export function externalRuntimeEnvironment(
   inherited: NodeJS.ProcessEnv,
   additions: NodeJS.ProcessEnv = {},

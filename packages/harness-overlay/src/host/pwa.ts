@@ -12,9 +12,9 @@ export { MINKE_PWA_ROUTES };
 export const MINKE_PWA_MANIFEST = `${JSON.stringify(
   {
     id: "/",
-    name: "Minke",
-    short_name: "Minke",
-    description: "A focused workspace for DeepSeek Harness.",
+    name: "HUB",
+    short_name: "HUB",
+    description: "A focused desktop and mobile AI workspace.",
     start_url: "/",
     scope: "/",
     display: "standalone",
@@ -47,9 +47,9 @@ export const MINKE_PWA_MANIFEST = `${JSON.stringify(
 )}\n`;
 
 const OFFLINE_ICON = [
-  '<svg aria-hidden="true" viewBox="0 0 832 832">',
-  '<rect width="832" height="832" rx="182.8125" fill="#0e1324"/>',
-  '<path fill="#fdfdfd" d="m437.587907 430.95442c15.012837-181.35846 261.147481-260.086019 265.280306-219.57142 10.612789 106.033587-114.385179 248.339993-192.070113 303.515172l.018949-.010111c110.042287 93.901273 147.48881 177.076689 308.234255 201.952791l.024955-.006984c-26.891831 67.477663-92.821175 115.166132-169.888759 115.166132l-207.150884-.003613c-25.845619-105.919985-34.937273-202.960069-28.886832-265.849738.530231-5.511349 1.371363-10.786918 2.489501-15.801176-74.031621 5.595025-235.312747-32.653886-291.556232-126.150813-20.691818-34.591122 199.819647-128.261366 313.534918 6.793542z"/>',
+  '<svg aria-hidden="true" viewBox="0 0 1024 1024">',
+  '<rect width="1024" height="1024" rx="224" fill="#f5f2ea"/>',
+  '<path fill="#0b0e17" d="M282 226c-22.1 0-40 17.9-40 40v492c0 22.1 17.9 40 40 40h80c22.1 0 40-17.9 40-40V590h220v168c0 22.1 17.9 40 40 40h80c22.1 0 40-17.9 40-40V266c0-22.1-17.9-40-40-40h-80c-22.1 0-40 17.9-40 40v164H402V266c0-22.1-17.9-40-40-40h-80Z"/>',
   "</svg>",
 ].join("");
 
@@ -58,15 +58,15 @@ function offlinePage(
 ): string {
   const copy = language === "zh"
     ? {
-        title: "无法连接到 Minke Host",
+        title: "无法连接到 HUB Host",
         description:
-          "请确认桌面端 Minke 和远程访问仍在运行，然后重新连接。",
+          "请确认桌面端 HUB 和远程访问仍在运行，然后重新连接。",
         action: "重新连接",
       }
     : {
-        title: "Minke Host is offline",
+        title: "HUB Host is offline",
         description:
-          "Check that desktop Minke and remote access are running, then reconnect.",
+          "Check that desktop HUB and remote access are running, then reconnect.",
         action: "Reconnect",
       };
   return [
@@ -104,20 +104,20 @@ function connectingPage(
 ): string {
   const copy = language === "zh"
     ? {
-        title: "正在连接 Minke Host",
+        title: "正在连接 HUB Host",
         description:
-          "网络响应较慢。Minke 会持续重试，并在 Host 可用后自动进入。",
+          "网络响应较慢。HUB 会持续重试，并在 Host 可用后自动进入。",
         action: "立即重试",
         retrying: "正在重试…",
         ready: "已连接，正在进入…",
       }
     : {
-        title: "Connecting to Minke Host",
+        title: "Connecting to HUB Host",
         description:
-          "The network is responding slowly. Minke will keep trying and open automatically when the Host is ready.",
+          "The network is responding slowly. HUB will keep trying and open automatically when the Host is ready.",
         action: "Retry now",
         retrying: "Retrying…",
-        ready: "Connected. Opening Minke…",
+        ready: "Connected. Opening HUB…",
       };
   const retryScript = [
     "(()=>{",
@@ -257,9 +257,9 @@ export const MINKE_PWA_SERVICE_WORKER = [
 ].join("\n");
 
 const PWA_LAUNCH_SHELL = [
-  '<div data-minke-pwa-launch role="status" aria-live="polite" aria-label="Minke is starting">',
+  '<div data-minke-pwa-launch role="status" aria-live="polite" aria-label="HUB is starting">',
   OFFLINE_ICON,
-  '<strong aria-hidden="true">Minke</strong>',
+  '<strong aria-hidden="true">HUB</strong>',
   '<span data-minke-pwa-launch-indicator aria-hidden="true"></span>',
   "</div>",
 ].join("");
@@ -339,12 +339,12 @@ export function injectMinkePwaHead(html: string): string {
   const hasManifest =
     /<link\s+rel=(["'])manifest\1[^>]*>/iu.test(output);
   const metadata = [
-    `<meta ${PWA_HEAD_MARKER} name="application-name" content="Minke">`,
+    `<meta ${PWA_HEAD_MARKER} name="application-name" content="HUB">`,
     hasViewport ? "" : viewportTag,
     '<meta name="theme-color" content="#0e1324">',
     '<meta name="apple-mobile-web-app-capable" content="yes">',
     '<meta name="apple-mobile-web-app-status-bar-style" content="black">',
-    '<meta name="apple-mobile-web-app-title" content="Minke">',
+    '<meta name="apple-mobile-web-app-title" content="HUB">',
     hasManifest
       ? ""
       : `<link rel="manifest" href="${MINKE_PWA_ROUTES.manifest}">`,

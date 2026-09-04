@@ -552,7 +552,7 @@ function unsafeLmStudioModelStateError(
 ): ModelRuntimeRequestError {
   return new ModelRuntimeRequestError(
     `LM Studio did not report model "${model}" as a single, explicitly unloaded `
-      + "LLM or VLM. Minke left LM Studio untouched. Update LM Studio or load the "
+      + "LLM or VLM. HUB left LM Studio untouched. Update LM Studio or load the "
       + "model manually, then retry.",
     "LM_STUDIO_CONTEXT_STATE_UNSAFE",
   );
@@ -568,7 +568,7 @@ function contextTooSmallError(
       ? "not loaded"
       : `loaded with a ${String(currentContext)}-token context`;
   return new ModelRuntimeRequestError(
-    `LM Studio model "${model}" is ${current}, but Minke requires at least `
+    `LM Studio model "${model}" is ${current}, but HUB requires at least `
       + `${String(requiredContext)} context tokens. In LM Studio, unload and reload `
       + `this model with Context Length ${String(requiredContext)} or higher, then retry.`,
     "LM_STUDIO_CONTEXT_TOO_SMALL",
@@ -676,7 +676,7 @@ class LmStudioContextGate {
       model !== resolved.state.key
     ) {
       throw new ModelRuntimeRequestError(
-        `LM Studio model "${model}" uses a custom instance identifier. Minke cannot `
+        `LM Studio model "${model}" uses a custom instance identifier. HUB cannot `
           + `safely preserve that identifier while changing its context. In LM Studio, `
           + `reload this instance with Context Length ${String(requiredContext)} or higher.`,
         "LM_STUDIO_CONTEXT_ALIAS_UNSUPPORTED",
@@ -735,7 +735,7 @@ class LmStudioContextGate {
         }
       } catch (error) {
         throw new ModelRuntimeRequestError(
-          `Minke could not load LM Studio model "${state.key}" with `
+          `HUB could not load LM Studio model "${state.key}" with `
             + `${String(requiredContext)} context tokens. Reduce the configured context `
             + `or load the model manually in LM Studio.`,
           "LM_STUDIO_CONTEXT_PREPARATION_FAILED",
@@ -811,10 +811,10 @@ class LmStudioContextGate {
       }
       throw new ModelRuntimeRequestError(
         rollbackFailures.length === 0
-          ? `Minke could not expand LM Studio model "${state.key}" to `
+          ? `HUB could not expand LM Studio model "${state.key}" to `
             + `${String(requiredContext)} context tokens; its previous `
             + `${String(instance.contextLength)}-token configuration was restored.`
-          : `Minke could not expand or restore LM Studio model "${state.key}". `
+          : `HUB could not expand or restore LM Studio model "${state.key}". `
             + "Open LM Studio and reload the model manually.",
         rollbackFailures.length === 0
           ? "LM_STUDIO_CONTEXT_PREPARATION_FAILED"

@@ -24,7 +24,7 @@ const clientEntry = readFileSync(
   "utf8",
 );
 
-test("ambient theme carries Minke's animated browser-tab palette", () => {
+test("ambient theme carries HUB's animated browser-tab palette", () => {
   for (const color of [
     "--minke-ambient-cyan",
     "--minke-ambient-blue",

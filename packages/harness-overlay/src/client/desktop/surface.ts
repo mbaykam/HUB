@@ -308,7 +308,7 @@ function clearDesktopMarkers(root: Document): void {
 }
 
 /**
- * Project Minke's macOS surface onto the upstream Harness DOM.
+ * Project HUB's macOS surface onto the upstream Harness DOM.
  *
  * The document-start extension owns first-paint layout and a fail-safe
  * no-drag default. This adapter enables each native drag target only while

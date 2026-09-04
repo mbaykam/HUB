@@ -35,9 +35,9 @@ const preloadPath = join(
   'build',
   'desktop-preload.js',
 );
-const BOOTSTRAP_PROMPT = 'Minke composer bootstrap e2e';
-const OPEN_PROMPT = 'Minke browser open e2e';
-const CLOSE_PROMPT = 'Minke browser close e2e';
+const BOOTSTRAP_PROMPT = 'HUB composer bootstrap e2e';
+const OPEN_PROMPT = 'HUB browser open e2e';
+const CLOSE_PROMPT = 'HUB browser close e2e';
 const BOOTSTRAP_MARKER = 'MINKE_COMPOSER_READY';
 const OPENED_MARKER = 'MINKE_BROWSER_OPENED_AND_CLICKED';
 const CLOSED_MARKER = 'MINKE_BROWSER_CLOSED';
@@ -129,7 +129,7 @@ async function startBrowserFixture() {
     });
     response.end(`<!doctype html>
       <html>
-        <head><title>Minke Agent Browser E2E</title></head>
+        <head><title>HUB Agent Browser E2E</title></head>
         <body>
           <p id="state">Ready</p>
           <label>
@@ -394,7 +394,7 @@ async function startDynamicModelServer(browserUrl) {
         return;
       }
 
-      sendText(response, 'Minke Agent Browser E2E');
+      sendText(response, 'HUB Agent Browser E2E');
     })().catch((error) => {
       if (!response.headersSent) {
         response.writeHead(500, {
@@ -950,7 +950,7 @@ async function run() {
       BOOTSTRAP_MARKER,
       harnessCookie,
     );
-    const conversationTitle = 'Minke Agent Browser Conversation E2E';
+    const conversationTitle = 'HUB Agent Browser Conversation E2E';
     await rpc(harnessUrl, 'session/rename', {
       sessionId: created.sessionId,
       title: conversationTitle,

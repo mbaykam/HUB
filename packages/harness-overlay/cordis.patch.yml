@@ -4,7 +4,7 @@
   disabled: true
 
 - insert:
-    # DSH ships Schedule as an explicit Web opt-in. Minke enables the durable
+    # DSH ships Schedule as an explicit Web opt-in. HUB enables the durable
     # host runtime and read-only conversation-header catalog together.
     - id: time-context
       name: '@deepseek-ai/dsh-time-context'
@@ -21,7 +21,7 @@
       config:
         baseURL: !!js process.env.MINKE_WEB_SEARCH_BASE_URL
 
-    # Minke's two supported local-model runtimes stay configurable even when
+    # HUB's two supported local-model runtimes stay configurable even when
     # their service is offline. Auto-start is an explicit desktop preference.
     - id: model-runtime
       name: '@lencx/minke-model-runtime/dsh'

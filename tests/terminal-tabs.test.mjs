@@ -299,7 +299,7 @@ test("desktop terminal runtime owns PTY data, resize, and teardown", async () =>
     environment: {
       DSH_HOME: "/data/harness",
       PATH: "/usr/bin",
-      TERM_PROGRAM: "Minke",
+      TERM_PROGRAM: "HUB",
       ELECTRON_RUN_AS_NODE: "1",
       NODE_OPTIONS: "--trace-warnings",
     },

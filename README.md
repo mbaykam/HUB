@@ -1,7 +1,8 @@
-# Minke Mobile PWA Fork
+# HUB
 
-A customized version of Minke focused on making its remote mobile interface
-cleaner, more reliable, and easier to use as an installed PWA.
+HUB is a focused desktop AI workspace with a fast, mobile-first PWA. It is an
+independent customization of [Minke](https://github.com/lencx/Minke), powered
+by [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 ## What changed
 
@@ -14,6 +15,12 @@ cleaner, more reliable, and easier to use as an installed PWA.
 - Removed tooltip bubbles that could remain stuck on the mobile screen after a
   touch.
 - Improved mobile viewport behavior when the onscreen keyboard is open.
+- Reduced mobile startup work so the installed PWA reaches the workspace
+  faster.
+- Added swipeable liquid-glass navigation panels, a dedicated mobile home
+  launch, deterministic one-tap session switching, and compact provider usage
+  meters for Codex and OpenRouter.
+- Rebranded the desktop app and PWA as HUB with a minimal geometric identity.
 - Made Harness staging work on Windows without requiring permission to create
   ordinary symbolic links.
 
@@ -35,14 +42,23 @@ Create a package for the current platform with:
 pnpm run package
 ```
 
+## Downloads
+
+- [macOS (Apple silicon)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-macos-arm64.dmg)
+- [macOS (Intel)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-macos-x64.dmg)
+- [Windows](https://github.com/mbaykam/Minke/releases/latest/download/HUB-windows-x64.exe)
+- [Linux (Debian/Ubuntu)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-linux-x64.deb)
+- [Linux (RPM)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-linux-x64.rpm)
+- [Linux (AppImage)](https://github.com/mbaykam/Minke/releases/latest/download/HUB-linux-x64.AppImage)
+
 ## Privacy
 
 This repository contains source code only. It does not include local Minke or
 DSH profiles, credentials, session logs, remote-access configuration, installed
 plugins, generated packages, or machine-specific paths.
 
-## Credits
+## Credits and license
 
-Based on [Minke](https://github.com/lencx/Minke) by lencx and
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
-Licensed under Apache-2.0.
+HUB is based on [Minke](https://github.com/lencx/Minke) by lencx and includes
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Licensed
+under Apache-2.0.
