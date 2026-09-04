@@ -21,6 +21,11 @@ import {
   type PwaWebServer,
 } from "./host/pwa.ts";
 import {
+  installMinkeUsageHost,
+  type UsageCredentials,
+  type UsageWebServer,
+} from "./host/usage.ts";
+import {
   apply as installAgentBrowserTools,
 } from "./host/agent-browser-tools.ts";
 import {
@@ -65,6 +70,7 @@ export const inject = [
   "agents",
   "attachments",
   "connection",
+  "credentials",
   "sessionController",
   "systemPrompt",
   "tools",
@@ -152,6 +158,7 @@ interface MinkeHostContext {
       ): () => Promise<void>;
     };
   };
+  readonly credentials: UsageCredentials;
   readonly sessionController: AgentTurnSessionControllerPort;
   readonly agents: {
     get(sessionId: string): MinkeHostAgent | undefined;
@@ -259,7 +266,10 @@ interface MinkeHostContext {
       next: () => Promise<unknown>,
     ) => Promise<unknown>,
   ): unknown;
-  readonly webServer: PwaWebServer & RemotePreviewWebServer;
+  readonly webServer:
+    & PwaWebServer
+    & RemotePreviewWebServer
+    & UsageWebServer;
 }
 
 function configuredRoot(config: Config | undefined): string {
@@ -389,6 +399,14 @@ export function apply(
   ctx.effect(
     () => installMinkePwaHost(ctx.webServer),
     "minke-host: PWA resources",
+  );
+  ctx.effect(
+    () =>
+      installMinkeUsageHost({
+        webServer: ctx.webServer,
+        credentials: ctx.credentials,
+      }),
+    "minke-host: usage meter",
   );
   const capabilities: MinkeHostCapabilities = {
     protocolVersion: MINKE_HOST_PROTOCOL_VERSION,

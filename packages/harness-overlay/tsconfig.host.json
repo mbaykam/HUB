@@ -19,6 +19,7 @@
     "src/minke-host-contract.ts",
     "src/pwa-contract.ts",
     "src/trusted-host-control-contract.ts",
+    "src/usage-contract.ts",
     "src/host",
     "src/web-search",
     "src/tabs/files-contract.ts",

@@ -1,3 +1,7 @@
+import {
+  installMobileUsageMeter,
+} from "./mobile-usage-meter.ts";
+
 const MOBILE_WEB_ROOT_SELECTOR = "[data-minke-mobile-web]";
 const SHELL_OVERLAY_SELECTOR = "[data-shell-overlay]";
 const MOBILE_SIDEBAR_FRAME_ATTRIBUTE =
@@ -113,6 +117,7 @@ export class MobileRightDrawerRuntime {
   #settingsSourceRow: HTMLElement | undefined;
   #settingsSignature = "";
   #settingsOpen = false;
+  #disposeUsageMeter: (() => void) | undefined;
   #gesture: RightDrawerGesture | undefined;
   #reconcileFrame: number | undefined;
   #settleTimer: number | undefined;
@@ -276,10 +281,10 @@ export class MobileRightDrawerRuntime {
 
     const body = this.#root.createElement("div");
     body.setAttribute("data-minke-mobile-right-drawer-body", "");
-    body.setAttribute("aria-hidden", "true");
     drawer.append(header, body);
     frame.append(drawer);
     this.#drawer = drawer;
+    this.#disposeUsageMeter = installMobileUsageMeter(body, this.#root);
   }
 
   #clearFrame(): void {
@@ -304,6 +309,7 @@ export class MobileRightDrawerRuntime {
     this.#settingsSourceRow?.removeAttribute(
       "data-minke-mobile-settings-source",
     );
+    this.#disposeUsageMeter?.();
     this.#edge?.remove();
     this.#drawer?.remove();
     this.#frame = undefined;
@@ -314,6 +320,7 @@ export class MobileRightDrawerRuntime {
     this.#settingsSourceRow = undefined;
     this.#settingsSignature = "";
     this.#settingsOpen = false;
+    this.#disposeUsageMeter = undefined;
     this.#gesture = undefined;
     this.#suppressClickUntil = 0;
     this.#suppressClickTarget = undefined;
@@ -676,8 +683,15 @@ export class MobileRightDrawerRuntime {
       return;
     }
     if (event.key !== "Tab") return;
-    const first = this.#settingsButton;
-    const last = this.#closeButton;
+    const drawer = this.#drawer;
+    if (drawer === undefined) return;
+    const focusable = [
+      ...drawer.querySelectorAll<HTMLButtonElement>(
+        "button:not(:disabled)",
+      ),
+    ];
+    const first = focusable.at(0);
+    const last = focusable.at(-1);
     if (first === undefined || last === undefined) return;
     if (event.shiftKey && this.#root.activeElement === first) {
       event.preventDefault();

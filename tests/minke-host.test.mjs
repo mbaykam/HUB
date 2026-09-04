@@ -24,6 +24,9 @@ import {
   MINKE_PWA_ROUTES,
 } from "@minke/harness-overlay/pwa-contract.ts";
 import {
+  MINKE_USAGE_ROUTE,
+} from "@minke/harness-overlay/usage-contract.ts";
+import {
   browserFilesPort,
   browserTerminalPort,
   browserTabsPort,
@@ -1345,6 +1348,11 @@ test("Minke Host calibrates identity only for external IM agents", async (t) => 
         },
       },
     },
+    credentials: {
+      async resolve() {
+        return undefined;
+      },
+    },
     on(event, listener) {
       if (event === "agent/created") onAgentCreated = listener;
       return () => {};
@@ -1614,10 +1622,16 @@ test("Minke Host mounts Files RPC on the trusted DSH connection", async (t) => {
         },
       },
     },
+    credentials: {
+      async resolve() {
+        return undefined;
+      },
+    },
     on() {
       return () => {};
     },
     webServer: {
+      port: 4312,
       register(route) {
         pwaRoutes.push(route);
         return () => {};
@@ -1642,6 +1656,7 @@ test("Minke Host mounts Files RPC on the trusted DSH connection", async (t) => {
       MINKE_PWA_ROUTES.icon512,
       MINKE_PWA_ROUTES.maskableIcon512,
       MINKE_PWA_ROUTES.appleTouchIcon,
+      MINKE_USAGE_ROUTE,
     ],
   );
   assert.equal(registration.channel, MINKE_HOST_RPC_CHANNEL);

@@ -30,6 +30,13 @@ const runtime = readFileSync(
   ),
   "utf8",
 );
+const usageRuntime = readFileSync(
+  new URL(
+    "../packages/harness-overlay/src/client/host/mobile-usage-meter.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("mobile right drawer tracks a full-canvas right-edge gesture", () => {
   assert.equal(clampMobileRightDrawerProgress(-1), 0);
@@ -112,4 +119,18 @@ test("mobile right drawer owns Settings and accessible dismissal", () => {
     installer,
     /installMobileSidebarDrawer[\s\S]*installMobileRightDrawer\(\)/u,
   );
+});
+
+test("mobile right drawer contains the live provider usage meter", () => {
+  assert.match(runtime, /installMobileUsageMeter\(body, this\.#root\)/u);
+  assert.doesNotMatch(
+    runtime,
+    /body\.setAttribute\("aria-hidden", "true"\)/u,
+  );
+  assert.match(usageRuntime, /MINKE_USAGE_ROUTE/u);
+  assert.match(usageRuntime, /"Codex", "Subscription limits"/u);
+  assert.match(usageRuntime, /"OpenRouter",[\s\S]*"Shared API-key spend"/u);
+  assert.match(usageRuntime, /REFRESH_INTERVAL_MS = 60_000/u);
+  assert.match(styles, /data-minke-usage-card[\s\S]*backdrop-filter:\s*blur/u);
+  assert.match(styles, /data-minke-usage-progress-track/u);
 });

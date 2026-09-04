@@ -89,6 +89,7 @@ const taskFiles = Object.freeze({
     "tabs.test.mjs",
     "terminal-settings.test.mjs",
     "terminal-tabs.test.mjs",
+    "usage-meter.test.mjs",
     "web-tab-annotations.test.mjs",
     "web-search-settings.test.mjs",
     "window-theme.test.mjs",
