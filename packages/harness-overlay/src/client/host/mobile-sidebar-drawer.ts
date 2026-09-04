@@ -4,8 +4,12 @@ const MOBILE_SIDEBAR_ATTRIBUTE =
   "data-minke-mobile-sidebar";
 const MOBILE_SIDEBAR_CONTENT_ATTRIBUTE =
   "data-minke-mobile-sidebar-content";
+const MOBILE_DETAILS_COLUMN_ATTRIBUTE =
+  "data-minke-mobile-details-column";
 const MOBILE_SIDEBAR_SCRIM_ATTRIBUTE =
   "data-minke-mobile-sidebar-scrim";
+const MOBILE_SIDEBAR_EDGE_ATTRIBUTE =
+  "data-minke-mobile-sidebar-edge";
 const MOBILE_SIDEBAR_OPEN_ATTRIBUTE =
   "data-minke-mobile-sidebar-open";
 const MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE =
@@ -22,9 +26,11 @@ const GESTURE_IGNORE_SELECTOR = [
   '[contenteditable="true"]',
   '[role="slider"]',
 ].join(",");
+const SESSION_SELECTION_SELECTOR =
+  '[role="treeitem"][aria-selected]';
 
 export const MOBILE_SIDEBAR_BREAKPOINT_PX = 1024;
-export const MOBILE_SIDEBAR_RAIL_PX = 56;
+export const MOBILE_SIDEBAR_EDGE_PX = 24;
 export const MOBILE_SIDEBAR_DIRECTION_LOCK_PX = 9;
 export const MOBILE_SIDEBAR_OPEN_THRESHOLD = 0.32;
 export const MOBILE_SIDEBAR_FLING_VELOCITY = 0.42;
@@ -33,7 +39,7 @@ const SETTLE_DURATION_MS = 280;
 const CLICK_SUPPRESSION_MS = 450;
 const CONTENT_SHIFT_PX = 18;
 const CONTENT_SCALE_DELTA = 0.015;
-const SCRIM_OPACITY = 0.38;
+const SCRIM_OPACITY = 0.32;
 const SHADOW_OPACITY = 0.32;
 
 interface SidebarLayoutPort {
@@ -89,7 +95,7 @@ export function mobileSidebarVisuals(
   shadowOpacity: number;
 }> {
   const progress = clampMobileSidebarProgress(progressValue);
-  const travel = Math.max(0, drawerWidth - MOBILE_SIDEBAR_RAIL_PX);
+  const travel = Math.max(0, drawerWidth);
   return Object.freeze({
     contentBrightness: 1 - 0.08 * progress,
     contentRadius: 18 * progress,
@@ -115,11 +121,14 @@ export class MobileSidebarDrawerRuntime {
   #frame: HTMLElement | undefined;
   #sidebar: HTMLElement | undefined;
   #content: HTMLElement | undefined;
+  #details: HTMLElement | undefined;
+  #edge: HTMLDivElement | undefined;
   #scrim: HTMLDivElement | undefined;
   #gesture: SidebarGesture | undefined;
   #reconcileFrame: number | undefined;
   #settleTimer: number | undefined;
   #suppressClickUntil = 0;
+  #suppressClickTarget: Element | undefined;
   #disposed = false;
 
   constructor(
@@ -231,9 +240,11 @@ export class MobileSidebarDrawerRuntime {
       candidate.querySelector(SIDEBAR_SLOT_SELECTOR) !== null
     );
     const content = sidebar?.nextElementSibling;
+    const details = content?.nextElementSibling;
     if (
       !(sidebar instanceof this.#view.HTMLElement) ||
-      !(content instanceof this.#view.HTMLElement)
+      !(content instanceof this.#view.HTMLElement) ||
+      !(details instanceof this.#view.HTMLElement)
     ) {
       return;
     }
@@ -243,9 +254,16 @@ export class MobileSidebarDrawerRuntime {
       this.#frame = frame;
       this.#sidebar = sidebar;
       this.#content = content;
+      this.#details = details;
       frame.setAttribute(MOBILE_SIDEBAR_FRAME_ATTRIBUTE, "");
       sidebar.setAttribute(MOBILE_SIDEBAR_ATTRIBUTE, "");
       content.setAttribute(MOBILE_SIDEBAR_CONTENT_ATTRIBUTE, "");
+      details.setAttribute(MOBILE_DETAILS_COLUMN_ATTRIBUTE, "");
+      const edge = this.#root.createElement("div");
+      edge.setAttribute(MOBILE_SIDEBAR_EDGE_ATTRIBUTE, "");
+      edge.setAttribute("aria-hidden", "true");
+      frame.append(edge);
+      this.#edge = edge;
       const scrim = this.#root.createElement("div");
       scrim.setAttribute(MOBILE_SIDEBAR_SCRIM_ATTRIBUTE, "");
       scrim.setAttribute("aria-hidden", "true");
@@ -275,6 +293,7 @@ export class MobileSidebarDrawerRuntime {
       this.#clearVisuals(frame);
     }
     this.#sidebar?.removeAttribute(MOBILE_SIDEBAR_ATTRIBUTE);
+    this.#details?.removeAttribute(MOBILE_DETAILS_COLUMN_ATTRIBUTE);
     if (content !== undefined) {
       content.removeAttribute(MOBILE_SIDEBAR_CONTENT_ATTRIBUTE);
       if (content.hasAttribute("data-minke-mobile-sidebar-inert")) {
@@ -283,12 +302,17 @@ export class MobileSidebarDrawerRuntime {
       }
     }
     this.#scrim?.removeEventListener("click", this.#onScrimClick);
+    this.#edge?.remove();
     this.#scrim?.remove();
     this.#frame = undefined;
     this.#sidebar = undefined;
     this.#content = undefined;
+    this.#details = undefined;
+    this.#edge = undefined;
     this.#scrim = undefined;
     this.#gesture = undefined;
+    this.#suppressClickTarget = undefined;
+    this.#suppressClickUntil = 0;
   }
 
   #enabled(): boolean {
@@ -300,7 +324,7 @@ export class MobileSidebarDrawerRuntime {
 
   #drawerWidth(): number {
     return Math.max(
-      MOBILE_SIDEBAR_RAIL_PX,
+      1,
       this.#sidebar?.getBoundingClientRect().width ?? 280,
     );
   }
@@ -394,7 +418,7 @@ export class MobileSidebarDrawerRuntime {
 
     const open = frame.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE);
     if (
-      (!open && event.clientX > MOBILE_SIDEBAR_RAIL_PX) ||
+      (!open && event.clientX > MOBILE_SIDEBAR_EDGE_PX) ||
       (open && event.clientX > this.#drawerWidth())
     ) {
       return;
@@ -470,7 +494,7 @@ export class MobileSidebarDrawerRuntime {
     gesture.lastX = event.clientX;
     const travel = Math.max(
       1,
-      this.#drawerWidth() - MOBILE_SIDEBAR_RAIL_PX,
+      this.#drawerWidth(),
     );
     gesture.progress = clampMobileSidebarProgress(
       (gesture.startedOpen ? 1 : 0) + dx / travel,
@@ -491,6 +515,7 @@ export class MobileSidebarDrawerRuntime {
     if (!gesture.dragging) return;
     this.#suppressClickUntil =
       this.#view.performance.now() + CLICK_SUPPRESSION_MS;
+    this.#suppressClickTarget = gesture.target;
     this.#settle(
       resolveMobileSidebarOpen({
         progress: gesture.progress,
@@ -549,15 +574,46 @@ export class MobileSidebarDrawerRuntime {
   };
 
   readonly #onClick = (event: MouseEvent): void => {
+    const target = asElement(event.target);
+    const suppressed = this.#suppressClickTarget;
     if (
-      this.#view.performance.now() > this.#suppressClickUntil ||
-      !this.#sidebar?.contains(asElement(event.target) ?? null)
+      this.#view.performance.now() <= this.#suppressClickUntil &&
+      target !== undefined &&
+      suppressed !== undefined &&
+      (
+        target === suppressed ||
+        target.contains(suppressed) ||
+        suppressed.contains(target)
+      )
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.#suppressClickUntil = 0;
+      this.#suppressClickTarget = undefined;
+      return;
+    }
+    if (this.#view.performance.now() > this.#suppressClickUntil) {
+      this.#suppressClickTarget = undefined;
+    }
+
+    if (
+      target === undefined ||
+      !this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE) ||
+      !this.#sidebar?.contains(target)
     ) {
       return;
     }
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    this.#suppressClickUntil = 0;
+    const row = target.closest(SESSION_SELECTION_SELECTOR);
+    const button = target.closest("button");
+    if (row === null || (button !== null && button !== row)) return;
+
+    // Let the row's React handler commit the session selection before the
+    // drawer begins collapsing and its wide session tree unmounts.
+    this.#view.setTimeout(() => {
+      if (this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)) {
+        this.#settle(false, true);
+      }
+    }, 0);
   };
 
   readonly #onKeyDown = (event: KeyboardEvent): void => {
