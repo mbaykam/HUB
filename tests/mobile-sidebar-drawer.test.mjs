@@ -2,12 +2,36 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  JSDOM,
+} from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
+import {
   MOBILE_SIDEBAR_FLING_VELOCITY,
   MOBILE_SIDEBAR_OPEN_THRESHOLD,
+  MobileSidebarDrawerRuntime,
   clampMobileSidebarProgress,
   mobileSidebarVisuals,
   resolveMobileSidebarOpen,
 } from "@minke/harness-overlay/client/host/mobile-sidebar-drawer.ts";
+
+function nextFrame(view) {
+  return new Promise((resolve) => view.requestAnimationFrame(resolve));
+}
+
+function pointerEvent(view, type, init) {
+  const event = new view.MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    clientX: init.clientX,
+    clientY: init.clientY,
+  });
+  Object.defineProperties(event, {
+    isPrimary: { value: true },
+    pointerId: { value: init.pointerId },
+    pointerType: { value: init.pointerType },
+  });
+  return event;
+}
 
 const styles = readFileSync(
   new URL(
@@ -85,6 +109,101 @@ test("mobile sidebar settles by distance or release velocity", () => {
   );
 });
 
+test("one touch activates a session once and then closes the drawer", async () => {
+  const dom = new JSDOM(`<!doctype html>
+    <html data-minke-mobile-web>
+      <body>
+        <main id="frame">
+          <aside id="sidebar">
+            <div data-slot="sidebar">
+              <div role="treeitem" aria-selected="false" id="session">
+                <span id="session-title">Previous session</span>
+                <button id="session-actions" type="button">Actions</button>
+              </div>
+            </div>
+          </aside>
+          <section id="content"></section>
+          <section id="details"></section>
+          <div data-shell-overlay></div>
+        </main>
+      </body>
+    </html>`, {
+    pretendToBeVisual: true,
+    url: "https://minke.test/",
+  });
+  const view = dom.window;
+  Object.defineProperty(view, "innerWidth", {
+    configurable: true,
+    value: 390,
+  });
+  view.matchMedia = () => ({ matches: true });
+  const sidebar = view.document.querySelector("#sidebar");
+  sidebar.getBoundingClientRect = () => ({ width: 320 });
+
+  let current = "current-session";
+  let opens = 0;
+  let toggles = 0;
+  const listeners = new Set();
+  const frame = view.document.querySelector("#frame");
+  const runtime = new MobileSidebarDrawerRuntime(
+    {
+      toggleSidebar: () => {
+        toggles += 1;
+        frame.toggleAttribute("data-sidebar-collapsed");
+      },
+    },
+    {
+      getSnapshot: () => ({ current }),
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+    view.document,
+  );
+  const row = view.document.querySelector("#session");
+  const title = view.document.querySelector("#session-title");
+  row.addEventListener("click", () => {
+    opens += 1;
+    current = "previous-session";
+    row.setAttribute("aria-selected", "true");
+    for (const listener of listeners) listener();
+  });
+
+  runtime.start();
+  await nextFrame(view);
+  title.dispatchEvent(pointerEvent(view, "pointerdown", {
+    clientX: 100,
+    clientY: 120,
+    pointerId: 7,
+    pointerType: "touch",
+  }));
+  title.dispatchEvent(pointerEvent(view, "pointerup", {
+    clientX: 100,
+    clientY: 120,
+    pointerId: 7,
+    pointerType: "touch",
+  }));
+  // Simulate WebKit's delayed native click. The explicit activation must be
+  // the only row click produced by this one physical touch.
+  title.dispatchEvent(new view.MouseEvent("click", {
+    bubbles: true,
+    cancelable: true,
+  }));
+  await new Promise((resolve) => view.setTimeout(resolve, 10));
+
+  assert.equal(current, "previous-session");
+  assert.equal(opens, 1);
+  assert.equal(toggles, 1);
+  assert.equal(
+    frame.hasAttribute("data-minke-mobile-sidebar-open"),
+    false,
+  );
+
+  runtime.dispose();
+  view.close();
+});
+
 test("mobile sidebar is a translucent, accessible motion layer", () => {
   assert.match(styles, /backdrop-filter:\s*blur\(34px\) saturate\(165%\)/u);
   assert.match(styles, /rgb\(8 12 22 \/ 48%\)/u);
@@ -120,7 +239,11 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
     runtime,
     /this\.#settleTimer = this\.#view\.setTimeout[\s\S]*logicalOpen !== open[\s\S]*toggleSidebar/u,
   );
-  assert.doesNotMatch(runtime, /SESSION_SELECTION_SELECTOR/u);
+  assert.match(runtime, /SESSION_SELECTION_SELECTOR/u);
+  assert.match(
+    runtime,
+    /#activateTouchedSession[\s\S]*row\.click\(\)/u,
+  );
   assert.match(
     installer,
     /installMobileSidebarDrawerStyles\(\)[\s\S]*installMobileSidebarDrawer\(ctx\.layout, ctx\.sessions\.list\)/u,

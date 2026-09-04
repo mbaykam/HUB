@@ -32,6 +32,18 @@ const GESTURE_IGNORE_SELECTOR = [
   '[contenteditable="true"]',
   '[role="slider"]',
 ].join(",");
+const SESSION_SELECTION_SELECTOR = '[role="treeitem"][aria-selected]';
+const SESSION_NESTED_ACTION_SELECTOR = [
+  "a",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "summary",
+  '[contenteditable="true"]',
+  '[role="button"]',
+  '[role="menuitem"]',
+].join(",");
 export const MOBILE_SIDEBAR_BREAKPOINT_PX = 1024;
 export const MOBILE_SIDEBAR_EDGE_PX = 24;
 export const MOBILE_SIDEBAR_DIRECTION_LOCK_PX = 9;
@@ -58,6 +70,7 @@ interface SidebarSessionSelectionPort {
 
 interface SidebarGesture {
   readonly pointerId: number;
+  readonly pointerType: string;
   readonly target: Element;
   readonly startedOpen: boolean;
   readonly startX: number;
@@ -71,6 +84,7 @@ interface SidebarGesture {
 }
 
 type MobileSidebarView = Window & {
+  readonly Element: typeof Element;
   readonly HTMLElement: typeof HTMLElement;
   readonly MutationObserver: typeof MutationObserver;
 };
@@ -118,8 +132,11 @@ export function mobileSidebarVisuals(
   });
 }
 
-function asElement(value: EventTarget | null): Element | undefined {
-  return value instanceof Element ? value : undefined;
+function asElement(
+  value: EventTarget | null,
+  view: MobileSidebarView,
+): Element | undefined {
+  return value instanceof view.Element ? value : undefined;
 }
 
 /** Project an animated, touch-driven drawer over Harness's narrow sidebar. */
@@ -141,6 +158,7 @@ export class MobileSidebarDrawerRuntime {
   #settleTimer: number | undefined;
   #suppressClickUntil = 0;
   #suppressClickTarget: Element | undefined;
+  #replayingSessionTap = false;
   #currentSession: string | undefined;
   #unsubscribeSessionSelection: (() => void) | undefined;
   #disposed = false;
@@ -435,7 +453,7 @@ export class MobileSidebarDrawerRuntime {
 
   readonly #onPointerDown = (event: PointerEvent): void => {
     const frame = this.#frame;
-    const target = asElement(event.target);
+    const target = asElement(event.target, this.#view);
     if (
       frame === undefined ||
       target === undefined ||
@@ -460,6 +478,7 @@ export class MobileSidebarDrawerRuntime {
 
     this.#gesture = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       target,
       startedOpen: open,
       startX: event.clientX,
@@ -547,7 +566,10 @@ export class MobileSidebarDrawerRuntime {
       return;
     }
     this.#gesture = undefined;
-    if (!gesture.dragging) return;
+    if (!gesture.dragging) {
+      this.#activateTouchedSession(gesture, event);
+      return;
+    }
     this.#suppressClickUntil =
       this.#view.performance.now() + CLICK_SUPPRESSION_MS;
     this.#suppressClickTarget = gesture.target;
@@ -560,6 +582,35 @@ export class MobileSidebarDrawerRuntime {
       gesture.logicalOpen,
     );
   };
+
+  /**
+   * Mobile Safari can consume the first tap when a row's hover state reveals
+   * its action button. Activate a touched session directly from pointerup and
+   * suppress the delayed native click, making one physical tap deterministic.
+   */
+  #activateTouchedSession(
+    gesture: SidebarGesture,
+    event: PointerEvent,
+  ): void {
+    if (gesture.pointerType !== "touch") return;
+    const row = gesture.target.closest(SESSION_SELECTION_SELECTOR);
+    if (!(row instanceof this.#view.HTMLElement)) return;
+    const nestedAction = gesture.target.closest(
+      SESSION_NESTED_ACTION_SELECTOR,
+    );
+    if (nestedAction !== null && nestedAction !== row) return;
+
+    event.preventDefault();
+    this.#suppressClickUntil =
+      this.#view.performance.now() + CLICK_SUPPRESSION_MS;
+    this.#suppressClickTarget = row;
+    this.#replayingSessionTap = true;
+    try {
+      row.click();
+    } finally {
+      this.#replayingSessionTap = false;
+    }
+  }
 
   readonly #onPointerCancel = (event: PointerEvent): void => {
     const gesture = this.#gesture;
@@ -621,7 +672,8 @@ export class MobileSidebarDrawerRuntime {
   };
 
   readonly #onClick = (event: MouseEvent): void => {
-    const target = asElement(event.target);
+    if (this.#replayingSessionTap) return;
+    const target = asElement(event.target, this.#view);
     const suppressed = this.#suppressClickTarget;
     if (
       this.#view.performance.now() <= this.#suppressClickUntil &&
