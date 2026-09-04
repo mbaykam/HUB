@@ -1,42 +1,72 @@
-import type { ComponentType } from "react";
+import type { ComponentType, ReactElement } from "react";
 import type {
   HarnessClientContext,
 } from "../core/context.ts";
 import {
-  desktopTabsPort,
-} from "../desktop/index.ts";
-import {
-  MinkeBrandMark,
-  MinkeBrandName,
-} from "./MinkeBrand.tsx";
+  installBrandCleanupStyles,
+} from "./styles.ts";
 
 const MINKE_BRAND_PRIORITY = -100;
 
-/** Replace official DSH brand slots only in the normal Web projection. */
-export function installWebBrand(ctx: HarnessClientContext): void {
-  if (desktopTabsPort().embeddedWebAvailable) return;
+function HeroBrandSuppressionMarker(): ReactElement {
+  return (
+    <span
+      aria-hidden="true"
+      data-minke-brand-suppression="hero"
+    />
+  );
+}
 
-  for (const name of [
-    "conversation.hero.brand.mark",
-    "sidebar.brand.mark",
-  ]) {
-    ctx.slots.inject(name, () =>
-      ctx.slots.register(
-        {
-          name,
-          priority: MINKE_BRAND_PRIORITY,
-        },
-        MinkeBrandMark as ComponentType<never>,
-      )
-    );
-  }
+function SidebarBrandMarkSuppressionMarker(): ReactElement {
+  return (
+    <span
+      aria-hidden="true"
+      data-minke-brand-suppression="sidebar-mark"
+    />
+  );
+}
+
+function SidebarBrandNameSuppressionMarker(): ReactElement {
+  return (
+    <span
+      aria-hidden="true"
+      data-minke-brand-suppression="sidebar-name"
+    />
+  );
+}
+
+/** Remove product branding from the desktop and PWA shell. */
+export function installBrandlessShell(ctx: HarnessClientContext): void {
+  ctx.effect(
+    () => installBrandCleanupStyles(),
+    "minke-overlay: brandless shell styles",
+  );
+
+  ctx.slots.inject("conversation.hero.brand.mark", () =>
+    ctx.slots.register(
+      {
+        name: "conversation.hero.brand.mark",
+        priority: MINKE_BRAND_PRIORITY,
+      },
+      HeroBrandSuppressionMarker as ComponentType<never>,
+    )
+  );
+  ctx.slots.inject("sidebar.brand.mark", () =>
+    ctx.slots.register(
+      {
+        name: "sidebar.brand.mark",
+        priority: MINKE_BRAND_PRIORITY,
+      },
+      SidebarBrandMarkSuppressionMarker as ComponentType<never>,
+    )
+  );
   ctx.slots.inject("sidebar.brand.name", () =>
     ctx.slots.register(
       {
         name: "sidebar.brand.name",
         priority: MINKE_BRAND_PRIORITY,
       },
-      MinkeBrandName as ComponentType<never>,
+      SidebarBrandNameSuppressionMarker as ComponentType<never>,
     ),
   );
 }

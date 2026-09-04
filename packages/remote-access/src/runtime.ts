@@ -38,6 +38,7 @@ const DEFAULT_RETRY_DELAYS_MS =
 type RemoteAccessServiceFactory = (
   settings: RemoteSettings,
   commands: RemoteCommands,
+  launchToken: string | undefined,
 ) => RemoteAccessLifecycle;
 
 export interface RemoteAccessRuntimeOptions {
@@ -248,10 +249,13 @@ export class RemoteAccessRuntime {
       options.waitForRetry ?? defaultWaitForRetry;
     this.#createService =
       options.createService ??
-      ((settings, commands) =>
+      ((settings, commands, launchToken) =>
         new RemoteAccessService({
           settings,
           commands,
+          ...(launchToken === undefined
+            ? {}
+            : { launchToken }),
           ...(options.execute === undefined
             ? {}
             : { execute: options.execute }),
@@ -453,6 +457,7 @@ export class RemoteAccessRuntime {
       const provider = this.#createService(
         this.#settings,
         commands,
+        this.#launchToken,
       );
       this.#active = provider;
       const unavailable =

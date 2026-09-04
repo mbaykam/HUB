@@ -21,6 +21,7 @@ import {
 } from "jose";
 import {
   isRemoteHostnameLabel,
+  parseRemoteBootstrapToken,
   parseRemoteRuntimeSnapshot,
   parseRemoteSettings,
   type RemoteRuntimeSnapshot,
@@ -65,6 +66,8 @@ export type CloudflareAccessTokenVerifier = (
 
 export interface CloudflareAccessGatewayOptions {
   config: CloudflareAccessConfig;
+  /** DSH process capability used only after Cloudflare Access succeeds. */
+  bootstrapToken?: string;
   verifyToken: CloudflareAccessTokenVerifier;
   createServer?: typeof createServer;
   request?: typeof requestHttp;
@@ -73,6 +76,7 @@ export interface CloudflareAccessGatewayOptions {
 export interface CloudflareAccessServiceOptions {
   command?: string;
   settings: RemoteSettings;
+  launchToken?: string;
   spawn?: RemoteProcessSpawner;
   environment?: NodeJS.ProcessEnv;
   startupTimeoutMs?: number;
@@ -273,6 +277,41 @@ function upstreamHeaders(
   return headers;
 }
 
+function hasDshBrowserCookie(
+  value: string | undefined,
+): boolean {
+  if (value === undefined) return false;
+  return value.split(";").some((cookie) => {
+    const name = cookie.trim().split("=", 1)[0]?.toLowerCase();
+    return name?.startsWith("dsh-auth-") === true;
+  });
+}
+
+/**
+ * Exchange DSH's process capability behind the already-verified Access gate.
+ * The token never appears in the public URL, Cloudflare logs, or browser
+ * history; DSH answers with its ordinary authority-bound HttpOnly cookie.
+ */
+function upstreamRequestPath(
+  request: IncomingMessage,
+  bootstrapToken: string | undefined,
+): string {
+  const path = request.url ?? "/";
+  if (
+    bootstrapToken === undefined ||
+    request.method !== "GET" ||
+    path !== "/" ||
+    hasDshBrowserCookie(
+      typeof request.headers.cookie === "string"
+        ? request.headers.cookie
+        : undefined,
+    )
+  ) {
+    return path;
+  }
+  return `/?token=${encodeURIComponent(bootstrapToken)}`;
+}
+
 function rejectUpgrade(
   socket: Duplex,
   status: 400 | 403 | 503,
@@ -298,6 +337,7 @@ function rejectUpgrade(
 export class CloudflareAccessGateway {
   readonly #config: CloudflareAccessConfig;
   readonly #verifyToken: CloudflareAccessTokenVerifier;
+  readonly #bootstrapToken: string | undefined;
   readonly #createServer: typeof createServer;
   readonly #request: typeof requestHttp;
   readonly #sockets = new Set<Socket>();
@@ -307,6 +347,9 @@ export class CloudflareAccessGateway {
   constructor(options: CloudflareAccessGatewayOptions) {
     this.#config = options.config;
     this.#verifyToken = options.verifyToken;
+    this.#bootstrapToken = options.bootstrapToken === undefined
+      ? undefined
+      : parseRemoteBootstrapToken(options.bootstrapToken);
     this.#createServer = options.createServer ?? createServer;
     this.#request = options.request ?? requestHttp;
   }
@@ -435,7 +478,10 @@ export class CloudflareAccessGateway {
       hostname: target.hostname,
       port: Number(target.port),
       method: request.method,
-      path: request.url,
+      path: upstreamRequestPath(
+        request,
+        this.#bootstrapToken,
+      ),
       headers: upstreamHeaders(request.headers),
     });
     upstream.on("response", (incoming) => {
@@ -556,6 +602,7 @@ implements RemoteAccessLifecycle {
   readonly #shutdownTimeoutMs: number;
   readonly #verifyToken:
     CloudflareAccessTokenVerifier | undefined;
+  readonly #launchToken: string | undefined;
   readonly #createGateway: (
     options: CloudflareAccessGatewayOptions,
   ) => CloudflareAccessGateway;
@@ -584,6 +631,7 @@ implements RemoteAccessLifecycle {
     this.#shutdownTimeoutMs =
       options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
     this.#verifyToken = options.verifyToken;
+    this.#launchToken = options.launchToken;
     this.#createGateway =
       options.createGateway ??
       ((gatewayOptions) =>
@@ -626,6 +674,9 @@ implements RemoteAccessLifecycle {
     const gateway = this.#createGateway({
       config,
       verifyToken,
+      ...(this.#launchToken === undefined
+        ? {}
+        : { bootstrapToken: this.#launchToken }),
     });
     try {
       await gateway.start();

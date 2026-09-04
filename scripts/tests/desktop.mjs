@@ -57,6 +57,7 @@ const taskFiles = Object.freeze({
     "web-search.test.mjs",
   ]),
   ui: Object.freeze([
+    "ambient-theme.test.mjs",
     "agent-browser-annotations.test.mjs",
     "agent-browser-chat.test.mjs",
     "agent-browser-tabs.test.mjs",

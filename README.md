@@ -24,6 +24,28 @@ Minke brings [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 > [!IMPORTANT]
 > Minke is under active development. Features, packaging, and the local data schema may change as the project evolves. Minke is an independent community project, not an official DeepSeek product.
 
+## About this fork
+
+This public fork starts from Minke v0.4.0 and adds a focused mobile/PWA
+polish layer:
+
+- Seamless DSH browser-authentication bootstrap after Cloudflare Access has
+  authenticated the visitor, without putting the DSH capability in the public
+  URL, browser history, or Cloudflare logs.
+- A slightly stronger animated cyan, blue, violet, pink, and amber ambient
+  glass theme for the desktop and responsive Web interface.
+- A clean, logo-free conversation shell that removes the empty-state title
+  and sidebar branding while preserving navigation controls.
+- Mobile Web viewport handling for the onscreen keyboard and suppression of
+  touch-sticky tooltip bubbles.
+- Windows-safe Harness staging that uses directory junctions where ordinary
+  symlink creation requires elevated privileges.
+
+Only source-controlled product changes are included. Local Minke and DSH
+profiles, credentials, session logs, remote-access configuration, generated
+packages, installed plugins, and machine-specific paths are intentionally
+excluded.
+
 ## Highlights
 
 Minke combines agentic browsing, local tools, remote access, and native desktop controls in one focused workspace.

@@ -365,7 +365,11 @@ async function ensureReact18TypeIsolation(harnessRoot) {
       if ((await realpath(target)) === source) continue;
       await rm(target);
     }
-    await symlink(source, target, "dir");
+    await symlink(
+      source,
+      target,
+      process.platform === "win32" ? "junction" : "dir",
+    );
   }
 }
 

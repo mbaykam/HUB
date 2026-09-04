@@ -32,6 +32,15 @@ export interface HarnessThemeSnapshot {
   };
 }
 
+export interface HarnessThemeTokenModes {
+  readonly light: string;
+  readonly dark: string;
+}
+
+export type HarnessThemeTokenOverrides = Readonly<
+  Record<string, HarnessThemeTokenModes>
+>;
+
 export interface LocaleService {
   register<Key extends string>(
     namespace: string,
@@ -162,6 +171,10 @@ export interface HarnessClientContext {
   slots: SlotService;
   theme: {
     getTheme(): HarnessThemeSnapshot;
+    overrideTokens(
+      source: string,
+      tokens: HarnessThemeTokenOverrides,
+    ): () => void;
   };
   on(
     event: "theme/change",

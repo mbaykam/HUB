@@ -157,9 +157,9 @@ const brandInstallSource = readFileSync(
   ),
   "utf8",
 );
-const brandMarkSource = readFileSync(
+const brandStylesSource = readFileSync(
   new URL(
-    "../packages/harness-overlay/src/client/brand/MinkeBrand.tsx",
+    "../packages/harness-overlay/src/client/brand/styles.css",
     import.meta.url,
   ),
   "utf8",
@@ -226,7 +226,7 @@ test("the client entry stays a composition root", () => {
     "installDesktopClient",
     "installAbout",
     "installDataHome",
-    "installWebBrand",
+    "installBrandlessShell",
     "installPwa",
     "installLocalModel",
     "installRemote",
@@ -283,11 +283,8 @@ test("the client inject grants access to the nested plugin inventory Remote", as
   await ctx.fiber.dispose();
 });
 
-test("the Web projection shadows official DSH brand slots with Minke", () => {
-  assert.match(
-    brandInstallSource,
-    /if \(desktopTabsPort\(\)\.embeddedWebAvailable\) return;/u,
-  );
+test("desktop and PWA projections suppress shell branding", () => {
+  assert.doesNotMatch(brandInstallSource, /desktopTabsPort/u);
   for (const slot of [
     "conversation.hero.brand.mark",
     "sidebar.brand.mark",
@@ -299,10 +296,25 @@ test("the Web projection shadows official DSH brand slots with Minke", () => {
     brandInstallSource,
     /MINKE_BRAND_PRIORITY\s*=\s*-100/u,
   );
-  assert.match(brandMarkSource, /viewBox="0 0 832 832"/u);
-  assert.match(brandMarkSource, /fill="#0e1324"/u);
-  assert.match(brandMarkSource, /fill="#fdfdfd"/u);
-  assert.match(brandMarkSource, />Minke<\/span>/u);
+  for (const marker of ["hero", "sidebar-mark", "sidebar-name"]) {
+    assert.match(
+      brandInstallSource,
+      new RegExp(`data-minke-brand-suppression="${marker}"`, "u"),
+    );
+  }
+  assert.match(brandInstallSource, /installBrandCleanupStyles\(\)/u);
+  assert.match(
+    brandStylesSource,
+    /div:has\(> span:first-child \[data-minke-brand-suppression="hero"\]\)[\s\S]*display:\s*none !important/u,
+  );
+  assert.match(
+    brandStylesSource,
+    /button:has\(\[data-minke-brand-suppression="sidebar-mark"\]\):has\([\s\S]*sidebar-name[\s\S]*display:\s*none !important/u,
+  );
+  assert.match(
+    brandStylesSource,
+    /sidebar-mark[\s\S]*> svg \{[\s\S]*display:\s*inline !important/u,
+  );
 });
 
 test("product capability packages follow the shared naming convention", () => {

@@ -1,0 +1,32 @@
+/* Keep the shell visually neutral while preserving its navigation controls. */
+[data-minke-brand-suppression] {
+  display: none !important;
+}
+
+/* The empty-session headline owns the hero mark, product copy, and badge. */
+div:has(> span:first-child [data-minke-brand-suppression="hero"]) {
+  display: none !important;
+}
+
+/* Expanded sidebars render the mark and name inside one brand button. */
+button:has([data-minke-brand-suppression="sidebar-mark"]):has(
+    [data-minke-brand-suppression="sidebar-name"]
+  ) {
+  display: none !important;
+}
+
+/* Collapsed sidebars share a button between the mark and panel-toggle icon. */
+button:has([data-minke-brand-suppression="sidebar-mark"]):not(
+    :has([data-minke-brand-suppression="sidebar-name"])
+  )
+  > span:first-child:has([data-minke-brand-suppression="sidebar-mark"]) {
+  display: none !important;
+}
+
+button:has([data-minke-brand-suppression="sidebar-mark"]):not(
+    :has([data-minke-brand-suppression="sidebar-name"])
+  )
+  > svg {
+  display: inline !important;
+  opacity: 1 !important;
+}

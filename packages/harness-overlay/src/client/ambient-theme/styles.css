@@ -1,0 +1,87 @@
+/* The palette deliberately follows Minke's official screenshots and the
+ * animated cyan-violet-pink-amber signal used by Agent Browser tabs. */
+
+body {
+  --minke-canvas: #edf3f8;
+  --minke-ambient-cyan: rgb(25 210 224 / 51%);
+  --minke-ambient-blue: rgb(66 113 255 / 48%);
+  --minke-ambient-violet: rgb(126 77 255 / 45%);
+  --minke-ambient-pink: rgb(227 75 244 / 41%);
+  --minke-ambient-amber: rgb(255 166 68 / 28%);
+}
+
+body[data-ds-dark-theme] {
+  --minke-canvas: #0c0e14;
+  --minke-ambient-cyan: rgb(22 190 204 / 54%);
+  --minke-ambient-blue: rgb(55 91 222 / 53%);
+  --minke-ambient-violet: rgb(110 65 214 / 50%);
+  --minke-ambient-pink: rgb(204 57 188 / 44%);
+  --minke-ambient-amber: rgb(216 99 55 / 31%);
+}
+
+html,
+body,
+#root {
+  background: var(--minke-canvas);
+}
+
+#root {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+#root::before {
+  position: fixed;
+  inset: -22vmax;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 9% 79%, var(--minke-ambient-cyan), transparent 28%),
+    radial-gradient(circle at 24% 24%, var(--minke-ambient-blue), transparent 31%),
+    radial-gradient(circle at 61% 2%, var(--minke-ambient-violet), transparent 29%),
+    radial-gradient(circle at 89% 4%, var(--minke-ambient-pink), transparent 25%),
+    radial-gradient(circle at 96% 68%, var(--minke-ambient-amber), transparent 31%);
+  content: "";
+  filter: blur(42px) saturate(118%);
+  opacity: 0.94;
+  pointer-events: none;
+  transform: translate3d(-1.5%, -1%, 0) scale(1.03);
+  animation: minke-ambient-flow 28s ease-in-out infinite alternate;
+}
+
+#root > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes minke-ambient-flow {
+  45% {
+    opacity: 0.96;
+    transform: translate3d(2.4%, 1.4%, 0) scale(1.065) rotate(0.8deg);
+  }
+
+  100% {
+    opacity: 0.88;
+    transform: translate3d(-0.4%, 2.2%, 0) scale(1.045) rotate(-0.7deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #root::before {
+    animation: none;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  #root::before {
+    filter: none;
+    opacity: 0.28;
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  #root::before {
+    opacity: 0.48;
+  }
+}

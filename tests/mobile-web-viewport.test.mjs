@@ -28,6 +28,13 @@ test("mobile drawer follows the visible viewport above the keyboard", () => {
   );
 });
 
+test("mobile Web suppresses touch-sticky tooltip bubbles", () => {
+  assert.match(
+    MOBILE_WEB_VIEWPORT_STYLES,
+    /html\[data-minke-mobile-web\]\s+\[role="tooltip"\]\s*\{[\s\S]*display:\s*none !important/u,
+  );
+});
+
 test("mobile viewport runtime tracks keyboard height and cleans up", () => {
   const styleValues = new Map();
   const rootAttributes = new Map();

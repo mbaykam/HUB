@@ -30,3 +30,10 @@ html[data-minke-mobile-web] body > #root {
   min-height: 0;
   overflow: hidden;
 }
+
+/* Touch focus can remain on icon buttons after a tap, leaving Harness's
+ * hover/focus explanations pinned over the conversation. Mobile controls
+ * already carry accessible names, so the visual bubbles add no information. */
+html[data-minke-mobile-web] [role="tooltip"] {
+  display: none !important;
+}

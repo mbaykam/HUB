@@ -29,6 +29,7 @@ export interface RemoteAccessServiceOptions {
   /** @deprecated Use commands.tailscale. */
   command?: string;
   settings: RemoteSettings;
+  launchToken?: string;
   execute?: RemoteCommandExecutor;
   spawn?: RemoteProcessSpawner;
   environment?: NodeJS.ProcessEnv;
@@ -55,6 +56,9 @@ implements RemoteAccessLifecycle {
       this.#active = new CloudflareAccessService({
         command: options.commands?.cloudflared,
         settings,
+        ...(options.launchToken === undefined
+          ? {}
+          : { launchToken: options.launchToken }),
         ...(options.spawn === undefined
           ? {}
           : { spawn: options.spawn }),

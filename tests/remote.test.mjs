@@ -953,6 +953,7 @@ test("Cloudflare Access gateway fails closed and strips identity credentials", a
   };
   const gateway = new CloudflareAccessGateway({
     config,
+    bootstrapToken: HARNESS_LAUNCH_TOKEN,
     async verifyToken(token) {
       verifiedTokens.push(token);
       if (token !== "valid") {
@@ -992,6 +993,24 @@ test("Cloudflare Access gateway fails closed and strips identity credentials", a
         port: gatewayPort,
         host: config.hostname,
         token: "valid",
+      }),
+      { status: 200, body: "upstream" },
+    );
+    assert.deepEqual(
+      await httpResponse({
+        port: gatewayPort,
+        host: config.hostname,
+        token: "valid",
+        cookie:
+          "CF_Authorization=secret; dsh-auth-example=signed",
+      }),
+      { status: 200, body: "upstream" },
+    );
+    assert.deepEqual(
+      await httpResponse({
+        port: gatewayPort,
+        host: config.hostname,
+        token: "valid",
         cookie: "CF_Authorization=secret; session=kept",
         path: "/health?source=remote",
       }),
@@ -1002,13 +1021,30 @@ test("Cloudflare Access gateway fails closed and strips identity credentials", a
     await closeServer(upstream);
   }
 
-  assert.deepEqual(verifiedTokens, ["invalid", "valid"]);
-  assert.deepEqual(upstreamRequests, [{
-    path: "/health?source=remote",
-    host: config.hostname,
-    token: undefined,
-    cookie: "session=kept",
-  }]);
+  assert.deepEqual(
+    verifiedTokens,
+    ["invalid", "valid", "valid", "valid"],
+  );
+  assert.deepEqual(upstreamRequests, [
+    {
+      path: `/?token=${HARNESS_LAUNCH_TOKEN}`,
+      host: config.hostname,
+      token: undefined,
+      cookie: undefined,
+    },
+    {
+      path: "/",
+      host: config.hostname,
+      token: undefined,
+      cookie: "dsh-auth-example=signed",
+    },
+    {
+      path: "/health?source=remote",
+      host: config.hostname,
+      token: undefined,
+      cookie: "session=kept",
+    },
+  ]);
 });
 
 test("Cloudflare remote owns a foreground named tunnel without environment tokens", async () => {
@@ -1034,6 +1070,7 @@ test("Cloudflare remote owns a foreground named tunnel without environment token
       ...configuredCloudflare(),
       enabled: true,
     },
+    launchToken: HARNESS_LAUNCH_TOKEN,
     environment: {
       SAFE_ENVIRONMENT_VALUE: "preserved",
       electron_run_as_node: "1",
@@ -1070,6 +1107,10 @@ test("Cloudflare remote owns a foreground named tunnel without environment token
     ],
   });
   assert.equal(gatewayConfig.verifyToken, verifyToken);
+  assert.equal(
+    gatewayConfig.bootstrapToken,
+    HARNESS_LAUNCH_TOKEN,
+  );
   assert.deepEqual(gatewayCalls, ["start"]);
   assert.deepEqual(service.read(), {
     method: "cloudflare",
@@ -1585,6 +1626,7 @@ test("remote runtime retries Tailscale in the background before exposing Harness
 
 test("remote runtime keeps provider targets clean and drops detached bootstrap capabilities", async () => {
   let providerTarget;
+  let providerLaunchToken;
   let providerStops = 0;
   let providerSnapshot = {
     method: "tailscale",
@@ -1597,7 +1639,8 @@ test("remote runtime keeps provider targets clean and drops detached bootstrap c
       return { tailscale: "/usr/bin/tailscale" };
     },
     async replaceTrustedHosts() {},
-    createService() {
+    createService(_settings, _commands, launchToken) {
+      providerLaunchToken = launchToken;
       return {
         async prepare() {
           return { trustedHosts: [] };
@@ -1623,6 +1666,7 @@ test("remote runtime keeps provider targets clean and drops detached bootstrap c
 
   await runtime.start(HARNESS_ORIGIN, HARNESS_LAUNCH_TOKEN);
   assert.equal(providerTarget, HARNESS_ORIGIN);
+  assert.equal(providerLaunchToken, HARNESS_LAUNCH_TOKEN);
   assert.equal(
     String(providerTarget).includes(HARNESS_LAUNCH_TOKEN),
     false,

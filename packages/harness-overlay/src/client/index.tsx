@@ -1,5 +1,6 @@
 import { installAbout } from "./about/install.tsx";
-import { installWebBrand } from "./brand/install.tsx";
+import { installAmbientTheme } from "./ambient-theme/install.ts";
+import { installBrandlessShell } from "./brand/install.tsx";
 import { installBrowserSettings } from "./browser-settings/index.ts";
 import type {
   HarnessClientContext,
@@ -34,11 +35,12 @@ export const inject = [
 /** Compose Minke features through Harness's public services and slots. */
 export function apply(ctx: HarnessClientContext): void {
   const minkeSettings = new MinkeSettingsRuntime();
+  installAmbientTheme(ctx);
   installDesktopClient(ctx);
   installAbout(ctx);
   installDataHome(ctx, minkeSettings);
   installBrowserSettings(ctx, minkeSettings);
-  installWebBrand(ctx);
+  installBrandlessShell(ctx);
   installPwa(ctx);
   installLocalModel(ctx);
   const remote = installRemote(ctx);
