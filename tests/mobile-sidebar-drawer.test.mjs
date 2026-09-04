@@ -281,7 +281,13 @@ test("mobile navigation separates unnamed recents from project folders", async (
 
   assert.equal(
     view.document.querySelector("#section-label").textContent,
-    "Recents",
+    "Workspaces",
+  );
+  assert.equal(
+    view.document.querySelector("#section-label").hasAttribute(
+      "data-hub-mobile-nav-section-label",
+    ),
+    true,
   );
   assert.equal(
     view.document.querySelector("#logo-row").hasAttribute(
@@ -322,20 +328,16 @@ test("mobile navigation separates unnamed recents from project folders", async (
   assert.equal(
     view.document.querySelector(
       "[data-hub-mobile-nav-workspaces-label]",
-    ).textContent,
-    "Workspaces",
+    ),
+    null,
   );
 
   runtime.dispose();
   assert.equal(
-    view.document.querySelector("#section-label").textContent,
-    "Workspaces",
-  );
-  assert.equal(
-    view.document.querySelector(
-      "[data-hub-mobile-nav-workspaces-label]",
+    view.document.querySelector("#section-label").hasAttribute(
+      "data-hub-mobile-nav-section-label",
     ),
-    null,
+    false,
   );
   view.close();
 });
@@ -352,7 +354,18 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
   assert.match(styles, /data-hub-mobile-nav-logo-row/u);
   assert.match(styles, /data-hub-mobile-nav-view-options/u);
   assert.match(styles, /data-hub-mobile-nav-recents-section/u);
-  assert.match(styles, /data-hub-mobile-nav-workspaces-label/u);
+  assert.match(
+    styles,
+    /data-hub-mobile-nav-section-label\]::after\s*\{[\s\S]*content:\s*"Recents"/u,
+  );
+  assert.match(
+    styles,
+    /data-hub-mobile-nav-tree\]::after\s*\{[\s\S]*content:\s*"Workspaces"/u,
+  );
+  assert.match(
+    styles,
+    /data-minke-mobile-sidebar\][\s\S]*box-sizing:\s*border-box/u,
+  );
   assert.match(
     styles,
     /data-minke-mobile-sidebar-edge[\s\S]*width:\s*24px;[\s\S]*touch-action:\s*pan-y/u,

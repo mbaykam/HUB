@@ -20,8 +20,6 @@ const MOBILE_NAV_BROWSER_ATTRIBUTE =
   "data-hub-mobile-nav-browser";
 const MOBILE_NAV_SECTION_LABEL_ATTRIBUTE =
   "data-hub-mobile-nav-section-label";
-const MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE =
-  "data-hub-mobile-nav-section-label-original";
 const MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE =
   "data-hub-mobile-nav-view-options";
 const MOBILE_NAV_TREE_ATTRIBUTE =
@@ -34,8 +32,6 @@ const MOBILE_NAV_RECENTS_HEADER_WRAPPER_ATTRIBUTE =
   "data-hub-mobile-nav-recents-header-wrapper";
 const MOBILE_NAV_WORKSPACE_SECTION_ATTRIBUTE =
   "data-hub-mobile-nav-workspace-section";
-const MOBILE_NAV_WORKSPACES_LABEL_ATTRIBUTE =
-  "data-hub-mobile-nav-workspaces-label";
 const MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE =
   "data-minke-mobile-right-drawer-open";
 const RIGHT_DRAWER_OPENING_EVENT =
@@ -185,7 +181,6 @@ export class MobileSidebarDrawerRuntime {
   #unsubscribeSessionSelection: (() => void) | undefined;
   #mainWorkspaceSection: HTMLElement | undefined;
   #mainWorkspaceResolved = false;
-  #workspaceDivider: HTMLDivElement | undefined;
   #disposed = false;
 
   constructor(
@@ -390,7 +385,6 @@ export class MobileSidebarDrawerRuntime {
     this.#scrim = undefined;
     this.#mainWorkspaceSection = undefined;
     this.#mainWorkspaceResolved = false;
-    this.#workspaceDivider = undefined;
     this.#gesture = undefined;
     this.#suppressClickTarget = undefined;
     this.#suppressClickUntil = 0;
@@ -427,20 +421,6 @@ export class MobileSidebarDrawerRuntime {
           MOBILE_NAV_SECTION_LABEL_ATTRIBUTE,
           "",
         );
-        if (
-          !sectionLabel.hasAttribute(
-            MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
-          )
-        ) {
-          sectionLabel.setAttribute(
-            MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
-            sectionLabel.textContent ?? "",
-          );
-        }
-        const recentsLabel = this.#navigationLabel("Recents", "最近聊天");
-        if (sectionLabel.textContent !== recentsLabel) {
-          sectionLabel.textContent = recentsLabel;
-        }
       }
 
       const actionButtons = [
@@ -466,8 +446,6 @@ export class MobileSidebarDrawerRuntime {
         this.#groupHeader(candidate) !== undefined,
     );
     if (groupSections.length === 0) {
-      this.#workspaceDivider?.remove();
-      this.#workspaceDivider = undefined;
       return;
     }
 
@@ -521,41 +499,20 @@ export class MobileSidebarDrawerRuntime {
       );
       const header = this.#groupHeader(section);
       if (header === undefined) continue;
+      const hasVisibleSessions = section.querySelector(
+        '[role="treeitem"][aria-selected]',
+      ) !== null;
       header.toggleAttribute(
         MOBILE_NAV_RECENTS_HEADER_ATTRIBUTE,
-        isRecents,
+        isRecents && hasVisibleSessions,
       );
       const wrapper = header.parentElement;
       if (wrapper !== null && wrapper !== section) {
         wrapper.toggleAttribute(
           MOBILE_NAV_RECENTS_HEADER_WRAPPER_ATTRIBUTE,
-          isRecents,
+          isRecents && hasVisibleSessions,
         );
       }
-      if (
-        isRecents &&
-        header.getAttribute("aria-expanded") === "false" &&
-        !header.hasAttribute("data-hub-mobile-nav-expand-requested")
-      ) {
-        header.setAttribute("data-hub-mobile-nav-expand-requested", "");
-        header.click();
-      }
-    }
-
-    if (
-      this.#workspaceDivider === undefined ||
-      this.#workspaceDivider.parentElement !== tree
-    ) {
-      this.#workspaceDivider?.remove();
-      const divider = this.#root.createElement("div");
-      divider.setAttribute(MOBILE_NAV_WORKSPACES_LABEL_ATTRIBUTE, "");
-      divider.setAttribute("role", "presentation");
-      tree.append(divider);
-      this.#workspaceDivider = divider;
-    }
-    const workspacesLabel = this.#navigationLabel("Workspaces", "工作区");
-    if (this.#workspaceDivider.textContent !== workspacesLabel) {
-      this.#workspaceDivider.textContent = workspacesLabel;
     }
   }
 
@@ -569,28 +526,11 @@ export class MobileSidebarDrawerRuntime {
       : undefined;
   }
 
-  #navigationLabel(english: string, chinese: string): string {
-    return this.#root.documentElement.lang
-      .toLocaleLowerCase()
-      .startsWith("zh")
-      ? chinese
-      : english;
-  }
-
   #clearNavigationDecoration(): void {
-    for (const label of this.#root.querySelectorAll(
-      `[${MOBILE_NAV_SECTION_LABEL_ATTRIBUTE}]`,
-    )) {
-      const original = label.getAttribute(
-        MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
-      );
-      if (original !== null) label.textContent = original;
-    }
     for (const attribute of [
       MOBILE_NAV_LOGO_ROW_ATTRIBUTE,
       MOBILE_NAV_BROWSER_ATTRIBUTE,
       MOBILE_NAV_SECTION_LABEL_ATTRIBUTE,
-      MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
       MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE,
       MOBILE_NAV_TREE_ATTRIBUTE,
       MOBILE_NAV_RECENTS_SECTION_ATTRIBUTE,
@@ -602,12 +542,6 @@ export class MobileSidebarDrawerRuntime {
         element.removeAttribute(attribute);
       }
     }
-    for (const element of this.#root.querySelectorAll(
-      '[data-hub-mobile-nav-expand-requested]',
-    )) {
-      element.removeAttribute("data-hub-mobile-nav-expand-requested");
-    }
-    this.#workspaceDivider?.remove();
   }
 
   #enabled(): boolean {

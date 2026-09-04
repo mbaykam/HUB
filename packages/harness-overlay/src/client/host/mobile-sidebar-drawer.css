@@ -52,6 +52,7 @@ html[data-minke-mobile-web] [data-minke-mobile-sidebar] {
   z-index: 12;
   width: var(--minke-mobile-sidebar-width) !important;
   min-width: 0;
+  box-sizing: border-box;
   overflow: hidden;
   background:
     linear-gradient(
@@ -137,14 +138,34 @@ html[data-minke-mobile-web] [data-hub-mobile-nav-browser] {
 
 html[data-minke-mobile-web] [data-hub-mobile-nav-section-label] {
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: 0;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-section-label]::after {
+  content: "Recents";
+  font-size: 13px;
 }
 
 html[data-minke-mobile-web] [data-hub-mobile-nav-tree] {
   display: flex;
   flex-direction: column;
+}
+
+html[data-minke-mobile-web] [data-hub-mobile-nav-tree]::after {
+  content: "Workspaces";
+  order: 1;
+  flex: none;
+  margin: 16px 8px 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(255 255 255 / 16%);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 20px;
 }
 
 html[data-minke-mobile-web]
@@ -161,20 +182,6 @@ html[data-minke-mobile-web]
 }
 
 html[data-minke-mobile-web]
-  [data-hub-mobile-nav-workspaces-label] {
-  order: 1;
-  flex: none;
-  margin: 16px 8px 6px;
-  padding-top: 12px;
-  border-top: 1px solid rgb(255 255 255 / 16%);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  line-height: 20px;
-}
-
-html[data-minke-mobile-web]
   [data-hub-mobile-nav-workspace-section] {
   order: 2;
 }
@@ -186,7 +193,7 @@ html[data-minke-mobile-web]
 }
 
 body[data-ds-dark-theme]
-  [data-hub-mobile-nav-workspaces-label] {
+  [data-hub-mobile-nav-tree]::after {
   border-top-color: rgb(255 255 255 / 10%);
 }
 
