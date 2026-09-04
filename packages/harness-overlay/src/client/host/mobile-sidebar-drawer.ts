@@ -14,6 +14,28 @@ const MOBILE_SIDEBAR_OPEN_ATTRIBUTE =
   "data-minke-mobile-sidebar-open";
 const MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE =
   "data-minke-mobile-sidebar-dragging";
+const MOBILE_NAV_LOGO_ROW_ATTRIBUTE =
+  "data-hub-mobile-nav-logo-row";
+const MOBILE_NAV_BROWSER_ATTRIBUTE =
+  "data-hub-mobile-nav-browser";
+const MOBILE_NAV_SECTION_LABEL_ATTRIBUTE =
+  "data-hub-mobile-nav-section-label";
+const MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE =
+  "data-hub-mobile-nav-section-label-original";
+const MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE =
+  "data-hub-mobile-nav-view-options";
+const MOBILE_NAV_TREE_ATTRIBUTE =
+  "data-hub-mobile-nav-tree";
+const MOBILE_NAV_RECENTS_SECTION_ATTRIBUTE =
+  "data-hub-mobile-nav-recents-section";
+const MOBILE_NAV_RECENTS_HEADER_ATTRIBUTE =
+  "data-hub-mobile-nav-recents-header";
+const MOBILE_NAV_RECENTS_HEADER_WRAPPER_ATTRIBUTE =
+  "data-hub-mobile-nav-recents-header-wrapper";
+const MOBILE_NAV_WORKSPACE_SECTION_ATTRIBUTE =
+  "data-hub-mobile-nav-workspace-section";
+const MOBILE_NAV_WORKSPACES_LABEL_ATTRIBUTE =
+  "data-hub-mobile-nav-workspaces-label";
 const MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE =
   "data-minke-mobile-right-drawer-open";
 const RIGHT_DRAWER_OPENING_EVENT =
@@ -161,6 +183,9 @@ export class MobileSidebarDrawerRuntime {
   #replayingSessionTap = false;
   #currentSession: string | undefined;
   #unsubscribeSessionSelection: (() => void) | undefined;
+  #mainWorkspaceSection: HTMLElement | undefined;
+  #mainWorkspaceResolved = false;
+  #workspaceDivider: HTMLDivElement | undefined;
   #disposed = false;
 
   constructor(
@@ -322,6 +347,8 @@ export class MobileSidebarDrawerRuntime {
       this.#scrim = scrim;
     }
 
+    this.#decorateNavigation(sidebar);
+
     if (
       !frame.hasAttribute(MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE) &&
       !frame.hasAttribute("data-minke-mobile-sidebar-settling")
@@ -354,15 +381,233 @@ export class MobileSidebarDrawerRuntime {
     this.#scrim?.removeEventListener("click", this.#onScrimClick);
     this.#edge?.remove();
     this.#scrim?.remove();
+    this.#clearNavigationDecoration();
     this.#frame = undefined;
     this.#sidebar = undefined;
     this.#content = undefined;
     this.#details = undefined;
     this.#edge = undefined;
     this.#scrim = undefined;
+    this.#mainWorkspaceSection = undefined;
+    this.#mainWorkspaceResolved = false;
+    this.#workspaceDivider = undefined;
     this.#gesture = undefined;
     this.#suppressClickTarget = undefined;
     this.#suppressClickUntil = 0;
+  }
+
+  /**
+   * Present the mobile sidebar as an unnamed Recents area followed by named
+   * project folders. This is deliberately a DOM projection: Harness keeps
+   * the original Workspace/session ownership, so organizing the sidebar does
+   * not create an AI context boundary.
+   */
+  #decorateNavigation(sidebar: HTMLElement): void {
+    const sidebarSlot = sidebar.querySelector(SIDEBAR_SLOT_SELECTOR);
+    const sidebarRoot = sidebarSlot?.firstElementChild;
+    if (!(sidebarRoot instanceof this.#view.HTMLElement)) return;
+
+    const logoRow = sidebarRoot.firstElementChild;
+    if (logoRow instanceof this.#view.HTMLElement) {
+      logoRow.setAttribute(MOBILE_NAV_LOGO_ROW_ATTRIBUTE, "");
+    }
+
+    const workspaceSlot = sidebarRoot.querySelector(
+      '[data-slot="sidebar.workspaces"]',
+    );
+    const browser = workspaceSlot?.firstElementChild;
+    if (!(browser instanceof this.#view.HTMLElement)) return;
+    browser.setAttribute(MOBILE_NAV_BROWSER_ATTRIBUTE, "");
+
+    const sectionHeader = browser.firstElementChild;
+    if (sectionHeader instanceof this.#view.HTMLElement) {
+      const sectionLabel = sectionHeader.firstElementChild;
+      if (sectionLabel instanceof this.#view.HTMLElement) {
+        sectionLabel.setAttribute(
+          MOBILE_NAV_SECTION_LABEL_ATTRIBUTE,
+          "",
+        );
+        if (
+          !sectionLabel.hasAttribute(
+            MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
+          )
+        ) {
+          sectionLabel.setAttribute(
+            MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
+            sectionLabel.textContent ?? "",
+          );
+        }
+        const recentsLabel = this.#navigationLabel("Recents", "最近聊天");
+        if (sectionLabel.textContent !== recentsLabel) {
+          sectionLabel.textContent = recentsLabel;
+        }
+      }
+
+      const actionButtons = [
+        ...sectionHeader.querySelectorAll("button"),
+      ];
+      // Search is the first header button. When both trailing actions exist,
+      // the penultimate one is the grouping/filter menu and the last is Add.
+      if (actionButtons.length >= 3) {
+        actionButtons.at(-2)?.setAttribute(
+          MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE,
+          "",
+        );
+      }
+    }
+
+    const tree = browser.querySelector('[role="tree"]');
+    if (!(tree instanceof this.#view.HTMLElement)) return;
+    tree.setAttribute(MOBILE_NAV_TREE_ATTRIBUTE, "");
+
+    const groupSections = [...tree.children].filter(
+      (candidate): candidate is HTMLElement =>
+        candidate instanceof this.#view.HTMLElement &&
+        this.#groupHeader(candidate) !== undefined,
+    );
+    if (groupSections.length === 0) {
+      this.#workspaceDivider?.remove();
+      this.#workspaceDivider = undefined;
+      return;
+    }
+
+    const ungroupedSections = groupSections.filter((section) => {
+      const header = this.#groupHeader(section);
+      return header !== undefined && header.parentElement === section;
+    });
+    const namedSections = groupSections.filter(
+      (section) => !ungroupedSections.includes(section),
+    );
+
+    if (
+      this.#mainWorkspaceSection !== undefined &&
+      !namedSections.includes(this.#mainWorkspaceSection)
+    ) {
+      this.#mainWorkspaceSection = undefined;
+      this.#mainWorkspaceResolved = false;
+    }
+    if (!this.#mainWorkspaceResolved && namedSections.length > 0) {
+      this.#mainWorkspaceSection =
+        namedSections.find((section) => {
+          const label = this.#groupHeader(section)?.textContent
+            ?.trim()
+            .toLocaleLowerCase();
+          return label === "minke" || label === "hub";
+        }) ?? namedSections[0];
+      this.#mainWorkspaceResolved = true;
+    } else if (
+      !this.#mainWorkspaceResolved &&
+      ungroupedSections.length > 0
+    ) {
+      // A profile that begins with loose chats has no hidden default
+      // Workspace. Resolve that shape now so its first future project remains
+      // a named folder instead of being silently promoted to the default.
+      this.#mainWorkspaceResolved = true;
+    }
+
+    const recentsSections = new Set<HTMLElement>(ungroupedSections);
+    if (this.#mainWorkspaceSection !== undefined) {
+      recentsSections.add(this.#mainWorkspaceSection);
+    }
+    for (const section of groupSections) {
+      const isRecents = recentsSections.has(section);
+      section.toggleAttribute(
+        MOBILE_NAV_RECENTS_SECTION_ATTRIBUTE,
+        isRecents,
+      );
+      section.toggleAttribute(
+        MOBILE_NAV_WORKSPACE_SECTION_ATTRIBUTE,
+        !isRecents,
+      );
+      const header = this.#groupHeader(section);
+      if (header === undefined) continue;
+      header.toggleAttribute(
+        MOBILE_NAV_RECENTS_HEADER_ATTRIBUTE,
+        isRecents,
+      );
+      const wrapper = header.parentElement;
+      if (wrapper !== null && wrapper !== section) {
+        wrapper.toggleAttribute(
+          MOBILE_NAV_RECENTS_HEADER_WRAPPER_ATTRIBUTE,
+          isRecents,
+        );
+      }
+      if (
+        isRecents &&
+        header.getAttribute("aria-expanded") === "false" &&
+        !header.hasAttribute("data-hub-mobile-nav-expand-requested")
+      ) {
+        header.setAttribute("data-hub-mobile-nav-expand-requested", "");
+        header.click();
+      }
+    }
+
+    if (
+      this.#workspaceDivider === undefined ||
+      this.#workspaceDivider.parentElement !== tree
+    ) {
+      this.#workspaceDivider?.remove();
+      const divider = this.#root.createElement("div");
+      divider.setAttribute(MOBILE_NAV_WORKSPACES_LABEL_ATTRIBUTE, "");
+      divider.setAttribute("role", "presentation");
+      tree.append(divider);
+      this.#workspaceDivider = divider;
+    }
+    const workspacesLabel = this.#navigationLabel("Workspaces", "工作区");
+    if (this.#workspaceDivider.textContent !== workspacesLabel) {
+      this.#workspaceDivider.textContent = workspacesLabel;
+    }
+  }
+
+  #groupHeader(section: HTMLElement): HTMLElement | undefined {
+    const header = section.querySelector(
+      ':scope > [role="treeitem"][aria-expanded], ' +
+        ':scope > span > [role="treeitem"][aria-expanded]',
+    );
+    return header instanceof this.#view.HTMLElement
+      ? header
+      : undefined;
+  }
+
+  #navigationLabel(english: string, chinese: string): string {
+    return this.#root.documentElement.lang
+      .toLocaleLowerCase()
+      .startsWith("zh")
+      ? chinese
+      : english;
+  }
+
+  #clearNavigationDecoration(): void {
+    for (const label of this.#root.querySelectorAll(
+      `[${MOBILE_NAV_SECTION_LABEL_ATTRIBUTE}]`,
+    )) {
+      const original = label.getAttribute(
+        MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
+      );
+      if (original !== null) label.textContent = original;
+    }
+    for (const attribute of [
+      MOBILE_NAV_LOGO_ROW_ATTRIBUTE,
+      MOBILE_NAV_BROWSER_ATTRIBUTE,
+      MOBILE_NAV_SECTION_LABEL_ATTRIBUTE,
+      MOBILE_NAV_SECTION_LABEL_ORIGINAL_ATTRIBUTE,
+      MOBILE_NAV_VIEW_OPTIONS_ATTRIBUTE,
+      MOBILE_NAV_TREE_ATTRIBUTE,
+      MOBILE_NAV_RECENTS_SECTION_ATTRIBUTE,
+      MOBILE_NAV_RECENTS_HEADER_ATTRIBUTE,
+      MOBILE_NAV_RECENTS_HEADER_WRAPPER_ATTRIBUTE,
+      MOBILE_NAV_WORKSPACE_SECTION_ATTRIBUTE,
+    ]) {
+      for (const element of this.#root.querySelectorAll(`[${attribute}]`)) {
+        element.removeAttribute(attribute);
+      }
+    }
+    for (const element of this.#root.querySelectorAll(
+      '[data-hub-mobile-nav-expand-requested]',
+    )) {
+      element.removeAttribute("data-hub-mobile-nav-expand-requested");
+    }
+    this.#workspaceDivider?.remove();
   }
 
   #enabled(): boolean {

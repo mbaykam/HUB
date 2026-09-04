@@ -118,6 +118,78 @@ html[data-minke-mobile-web]
   background: transparent !important;
 }
 
+/* The mobile drawer is gesture-first, so the duplicate panel buttons only
+ * consume space. Keep search and project creation, but remove the sidebar
+ * toggle, desktop dock controls, and the grouping/filter control. */
+html[data-minke-mobile-web] [data-hub-mobile-nav-logo-row],
+html[data-minke-mobile-web] [data-minke-tabs-layout-actions],
+html[data-minke-mobile-web] [data-hub-mobile-nav-view-options] {
+  display: none !important;
+}
+
+/* Mobile information architecture: ordinary chats are an unnamed Recents
+ * run, followed by named Workspace folders. The runtime only annotates and
+ * reorders rendered rows; it does not change Workspace membership or limit
+ * which conversations the assistant can access. */
+html[data-minke-mobile-web] [data-hub-mobile-nav-browser] {
+  padding-top: max(10px, env(safe-area-inset-top));
+}
+
+html[data-minke-mobile-web] [data-hub-mobile-nav-section-label] {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+html[data-minke-mobile-web] [data-hub-mobile-nav-tree] {
+  display: flex;
+  flex-direction: column;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-recents-section] {
+  order: 0;
+}
+
+html[data-minke-mobile-web]
+  :is(
+    [data-hub-mobile-nav-recents-header],
+    [data-hub-mobile-nav-recents-header-wrapper]
+  ) {
+  display: none !important;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-workspaces-label] {
+  order: 1;
+  flex: none;
+  margin: 16px 8px 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(255 255 255 / 16%);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 20px;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-workspace-section] {
+  order: 2;
+}
+
+html[data-minke-mobile-web]
+  [data-hub-mobile-nav-workspace-section]
+  + [data-hub-mobile-nav-workspace-section] {
+  margin-top: 4px;
+}
+
+body[data-ds-dark-theme]
+  [data-hub-mobile-nav-workspaces-label] {
+  border-top-color: rgb(255 255 255 / 10%);
+}
+
 html[data-minke-mobile-web] [data-minke-mobile-sidebar-content] {
   grid-column: 2;
   position: relative;

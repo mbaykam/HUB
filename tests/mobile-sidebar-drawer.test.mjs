@@ -204,6 +204,142 @@ test("one touch activates a session once and then closes the drawer", async () =
   view.close();
 });
 
+test("mobile navigation separates unnamed recents from project folders", async () => {
+  const dom = new JSDOM(`<!doctype html>
+    <html data-minke-mobile-web lang="en">
+      <body>
+        <main id="frame">
+          <aside id="sidebar">
+            <div data-slot="sidebar">
+              <div id="sidebar-root">
+                <div id="logo-row"><button id="sidebar-toggle">Toggle</button></div>
+                <button id="new-session">New Session</button>
+                <div id="region">
+                  <div data-slot="sidebar.workspaces">
+                    <div id="browser">
+                      <div id="section-header">
+                        <span id="section-label">Workspaces</span>
+                        <div><button id="search">Search</button></div>
+                        <div>
+                          <button id="view-options">View options</button>
+                          <button id="add-workspace">Add workspace</button>
+                        </div>
+                      </div>
+                      <div id="list-area">
+                        <div><div role="tree" id="tree">
+                          <div id="main-workspace">
+                            <span><div role="treeitem" aria-expanded="true">
+                              <span>Minke</span><button>Actions</button><button>Add</button>
+                            </div></span>
+                            <div role="treeitem" aria-selected="false">Existing chat</div>
+                          </div>
+                          <div id="project-workspace">
+                            <span><div role="treeitem" aria-expanded="true">
+                              <span>Website redesign</span><button>Actions</button><button>Add</button>
+                            </div></span>
+                            <div role="treeitem" aria-selected="false">Project chat</div>
+                          </div>
+                          <div id="loose-chats">
+                            <div role="treeitem" aria-expanded="true">
+                              <span>Ungrouped</span><button>Add</button>
+                            </div>
+                            <div role="treeitem" aria-selected="false">Loose chat</div>
+                          </div>
+                        </div></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+          <section id="content"></section>
+          <section id="details"></section>
+          <div data-shell-overlay></div>
+        </main>
+      </body>
+    </html>`, {
+    pretendToBeVisual: true,
+    url: "https://hub.test/",
+  });
+  const view = dom.window;
+  Object.defineProperty(view, "innerWidth", {
+    configurable: true,
+    value: 390,
+  });
+  const runtime = new MobileSidebarDrawerRuntime(
+    { toggleSidebar: () => {} },
+    {
+      getSnapshot: () => ({ current: undefined }),
+      subscribe: () => () => {},
+    },
+    view.document,
+  );
+
+  runtime.start();
+  await nextFrame(view);
+
+  assert.equal(
+    view.document.querySelector("#section-label").textContent,
+    "Recents",
+  );
+  assert.equal(
+    view.document.querySelector("#logo-row").hasAttribute(
+      "data-hub-mobile-nav-logo-row",
+    ),
+    true,
+  );
+  assert.equal(
+    view.document.querySelector("#view-options").hasAttribute(
+      "data-hub-mobile-nav-view-options",
+    ),
+    true,
+  );
+  assert.equal(
+    view.document.querySelector("#add-workspace").hasAttribute(
+      "data-hub-mobile-nav-view-options",
+    ),
+    false,
+  );
+  assert.equal(
+    view.document.querySelector("#main-workspace").hasAttribute(
+      "data-hub-mobile-nav-recents-section",
+    ),
+    true,
+  );
+  assert.equal(
+    view.document.querySelector("#loose-chats").hasAttribute(
+      "data-hub-mobile-nav-recents-section",
+    ),
+    true,
+  );
+  assert.equal(
+    view.document.querySelector("#project-workspace").hasAttribute(
+      "data-hub-mobile-nav-workspace-section",
+    ),
+    true,
+  );
+  assert.equal(
+    view.document.querySelector(
+      "[data-hub-mobile-nav-workspaces-label]",
+    ).textContent,
+    "Workspaces",
+  );
+
+  runtime.dispose();
+  assert.equal(
+    view.document.querySelector("#section-label").textContent,
+    "Workspaces",
+  );
+  assert.equal(
+    view.document.querySelector(
+      "[data-hub-mobile-nav-workspaces-label]",
+    ),
+    null,
+  );
+  view.close();
+});
+
 test("mobile sidebar is a translucent, accessible motion layer", () => {
   assert.match(styles, /backdrop-filter:\s*blur\(34px\) saturate\(165%\)/u);
   assert.match(styles, /rgb\(8 12 22 \/ 48%\)/u);
@@ -212,6 +348,11 @@ test("mobile sidebar is a translucent, accessible motion layer", () => {
   assert.match(styles, /prefers-reduced-transparency:\s*reduce/u);
   assert.match(styles, /touch-action:\s*pan-y/u);
   assert.match(styles, /data-minke-mobile-sidebar-scrim/u);
+  assert.match(styles, /data-minke-tabs-layout-actions/u);
+  assert.match(styles, /data-hub-mobile-nav-logo-row/u);
+  assert.match(styles, /data-hub-mobile-nav-view-options/u);
+  assert.match(styles, /data-hub-mobile-nav-recents-section/u);
+  assert.match(styles, /data-hub-mobile-nav-workspaces-label/u);
   assert.match(
     styles,
     /data-minke-mobile-sidebar-edge[\s\S]*width:\s*24px;[\s\S]*touch-action:\s*pan-y/u,
