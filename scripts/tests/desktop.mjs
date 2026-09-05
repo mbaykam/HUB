@@ -95,6 +95,7 @@ const taskFiles = Object.freeze({
     "window-theme.test.mjs",
   ]),
   host: Object.freeze([
+    "bookmarks.test.mjs",
     "im-discord.test.mjs",
     "im-gateway.test.mjs",
     "im-gateway-inbox-limits.test.mjs",

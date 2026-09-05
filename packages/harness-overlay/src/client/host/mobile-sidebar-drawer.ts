@@ -1,3 +1,5 @@
+import { BookmarkClient } from "./bookmarks.ts";
+
 const MOBILE_SIDEBAR_FRAME_ATTRIBUTE =
   "data-minke-mobile-sidebar-frame";
 const MOBILE_SIDEBAR_ATTRIBUTE =
@@ -102,8 +104,6 @@ const CONTENT_SHIFT_PX = 18;
 const CONTENT_SCALE_DELTA = 0.015;
 const SCRIM_OPACITY = 0.32;
 const SHADOW_OPACITY = 0.32;
-const PINNED_SESSIONS_STORAGE_KEY =
-  "hub.mobile.pinned-sessions.v1";
 const PINNED_EXPANDED_STORAGE_KEY =
   "hub.mobile.pinned-expanded.v1";
 const PINNED_VISIBLE_ROW_LIMIT = 4;
@@ -237,6 +237,8 @@ export class MobileSidebarDrawerRuntime {
   #newSessionButton: HTMLButtonElement | undefined;
   #pinnedPanel: HTMLElement | undefined;
   #pinnedSessionIds: string[] = [];
+  readonly #bookmarks: BookmarkClient;
+  #bookmarkRefreshTimer: number | undefined;
   #pinnedExpanded = false;
   #pinnedRenderKey: string | undefined;
   #openSession: ((sessionId: string) => void) | undefined;
@@ -258,7 +260,20 @@ export class MobileSidebarDrawerRuntime {
     this.#sessionSelection = sessionSelection;
     this.#openSession = openSession;
     this.#currentSession = sessionSelection.getSnapshot().current;
-    this.#pinnedSessionIds = this.#readPinnedSessionIds();
+    this.#bookmarks = new BookmarkClient({
+      storage: {
+        getItem: (key) => view.localStorage.getItem(key),
+        setItem: (key, value) => view.localStorage.setItem(key, value),
+        removeItem: (key) => view.localStorage.removeItem(key),
+      },
+      fetch: (input, init) => view.fetch(input, init),
+      onChange: () => {
+        this.#pinnedSessionIds = this.#bookmarks.sessionIds;
+        this.#renderPinnedPanel();
+        this.#decorateCurrentSessionBookmark();
+      },
+    });
+    this.#pinnedSessionIds = this.#bookmarks.sessionIds;
     this.#pinnedExpanded = this.#readPinnedExpanded();
     this.#observer = new view.MutationObserver(
       () => this.#scheduleReconcile(),
@@ -266,6 +281,11 @@ export class MobileSidebarDrawerRuntime {
   }
 
   start(): void {
+    void this.#bookmarks.sync();
+    this.#view.addEventListener("focus", this.#refreshBookmarks);
+    this.#view.addEventListener("online", this.#refreshBookmarks);
+    this.#root.addEventListener("visibilitychange", this.#refreshBookmarks);
+    this.#bookmarkRefreshTimer = this.#view.setInterval(this.#refreshBookmarks, 10_000);
     this.#unsubscribeSessionSelection =
       this.#sessionSelection.subscribe(this.#onSessionSelection);
     this.#observer.observe(this.#root.documentElement, {
@@ -309,6 +329,11 @@ export class MobileSidebarDrawerRuntime {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#bookmarks.dispose();
+    this.#view.removeEventListener("focus", this.#refreshBookmarks);
+    this.#view.removeEventListener("online", this.#refreshBookmarks);
+    this.#root.removeEventListener("visibilitychange", this.#refreshBookmarks);
+    this.#view.clearInterval(this.#bookmarkRefreshTimer);
     this.#observer.disconnect();
     this.#unsubscribeSessionSelection?.();
     this.#unsubscribeSessionSelection = undefined;
@@ -768,22 +793,9 @@ export class MobileSidebarDrawerRuntime {
       : english;
   }
 
-  #readPinnedSessionIds(): string[] {
-    try {
-      const stored = this.#view.localStorage.getItem(
-        PINNED_SESSIONS_STORAGE_KEY,
-      );
-      if (stored === null) return [];
-      const parsed: unknown = JSON.parse(stored);
-      if (!Array.isArray(parsed)) return [];
-      return [...new Set(parsed.filter(
-        (value): value is string =>
-          typeof value === "string" && value !== "",
-      ))];
-    } catch {
-      return [];
-    }
-  }
+  readonly #refreshBookmarks = (): void => {
+    if (!this.#root.hidden) void this.#bookmarks.sync();
+  };
 
   #readPinnedExpanded(): boolean {
     try {
@@ -798,15 +810,11 @@ export class MobileSidebarDrawerRuntime {
   #persistPinnedSessions(): void {
     try {
       this.#view.localStorage.setItem(
-        PINNED_SESSIONS_STORAGE_KEY,
-        JSON.stringify(this.#pinnedSessionIds),
-      );
-      this.#view.localStorage.setItem(
         PINNED_EXPANDED_STORAGE_KEY,
         String(this.#pinnedExpanded),
       );
     } catch {
-      // Pinning remains available for this runtime when storage is blocked.
+      // Drawer expansion is only a local presentation preference.
     }
   }
 
@@ -831,8 +839,12 @@ export class MobileSidebarDrawerRuntime {
 
     const list = this.#root.createElement("div");
     list.setAttribute(MOBILE_NAV_PINNED_LIST_ATTRIBUTE, "");
+    const status = this.#root.createElement("div");
+    status.setAttribute("data-hub-bookmark-status", "");
+    status.setAttribute("role", "status");
+    status.hidden = true;
     header.append(toggle, pinCurrent);
-    panel.append(header, list);
+    panel.append(header, status, list);
     panel.addEventListener("click", this.#onPinnedPanelClick);
     frame.append(panel);
     this.#pinnedPanel = panel;
@@ -860,10 +872,19 @@ export class MobileSidebarDrawerRuntime {
       current,
       currentPinned,
       expanded: this.#pinnedExpanded,
+      syncStatus: this.#bookmarks.status,
       lang: this.#root.documentElement.lang,
     });
     if (renderKey === this.#pinnedRenderKey) return;
     this.#pinnedRenderKey = renderKey;
+    const syncStatus = panel.querySelector("[data-hub-bookmark-status]");
+    if (syncStatus instanceof this.#view.HTMLElement) {
+      syncStatus.hidden = this.#bookmarks.status !== "pending";
+      syncStatus.textContent = this.#navigationLabel(
+        "Waiting to sync · reconnect to save",
+        "等待同步 · 重新连接以保存",
+      );
+    }
 
     panel.toggleAttribute(
       MOBILE_NAV_PINNED_EXPANDED_ATTRIBUTE,
@@ -966,7 +987,7 @@ export class MobileSidebarDrawerRuntime {
       : 44;
     this.#frame?.style.setProperty(
       "--hub-mobile-pinned-height",
-      `${String(panelHeight)}px`,
+      `${String(panelHeight + (this.#bookmarks.status === "pending" ? 24 : 0))}px`,
     );
   }
 
@@ -980,18 +1001,11 @@ export class MobileSidebarDrawerRuntime {
   }
 
   #togglePinnedSession(sessionId: string): void {
-    const index = this.#pinnedSessionIds.indexOf(sessionId);
-    if (index === -1) {
-      this.#pinnedSessionIds = [
-        sessionId,
-        ...this.#pinnedSessionIds,
-      ];
+    const pinned = !this.#pinnedSessionIds.includes(sessionId);
+    if (pinned) {
       this.#pinnedExpanded = true;
-    } else {
-      this.#pinnedSessionIds = this.#pinnedSessionIds.filter(
-        (candidate) => candidate !== sessionId,
-      );
     }
+    this.#bookmarks.set(sessionId, pinned);
     this.#persistPinnedSessions();
     this.#pinnedRenderKey = undefined;
     this.#renderPinnedPanel();
@@ -1114,6 +1128,9 @@ export class MobileSidebarDrawerRuntime {
     const frame = this.#frame;
     const content = this.#content;
     if (frame === undefined || content === undefined) return;
+    if (open && !frame.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)) {
+      this.#refreshBookmarks();
+    }
     frame.toggleAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE, open);
     this.#navigationFooter?.toggleAttribute("inert", !open);
     this.#navigationFooter?.setAttribute(

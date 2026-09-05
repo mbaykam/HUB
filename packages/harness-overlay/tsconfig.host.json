@@ -15,6 +15,7 @@
   "include": [
     "src/agent-browser-contract.ts",
     "src/agent-turn-contract.ts",
+    "src/bookmarks-contract.ts",
     "src/index.ts",
     "src/minke-host-contract.ts",
     "src/pwa-contract.ts",

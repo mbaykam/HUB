@@ -425,9 +425,9 @@ test("mobile navigation separates unnamed recents from project folders", async (
   );
   assert.deepEqual(
     JSON.parse(
-      view.localStorage.getItem("hub.mobile.pinned-sessions.v1"),
-    ),
-    ["existing-session"],
+      view.localStorage.getItem("hub.bookmarks.cache.v2"),
+    ).pending,
+    [{ sessionId: "existing-session", pinned: true }],
   );
   const pinnedSession = view.document.querySelector(
     "[data-hub-mobile-nav-pinned-session]",
@@ -452,9 +452,9 @@ test("mobile navigation separates unnamed recents from project folders", async (
   ).click();
   assert.deepEqual(
     JSON.parse(
-      view.localStorage.getItem("hub.mobile.pinned-sessions.v1"),
-    ),
-    [],
+      view.localStorage.getItem("hub.bookmarks.cache.v2"),
+    ).pending,
+    [{ sessionId: "existing-session", pinned: false }],
   );
 
   runtime.dispose();

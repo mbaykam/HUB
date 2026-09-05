@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { HUB_BOOKMARKS_ROUTE } from "@minke/harness-overlay/bookmarks-contract.ts";
 import { EventEmitter } from "node:events";
 import {
   mkdtemp,
@@ -1647,6 +1648,7 @@ test("HUB Host mounts Files RPC on the trusted DSH connection", async (t) => {
   assert.deepEqual(
     pwaRoutes.map(({ path }) => path),
     [
+      HUB_BOOKMARKS_ROUTE,
       MINKE_REMOTE_PREVIEW_ROUTE,
       MINKE_PWA_ROUTES.manifest,
       MINKE_PWA_ROUTES.bootstrap,

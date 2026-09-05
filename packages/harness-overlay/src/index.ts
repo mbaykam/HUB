@@ -1,5 +1,7 @@
 import { homedir } from "node:os";
+import type { IncomingMessage } from "node:http";
 import { isAbsolute, resolve } from "node:path";
+import { installBookmarksHost } from "./host/bookmarks.ts";
 import {
   isMinkeHostRpcEndpoint,
   MINKE_HOST_PROTOCOL_VERSION,
@@ -82,6 +84,8 @@ export interface Config {
   readonly rootPath?: string;
   /** Durable private storage for generated HTML preview snapshots. */
   readonly previewStorePath?: string;
+  /** Durable bookmarks shared by all authenticated clients of this Host. */
+  readonly bookmarkStorePath?: string;
 }
 
 interface HostRpcError {
@@ -143,6 +147,7 @@ interface MinkeHostContext {
     label: string,
   ): unknown;
   readonly connection: {
+    requestRejection(request: IncomingMessage): 401 | 403 | undefined;
     replaceTrustedHosts(
       trustedHosts: readonly string[],
     ): void;
@@ -331,6 +336,12 @@ export function apply(
   config?: Config,
 ): void {
   const rootPath = configuredRoot(config);
+  const bookmarkStorePath = config?.bookmarkStorePath ?? resolve(process.cwd(), "hub-bookmarks.json");
+  if (!isAbsolute(bookmarkStorePath)) throw new TypeError("Bookmark store path must be absolute");
+  ctx.effect(
+    () => installBookmarksHost(ctx.webServer, bookmarkStorePath, (request) => ctx.connection.requestRejection(request)),
+    "minke-host: shared bookmarks",
+  );
   const previews = new RemotePreviewRuntime({
     rootPath,
     storePath: configuredPreviewStore(config),

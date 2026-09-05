@@ -20,6 +20,8 @@ by [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 - Added swipeable liquid-glass navigation panels, a dedicated mobile home
   launch, deterministic one-tap session switching, and compact provider usage
   meters for Codex and OpenRouter.
+- Added shared session bookmarks saved on the Host, with automatic migration
+  of existing browser bookmarks and synchronization across devices.
 - Rebranded the desktop app and PWA as HUB with a minimal geometric identity.
 - Made Harness staging work on Windows without requiring permission to create
   ordinary symbolic links.

@@ -34,6 +34,10 @@ docs/research
 
 *.local
 
+# Private Host bookmark data (also when running a Host from this directory).
+hub-bookmarks.json
+hub-bookmarks.json.*.tmp
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
