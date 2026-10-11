@@ -59,6 +59,10 @@ Original images/files can be saved under the vault's attachments with controlled
 previews. URLs remain source references; optional extraction/download can fail
 on unavailable or restricted content. Keeping an original file does not mean
 every media format has been understood or transcribed by AI.
+Local PDF extraction needs `pypdf` in the default Python runtime under
+`~/.dsh/runtimes/pipecat`; the separately pinned dependency list is
+`scripts/tests/requirements-media.txt`. Without it, original files can still be
+retained while text extraction is unavailable.
 
 ## Import older conversations
 

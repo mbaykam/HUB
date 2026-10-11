@@ -13,8 +13,8 @@ test('Camofox tabs are isolated per native task and DELETE carries the required 
  await assert.rejects(registered.get('camofox_snapshot').execute({tabId:'owned-tab'},owner),/created by this character/);off();assert.equal(registered.size,0);
 });
 
-test('Windows startup passes CMD arguments separately and scrubs ambient provider credentials',async()=>{
+test('startup keeps CMD arguments separate and binds the service to loopback',async()=>{
  const {mkdtemp,writeFile,mkdir,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join,dirname,basename}=await import('node:path');const root=await mkdtemp(join(tmpdir(),'hub-camo-start-'));let ready=false,launch;
- try{await writeFile(join(root,'runtime.json'),JSON.stringify({launcher:'C:\\HUB Tools\\camofox.cmd'}));const runtime=new CamofoxRuntime({async resolveExecutable(){return 'C:/Windows/System32/cmd.exe'},spawn(spec){launch=spec;ready=true;return {done:Promise.resolve({exitCode:0,signal:null})}}},new AbortController().signal,async()=>new Response(JSON.stringify({ok:ready,engine:'camoufox'})),root);await runtime.ensure();assert.deepEqual(launch.argv.slice(1),['/d','/c','C:\\HUB Tools\\camofox.cmd','server','start']);assert.equal(launch.env.CAMOFOX_HOST,'127.0.0.1');assert.equal(launch.env.CAMOFOX_AUTH_MODE,'auto');assert.equal(launch.signal.aborted,false);}
+ try{const launcher=join(root,'HUB Tools','camofox.cmd');await writeFile(join(root,'runtime.json'),JSON.stringify({launcher}));const runtime=new CamofoxRuntime({async resolveExecutable(){return join(root,'cmd.exe')},spawn(spec){launch=spec;ready=true;return {done:Promise.resolve({exitCode:0,signal:null})}}},new AbortController().signal,async()=>new Response(JSON.stringify({ok:ready,engine:'camoufox'})),root);await runtime.ensure();assert.deepEqual(launch.argv.slice(1),['/d','/c',launcher,'server','start']);assert.equal(launch.env.CAMOFOX_HOST,'127.0.0.1');assert.equal(launch.env.CAMOFOX_AUTH_MODE,'auto');assert.equal(launch.signal.aborted,false);}
  finally{assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-camo-start-'));await rm(root,{recursive:true,force:true});}
 });

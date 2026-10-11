@@ -18,6 +18,10 @@ normally use fixtures; real provider, microphone and phone tests are explicit
 opt-ins. State which environment and acceptance path you actually verified.
 File-symlink tests may skip on a Windows account without that OS privilege;
 the source-check workflow runs on Linux to cover those filesystem cases.
+The knowledge-assets suite also exercises real local PDF extraction. Install
+`scripts/tests/requirements-media.txt` in the default Python runtime under
+`~/.dsh/runtimes/pipecat`; the source-check workflow creates this isolated
+environment explicitly. No speech models or provider accounts are needed.
 
 Prefer behavior, rendered output and parsed artifacts over matching implementation
 text. Preserve the source-assertion ratchet; lower its baseline when deleting

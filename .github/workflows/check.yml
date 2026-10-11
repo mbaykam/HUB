@@ -34,4 +34,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm harness:stage
       - run: pnpm typecheck
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Prepare the local PDF test runtime
+        run: |
+          python -m venv "$HOME/.dsh/runtimes/pipecat"
+          "$HOME/.dsh/runtimes/pipecat/bin/python" -m pip install -r scripts/tests/requirements-media.txt
       - run: pnpm test:desktop
