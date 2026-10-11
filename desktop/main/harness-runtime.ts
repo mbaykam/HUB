@@ -1,4 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { bindTelegramControl } from "./remote-hub/telegram-control.ts";
+import { bindHubAgentActivity } from "./remote-hub/agent-activity.ts";
+import type { HubAgentActivity } from "@minke/harness-overlay/agent-activity-contract.ts";
+import type { HubTelegramCommand } from "@minke/harness-overlay/telegram-control-contract.ts";
 import { access, mkdir } from "node:fs/promises";
 import {
   deleteEnvironmentName,
@@ -76,6 +80,8 @@ export interface HarnessRuntimeOptions {
   webSearch: WebSearchSettings;
   agentBrowser?: Pick<AgentBrowserRuntime, "bindChild">;
   onUnexpectedExit(exit: HarnessRuntimeExit): void;
+  telegramControl?: (command: HubTelegramCommand) => Promise<unknown>;
+  agentActivity?: (activity: HubAgentActivity) => Promise<void>;
   startupTimeoutMs?: number;
   shutdownTimeoutMs?: number;
   controlTimeoutMs?: number;
@@ -248,6 +254,8 @@ export class HarnessRuntime {
       },
     );
     this.#child = child;
+    if (this.#options.telegramControl) bindTelegramControl(child, this.#options.telegramControl);
+    if (this.#options.agentActivity) bindHubAgentActivity(child, this.#options.agentActivity);
     this.#control = new HarnessControlChannel(
       child,
       this.#options.controlTimeoutMs,

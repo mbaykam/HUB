@@ -1128,8 +1128,10 @@ function stalledBotPoll({ ingressPolicy, signal }) {
 
 function transactionalBotHarness(options = {}) {
   const providerName = options.provider ?? "telegram";
+  const activityRoutes = new Map();
   const state = {
     deletes: 0,
+    enqueued: [],
     mailboxes: [],
     providers: [],
     stored: options.stored,
@@ -1145,6 +1147,7 @@ function transactionalBotHarness(options = {}) {
   };
   const runtime = new BotCapabilityRuntime({
     mailboxPath: "/tmp/minke-transactional-bot-test.sqlite",
+    activityDestinations: { remember: route => activityRoutes.set(route.taskId ? "task:" + route.taskId : route.sessionId, route), get: id => activityRoutes.get(id) },
     vault: {
       available: true,
       async readBot() {
@@ -1172,6 +1175,7 @@ function transactionalBotHarness(options = {}) {
     },
     driver: {
       provider: providerName,
+      liveReplies: options.liveReplies,
       agentReplyPayload: options.agentReplyPayload,
       candidateHealthIssue(provider) {
         return options.candidateHealthIssue?.(
@@ -1240,6 +1244,8 @@ function transactionalBotHarness(options = {}) {
     },
     createMailbox() {
       const mailbox = {
+        enqueue(input) { if (!state.enqueued.some(x => x.operationId === input.operationId)) state.enqueued.push(input); return {created:true}; },
+        findOutbox(operationId) { return state.enqueued.find(x => x.operationId === operationId); },
         accounts: [],
         closes: 0,
         recoveries: 0,
@@ -1390,10 +1396,10 @@ test("an unknown Telegram DM creates a pairing reply and approval authorizes onl
     payload: {
       kind: "text",
       text:
-        "HUB 收到了你的 Telegram 私聊配对请求。\n"
-        + "配对码：ABCDEFGH\n"
-        + "请在 HUB 的「远端 → Telegram」中确认。"
-        + "这条消息尚未交给 Agent。",
+        "HUB received your Telegram pairing request.\n"
+        + "Pairing code: ABCDEFGH\n"
+        + "Open HUB → Telegram and approve the matching account. "
+        + "No assistant task has run yet.",
     },
   });
   assert.equal(agentInputs.length, 0);
@@ -1510,10 +1516,10 @@ test("an unknown Discord DM creates an approvable pairing request", async (t) =>
     payload: {
       kind: "text",
       text:
-        "HUB 收到了你的 Discord 私聊配对请求。\n"
-        + "配对码：ABCDEFGH\n"
-        + "请在 HUB 的「远端 → Discord」中确认。"
-        + "这条消息尚未交给 Agent。",
+        "HUB received your Discord pairing request.\n"
+        + "Pairing code: ABCDEFGH\n"
+        + "Open HUB → Discord and approve the matching account. "
+        + "No assistant task has run yet.",
     },
   });
 
@@ -1589,7 +1595,7 @@ test("an unpaired Discord server mention cannot create an authorization request"
   });
 });
 
-test("authorized Telegram DMs route through Agent and durable reply dispatch", async (t) => {
+for (const [liveReplies, delegate] of [[false, false], [true, false], [true, true]]) test(`authorized Telegram DMs route through Agent and durable reply dispatch (live=${liveReplies}, delegate=${delegate})`, async (t) => {
   const ingressDecision = deferred();
   const routeResult = deferred();
   const dispatchStarted = deferred();
@@ -1599,7 +1605,8 @@ test("authorized Telegram DMs route through Agent and durable reply dispatch", a
   let routeCalls = 0;
   let dispatchCalls = 0;
   const telegramDriver = createTelegramBotDriver();
-  const { runtime } = transactionalBotHarness({
+  const { runtime, state } = transactionalBotHarness({
+    liveReplies,
     stored: {
       accountId: "transactional-bot-id",
       accountLabel: "@minke_dsh_bot",
@@ -1732,6 +1739,7 @@ test("authorized Telegram DMs route through Agent and durable reply dispatch", a
     agentRoute: {
       async runAgentTurn(input) {
         agentInputs.push(input);
+        if (delegate) await runtime.notifyAgentActivity({ channel: "hub:agent-activity", version: 1, rootSessionId: input.sessionId, taskId: "specialist-task", eventId: "specialist-task:started", status: "started", label: "Private auto-generated title · web_fetch" });
         return {
           outcome: "completed",
           sessionId: input.sessionId,
@@ -1749,7 +1757,14 @@ test("authorized Telegram DMs route through Agent and durable reply dispatch", a
   await runtime.initialize();
   assert.equal(await ingressDecision.promise, true);
   await dispatchStarted.promise;
-  assert.deepEqual(await routeResult.promise, {
+  const answer = await routeResult.promise;
+  if (liveReplies) {
+    assert.equal(answer.status, "reply");
+    assert.equal(answer.payload.kind, "hub-live-reply");
+    assert.equal(answer.payload.markdown, "# HUB reply\n\n**Ready**");
+    assert.equal(answer.payload.final, !delegate);
+    assert.match(answer.payload.key, /^[a-f0-9]{64}$/);
+  } else assert.deepEqual(answer, {
     status: "reply",
     payload: {
       kind: "rich-markdown",
@@ -1779,6 +1794,25 @@ test("authorized Telegram DMs route through Agent and durable reply dispatch", a
     receivedMessages: 1,
     sentMessages: 1,
   });
+  const event = { channel: "hub:agent-activity", version: 1, rootSessionId: agentInputs[0].sessionId, taskId: "specialist-task", eventId: "specialist-task:started", status: "started", label: "HUB specialist" };
+  await runtime.notifyAgentActivity(event);
+  await runtime.notifyAgentActivity(event);
+  assert.equal(state.enqueued.length, 0, "Standalone tool status chatter is suppressed");
+  await runtime.notifyAgentActivity({ ...event, status: "completed", eventId: "specialist-task:done", text: "The clean answer." });
+  await runtime.notifyAgentActivity({ ...event, status: "completed", eventId: "specialist-task:done", text: "The clean answer." });
+  assert.equal(state.enqueued.length, 1);
+  assert.equal(state.enqueued[0].recipientId, "owner-user");
+  assert.equal(state.enqueued[0].generation, 1);
+  assert.equal(state.enqueued[0].payload.markdown, "The clean answer.");
+  if (liveReplies) {
+    assert.equal(state.enqueued[0].payload.key, answer.payload.key, "Worker uses the parent answer's message slot");
+    assert.equal(state.enqueued[0].payload.final, true);
+    await runtime.notifyAgentActivity({ ...event, status: "running", eventId: "specialist-task:late", label: "send_message" });
+    assert.equal(state.enqueued.length, 1, "Late tool chatter cannot replace the final result");
+  }
+  await runtime.notifyAgentActivity({ ...event, rootSessionId: "minke-im-telegram-" + "f".repeat(32), eventId: "other:1" });
+  assert.equal(state.enqueued.length, 1, "Unbound conversations cannot receive activity");
+
 });
 
 test("authorized Discord DMs route through Agent and durable reply dispatch", async (t) => {
@@ -7362,7 +7396,7 @@ test("Remote Hub uses grouped sidebar navigation and stable detail panels", asyn
   );
   assert.match(
     remoteDialog,
-    /Minke adds no second sign-in layer to the Tailscale route/u,
+    /HUB adds no second sign-in layer to the Tailscale route/u,
   );
   assert.equal(
     (
@@ -7792,7 +7826,7 @@ test("Remote Hub prioritizes recovery for a blocked active remote route", async 
   assert.match(dialog, />Retrying</u);
   assert.match(
     dialog,
-    /Minke could not read a connected Tailscale node/u,
+    /HUB could not read a connected Tailscale node/u,
   );
   assert.match(dialog, />Refresh status</u);
   assert.match(dialog, />Disable remote access</u);
@@ -8206,7 +8240,7 @@ test("Discord shows manual proxy configuration only after automatic routing fail
   );
   assert.match(
     failed,
-    /Minke already tries the system proxy and reuses the Telegram proxy when available/u,
+    /HUB already tries the system proxy and reuses the Telegram proxy when available/u,
   );
   assert.match(failed, /type="url"/u);
 

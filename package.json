@@ -14,7 +14,7 @@
     "url": "https://github.com/mbaykam/HUB/issues"
   },
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.26",
   "packageManager": "pnpm@11.7.0",
   "main": ".vite/build/main.js",
   "scripts": {
@@ -30,6 +30,7 @@
     "test:desktop:host": "node scripts/tests/desktop.mjs host",
     "test:desktop:about-layout": "electron tests/about-update-layout-runtime.cjs",
     "test:desktop:agent-browser-runtime": "electron tests/agent-browser-runtime.cjs",
+    "test:pwa:browser-runtime": "electron tests/agent-browser-runtime.cjs --pwa-view",
     "test:desktop:web-tab-links-runtime": "pnpm run build:preload && electron tests/web-tab-links-runtime.cjs",
     "test:desktop:agent-browser-conversation": "pnpm run build:preload && pnpm run harness:stage:ensure && pnpm run test:desktop:agent-browser-conversation:prepared",
     "test:desktop:agent-browser-conversation:prepared": "node scripts/tests/agent-browser-conversation.mjs",
@@ -47,7 +48,8 @@
     "forge:make": "node --max-old-space-size=8192 scripts/forge/run.mjs make",
     "package": "pnpm run harness:stage && pnpm run forge:package",
     "make": "pnpm run harness:stage && pnpm run forge:make",
-    "make:macos": "pnpm run harness:stage && node scripts/forge/run.mjs make --platform=darwin"
+    "make:macos": "pnpm run harness:stage && node scripts/forge/run.mjs make --platform=darwin",
+    "test:characters:native": "node --experimental-transform-types --test tests/characters-native.test.mjs"
   },
   "dependencies": {
     "@lencx/minke-im-discord": "workspace:*",

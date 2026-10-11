@@ -1,9 +1,18 @@
-# Minke 使用文档
+# HUB documentation
 
-`docs/` 根目录面向 Minke 使用者，只收录安装、配置、操作、工作流和故障处理等可直接执行的内容。
+Start with [Setup](setup.md). The public source snapshot is experimental and
+Windows-first; optional voice/knowledge/calling require additional configuration.
 
-## 使用指南
+| Goal | Guide |
+| --- | --- |
+| Build HUB, choose models and connect the mobile PWA | [Setup](setup.md) |
+| Configure local speech, voices and live transcription | [Voice](voice.md) |
+| Maintain connected notes or import older conversations | [Knowledge](knowledge.md) |
+| Pair a text bot or understand incoming user-account calls | [Telegram](telegram.md) |
+| Configure optional browser capabilities and visual results | [Browsing](browsing.md) |
+| Understand project/component credits | [Sources](sources.md) |
+| Apply a compatible PWA interface update | [UI updates](../HUB_UI_UPDATES.md) |
+| Read product status and contribute | [Changelog](../CHANGELOG.md) · [Contributing](../CONTRIBUTING.md) |
 
-- [应用更新](./app-updates.md)：检查、下载和安装更新，以及各平台的提示。
-- [安装与移动端访问（English）](../README.md)
-- [安装与移动端访问（简体中文）](../README.zh-CN.md)
+[English overview](../README.md) · [Türkçe](../README.tr.md) ·
+[Security and private data](../SECURITY.md)

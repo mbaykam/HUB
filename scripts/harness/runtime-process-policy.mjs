@@ -513,6 +513,26 @@ export async function hardenHarnessWindowsRestrictedLaunches(runtimeRoot) {
   };
 }
 
+/** Apply the same background-window rule to whichever web-app entries deploy emits. */
+export async function hardenHarnessBrowserLaunches(runtimeRoot) {
+  const root = join(runtimeRoot, "node_modules", "@deepseek-ai", "dsh-web-app");
+  let changed = 0;
+  for (const path of await javascriptFiles(root)) {
+    const source = await readFile(path, "utf8"), ast = parseRuntimeJavaScript(source, runtimePath(runtimeRoot, path));
+    const bindings = collectChildProcessBindings(ast), edits = [];
+    walk(ast, node => {
+      if (node.type !== "CallExpression" || childProcessMethod(node, bindings) === undefined || hasExplicitHiddenWindow(node)) return;
+      const options = node.arguments.slice(1).find(arg => arg.type === "ObjectExpression");
+      if (!options || options.properties.some(p => p.type === "SpreadElement")) throw new Error("Cannot safely hide a dynamic web-app launch");
+      const property = objectProperty(options, "windowsHide");
+      if (property) edits.push({ start: property.value.start, end: property.value.end, text: "true" });
+      else edits.push({ start: options.start + 1, end: options.start + 1, text: "\nwindowsHide: true," });
+    });
+    if (edits.length) { await writeFile(path, applySourceEdits(source, edits)); changed += edits.length; }
+  }
+  return changed;
+}
+
 /**
  * Inspect first-party process launch sites in a staged Harness runtime.
  * Non-terminal child_process calls must always suppress native Windows

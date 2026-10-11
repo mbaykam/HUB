@@ -16,6 +16,7 @@ export interface AgentTurnInput {
   readonly operationId: string;
   readonly sessionId: string;
   readonly text: string;
+  readonly media?:readonly {name:string;mediaType:string;data:string}[];
 }
 
 export interface AgentTurnPreview {
@@ -204,7 +205,7 @@ function parseAgentTurnInput(value: unknown): AgentTurnInput {
       "operationId",
       "sessionId",
       "text",
-    ])
+    ],["media"])
   ) {
     throw new TypeError("invalid Agent turn input");
   }
@@ -222,7 +223,12 @@ function parseAgentTurnInput(value: unknown): AgentTurnInput {
       "Agent turn text",
       MAX_TEXT_LENGTH,
     ),
+    ...(candidate.media===undefined?{}:{media:parseMedia(candidate.media)}),
   };
+}
+function parseMedia(value:unknown):NonNullable<AgentTurnInput["media"]>{
+  if(!Array.isArray(value)||value.length<1||value.length>4)throw TypeError("Invalid Agent media");let total=0;
+  return value.map(item=>{const media=record(item,"Agent media");if(!hasExactKeys(media,["name","mediaType","data"]))throw TypeError("Invalid Agent media");const name=boundedString(media.name,"Media name",200),mediaType=boundedString(media.mediaType,"Media type",100),data=boundedString(media.data,"Media bytes",34000000);total+=data.length;if(total>34000000||!/^[-\w.+]+\/[-\w.+]+$/.test(mediaType)||!data||data.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(data))throw TypeError("Invalid media data");return {name,mediaType,data};});
 }
 
 export function parseAgentTurnResult(

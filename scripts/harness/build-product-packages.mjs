@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { build } from "esbuild";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { browserLicenses } from "./browser-licenses.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const overlayPackageRoot = join(
@@ -283,6 +285,52 @@ await Promise.all([
     sourcemap: true,
   }),
   build({
+    entryPoints: [join(overlayPackageRoot, "src", "memory.ts")],
+    outfile: join(overlayOutputRoot, "memory.js"),
+    bundle: true, packages: "external", format: "esm", platform: "node",
+    target: "es2022", tsconfig: tsconfigPath, sourcemap: true,
+  }),
+  build({
+    entryPoints: [join(overlayPackageRoot, "src", "voice.ts")],
+    outfile: join(overlayOutputRoot, "voice.js"),
+    bundle: true, packages: "external", format: "esm", platform: "node",
+    target: "es2022", tsconfig: tsconfigPath, sourcemap: true,
+  }),
+  build({
+    entryPoints: [join(overlayPackageRoot, "src", "characters.ts")],
+    outfile: join(overlayOutputRoot, "characters.js"),
+    bundle: true, packages: "external", format: "esm", platform: "node",
+    target: "es2022", tsconfig: tsconfigPath, sourcemap: true,
+  }),
+  build({
+    entryPoints: [join(overlayPackageRoot, "src", "models.ts")],
+    outfile: join(overlayOutputRoot, "models.js"),
+    bundle: true, packages: "external", format: "esm", platform: "node",
+    target: "es2022", tsconfig: tsconfigPath, sourcemap: true,
+  }),
+  build({
+    entryPoints: [join(overlayPackageRoot, "src", "client", "voice", "browser-client.ts")],
+    outfile: join(overlayOutputRoot, "voice-browser.js"),
+    bundle: true, format: "esm", platform: "browser", target: ["safari17", "chrome120"],
+    tsconfig: tsconfigPath, minify: true,
+    define: { "process.env.NODE_ENV": JSON.stringify("production") },
+  }),
+  build({
+    entryPoints: [join(overlayPackageRoot, "src", "client", "presentation", "renderer.ts")],
+    outfile: join(overlayOutputRoot, "presentation-renderer.js"),
+    bundle: true, format: "iife", platform: "browser", target: ["safari17", "chrome120"],
+    tsconfig: tsconfigPath, minify: true, legalComments: "external", loader: { ".css": "text" },
+    metafile: true, plugins: [browserLicenses(projectRoot, join(overlayOutputRoot, "presentation-third-party-licenses.txt"))],
+    define: { "process.env.NODE_ENV": JSON.stringify("production") },
+  }),
+  build({
+    entryPoints: [join(overlayPackageRoot, "src", "client", "memory", "graph-browser.ts")],
+    outfile: join(overlayOutputRoot, "memory-graph-browser.js"),
+    bundle: true, format: "esm", platform: "browser", target: ["safari17", "chrome120"],
+    tsconfig: tsconfigPath, minify: true, legalComments: "external", loader: { ".css": "text" },
+    metafile: true, plugins: [browserLicenses(projectRoot, join(overlayOutputRoot, "memory-graph-third-party-licenses.txt"))],
+  }),
+  build({
     entryPoints: [
       join(
         overlayPackageRoot,
@@ -323,10 +371,10 @@ await Promise.all([
     banner: {
       js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(
         overlayPackageId,
-      )}, factory: (require) => { var module = { exports: {} }; var exports = module.exports;`,
+      )}, factory: window.__HUB_UI_FACTORY__ ?? ((require) => { var module = { exports: {} }; var exports = module.exports;`,
     },
     footer: {
-      js: "return module.exports; } });",
+      js: "return module.exports; }) });",
     },
     sourcemap: true,
   }),
@@ -346,6 +394,30 @@ if (/require\(["']@deepseek-ai\//u.test(clientBundle)) {
     "HUB overlay client bundle leaked a non-platform Harness value import",
   );
 }
+
+// A PWA factory can be preloaded before Harness materializes its usual module.
+// The native desktop has no HTTP injection and keeps the bundled factory.
+const factoryStart = clientBundle.indexOf("((require) =>");
+const factoryEnd = clientBundle.lastIndexOf("return module.exports; }) });");
+if (factoryStart < 0 || factoryEnd < factoryStart) throw new Error("Invalid UI factory boundary");
+await writeFile(join(overlayOutputRoot, "pwa-client.js"), "window.__HUB_UI_FACTORY__ = " + clientBundle.slice(factoryStart, factoryEnd) + "return module.exports; });\n");
+
+// Conservative compatibility: any native host, runtime contract, lockfile,
+// configured vendor patch or speech-server change requires a host install.
+// UI/CSS-only changes do not change this fingerprint.
+const runtimeConfig = JSON.parse(await readFile(join(projectRoot, "config/harness-runtime.json"), "utf8"));
+const compatibilityFiles = [
+  "config/harness-runtime.json", "pnpm-lock.yaml", ...runtimeConfig.patches,
+  "packages/harness-overlay/package.json", "packages/harness-overlay/cordis.patch.yml",
+  ...["index.js", "characters.js", "models.js", "memory.js", "voice.js", "web-search.js", "presentation-renderer.js"].map(name => `packages/harness-overlay/lib/${name}`),
+    ...["server.py", "voice_pipeline.py", "playback_guard.py", "speech_settings.py", "speech_download.py", "hub_native_llm.py", "bilingual_tts.py", "supertonic_tts.py", "streaming_asr.py", "native_streaming_stt.py", "speech_preview.py", "telegram_calls.py", "telegram_transport.py", "whisper_auto.py", "speech_health.py", "streaming_preview.py", "knowledge_extract.py"].map(name => `packages/harness-overlay/voice/${name}`),
+  "packages/model-runtime/lib/index.js", "packages/model-runtime/lib/dsh.js",
+];
+const compatibility = createHash("sha256");
+for (const name of compatibilityFiles.sort()) {
+  compatibility.update(name + "\0").update(await readFile(join(projectRoot, name))).update("\0");
+}
+await writeFile(join(overlayOutputRoot, "ui-host.json"), JSON.stringify({ schema: 1, compatibility: compatibility.digest("hex") }) + "\n");
 
 console.log(
   `Built ${modelRuntimePackageId} in ${modelRuntimeOutputRoot}`,

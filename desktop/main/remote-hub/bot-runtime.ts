@@ -3,6 +3,9 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
+import { AgentActivityDestinations, type ActivityDestination } from "./agent-activity.ts";
+import type { TelegramLiveReply } from "./telegram-replies.ts";
+import type { HubAgentActivity } from "@minke/harness-overlay/agent-activity-contract.ts";
 import {
   botEchoOnlyGatewayIngress,
   dispatchGatewayProviderOnce,
@@ -97,6 +100,7 @@ export interface BotInboundMessage {
   readonly conversationKind: "direct" | "group";
   readonly senderLabel: string;
   readonly text?: string;
+  readonly media?:readonly {fileId:string;name:string;mediaType:string;size?:number}[];
 }
 
 export interface BotAgentTurnPreview {
@@ -121,11 +125,13 @@ export type BotAgentTurnResult =
     };
 
 export interface BotAgentRoutePort {
+  conversationUrl?(sessionId: string, panel?: "models"): string | undefined;
   runAgentTurn(
     input: {
       readonly operationId: string;
       readonly sessionId: string;
       readonly text: string;
+      readonly media?:readonly {name:string;mediaType:string;data:string}[];
     },
     options?: { readonly signal?: AbortSignal },
   ): Promise<BotAgentTurnResult>;
@@ -133,6 +139,8 @@ export interface BotAgentRoutePort {
 
 export interface BotProviderDriver<Identity> {
   readonly provider: BotCredentialProvider;
+  readonly liveReplies?: boolean;
+  receiveMedia?(token:string,items:NonNullable<BotInboundMessage["media"]>,signal:AbortSignal):Promise<readonly {name:string;mediaType:string;data:string}[]>;
   agentReplyPayload?(
     markdown: string,
     context: {
@@ -170,6 +178,7 @@ export interface BotProviderDriver<Identity> {
 }
 
 export interface BotCapabilityRuntimeOptions<Identity> {
+  readonly activityDestinations?: Pick<AgentActivityDestinations, "remember" | "get">;
   readonly driver: BotProviderDriver<Identity>;
   readonly mailboxPath: string;
   readonly vault: BotCredentialVaultPort;
@@ -243,23 +252,24 @@ function botAgentSessionId(
     .slice(0, 32)}`;
 }
 
-function boundedReplyText(value: string): string {
+function boundedReplyText(value: string, limit = BOT_AGENT_REPLY_CODE_POINTS): string {
   const text = value.trim();
   const codePoints = [...text];
-  if (codePoints.length <= BOT_AGENT_REPLY_CODE_POINTS) {
+  if (codePoints.length <= limit) {
     return text;
   }
   return `${codePoints
-    .slice(0, BOT_AGENT_REPLY_CODE_POINTS - 1)
+    .slice(0, limit - 1)
     .join("")}…`;
 }
 
 function botAgentReplyText(
   text: string,
   previews: readonly BotAgentTurnPreview[] | undefined,
+  limit = BOT_AGENT_REPLY_CODE_POINTS,
 ): string {
   if (previews === undefined || previews.length === 0) {
-    return boundedReplyText(text);
+    return boundedReplyText(text, limit);
   }
   let suffix = "\n\nHTML 预览：";
   let links = 0;
@@ -283,17 +293,17 @@ function botAgentReplyText(
     const line = `\n${preview.title}\n${url.href}`;
     if (
       [...`${suffix}${line}`].length >
-      BOT_AGENT_REPLY_CODE_POINTS - 2
+      limit - 2
     ) {
       break;
     }
     suffix += line;
     links += 1;
   }
-  if (links === 0) return boundedReplyText(text);
+  if (links === 0) return boundedReplyText(text, limit);
   const body = [...text.trim()];
   const remaining =
-    BOT_AGENT_REPLY_CODE_POINTS - [...suffix].length;
+    limit - [...suffix].length;
   const boundedBody = body.length <= remaining
     ? body.join("")
     : `${body
@@ -402,6 +412,11 @@ type CandidateCommitResult =
  * details to the renderer.
  */
 export class BotCapabilityRuntime<Identity> {
+  readonly #activityDestinations: Pick<AgentActivityDestinations, "remember" | "get">;
+  readonly #activityTimes = new Map<string, number>();
+  readonly #activityEvents = new Set<string>();
+  readonly #replyTurns = new Map<string, { tasks: Map<string, { done: boolean; text?: string; failed?: boolean }>; finished: boolean; rootFinal: boolean }>();
+  #replyRevision = 0;
   readonly #driver: BotProviderDriver<Identity>;
   readonly #mailboxPath: string;
   readonly #vault: BotCredentialVaultPort;
@@ -459,6 +474,7 @@ export class BotCapabilityRuntime<Identity> {
     this.#driver = options.driver;
     this.#mailboxPath = options.mailboxPath;
     this.#vault = options.vault;
+    this.#activityDestinations = options.activityDestinations ?? new AgentActivityDestinations(options.mailboxPath + "." + options.driver.provider + "-activity.enc", () => this.#vault.gatewayCipher());
     this.#createMailbox =
       options.createMailbox ??
       ((input) =>
@@ -493,6 +509,64 @@ export class BotCapabilityRuntime<Identity> {
   }
 
   getSnapshot = (): BotHubSnapshot => this.#snapshot;
+
+  async notifyAgentActivity(activity: HubAgentActivity): Promise<void> {
+    if (this.#driver.provider !== "telegram" || this.#disposed || !this.#provider || !this.#mailbox) return;
+    const bound = this.#activityDestinations.get("task:" + activity.taskId);
+    if (bound && bound.sessionId !== activity.rootSessionId) return;
+    const route = bound ?? this.#activityDestinations.get(activity.rootSessionId);
+    const account = this.#provider.account;
+    if (!route || route.accountKey !== account.accountKey || route.generation !== account.generation || route.senderId !== this.#credential?.authorizedUserId) return;
+    const eventKey = route.accountKey + ":" + activity.eventId;
+    if (this.#activityEvents.has(eventKey)) return;
+    this.#activityEvents.add(eventKey);
+    if (this.#activityEvents.size > 2000) this.#activityEvents.delete(this.#activityEvents.values().next().value!);
+    if (!bound) this.#activityDestinations.remember({ ...route, taskId: activity.taskId });
+    const now = this.#now();
+    if (!this.#driver.liveReplies || !route.replyKey) {
+      if (activity.status !== "completed" && activity.status !== "failed") return;
+      this.#mailbox.enqueue({ accountKey: route.accountKey, generation: route.generation, recipientId: route.recipientId, conversationId: route.conversationId, operationId: "hub-activity:" + createHash("sha256").update(route.accountKey + ":" + activity.eventId).digest("hex"), now, payload: { kind: "rich-markdown", markdown: activity.text?.trim() || "İsteği tamamlayamadım. Tekrar deneyebiliriz." } });
+      return;
+    }
+    const turn = this.#replyTurn(route.replyKey);
+    const terminal = activity.status === "completed" || activity.status === "failed";
+    const previous = turn.tasks.get(activity.taskId);
+    if (previous?.done) return;
+    turn.tasks.set(activity.taskId, { done: terminal, text: terminal ? activity.text?.trim() : undefined, failed: activity.status === "failed" });
+    if (turn.rootFinal && !terminal) return;
+    if (turn.finished && !terminal) return;
+    if (!terminal && now - (this.#activityTimes.get(route.replyKey) ?? now) < 1500) return;
+    if (activity.status === "running" && now - (this.#activityTimes.get(route.replyKey) ?? 0) < 4000) return;
+    this.#activityTimes.set(route.replyKey, now);
+    if (this.#activityTimes.size > 1000) this.#activityTimes.delete(this.#activityTimes.keys().next().value!);
+    const tasks = [...turn.tasks.values()];
+    turn.finished = tasks.every(task => task.done);
+    const results = [...new Set(tasks.filter(task => task.done && task.text).map(task => task.text!))];
+    const markdown = turn.finished ? results.join("\n\n") || "İsteği tamamlayamadım. Tekrar deneyebiliriz." : results.length ? results.join("\n\n") + "\n\nDiğer çalışmayı sürdürüyorum…" : /web|camofox|browser/i.test(activity.label) ? "Web sayfasını inceliyorum…" : "İsteğin üzerinde çalışıyorum…";
+    this.#enqueueLiveReply(route, markdown, turn.finished, "hub-activity:" + createHash("sha256").update(eventKey).digest("hex"));
+  }
+
+  #replyTurn(key: string) {
+    let value = this.#replyTurns.get(key);
+    if (!value) { value = { tasks: new Map(), finished: false, rootFinal: false }; this.#replyTurns.set(key, value); }
+    if (this.#replyTurns.size > 1000) this.#replyTurns.delete(this.#replyTurns.keys().next().value!);
+    return value;
+  }
+  #liveReply(key: string, markdown: string, final: boolean): TelegramLiveReply {
+    this.#replyRevision = Math.max(this.#now(), this.#replyRevision + 1);
+    return { kind: "hub-live-reply", key, revision: this.#replyRevision, final, markdown };
+  }
+  #enqueueLiveReply(route: ActivityDestination, markdown: string, final: boolean, operationId?: string) {
+    if (!this.#mailbox || !route.replyKey) return;
+    const id = operationId ?? "hub-reply:" + route.replyKey + ":draft";
+    const existing = this.#mailbox.findOutbox(id);
+    if (existing) {
+      if (existing.accountKey !== route.accountKey || existing.generation !== route.generation) throw new Error("Live reply generation conflict");
+      return;
+    }
+    const payload = this.#liveReply(route.replyKey, markdown, final);
+    this.#mailbox.enqueue({ accountKey: route.accountKey, generation: route.generation, recipientId: route.recipientId, conversationId: route.conversationId, operationId: id, now: this.#now(), payload });
+  }
 
   async initialize(): Promise<void> {
     this.#assertActive();
@@ -1795,7 +1869,7 @@ export class BotCapabilityRuntime<Identity> {
       credential?.authorizedUserId ===
       input.lease.senderId
     ) {
-      const sourceText = message.text?.trim() ?? "";
+      const sourceText = message.text?.trim() || (message.media?.length?"Please process the attached "+message.media.map(m=>m.name).join(", "):"");
       if (sourceText.length === 0) {
         return {
           status: "reply",
@@ -1816,7 +1890,26 @@ export class BotCapabilityRuntime<Identity> {
           "Gateway inbox lease omitted its account key",
         );
       }
-      const result = await route.runAgentTurn(
+      const nativeSessionId = botAgentSessionId(this.#driver.provider, accountKeyValue, input.lease.conversationId);
+      const replyKey = this.#driver.liveReplies ? createHash("sha256").update(accountKeyValue + ":" + input.operationId).digest("hex") : undefined;
+      let media:readonly {name:string;mediaType:string;data:string}[]|undefined;
+      try{media=message.media?.length&&this.#driver.receiveMedia?await this.#driver.receiveMedia(credential.token,message.media,input.signal):undefined;}catch{if(input.signal.aborted)throw new Error("Media receive cancelled");return {status:"reply",payload:this.#agentReplyPayload("Dosyayı alamadım. Telegram’dan 20 MB’tan küçük bir dosya gönderebilir veya HUB’dan ekleyebilirsin.",input.lease,message)};}
+      const destination: ActivityDestination = { sessionId: nativeSessionId, accountKey: accountKeyValue, generation: this.#provider?.account.generation ?? credential.generation, recipientId: input.lease.peerId, conversationId: input.lease.conversationId, senderId: input.lease.senderId, replyKey };
+      if (this.#driver.provider === "telegram" && this.#provider) this.#activityDestinations.remember(destination);
+      if (!media && (sourceText === "/hub" || sourceText === "/models")) {
+        const url = route.conversationUrl?.(nativeSessionId, sourceText === "/models" ? "models" : undefined);
+        if (url) return { status: "reply", payload: this.#agentReplyPayload(`Open in HUB:\n${url}`, input.lease, message) };
+      }
+      const previewTimer = replyKey ? setTimeout(() => {
+        try {
+          if (!input.signal.aborted && this.#provider?.account.accountKey === destination.accountKey && this.#provider.account.generation === destination.generation && !this.#replyTurn(replyKey).finished) this.#enqueueLiveReply(destination, "İsteğin üzerinde çalışıyorum…", false);
+        } catch { /* Optional preview failures must not abort the durable final reply. */ }
+      }, 1500) : undefined;
+      previewTimer?.unref();
+      if (replyKey) this.#activityTimes.set(replyKey, this.#now());
+      let result: BotAgentTurnResult;
+      try { result = await route.runAgentTurn(
+        // Each Telegram conversation keeps the same native HUB session.
         {
           operationId: input.operationId,
           sessionId: botAgentSessionId(
@@ -1825,16 +1918,17 @@ export class BotCapabilityRuntime<Identity> {
             input.lease.conversationId,
           ),
           text: sourceText,
+          ...(media?{media}:{}),
         },
         { signal: input.signal },
-      );
+      ); } finally { clearTimeout(previewTimer); }
       if (
         result.outcome !== "completed" ||
         result.text.trim().length === 0
       ) {
         return {
           status: "reply",
-          payload: this.#agentReplyPayload(
+          payload: replyKey ? this.#liveReply(replyKey, "Yanıtı oluştururken bir sorun oluştu. Tekrar deneyebiliriz.", true) : this.#agentReplyPayload(
             "HUB 未能生成回复，请稍后再试。",
             input.lease,
             message,
@@ -1844,7 +1938,14 @@ export class BotCapabilityRuntime<Identity> {
       const reply = botAgentReplyText(
         result.text,
         result.previews,
+        replyKey ? 120000 : BOT_AGENT_REPLY_CODE_POINTS,
       );
+      if (replyKey) {
+        const turn = this.#replyTurn(replyKey);
+        if (turn.finished) return { status: "ack" };
+        turn.rootFinal = turn.tasks.size === 0;
+        return { status: "reply", payload: this.#liveReply(replyKey, reply, turn.rootFinal) };
+      }
       return {
         status: "reply",
         payload: this.#agentReplyPayload(
@@ -1867,10 +1968,10 @@ export class BotCapabilityRuntime<Identity> {
       payload: {
         kind: "text",
         text:
-          `HUB 收到了你的 ${this.#providerLabel()} 私聊配对请求。\n`
-          + `配对码：${pairing.code}\n`
-          + `请在 HUB 的「远端 → ${this.#providerLabel()}」中确认。`
-          + "这条消息尚未交给 Agent。",
+          `HUB received your ${this.#providerLabel()} pairing request.\n`
+          + `Pairing code: ${pairing.code}\n`
+          + `Open HUB → ${this.#providerLabel()} and approve the matching account. `
+          + "No assistant task has run yet.",
       },
     };
   }

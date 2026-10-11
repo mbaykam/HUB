@@ -1,4 +1,8 @@
-# Minke application updates
+# HUB application updates
+
+The current public snapshot is source-first. Installer availability depends on
+actual published release assets; this guide describes the updater's supported
+behavior, not a promise of prebuilt downloads for every platform.
 
 Packaged macOS, Windows, and Linux builds can check for stable Minke releases. Updating always requires an explicit installation step: Minke never replaces the running application and never silently launches an installer.
 

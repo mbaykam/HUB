@@ -1,11 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { rmSync } = require('node:fs');
 const {
   mkdtemp,
   mkdir,
-  rm,
   writeFile,
 } = require('node:fs/promises');
 const http = require('node:http');
@@ -786,12 +784,11 @@ async function run() {
     assert.equal(basename(temporaryRoot).startsWith(TEMP_ROOT_PREFIX), true);
     await mkdir(temporaryRoot, { recursive: true });
   }
-  // Chromium may flush Preferences after the BrowserWindow is destroyed and
-  // recreate userData after the async cleanup below. Reap that narrow temp
-  // root again only once Electron has fully exited.
-  process.once('exit', () => {
-    rmSync(temporaryRoot, { recursive: true, force: true });
-  });
+  // The Node launcher owns final filesystem cleanup AFTER Electron exits.
+  // Electron 43's Node 24.18.1 rmSync recursively follows Windows junctions,
+  // including native profile links into runtime/source package directories.
+  // Never recursively remove a Harness profile from an Electron exit hook.
+  assert.ok(suppliedTemporaryRoot, 'Run through scripts/tests/agent-browser-conversation.mjs');
   const userData = join(temporaryRoot, 'electron-user-data');
   const dshHome = join(temporaryRoot, 'dsh-home');
   const workspace = join(temporaryRoot, 'workspace');
@@ -922,6 +919,16 @@ async function run() {
       .map(({ name, value }) => `${name}=${value}`)
       .join('; ');
     assert.notEqual(harnessCookie, '');
+    const viewBrowser = async (query) => {
+      const response = await fetch(`${harnessUrl}/api/hub/browser-view`, {
+        method: 'POST', headers: { cookie: harnessCookie, 'content-type': 'application/json', 'x-hub-browser-view': '1' },
+        body: JSON.stringify(query), signal: AbortSignal.timeout(10000),
+      });
+      const body = await response.json();
+      assert.equal(response.status, 200, `Real desktop/host browser viewer: ${body.error ?? ''} ${body.reason ?? ''}`);
+      return body;
+    };
+    assert.deepEqual(await viewBrowser({ type: 'list' }), [], 'The full desktop IPC route is available before a browser exists');
 
     const registeredWorkspace = await rpc(
       harnessUrl,
@@ -993,6 +1000,15 @@ async function run() {
       'the production preload bridge projection',
     );
     assert.equal(preloadProjection.status, 'ready');
+    const viewedTabs = await viewBrowser({ type: 'list' });
+    const viewedTab = viewedTabs.find(tab => tab.sessionId === projection.sessionId);
+    assert.ok(viewedTab, 'The actual assistant-owned browser must appear in the authenticated PWA route');
+    assert.equal(viewedTab.ownerSessionId, created.sessionId);
+    const viewedFrame = await viewBrowser({ type: 'frame', ownerSessionId: created.sessionId, sessionId: projection.sessionId });
+    assert.equal(viewedFrame.mimeType, 'image/jpeg');
+    assert.ok(viewedFrame.width > 0 && viewedFrame.height > 0);
+    assert.deepEqual([...Buffer.from(viewedFrame.data, 'base64').subarray(0, 2)], [255, 216]);
+    trace('PWA viewer received actual assistant-owned compositor pixels through the production desktop/host IPC');
     const footprint =
       await readAgentBrowserHistoryPreload(window);
     assert.ok(footprint.totalVisits >= 1);
@@ -1054,6 +1070,7 @@ async function run() {
         'browser_locate',
         'browser_wait',
         'browser_screenshot',
+        'browser_scroll',
         'browser_close',
       ].sort(),
     );
@@ -1104,6 +1121,7 @@ async function run() {
         'browser_click',
         'browser_fill',
         'browser_press',
+        'browser_scroll',
         'browser_wait',
         'browser_screenshot',
         'browser_close',
@@ -1162,9 +1180,6 @@ async function run() {
         const frameStyle = getComputedStyle(view, "::before");
         return {
           frameAnimation: frameStyle.animationName,
-          frameOffsetPath: frameStyle.offsetPath,
-          framePointerEvents: frameStyle.pointerEvents,
-          frameZIndex: frameStyle.zIndex,
           tabAnimation:
             getComputedStyle(tab, "::after").animationName,
         };
@@ -1176,11 +1191,10 @@ async function run() {
     );
     assert.equal(
       agentControlStyling.frameAnimation,
-      'minke-agent-browser-frame-flow',
+      'none',
     );
-    assert.match(agentControlStyling.frameOffsetPath, /inset/u);
-    assert.equal(agentControlStyling.framePointerEvents, 'none');
-    assert.equal(agentControlStyling.frameZIndex, '1');
+    // Current design uses the tab signal and native cursor overlay, not the
+    // removed animated frame. The input shield is asserted separately above.
     const agentLayout = await readAgentBrowserLayout(window);
 
     const screenshotPath = process.env[SCREENSHOT_ENV];
@@ -1315,6 +1329,7 @@ async function run() {
       'browser_close to remove the runtime projection',
     );
     assert.deepEqual(await readAgentBrowserPreload(window), []);
+    assert.deepEqual(await viewBrowser({ type: 'list' }), [], 'Closing the actual browser clears the PWA owner list');
     assert.equal(model.issuedTools.at(-1), 'browser_close');
     await waitFor(
       () => rendererValue(
@@ -1354,7 +1369,8 @@ async function run() {
     } else {
       process.env.DEEPSEEK_BASE_URL = previousBaseUrl;
     }
-    await rm(temporaryRoot, { recursive: true, force: true });
+    // Leave the test tree for the parent Node process to clean after Chromium
+    // releases its database writers and every child process has exited.
   }
 }
 
@@ -1364,8 +1380,5 @@ run()
     process.exitCode = 1;
   })
   .finally(() => {
-    // Let Chromium shut its profile down before the synchronous process-exit
-    // cleanup above runs. app.exit() can force native profile writers to race
-    // that cleanup and recreate the otherwise-deleted test directory.
-    app.quit();
+    app.exit(process.exitCode || 0);
   });

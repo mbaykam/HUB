@@ -4,12 +4,12 @@ import {
   lstat,
   mkdtemp,
   rm,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
+import { createFileSymlink } from "./helpers/file-symlink.mjs";
 import {
   appUpdateAssetName,
   assertTrustedDownloadUrlChain,
@@ -430,10 +430,15 @@ test("download verification checks regular-file type, exact size, and SHA-256", 
     /SHA-256 mismatch/u,
   );
 
+});
+
+test("download verification rejects a real file symlink", async (t) => {
+  const root = await temporaryRoot();
+  const asset = { size: fixture.byteLength, sha256: fixtureDigest };
   const target = join(root, "target.dmg");
   const linked = join(root, "linked.dmg");
   await writeFile(target, fixture);
-  await symlink(target, linked);
+  if (!await createFileSymlink(t, target, linked)) return;
   await assert.rejects(
     verifyDownloadedUpdate(linked, asset),
     /regular file/u,

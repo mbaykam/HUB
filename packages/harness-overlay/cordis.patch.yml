@@ -54,5 +54,16 @@
       config:
         rootPath: !!js process.env.MINKE_HOST_ROOT
 
+    - id: hub-character-spawn
+      name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+      config:
+        providerName: hub-character-spawn
+
+    - id: hub-characters
+      name: '@lencx/minke-harness-overlay/characters'
+
+    - id: hub-models
+      name: '@lencx/minke-harness-overlay/models'
+
 - id: ui-schedule
   disabled: false

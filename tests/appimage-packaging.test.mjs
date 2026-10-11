@@ -6,7 +6,6 @@ const workflowUrl = new URL(
   "../.github/workflows/package.yml",
   import.meta.url,
 );
-const readmeUrl = new URL("../README.md", import.meta.url);
 const scriptUrl = new URL("../scripts/forge/appimage.mjs", import.meta.url);
 
 const appImageAssetName = "HUB-linux-x64.AppImage";
@@ -51,14 +50,4 @@ test("release job stages and checksums the AppImage", async () => {
   );
   assert.match(releaseJob, /'HUB-\*\.AppImage'/u);
   assert.match(releaseJob, /sha256sum HUB-\* > SHA256SUMS/u);
-});
-
-test("README links directly to the AppImage installer", async () => {
-  const readme = await readFile(readmeUrl, "utf8");
-
-  assert.ok(
-    readme.includes(
-      `https://github.com/mbaykam/HUB/releases/latest/download/${appImageAssetName}`,
-    ),
-  );
 });

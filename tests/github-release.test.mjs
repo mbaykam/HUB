@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import {
   mkdtemp,
   rm,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, test } from "node:test";
+import { createFileSymlink } from "./helpers/file-symlink.mjs";
 import {
   discoverReleaseAssets,
   GITHUB_RELEASE_API_VERSION,
@@ -80,13 +80,13 @@ test("release asset discovery accepts only the exact non-empty installer set", a
   );
 });
 
-test("release asset discovery rejects symbolic links", async () => {
+test("release asset discovery rejects symbolic links", async (t) => {
   const root = await releaseAssetFixture();
   await rm(join(root, "SHA256SUMS"));
-  await symlink(
+  if (!await createFileSymlink(t,
     join(root, "HUB-linux-x64.deb"),
     join(root, "SHA256SUMS"),
-  );
+  )) return;
   await assert.rejects(
     discoverReleaseAssets(root),
     /non-empty regular file/u,

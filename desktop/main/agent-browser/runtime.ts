@@ -12,6 +12,7 @@ import type {
   WebPreferences,
 } from "electron";
 import { randomUUID } from "node:crypto";
+import type { BrowserViewTab, BrowserViewFrame } from "@minke/harness-overlay/browser-view-contract.ts";
 import {
   AGENT_BROWSER_CLOSE_CHANNEL,
   AGENT_BROWSER_CONTROL_CHANNEL,
@@ -415,6 +416,38 @@ export class AgentBrowserRuntime {
     return [...this.#states.values()].map((state) =>
       this.#projection(state)
     );
+  }
+
+  listOwnedBrowsers(owners: ReadonlySet<string>): BrowserViewTab[] {
+    this.#ensureAvailable();
+    return [...this.#states.values()].filter((state) => !state.closing && owners.has(state.ownerSessionId)).map((state) => this.#viewTab(state));
+  }
+
+  #viewTab(state: AgentBrowserSessionState): BrowserViewTab {
+    // Metadata is untrusted page text, not HTML, and never contains partition
+    // or webContents IDs. Match the exact conversation/browser pair.
+    return { sessionId: state.sessionId, ownerSessionId: state.ownerSessionId, title: (state.title ?? "Browser").slice(0, 8192), url: (state.url ?? "").slice(0, 8192), status: state.status, owner: state.owner };
+  }
+
+  async captureOwnedBrowser(ownerSessionId: string, sessionId: string): Promise<BrowserViewFrame> {
+    this.#ensureAvailable();
+    const state = this.#states.get(sessionId);
+    if (!state || state.closing || state.ownerSessionId !== ownerSessionId || !state.guest || state.guest.isDestroyed() || state.status !== "ready") throw new Error("Browser unavailable");
+    const guest = state.guest, generation = state.generation, url = state.url;
+    const capturedAt = Date.now();
+    // Native compositor capture: no focus, agent claim, DOM execution, CDP
+    // snapshot/ref changes, or persistent frame storage. Keep the page and
+    // desktop window hidden; the integration verifier waits for a specific
+    // visible pixel change, not merely different JPEG bytes or a new timestamp.
+    let image = await guest.capturePage(undefined, { stayHidden: true, stayAwake: false });
+    if (this.#disposed || this.#states.get(sessionId) !== state || state.closing || state.guest !== guest || guest.isDestroyed() || state.generation !== generation || state.url !== url || state.status !== "ready") throw new Error("Browser changed during capture");
+    const size = image.getSize();
+    if (image.isEmpty() || size.width < 1 || size.height < 1) throw new Error("Empty browser frame");
+    const scale = Math.min(1, 1024 / size.width, 4096 / size.height);
+    if (scale < 1) image = image.resize({ width: Math.max(1, Math.floor(size.width * scale)), height: Math.max(1, Math.floor(size.height * scale)) });
+    const data = image.toJPEG(65).toString("base64");
+    if (data.length > 3_000_000) throw new Error("Browser frame too large");
+    return { tab: this.#viewTab(state), capturedAt, ...image.getSize(), mimeType: "image/jpeg", data };
   }
 
   /** Apply one main-owned identity to current and future Agent sessions. */
@@ -2070,6 +2103,18 @@ export class AgentBrowserRuntime {
   ): Promise<void> {
     const cdp = new AgentBrowserCdp(guest.debugger, {
       commandTimeoutMs: this.#cdpTimeoutMs,
+      captureScreenshot: async () => {
+        const generation = cdp.generation;
+        // CDP capture may stall without a visible compositor surface. Electron
+        // can capture this exact owned guest while preserving window visibility.
+        // No focus, desktop screenshot, resize or agent-control change.
+        const image = await guest.capturePage(undefined, { stayHidden: true, stayAwake: false });
+        if (state.closing || guest.isDestroyed() || state.guest !== guest || cdp.generation !== generation) {
+          throw new AgentBrowserError("screenshot_failed", "Agent Browser changed during screenshot");
+        }
+        if (image.isEmpty()) throw new AgentBrowserError("screenshot_failed", "Agent Browser returned an empty screenshot");
+        return image.toPNG().toString("base64");
+      },
       onGenerationChange: (generation, reason) => {
         if (state.closing) return;
         state.generation = generation;

@@ -58,6 +58,7 @@ import {
 } from "./runtime-patches.mjs";
 import {
   hardenHarnessWindowsRestrictedLaunches,
+  hardenHarnessBrowserLaunches,
   verifyHarnessRuntimeProcessPolicy,
 } from "./runtime-process-policy.mjs";
 
@@ -131,6 +132,13 @@ async function fingerprintProductBundle(productBundle) {
           "lib",
           "assets",
           "config",
+          "voice/server.py",
+          "voice/voice_pipeline.py",
+          "voice/speech_settings.py",
+          "voice/speech_download.py",
+          "voice/hub_native_llm.py",
+          "voice/bilingual_tts.py", "voice/supertonic_tts.py", "voice/streaming_asr.py", "voice/native_streaming_stt.py", "voice/speech_preview.py", "voice/telegram_calls.py", "voice/telegram_transport.py", "voice/whisper_auto.py",
+          "voice/speech_health.py", "voice/playback_guard.py", "voice/streaming_preview.py", "voice/knowledge_extract.py",
           productBundle.bundle.patch,
           "LICENSE",
         ],
@@ -408,11 +416,21 @@ async function copyWorkspacePackage(packageName, packageSource, destination) {
     "lib",
     "assets",
     "config",
+    // Explicit voice source allowlist: never copy model caches, Python bytecode,
+    // venvs, recordings or private runtime configuration into distributables.
+    "voice/server.py",
+    "voice/voice_pipeline.py",
+    "voice/speech_settings.py",
+    "voice/speech_download.py",
+    "voice/hub_native_llm.py",
+    "voice/bilingual_tts.py", "voice/supertonic_tts.py", "voice/streaming_asr.py", "voice/native_streaming_stt.py", "voice/speech_preview.py", "voice/telegram_calls.py", "voice/telegram_transport.py", "voice/whisper_auto.py",
+    "voice/speech_health.py", "voice/playback_guard.py", "voice/streaming_preview.py", "voice/knowledge_extract.py",
     "cordis.patch.yml",
     "LICENSE",
   ]) {
     const source = join(packageSource, entry);
     if (!existsSync(source)) continue;
+    await mkdir(dirname(join(destination, entry)), { recursive: true });
     await cp(source, join(destination, entry), {
       dereference: true,
       preserveTimestamps: true,
@@ -696,6 +714,9 @@ async function validateRuntime(
     join(runtimeRoot, "bin", process.platform === "win32" ? "dsh.cmd" : "dsh"),
     join(runtimeRoot, "bin", process.platform === "win32" ? "pnpm.cmd" : "pnpm"),
     join(runtimeRoot, "bin", "node-environment-bootstrap.cjs"),
+    ...["lib/voice.js", "lib/voice-browser.js", "lib/presentation-renderer.js",
+      "lib/memory.js", "lib/models.js", "lib/characters.js", "voice/server.py", "voice/voice_pipeline.py", "voice/playback_guard.py", "voice/speech_settings.py", "voice/speech_download.py", "voice/hub_native_llm.py", "voice/bilingual_tts.py", "voice/supertonic_tts.py", "voice/streaming_asr.py", "voice/native_streaming_stt.py", "voice/speech_preview.py", "voice/telegram_calls.py", "voice/telegram_transport.py", "voice/whisper_auto.py", "voice/speech_health.py", "voice/streaming_preview.py", "voice/knowledge_extract.py"].map(path =>
+      join(runtimeRoot, "node_modules", ...contract.productBundle.packageName.split("/"), path)),
   ];
   for (const path of required) {
     if (!existsSync(path)) {
@@ -1079,6 +1100,7 @@ async function main() {
     );
     await pruneNodePtyPrebuilds(candidateRuntimeRoot);
     const pruneReport = await pruneRuntimeArtifacts(candidateRuntimeRoot);
+    await hardenHarnessBrowserLaunches(candidateRuntimeRoot);
     const runtimeInspection = await inspectPrunedRuntime(
       candidateRuntimeRoot,
       contract,

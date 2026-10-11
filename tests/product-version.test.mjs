@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { PRODUCT_MANIFESTS } from "../scripts/forge/set-version.mjs";
 import {
   validateDiscordBotToken,
 } from "../packages/im-discord/src/index.ts";
@@ -18,16 +19,6 @@ const projectRoot = resolve(
   "..",
 );
 
-const productManifests = Object.freeze([
-  "package.json",
-  "packages/harness-overlay/package.json",
-  "packages/im-discord/package.json",
-  "packages/im-gateway/package.json",
-  "packages/im-telegram/package.json",
-  "packages/im-weixin/package.json",
-  "packages/model-runtime/package.json",
-  "packages/remote-access/package.json",
-]);
 
 function readManifest(relativePath) {
   return JSON.parse(
@@ -35,11 +26,12 @@ function readManifest(relativePath) {
   );
 }
 
-test("all product manifests declare the 0.4.0 release", () => {
-  for (const relativePath of productManifests) {
+test("all product manifests declare the same release as the application", () => {
+  const version = readManifest("package.json").version;
+  for (const relativePath of PRODUCT_MANIFESTS) {
     assert.equal(
       readManifest(relativePath).version,
-      "0.4.0",
+      version,
       `${relativePath} must match the product release`,
     );
   }

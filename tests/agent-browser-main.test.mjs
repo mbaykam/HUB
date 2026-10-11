@@ -447,6 +447,15 @@ class FakeGuest extends EventEmitter {
     return this.url;
   }
 
+  async capturePage(rect, options) {
+    assert.equal(rect, undefined);
+    assert.deepEqual(options, { stayHidden: true, stayAwake: false });
+    // Reuse this fixture's existing screenshot barrier/result queue for the
+    // compositor port; the real Electron suite proves no CDP capture is needed.
+    const { data } = await this.debugger.sendCommand("Page.captureScreenshot", {});
+    return { isEmpty: () => false, toPNG: () => Buffer.from(data, "base64") };
+  }
+
   isDestroyed() {
     return this.destroyed;
   }
@@ -3344,6 +3353,21 @@ test("failed navigation leaves an attached session inspectable", async () => {
   await target.runtime.closeOwner("conversation-1");
   target.binding.dispose();
   target.runtime.dispose();
+});
+
+test("native compositor screenshot rejects empty images and navigation during capture", async () => {
+  for (const scenario of ["empty", "navigation"]) {
+    const target = runtimeFixture();
+    const opened = await openAgentBrowser(target);
+    opened.guest.capturePage = async () => {
+      if (scenario === "navigation") opened.guest.debugger.emit("message", {}, "Page.frameNavigated", { frame: { id: "main-frame", url: "https://example.com/changed" } });
+      return { isEmpty: () => scenario === "empty", toPNG: () => Buffer.from("stale frame") };
+    };
+    await assert.rejects(target.runtime.handleProcessRequest(createAgentBrowserRequest(2, "conversation-1", "screenshot", {
+      sessionId: opened.result.sessionId,
+    }), new AbortController().signal), error => error.code === "screenshot_failed");
+    await target.runtime.closeOwner("conversation-1"); target.binding.dispose(); target.runtime.dispose();
+  }
 });
 
 test("CDP cancellation waits for the dispatched command to quiesce", async () => {

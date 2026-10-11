@@ -26,6 +26,10 @@ import {
 import {
   installMobileRightDrawer,
 } from "../host/mobile-right-drawer.ts";
+import { installMobileHubs } from "../host/mobile-hubs.ts";
+import { installMobileSettings } from "../host/mobile-settings.ts";
+import { installMobileConversationVisibility, type NavigationVisibilityPort } from "../host/mobile-conversation-visibility.ts";
+import { VoiceHistoryClient } from "../host/voice-history.ts";
 import {
   AppUpdateSettingsRuntime,
   PreferencesSection,
@@ -186,6 +190,8 @@ export function installTabs(
     ctx.theme.getTheme().active.colorScheme,
   );
   if (!tabsPort.embeddedWebAvailable) {
+    const conversationHistory = new VoiceHistoryClient((input, init) => window.fetch(input, init));
+    ctx.effect(() => () => conversationHistory.dispose(), "hub: PWA conversation metadata");
     ctx.effect(
       () => installMobileWebViewportStyles(),
       "minke-overlay: mobile Web viewport styles",
@@ -203,9 +209,14 @@ export function installTabs(
       "minke-overlay: mobile sidebar drawer",
     );
     ctx.effect(
-      () => installMobileRightDrawer(),
+      () => installMobileRightDrawer(document, ctx.sessions, conversationHistory),
       "minke-overlay: mobile right drawer",
     );
+    ctx.effect(() => installMobileHubs(ctx), "hub: PWA voice and text hubs");
+    ctx.effect(() => installMobileSettings(), "hub: phone-first native Settings navigation");
+    ctx.inject?.(["uiWorkspace"], scope => {
+      scope.effect(() => installMobileConversationVisibility(ctx, scope.get("uiWorkspace") as NavigationVisibilityPort, document, conversationHistory), "hub: PWA conversation visibility");
+    });
   }
   ctx.on("theme/change", (snapshot) =>
     codeThemes.setColorScheme(snapshot.active.colorScheme)

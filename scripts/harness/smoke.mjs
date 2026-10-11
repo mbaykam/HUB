@@ -23,6 +23,9 @@ import {
 } from "./command-invocation.mjs";
 import { parseBootManifest } from "./boot-manifest.mjs";
 import { verifyHarnessContract } from "./contract.mjs";
+import { smokeUiUpdates } from "./ui-update-smoke.mjs";
+import { AGENT_BROWSER_IPC_VERSION_ENV, AGENT_BROWSER_PROTOCOL_VERSION } from "../../packages/harness-overlay/src/agent-browser-contract.ts";
+import { BROWSER_VIEW_CHANNEL } from "../../packages/harness-overlay/src/browser-view-contract.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const packaged = process.argv.slice(2).includes("--packaged");
@@ -272,7 +275,7 @@ async function exchangeBrowserAuthentication(endpoint) {
       `authenticated GET / failed with HTTP ${String(index.status)}`,
     );
   }
-  return authenticatedFetch;
+  return Object.assign(authenticatedFetch, { browserCookie: cookie });
 }
 
 async function run(command, args, options = {}) {
@@ -529,11 +532,22 @@ async function startServer(
     {
       cwd: projectRoot,
       detached: process.platform !== "win32",
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...env, [AGENT_BROWSER_IPC_VERSION_ENV]: String(AGENT_BROWSER_PROTOCOL_VERSION) },
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
       windowsHide: true,
     },
   );
+  // Exercise the actual Cordis-loaded browser HTTP route and child IPC. The
+  // parent fixture has no browser owners. Native capture/owner authorization
+  // are covered by agent-browser-runtime.cjs using a real Electron parent.
+  let browserViewRequests = 0;
+  child.on("message", message => {
+    if (message?.channel !== BROWSER_VIEW_CHANNEL || message.type !== "request" || !child.connected) return;
+    browserViewRequests++;
+    child.send({ channel: BROWSER_VIEW_CHANNEL, type: "response", requestId: message.requestId,
+      ...(message.query?.type === "list" ? { result: [] } : { error: "unavailable" }),
+    }, () => {});
+  });
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   let output = "";
@@ -614,6 +628,8 @@ async function startServer(
       baseUrl: endpoint.baseUrl,
       child,
       fetch: authenticatedFetch,
+      browserCookie: authenticatedFetch.browserCookie,
+      browserViewRequests: () => browserViewRequests,
       output: () => output,
     };
   } catch (error) {
@@ -696,6 +712,7 @@ async function main() {
   const env = {
     ...baseEnv,
     DSH_HOME: harnessHome,
+    HUB_UI_UPDATE_ROOT: join(temporaryRoot, "ui-updates"),
     PATH: [runtimeBin, systemPath()].filter(Boolean).join(delimiter),
   };
   let server;
@@ -891,8 +908,10 @@ async function main() {
     }
 
     server = await startServer(
-      executable("dsh"),
+      electronExecutable,
       [
+        "--expose-internals",
+        runtimeLayout.entryPath,
         "web",
         "--patch",
         runtimeLayout.productPatch,
@@ -932,6 +951,13 @@ async function main() {
     const manifest = await fetchManifest(server);
     const minkeCapabilities = await fetchMinkeHostCapabilities(server);
     await smokeMinkePwa(server);
+    const browserList = await server.fetch(`${server.baseUrl}/api/hub/browser-view`, {
+      method: "POST", headers: { "content-type": "application/json", "x-hub-browser-view": "1" }, body: JSON.stringify({ type: "list" }),
+    });
+    const browserResult = await browserList.json();
+    if (browserList.status !== 200 || JSON.stringify(browserResult) !== "[]") throw new Error(`Full native host browser viewer failed: HTTP ${browserList.status}, ${JSON.stringify(browserResult)}, IPC requests ${server.browserViewRequests()}`);
+    console.log("Full native host browser route: authenticated HTTP through loaded product plugin and real Node IPC PASS");
+    await smokeUiUpdates(server, env.HUB_UI_UPDATE_ROOT, join(runtimeRoot, "node_modules", ...productPackageName.split("/"), "lib"));
     await smokeMinkeHostTerminal(server);
     const productRow = manifest.entries.find(
       (entry) => entry.id === productPackageName,

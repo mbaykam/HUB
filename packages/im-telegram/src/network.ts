@@ -251,6 +251,13 @@ function apiFailureError(
     migrateToChatId,
     status: response.status,
   };
+  // Classify known edit failures without retaining Telegram's description.
+  if (apiErrorCode === 400 && /message is not modified/i.test(failure.description ?? "")) {
+    return new TelegramTransportError("message-not-modified", "Telegram message already has this content", shared);
+  }
+  if (apiErrorCode === 400 && /message to edit not found|message can't be edited/i.test(failure.description ?? "")) {
+    return new TelegramTransportError("message-not-found", "Telegram preview is unavailable", shared);
+  }
   if (apiErrorCode === 401 || response.status === 401) {
     return new TelegramTransportError(
       "credential-invalid",

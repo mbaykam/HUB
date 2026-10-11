@@ -1,0 +1,2 @@
+# Isolated validation runtime; never install into the user's system Python.
+basic-memory==0.23.2

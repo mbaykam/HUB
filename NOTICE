@@ -1,0 +1,15 @@
+HUB
+Copyright 2026 HUB contributors.
+
+This project contains code derived from Minke, by lencx and contributors,
+licensed under Apache License 2.0: https://github.com/lencx/Minke
+
+DeepSeek Harness is included as a pinned Git submodule and packaged runtime.
+Its MIT license and third-party notices are preserved under resources/licenses/.
+https://github.com/deepseek-ai/deepseek-harness
+
+The Weixin transport includes adaptations from the MIT-licensed
+@tencent-weixin/openclaw-weixin package. See packages/im-weixin/THIRD_PARTY_NOTICES.md.
+
+Optional downloaded models and third-party dependencies retain their own licenses.
+HUB is independently maintained; upstream attribution does not imply endorsement.

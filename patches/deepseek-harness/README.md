@@ -42,6 +42,17 @@ then rejects any direct or restricted launch site that remains visible.
 - restores Minke's managed Node executable and bootstrap only for an explicitly recognized embedded-Node launch, including terminal and Windows ACL paths.
 
 The former Details layout/presentation patches remain removed at this pin.
+
+`client-navigation-visibility.patch` adds a client-only observable navigation
+filter to `uiWorkspace` in the served browser bundle. Its default is empty, so
+desktop navigation is unchanged. The PWA registers unsaved voice-coordinator IDs;
+only the existing browsing region combines them with its display exclusion set.
+Native search, grouping, row limits, menus and directory-flow slot ownership stay
+intact. It does not alter the host archive set, workspace membership, selected
+session, transcripts, AI context, or the authoritative session-list source.
+The product consumes this additive hook structurally; no upstream source or
+declarations are changed. Removing the PWA contribution restores native rows.
+
 Harness owns adaptive conversation width, the native top-level `details` slot,
 and Harness's whole-session turn rail with deep-history load-and-jump; Minke
 Tabs uses only `ILayout.openDetails/closeDetails`. The former subagent route

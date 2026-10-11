@@ -433,6 +433,9 @@ export class MobileSidebarDrawerRuntime {
     }
 
     this.#decorateNavigation(sidebar);
+    // The native collapsed rail omits its workspace tree. Home still renders
+    // its workspace picker, so decoration must not depend on opening the drawer.
+    this.#decorateMainWorkspaceChip();
     this.#renderPinnedPanel();
     this.#decorateCurrentSessionBookmark();
 
@@ -665,7 +668,6 @@ export class MobileSidebarDrawerRuntime {
       }
     }
     this.#initializeMainWorkspaceHome();
-    this.#decorateMainWorkspaceChip();
   }
 
   #groupLabel(section: HTMLElement): string | undefined {
@@ -1066,12 +1068,14 @@ export class MobileSidebarDrawerRuntime {
       chip.removeAttribute(MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE);
     }
     const mainLabel = this.#mainWorkspaceLabel?.toLocaleLowerCase();
-    if (mainLabel === undefined) return;
     for (const candidate of this.#root.querySelectorAll(
       'button[aria-haspopup="menu"]',
     )) {
       const label = candidate.textContent?.trim().toLocaleLowerCase();
-      if (label === mainLabel) {
+      const conventionalHomeWorkspace = candidate.closest(
+        '[data-phase="hero"]',
+      ) !== null && (label === "minke" || label === "hub");
+      if (mainLabel !== undefined ? label === mainLabel : conventionalHomeWorkspace) {
         candidate.setAttribute(
           MOBILE_NAV_MAIN_WORKSPACE_CHIP_ATTRIBUTE,
           "",

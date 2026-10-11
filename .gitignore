@@ -34,6 +34,18 @@ docs/research
 
 *.local
 
+# Python caches, optional speech environments and local-only application state.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+/coverage/
+/.dsh/
+/.minke/
+.credentials.yaml
+*.hub-ui
+*.hubui
+
 # Private Host bookmark data (also when running a Host from this directory).
 hub-bookmarks.json
 hub-bookmarks.json.*.tmp

@@ -2,6 +2,8 @@ import { homedir } from "node:os";
 import type { IncomingMessage } from "node:http";
 import { isAbsolute, resolve } from "node:path";
 import { installBookmarksHost } from "./host/bookmarks.ts";
+import { installUiUpdates } from "./host/ui-updates.ts";
+import { installBrowserViewHost } from "./host/browser-view.ts";
 import {
   isMinkeHostRpcEndpoint,
   MINKE_HOST_PROTOCOL_VERSION,
@@ -41,6 +43,7 @@ import {
   installAgentTurnControl,
   type AgentTurnSessionControllerPort,
 } from "./host/agent-turn-control.ts";
+import {prepareKnowledgeMedia} from "./host/knowledge-assets.ts";
 import {
   RemotePreviewRuntime,
   type RemotePreviewWebServer,
@@ -336,6 +339,7 @@ export function apply(
   config?: Config,
 ): void {
   const rootPath = configuredRoot(config);
+  ctx.effect(() => installUiUpdates(ctx.webServer, request => ctx.connection.requestRejection(request)), "hub: PWA UI updates");
   const bookmarkStorePath = config?.bookmarkStorePath ?? resolve(process.cwd(), "hub-bookmarks.json");
   if (!isAbsolute(bookmarkStorePath)) throw new TypeError("Bookmark store path must be absolute");
   ctx.effect(
@@ -355,6 +359,7 @@ export function apply(
     calibrateMinkeImIdentity(agent);
   });
   installAgentTurnControl(ctx, undefined, {
+    async prepareMedia(input,signal){const service=(ctx as any).get("hubKnowledgeAssets");if(!service?.assets)throw Error("Knowledge attachments are unavailable");return prepareKnowledgeMedia(input,service.assets,(ctx as any).attachments,signal);},
     previewPublisher: {
       async publish(input) {
         if (!isMinkeImSessionId(input.sessionId)) return [];
@@ -384,6 +389,7 @@ export function apply(
       );
     }
     installAgentBrowserParentLifetime(ctx, exit);
+    ctx.effect(() => installBrowserViewHost(ctx.webServer, request => ctx.connection.requestRejection(request)), "hub: PWA browser viewer");
     if (!installAgentBrowserTools(ctx)) {
       throw new Error(
         "Agent Browser desktop mode failed to install its IPC tools",

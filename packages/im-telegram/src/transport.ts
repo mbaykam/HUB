@@ -760,6 +760,23 @@ class TelegramTransportImplementation
     );
   }
 
+  async editRichMarkdown(
+    input: { readonly chatId: string; readonly messageId: string; readonly markdown: string },
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<TelegramDeliveryReceipt> {
+    const markdown = requiredText(input.markdown, "markdown", TELEGRAM_MAX_TEXT_CHARACTERS, value => value.length);
+    if (!/^[1-9][0-9]*$/.test(input.messageId) || !Number.isSafeInteger(Number(input.messageId))) {
+      throw new TelegramTransportError("invalid-config", "Invalid Telegram edit target");
+    }
+    const target = { chat_id: input.chatId, message_id: Number(input.messageId) };
+    try {
+      return await this.#sendMethod("editMessageText", { ...target, rich_message: { markdown } }, options.signal);
+    } catch (error) {
+      if (!canFallbackRichMarkdown(error)) throw error;
+      return await this.#sendMethod("editMessageText", { ...target, text: markdown, link_preview_options: { is_disabled: true } }, options.signal);
+    }
+  }
+
   async #sendPlainMarkdownFallback(
     input: TelegramSendRichMarkdownInput,
     options: { readonly signal?: AbortSignal },

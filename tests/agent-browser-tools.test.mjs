@@ -383,11 +383,10 @@ test("fixed tool schemas infer only the current agent's focused browser session"
     Object.hasOwn(snapshotTool.parameters, "required"),
     false,
   );
-  assert.deepEqual(findTool.parameters.oneOf[0].required, ["query"]);
-  assert.deepEqual(
-    findTool.parameters.oneOf[1].required,
-    ["next_cursor"],
-  );
+  for (const definition of definitions) for (const combination of ["oneOf", "anyOf", "allOf"]) {
+    assert.equal(Object.hasOwn(definition.parameters, combination), false, "Provider-facing tool input must have a plain object root");
+  }
+  assert.match(findTool.description, /either query or next_cursor, never both/);
   assert.deepEqual(
     locateTool.parameters.properties.code,
     {
@@ -1975,6 +1974,19 @@ test("fresh snapshot action refs authorize only their listed mutations", async (
     await click;
   } finally {
     for (const cleanup of cleanups) cleanup();
+  }
+});
+
+test("provider-compatible browser_find schema retains exclusive query/cursor validation before IPC", async () => {
+  for (const args of [{}, { query: { text: "hello" }, next_cursor: "cursor-1" }, { next_cursor: "cursor-1", view: "matches" }, { next_cursor: "cursor-1", ordinal: 1 }]) {
+    const port = new FakeProcessPort(), definitions = [], cleanups = [];
+    applyAgentBrowserTools({ effect(callback) { const cleanup = callback(); if (cleanup) cleanups.push(cleanup); }, tools: { register(definition) { definitions.push(definition); } } }, {}, port);
+    try {
+      await assert.rejects(async () => definitions.find(definition => definition.name === "browser_find").execute({ session_id: "browser-1", ...args }, {
+        signal: new AbortController().signal, rootCallId: "invalid-find-shape", agent: { session: { id: "find-shape-owner" } },
+      }));
+      assert.equal(port.sent.length, 0, "Invalid combination must never reach the browser");
+    } finally { for (const cleanup of cleanups) cleanup(); }
   }
 });
 

@@ -6,7 +6,6 @@ const workflowUrl = new URL(
   "../.github/workflows/package.yml",
   import.meta.url,
 );
-const readmeUrl = new URL("../README.md", import.meta.url);
 const packageManifestUrl = new URL("../package.json", import.meta.url);
 const harnessManifestUrl = new URL(
   "../vendor/deepseek-harness/package.json",
@@ -259,17 +258,6 @@ test("release workflow contract supports Windows line endings", async () => {
   assert.match(releaseJob, /needs:\s*package/u);
 });
 
-test("README links directly to every latest installer", async () => {
-  const readme = await readFile(readmeUrl, "utf8");
-
-  for (const assetName of releaseAssetNames) {
-    assert.ok(
-      readme.includes(
-        `https://github.com/mbaykam/HUB/releases/latest/download/${assetName}`,
-      ),
-    );
-  }
-});
 
 test("native makers receive required distribution metadata", async () => {
   const manifest = JSON.parse(

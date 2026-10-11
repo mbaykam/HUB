@@ -702,8 +702,8 @@ test("About uses the public sidebar action and packaged desktop metadata", () =>
     aboutZh.tagline,
     "为 {harness} 打造的原生桌面工作空间",
   );
-  assert.equal(aboutEn.project, "HUB");
-  assert.equal(aboutZh.project, "HUB");
+  assert.equal(aboutEn.project, "HUB on GitHub");
+  assert.equal(aboutZh.project, "HUB on GitHub");
   assert.equal(Object.hasOwn(aboutEn, "title"), false);
   assert.equal(Object.hasOwn(aboutZh, "title"), false);
   assert.equal(Object.hasOwn(aboutEn, "description"), false);

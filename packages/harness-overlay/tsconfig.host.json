@@ -6,17 +6,36 @@
     "rootDir": "src",
     "tsBuildInfoFile": "./lib/tsconfig.host.tsbuildinfo",
     "paths": {
-      "@minke/harness-overlay/*": ["./src/*"],
+      "@deepseek-ai/dsh-tools": [
+        "../../vendor/deepseek-harness/packages/core/tools/src/index.ts"
+      ],
+      "@minke/harness-overlay/*": [
+        "./src/*"
+      ],
       "@deepseek-ai/dsh-llm": [
         "../../vendor/deepseek-harness/packages/llm/llm/src/index.ts"
+      ],
+      "@deepseek-ai/dsh-tool-subagent": [
+        "../../vendor/deepseek-harness/packages/subagent/tool-subagent/lib/types/index.d.ts"
       ]
     }
   },
   "include": [
+    "src/knowledge-contract.ts",
     "src/agent-browser-contract.ts",
     "src/agent-turn-contract.ts",
     "src/bookmarks-contract.ts",
+    "src/browser-view-contract.ts",
+    "src/presentation-contract.ts",
+    "src/memory-graph-contract.ts",
     "src/index.ts",
+    "src/memory.ts",
+    "src/voice.ts",
+    "src/models.ts",
+    "src/model-catalog-contract.ts",
+    "src/telegram-control-contract.ts",
+    "src/voice-ice-contract.ts",
+    "src/voice-profile-contract.ts",
     "src/minke-host-contract.ts",
     "src/pwa-contract.ts",
     "src/trusted-host-control-contract.ts",
@@ -24,9 +43,15 @@
     "src/host",
     "src/web-search",
     "src/tabs/files-contract.ts",
-    "src/tabs/terminal-contract.ts"
+    "src/tabs/terminal-contract.ts",
+    "src/characters.ts",
+    "src/character-contract.ts",
+    "src/agent-activity-contract.ts"
   ],
   "references": [
+    {
+      "path": "../../vendor/deepseek-harness/packages/core/tools"
+    },
     {
       "path": "../../vendor/deepseek-harness/packages/llm/llm"
     }

@@ -123,7 +123,7 @@ test("mobile right drawer owns Settings and accessible dismissal", () => {
   );
   assert.match(
     installer,
-    /installMobileSidebarDrawer[\s\S]*installMobileRightDrawer\(\)/u,
+    /installMobileSidebarDrawer[\s\S]*installMobileRightDrawer\(document, ctx\.sessions, conversationHistory\)/u,
   );
 });
 

@@ -3,6 +3,17 @@ import type { ComponentType } from "react";
 export type HarnessThemePreference = "light" | "dark" | "system";
 export type HarnessColorScheme = "light" | "dark";
 
+/** Native job summaries delivered by the existing session control stream. */
+export interface HarnessSessionJob {
+  readonly id: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly status: "running" | "stopping" | "completed" | "killed" | "failed";
+  readonly detail?: string;
+  readonly startedAt: number;
+  readonly finishedAt?: number;
+}
+
 /** Open locale identifier accepted from alpha.2 language-pack plugins. */
 export type HarnessLocale = string;
 
@@ -144,6 +155,10 @@ export interface HarnessClientContext {
     callback: (scope: HarnessClientScopedContext) => void,
   ): unknown;
   connection: {
+    readonly state?: {
+      getSnapshot(): "connected" | "disconnected" | "connecting" | undefined;
+      subscribe(listener: () => void): () => void;
+    };
     rpc: {
       call(
         channel: string,
@@ -171,6 +186,7 @@ export interface HarnessClientContext {
   slots: SlotService;
   theme: {
     getTheme(): HarnessThemeSnapshot;
+    setTheme(preference: HarnessThemePreference): void;
     overrideTokens(
       source: string,
       tokens: HarnessThemeTokenOverrides,
@@ -197,9 +213,19 @@ export interface HarnessClientContext {
             {
               readonly cwd?: string;
               readonly title?: string;
+              readonly displayTitle?: string;
+              readonly running?: boolean;
+              readonly completed?: boolean;
+              readonly blank?: boolean;
+              readonly updatedAt?: number;
+              readonly origin?: string;
+              readonly parentId?: string;
             } | undefined
           >
         >;
+        readonly phase?: "pending" | "ready";
+        readonly jobsBySession?: Readonly<Record<string, readonly HarnessSessionJob[]>>;
+        readonly subagentsByParent?: Readonly<Record<string, { readonly entries: readonly { readonly kind: string; readonly id: string; readonly label?: string; readonly activity?: string }[] }>>;
       };
       subscribe(listener: () => void): () => void;
     };
@@ -207,11 +233,17 @@ export interface HarnessClientContext {
     clear(): void;
     binding(sessionId: string): {
       readonly session: {
+        getSnapshot?(): { readonly queue?: readonly unknown[]; readonly lastAgentError?: string | null };
+        subscribe?(listener: () => void): () => void;
         prompt(
           content: HarnessPromptContentPart[],
           mode: "queue" | "steer",
           signal?: AbortSignal,
         ): Promise<HarnessRemoteResult>;
+      };
+      readonly eventSource?: {
+        getSnapshot(): { readonly entries: readonly { readonly type: string; readonly event: { readonly type: string; readonly data?: unknown } }[] };
+        subscribe(listener: () => void): () => void;
       };
     } | undefined;
     /**
@@ -220,5 +252,7 @@ export interface HarnessClientContext {
      */
     scope?(sessionId: string): unknown;
     open(sessionId: string): void;
+    /** Refresh native membership before opening a call admitted outside UI RPC. */
+    refresh?(): Promise<void>;
   };
 }

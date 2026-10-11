@@ -120,6 +120,7 @@ import {
 } from "@minke/harness-overlay/remote-hub-contract.ts";
 import {
   externalizeAgentTurnPreviews,
+  hubConversationUrl,
 } from "./remote-hub/agent-preview";
 import {
   bindShortcutMenu,
@@ -517,6 +518,15 @@ class DesktopApplication {
       pluginManagement,
       webSearch: webSearchSettings,
       agentBrowser,
+      telegramControl: async (command) => {
+        const remote = this.#remoteHub;
+        if (!remote) throw new Error("Telegram is initializing");
+        if (command.action === "connect") await remote.dispatch({ kind: "telegram/connect", token: command.token });
+        else if (command.action === "reconnect") await remote.dispatch({ kind: "telegram/reconnect" });
+        else if (command.action === "approve") await remote.dispatch({ kind: "bot/pairing/approve", provider: "telegram", requestId: command.requestId });
+        return remote.getSnapshot().channels.telegram;
+      },
+      agentActivity: async (activity) => { await this.#remoteHub?.notifyAgentActivity(activity); },
       onUnexpectedExit: (exit) => {
         void this.#handleUnexpectedExit(exit);
       },
@@ -645,6 +655,7 @@ class DesktopApplication {
       discordWebSocketFactory:
         discordNetwork.webSocketFactory,
       agentRoute: {
+        conversationUrl: (sessionId, panel) => hubConversationUrl(sessionId, remoteAccess.read(), panel),
         runAgentTurn: async (input, options) =>
           externalizeAgentTurnPreviews(
             await runtime.runAgentTurn(input, options),

@@ -18,6 +18,8 @@ import { installRemote } from "./remote/install.tsx";
 import { installRemoteHub } from "./remote-hub/install.tsx";
 import { installShortcuts } from "./shortcuts/install.tsx";
 import { installTabs } from "./tabs/install.tsx";
+import { installHubDeepLink } from "./host/hub-deep-link.ts";
+import { installCharactersClient } from "./host/mobile-characters.ts";
 
 /** Cordis services required by this out-of-tree browser plugin. */
 export const inject = [
@@ -46,6 +48,8 @@ export function apply(ctx: HarnessClientContext): void {
   const remote = installRemote(ctx);
   installRemoteHub(ctx, remote);
   const tabsRuntimes = installTabs(ctx, minkeSettings);
+  ctx.effect(() => installHubDeepLink(ctx), "hub: authenticated Telegram conversation links");
+  ctx.effect(() => installCharactersClient(ctx), "hub: character management");
   installShortcuts(ctx, tabsRuntimes, minkeSettings);
   installMinkeSettings(ctx, minkeSettings);
   installOnboarding(ctx);

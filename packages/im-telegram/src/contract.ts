@@ -32,6 +32,8 @@ export type TelegramTransportErrorCode =
   | "http"
   | "invalid-config"
   | "invalid-state"
+  | "message-not-modified"
+  | "message-not-found"
   | "network"
   | "payload-too-large"
   | "protocol"
@@ -398,6 +400,7 @@ export interface TelegramTransport {
   /** Available after `getMe()` or `start()` succeeds. */
   readonly identity: TelegramBotIdentity | undefined;
   close(): Promise<void>;
+  editRichMarkdown(input: { readonly chatId: string; readonly messageId: string; readonly markdown: string }, options?: { readonly signal?: AbortSignal }): Promise<TelegramDeliveryReceipt>;
   getMe(options?: {
     readonly signal?: AbortSignal;
   }): Promise<TelegramBotIdentity>;

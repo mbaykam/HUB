@@ -53,3 +53,4 @@ export {
   createTelegramTransport,
   validateTelegramBotToken,
 } from "./transport.ts";
+export { splitTelegramText } from "./chunk.ts";

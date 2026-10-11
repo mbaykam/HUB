@@ -1,6 +1,11 @@
 import {
   installMobileUsageMeter,
 } from "./mobile-usage-meter.ts";
+import { installMobileMemory } from "./mobile-memory.ts";
+import { installMobileMemoryGraph } from "./mobile-memory-graph.ts";
+import { installMobileTelegram } from "./mobile-telegram.ts";
+import { installMobileVoiceHistory, type VoiceHistorySessions } from "./mobile-voice-history.ts";
+import type { VoiceHistoryClient } from "./voice-history.ts";
 
 const MOBILE_WEB_ROOT_SELECTOR = "[data-minke-mobile-web]";
 const SHELL_OVERLAY_SELECTOR = "[data-shell-overlay]";
@@ -23,6 +28,7 @@ const MOBILE_SETTINGS_OPEN_ATTRIBUTE =
 const SETTINGS_TRIGGER_SELECTOR =
   '[data-slot="sidebar.settings"] button[aria-haspopup="dialog"]';
 const GESTURE_IGNORE_SELECTOR = [
+  "dialog[open]",
   "input",
   "textarea",
   "select",
@@ -118,6 +124,13 @@ export class MobileRightDrawerRuntime {
   #settingsSignature = "";
   #settingsOpen = false;
   #disposeUsageMeter: (() => void) | undefined;
+  #disposeMemory: (() => void) | undefined;
+  #disposeMemoryGraph: (() => void) | undefined;
+  #disposeModels: (() => void) | undefined;
+  #disposeTelegram: (() => void) | undefined;
+  #disposeVoiceHistory: (() => void) | undefined;
+  readonly #sessions: VoiceHistorySessions | undefined;
+  readonly #history: VoiceHistoryClient | undefined;
   #gesture: RightDrawerGesture | undefined;
   #reconcileFrame: number | undefined;
   #settleTimer: number | undefined;
@@ -125,8 +138,10 @@ export class MobileRightDrawerRuntime {
   #suppressClickTarget: Element | undefined;
   #disposed = false;
 
-  constructor(root: Document = document) {
+  constructor(root: Document = document, sessions?: VoiceHistorySessions, history?: VoiceHistoryClient) {
     this.#root = root;
+    this.#sessions = sessions;
+    this.#history = history;
     const view = root.defaultView as MobileRightDrawerView | null;
     if (view === null) {
       throw new Error("Mobile right drawer requires a browser window");
@@ -285,6 +300,13 @@ export class MobileRightDrawerRuntime {
     frame.append(drawer);
     this.#drawer = drawer;
     this.#disposeUsageMeter = installMobileUsageMeter(body, this.#root);
+    this.#disposeMemory = installMobileMemory(body, this.#root);
+    this.#disposeMemoryGraph = installMobileMemoryGraph(body, this.#root);
+    const characters = this.#root.createElement("button"); characters.type = "button"; characters.setAttribute("data-hub-characters-launcher", ""); characters.textContent = "Character settings";
+    characters.addEventListener("click", () => { this.#settle(false); this.#root.defaultView?.dispatchEvent(new Event("hub:characters-open")); }); body.append(characters);
+    this.#disposeModels = () => characters.remove();
+    this.#disposeTelegram = installMobileTelegram(body, this.#root);
+    if (this.#sessions) this.#disposeVoiceHistory = installMobileVoiceHistory(body, this.#root, this.#sessions, () => this.#settle(false), this.#history);
   }
 
   #clearFrame(): void {
@@ -310,6 +332,16 @@ export class MobileRightDrawerRuntime {
       "data-minke-mobile-settings-source",
     );
     this.#disposeUsageMeter?.();
+    this.#disposeMemory?.();
+    this.#disposeMemoryGraph?.();
+    this.#disposeMemoryGraph = undefined;
+    this.#disposeModels?.();
+    this.#disposeModels = undefined;
+    this.#disposeTelegram?.();
+    this.#disposeTelegram = undefined;
+    this.#disposeVoiceHistory?.();
+    this.#disposeVoiceHistory = undefined;
+    this.#disposeMemory = undefined;
     this.#edge?.remove();
     this.#drawer?.remove();
     this.#frame = undefined;
@@ -676,7 +708,7 @@ export class MobileRightDrawerRuntime {
     if (!this.#frame?.hasAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE)) {
       return;
     }
-    if (this.#settingsOpen) return;
+    if (this.#settingsOpen || this.#root.querySelector("dialog[open]")) return;
     if (event.key === "Escape") {
       event.preventDefault();
       this.#settle(false);
@@ -686,10 +718,10 @@ export class MobileRightDrawerRuntime {
     const drawer = this.#drawer;
     if (drawer === undefined) return;
     const focusable = [
-      ...drawer.querySelectorAll<HTMLButtonElement>(
-        "button:not(:disabled)",
+      ...drawer.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), summary, a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
       ),
-    ];
+    ].filter(element => element.getClientRects().length > 0 && !element.closest('[hidden], [inert]'));
     const first = focusable.at(0);
     const last = focusable.at(-1);
     if (first === undefined || last === undefined) return;
@@ -705,8 +737,10 @@ export class MobileRightDrawerRuntime {
 
 export function installMobileRightDrawer(
   root: Document = document,
+  sessions?: VoiceHistorySessions,
+  history?: VoiceHistoryClient,
 ): () => void {
-  const runtime = new MobileRightDrawerRuntime(root);
+  const runtime = new MobileRightDrawerRuntime(root, sessions, history);
   runtime.start();
   return () => runtime.dispose();
 }

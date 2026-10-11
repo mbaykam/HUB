@@ -16,7 +16,7 @@ import {
 } from "@deepseek-ai/dsh-typert-protocol";
 import {
   apply as applyMinkeHost,
-} from "@minke/harness-overlay/index.ts";
+} from "../packages/harness-overlay/lib/index.js";
 import {
   MINKE_HOST_PROTOCOL_VERSION,
   MINKE_HOST_RPC_CHANNEL,
@@ -1398,7 +1398,7 @@ test("HUB Host calibrates identity only for external IM agents", async (t) => {
   assert.equal(sections.length, 1);
   assert.equal(sections[0].name, "harness:identity");
   assert.equal(sections[0].order, -100);
-  assert.match(sections[0].text, /\bMinke\b/u);
+  assert.match(sections[0].text, /\bHUB\b/u);
   assert.doesNotMatch(sections[0].text, /DeepSeek Harness/u);
 });
 
@@ -1618,7 +1618,7 @@ test("HUB Host mounts Files RPC on the trusted DSH connection", async (t) => {
     connection: {
       rpc: {
         handle(channel, handler, options) {
-          registration = { channel, handler, options };
+          if (channel === MINKE_HOST_RPC_CHANNEL) registration = { channel, handler, options };
           return async () => {};
         },
       },
@@ -1644,10 +1644,12 @@ test("HUB Host mounts Files RPC on the trusted DSH connection", async (t) => {
     },
   };
   applyMinkeHost(context, { rootPath: root });
-  assert.equal(indexTaps.length, 1);
+  assert.equal(indexTaps.length, 2);
   assert.deepEqual(
     pwaRoutes.map(({ path }) => path),
     [
+      "/api/hub/ui/status",
+      "/api/hub/ui/asset",
       HUB_BOOKMARKS_ROUTE,
       MINKE_REMOTE_PREVIEW_ROUTE,
       MINKE_PWA_ROUTES.manifest,

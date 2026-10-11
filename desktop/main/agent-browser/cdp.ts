@@ -186,6 +186,9 @@ interface CdpDebuggerPort {
 
 export interface AgentBrowserCdpOptions {
   readonly commandTimeoutMs?: number;
+  /** Host compositor capture for hidden Electron guests. It retains this
+   * adapter's existing deadlines, cancellation and screenshot validation. */
+  readonly captureScreenshot?: () => Promise<string>;
   readonly onGenerationChange?: (
     generation: number,
     reason: AgentBrowserGenerationChangeReason,
@@ -1123,6 +1126,7 @@ function attribute(
 export class AgentBrowserCdp {
   readonly #debugger: CdpDebuggerPort;
   readonly #timeoutMs: number;
+  readonly #captureScreenshot: (() => Promise<string>) | undefined;
   readonly #onGenerationChange:
     | ((
       generation: number,
@@ -1163,6 +1167,7 @@ export class AgentBrowserCdp {
   ) {
     this.#debugger = debuggerPort;
     this.#timeoutMs = positiveTimeout(options.commandTimeoutMs);
+    this.#captureScreenshot = options.captureScreenshot;
     this.#onGenerationChange = options.onGenerationChange;
     this.#onReferencesDirty = options.onReferencesDirty;
     this.#onDetach = options.onDetach;
@@ -4764,8 +4769,9 @@ export class AgentBrowserCdp {
     let commandSettled = false;
     let command: Promise<unknown>;
     try {
-      command = this.#debugger
-        .sendCommand(method, params)
+      command = (method === "Page.captureScreenshot" && this.#captureScreenshot
+        ? this.#captureScreenshot().then(data => ({ data }))
+        : this.#debugger.sendCommand(method, params))
         .finally(() => {
           commandSettled = true;
         });

@@ -1,3 +1,4 @@
+import packageMetadata from "../package.json" with { type: "json" };
 import {
   DISCORD_API_BASE_URL,
   DiscordTransportError,
@@ -11,7 +12,7 @@ import {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_USER_AGENT =
-  "DiscordBot (https://github.com/mbaykam/HUB, 0.4.0)";
+  `DiscordBot (https://github.com/mbaykam/HUB, ${packageMetadata.version})`;
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_RETRY_AFTER_MS = 7 * 24 * 60 * 60_000;
 

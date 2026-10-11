@@ -1,0 +1,19 @@
+[data-hub-models-launcher] { display:block; width:100%; min-height:50px; border:1px solid #ffffff16; border-radius:14px; padding:14px 18px; margin:10px 0; background:#ffffff09; color:inherit; text-align:left; font:inherit; }
+[data-hub-models] { color:#e9eaf2; background:#11131df7; border:1px solid #ffffff22; border-radius:22px; width:min(720px,calc(100vw - 24px)); max-height:calc(100dvh - 28px); padding:20px; box-sizing:border-box; overflow:auto; overscroll-behavior:contain; }
+[data-hub-models]::backdrop { background:#0009; backdrop-filter:blur(12px); }
+[data-hub-models] header { display:flex; align-items:center; justify-content:space-between; gap:16px; position:sticky; top:-20px; margin:-20px -20px 16px; padding:18px 20px; background:#11131dfa; z-index:2; }
+[data-hub-models] h2 { font-size:20px; margin:0; }
+[data-hub-models] button,[data-hub-models] select,[data-hub-models] input { min-height:44px; border:1px solid #ffffff24; background:#ffffff0b; border-radius:10px; padding:10px 12px; color:inherit; font:inherit; box-sizing:border-box; }
+[data-hub-models] select option { background:#191b28; color:#e9eaf2; }
+[data-hub-models] button:disabled { opacity:.45; }
+[data-hub-models] button:focus-visible,[data-hub-models] input:focus-visible,[data-hub-models] select:focus-visible { outline:2px solid #7a9cff; outline-offset:2px; }
+.hub-model-toolbar { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.hub-model-toolbar input { grid-column:1/-1; width:100%; }
+.hub-model-note { opacity:.7; font-size:13px; line-height:1.5; }
+.hub-model-list { display:grid; gap:10px; margin-top:12px; }
+.hub-model-list article { border:1px solid #ffffff16; border-radius:16px; padding:16px; background:#ffffff04; }
+.hub-model-list h3 { font-size:16px; margin:0 0 7px; }
+.hub-model-list p { font-size:12px; line-height:1.5; margin:6px 0; overflow-wrap:anywhere; opacity:.72; }
+.hub-model-list article button { display:block; margin-top:12px; width:100%; background:#839aff20; }
+[data-hub-models] > select { width:100%; }
+@media(max-width:420px) { [data-hub-models] { padding:14px; border-radius:18px; }.hub-model-toolbar { grid-template-columns:1fr; }.hub-model-toolbar input { grid-column:auto; } [data-hub-models] header { top:-14px; margin:-14px -14px 14px; padding:14px; } }

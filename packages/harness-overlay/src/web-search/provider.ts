@@ -1,3 +1,4 @@
+import packageMetadata from "../../package.json" with { type: "json" };
 import {
   HarnessError,
 } from "@deepseek-ai/dsh-llm";
@@ -16,7 +17,7 @@ export const MINKE_WEB_SEARCH_DEFAULT_BASE_URL =
 export const MINKE_WEB_SEARCH_DEFAULT_TIMEOUT_MS = 15_000;
 export const MINKE_WEB_SEARCH_DEFAULT_MAX_RESPONSE_BYTES = 512 * 1024;
 export const MINKE_WEB_SEARCH_DEFAULT_USER_AGENT =
-  "HUB/0.4.0 (+https://github.com/mbaykam/HUB)";
+  `HUB/${packageMetadata.version} (+https://github.com/mbaykam/HUB)`;
 
 const MAX_QUERY_CHARS = 2_048;
 const MAX_REQUEST_URL_BYTES = 8_192;

@@ -1,0 +1,65 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
+--- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
+@@ -26,4 +26,27 @@
+ 			directoryPicker;
+ 			workspaces;
+ 			sessions;
++			// Product-owned, client-only navigation filters. No host archive mutation.
++			navigationSources = new Set();
++			navigationListeners = new Set();
++			navigationHiddenIds = Object.freeze([]);
++			navigationVisibility = {
++				getSnapshot: () => this.navigationHiddenIds,
++				subscribe: (listener) => {
++					this.navigationListeners.add(listener);
++					return () => this.navigationListeners.delete(listener);
++				}
++			};
++			registerNavigationHiddenSessions(source) {
++				const publish = () => {
++					const ids = [...new Set([...this.navigationSources].flatMap((item) => [...item.getSnapshot()]))].sort();
++					if (ids.length === this.navigationHiddenIds.length && ids.every((id, index) => id === this.navigationHiddenIds[index])) return;
++					this.navigationHiddenIds = Object.freeze(ids);
++					for (const listener of this.navigationListeners) listener();
++				};
++				this.navigationSources.add(source);
++				const unsubscribe = source.subscribe(publish);
++				publish();
++				return () => { unsubscribe(); this.navigationSources.delete(source); publish(); };
++			}
+ 			connecting = /* @__PURE__ */ new Map();
+@@ -862,3 +885,4 @@
+ 				role: "treeitem",
+ 				"aria-selected": selected,
++				"data-session-id": result.id,
+ 				onClick: () => {
+@@ -937,3 +961,4 @@
+ 					role: "treeitem",
+ 					"aria-selected": selected,
++					"data-session-id": node.id,
+ 					onClick: () => {
+@@ -1914,8 +1939,14 @@
+-		function WorkspaceBrowser({ wide, expandSidebar, useSessions, useSessionPendingInteraction, useWorkspaces, useStore, actions, startSession, open, renameSession, forkSession, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, archiveSession, insertSessionBefore, createWorkspace, searchSessions, searchResultLimit, useDirectoryFlow, useHostInfo, renderSlot, t }) {
++		function WorkspaceBrowser({ wide, expandSidebar, useSessions, useSessionPendingInteraction, useWorkspaces, useStore, actions, startSession, open, renameSession, forkSession, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, archiveSession, insertSessionBefore, createWorkspace, searchSessions, searchResultLimit, useDirectoryFlow, useHostInfo, useNavigationVisibility, renderSlot, t }) {
+ 			const home = useHostInfo((info) => info.home);
+ 			const workspaces = useWorkspaces((state) => state.items);
+ 			const workspacePhase = useWorkspaces((state) => state.phase);
+-			const archivedSessionIds = useWorkspaces((state) => state.archivedSessionIds);
++			const nativeArchivedSessionIds = useWorkspaces((state) => state.archivedSessionIds);
++			const navigationHiddenIds = useNavigationVisibility((ids) => ids);
++			// Only the browsing region consumes this projection. Current-session
++			// ownership, workspace accounts, conversation context and logs stay native.
++			const archivedSessionIds = react.useMemo(() => navigationHiddenIds.length
++				? [...new Set([...nativeArchivedSessionIds, ...navigationHiddenIds])]
++				: nativeArchivedSessionIds, [nativeArchivedSessionIds, navigationHiddenIds]);
+ 			const directoryFlowAvailable = useDirectoryFlow((occupied) => occupied);
+ 			const groupBy = useStore((s) => s.groupBy);
+ 			const orderBy = useStore((s) => s.orderBy);
+@@ -2704,4 +2735,5 @@
+ 				hooks: {
+ 					directoryFlow: browserFlowSource,
+-					hostInfo
++					hostInfo,
++					navigationVisibility: uiWorkspace.navigationVisibility
+ 				}

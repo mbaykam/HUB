@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   JSDOM,
@@ -32,28 +31,6 @@ function pointerEvent(view, type, init) {
   });
   return event;
 }
-
-const styles = readFileSync(
-  new URL(
-    "../packages/harness-overlay/src/client/host/mobile-sidebar-drawer.css",
-    import.meta.url,
-  ),
-  "utf8",
-);
-const installer = readFileSync(
-  new URL(
-    "../packages/harness-overlay/src/client/tabs/install.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
-const overlayPatch = readFileSync(
-  new URL(
-    "../packages/harness-overlay/cordis.patch.yml",
-    import.meta.url,
-  ),
-  "utf8",
-);
 
 test("mobile sidebar visuals fully retract and track the finger", () => {
   assert.equal(clampMobileSidebarProgress(-1), 0);
@@ -553,85 +530,37 @@ test("mobile home defaults to the hidden main workspace once", async () => {
   view.close();
 });
 
-test("mobile sidebar is a translucent, accessible motion layer", () => {
-  assert.match(
-    overlayPatch,
-    /- id: directory-picker\s+disabled: true/u,
+test("collapsed native rail hides only the conventional Home workspace chip", async () => {
+  const dom = new JSDOM(`<!doctype html><html data-minke-mobile-web><body>
+    <main data-sidebar-collapsed>
+      <aside><div data-slot="sidebar"><div>
+        <div><button>Toggle</button></div><button>New Session</button>
+        <div data-slot="sidebar.workspaces"><div><div></div></div></div>
+      </div></div></aside>
+      <section><div data-phase="hero">
+        <button id="main" aria-haspopup="menu">Minke</button>
+        <button id="project" aria-haspopup="menu">My project</button>
+      </div><button id="unrelated" aria-haspopup="menu">Minke</button></section>
+      <section></section><div data-shell-overlay></div>
+    </main></body></html>`, { pretendToBeVisual: true, url: "https://hub.test/" });
+  const view = dom.window;
+  Object.defineProperty(view, "innerWidth", { configurable: true, value: 390 });
+  const runtime = new MobileSidebarDrawerRuntime(
+    { toggleSidebar: () => {} },
+    { getSnapshot: () => ({ current: undefined }), subscribe: () => () => {} },
+    view.document,
   );
-  assert.match(
-    overlayPatch,
-    /- id: hub-directory-picker-browse\s+name: '@deepseek-ai\/dsh-host-directory-picker-browse'/u,
-  );
-  assert.match(
-    overlayPatch,
-    /- id: hub-directory-picker-browse-ui\s+name: '@deepseek-ai\/dsh-client-ui-directory-picker-browse'/u,
-  );
-  assert.match(styles, /backdrop-filter:\s*blur\(34px\) saturate\(165%\)/u);
-  assert.match(styles, /rgb\(8 12 22 \/ 48%\)/u);
-  assert.match(styles, /minke-mobile-glass-drift/u);
-  assert.match(styles, /prefers-reduced-motion:\s*reduce/u);
-  assert.match(styles, /prefers-reduced-transparency:\s*reduce/u);
-  assert.match(styles, /touch-action:\s*pan-y/u);
-  assert.match(styles, /data-minke-mobile-sidebar-scrim/u);
-  assert.match(styles, /data-minke-tabs-layout-actions/u);
-  assert.match(styles, /data-hub-mobile-nav-logo-row/u);
-  assert.match(styles, /data-hub-mobile-nav-view-options/u);
-  assert.match(styles, /data-hub-mobile-nav-new-session-source/u);
-  assert.match(styles, /data-hub-mobile-nav-add-workspace-source/u);
-  assert.match(styles, /data-hub-mobile-nav-footer-new-workspace/u);
-  assert.match(styles, /data-hub-mobile-nav-footer-new-session/u);
-  assert.match(styles, /data-hub-mobile-nav-pinned/u);
-  assert.match(styles, /data-hub-mobile-nav-pin-current/u);
-  assert.match(styles, /data-hub-mobile-nav-pinned-session/u);
-  assert.match(styles, /data-hub-mobile-nav-current-bookmark/u);
-  assert.match(styles, /data-hub-mobile-main-workspace-chip/u);
-  assert.match(styles, /data-hub-mobile-nav-recents-section/u);
-  assert.match(
-    styles,
-    /data-hub-mobile-nav-section-label\]::after\s*\{[\s\S]*content:\s*"Recents"/u,
-  );
-  assert.match(
-    styles,
-    /data-hub-mobile-nav-tree\]::after\s*\{[\s\S]*content:\s*"Workspaces"/u,
-  );
-  assert.match(
-    styles,
-    /data-minke-mobile-sidebar\][\s\S]*box-sizing:\s*border-box/u,
-  );
-  assert.match(
-    styles,
-    /data-minke-mobile-sidebar-edge[\s\S]*width:\s*24px;[\s\S]*touch-action:\s*pan-y/u,
-  );
-  assert.match(
-    styles,
-    /data-minke-mobile-details-column[\s\S]*grid-column:\s*3;[\s\S]*width:\s*0 !important;/u,
-  );
-  const runtime = readFileSync(
-    new URL(
-      "../packages/harness-overlay/src/client/host/mobile-sidebar-drawer.ts",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  assert.match(
-    runtime,
-    /#onSessionSelection[\s\S]*current === this\.#currentSession[\s\S]*#settle\(false, true\)/u,
-  );
-  assert.match(
-    runtime,
-    /#selectionCloseFrame = this\.#view\.requestAnimationFrame[\s\S]*#settle\(false, true\)/u,
-  );
-  assert.match(
-    runtime,
-    /this\.#settleTimer = this\.#view\.setTimeout[\s\S]*logicalOpen !== open[\s\S]*toggleSidebar/u,
-  );
-  assert.match(runtime, /SESSION_SELECTION_SELECTOR/u);
-  assert.match(
-    runtime,
-    /#activateTouchedSession[\s\S]*row\.click\(\)/u,
-  );
-  assert.match(
-    installer,
-    /installMobileSidebarDrawerStyles\(\)[\s\S]*installMobileSidebarDrawer\(ctx\.layout, ctx\.sessions\)/u,
-  );
+  runtime.start();
+  await nextFrame(view);
+  await nextFrame(view);
+  const hidden = (id) => view.document.getElementById(id).hasAttribute("data-hub-mobile-main-workspace-chip");
+  assert.equal(hidden("main"), true);
+  assert.equal(hidden("project"), false);
+  assert.equal(hidden("unrelated"), false);
+  view.document.getElementById("main").textContent = "Another project";
+  await nextFrame(view);
+  await nextFrame(view);
+  assert.equal(hidden("main"), false, "Switching to a project restores its picker");
+  runtime.dispose();
+  view.close();
 });

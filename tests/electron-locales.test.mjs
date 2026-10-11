@@ -56,7 +56,7 @@ test("macOS packaging keeps mainstream Browser locales", async () => {
       await mkdir(frameworkLocale);
       await writeFile(join(frameworkLocale, "locale.pak"), locale);
       await symlink(
-        join(
+        process.platform === "win32" ? frameworkLocale : join(
           "..",
           "Frameworks",
           "Electron Framework.framework",
@@ -66,6 +66,7 @@ test("macOS packaging keeps mainstream Browser locales", async () => {
           locale,
         ),
         join(appResources, locale),
+        process.platform === "win32" ? "junction" : "dir",
       );
     }
     await writeFile(join(frameworkResources, "resources.pak"), "chromium");

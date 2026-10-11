@@ -8,6 +8,15 @@ import type {
 const PREVIEW_ROUTE_PATTERN =
   /^\/minke-preview\/[A-Za-z0-9_-]{22}\/$/u;
 
+/** Authenticated navigation target; never includes the Host capability. */
+export function hubConversationUrl(sessionId: string, remote: RemoteRuntimeSnapshot, panel?: "models"): string | undefined {
+  const origin = stableRemoteOrigin(remote);
+  if (!origin || !/^minke-im-(telegram|discord)-[a-f0-9]{32}$/.test(sessionId)) return undefined;
+  const url = new URL("/", origin); url.searchParams.set("hubSession", sessionId);
+  if (panel) url.searchParams.set("hubPanel", panel);
+  return url.href;
+}
+
 export interface ExternalAgentTurnPreview {
   readonly title: string;
   readonly url: string;
@@ -27,7 +36,7 @@ export type ExternalAgentTurnResult =
     )
   | Exclude<AgentTurnResult, CompletedAgentTurn>;
 
-function stableRemoteOrigin(
+export function stableRemoteOrigin(
   snapshot: RemoteRuntimeSnapshot,
 ): URL | undefined {
   const stable =

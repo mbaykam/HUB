@@ -634,7 +634,9 @@ html[data-minke-mobile-web] [data-minke-mobile-right-drawer] {
   flex-direction: column;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  /* Clip the glass decoration without making the outer shell a hidden scroll
+   * container that focus/viewport changes can scroll behind its fixed header. */
+  overflow: clip;
   padding:
     max(14px, env(safe-area-inset-top))
     max(14px, env(safe-area-inset-right))
@@ -793,7 +795,13 @@ html[data-minke-mobile-web] [data-minke-mobile-right-drawer-body] {
   z-index: 1;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 
 html[data-minke-mobile-web] [data-minke-usage-meter] {
@@ -808,7 +816,7 @@ html[data-minke-mobile-web] [data-minke-usage-meter] {
 
 html[data-minke-mobile-web]
   [data-minke-usage-meter][data-expanded] {
-  height: 100%;
+  height: auto;
 }
 
 html[data-minke-mobile-web] [data-minke-usage-toggle] {
@@ -859,7 +867,7 @@ html[data-minke-mobile-web]
 
 html[data-minke-mobile-web] [data-minke-usage-content] {
   display: flex;
-  flex: 1;
+  flex: none;
   min-height: 0;
   flex-direction: column;
   padding-top: 14px;
@@ -915,12 +923,11 @@ html[data-minke-mobile-web]
 
 html[data-minke-mobile-web] [data-minke-usage-providers] {
   display: flex;
-  flex: 1;
+  flex: none;
   min-height: 0;
   flex-direction: column;
   gap: 12px;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
   padding: 1px 2px 14px;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -1174,6 +1181,12 @@ html[data-minke-mobile-web]
 
 /* Settings takes over immediately instead of waiting behind the outgoing
  * secondary drawer's 300ms glass animation. */
+html[data-minke-mobile-web]
+  [data-minke-mobile-sidebar-frame][data-minke-mobile-settings-open]
+  > [data-minke-mobile-sidebar-edge] {
+  pointer-events: none;
+}
+
 html[data-minke-mobile-web]
   [data-minke-mobile-sidebar-frame][data-minke-mobile-settings-open]
   > [data-minke-mobile-right-drawer] {

@@ -821,7 +821,7 @@ const TOOL_SPECS = [
     name: "browser_find",
     operation: "find",
     description:
-      "Search the complete current page index without mutating the page. Use this as a magnifier after the macro browser_snapshot: return exact matches only, bounded local context, or a bounded subtree. To select the Nth repeated item, constrain its collection in query and pass ordinal beside query; ordinal queries return at most one direct match and no next_cursor. Zero matches and multiple matches are normal structured results. Continue other large match sets with next_cursor.",
+      "Search the complete current page index without mutating the page. Use this as a magnifier after the macro browser_snapshot: return exact matches only, bounded local context, or a bounded subtree. To select the Nth repeated item, constrain its collection in query and pass ordinal beside query; ordinal queries return at most one direct match and no next_cursor. Zero matches and multiple matches are normal structured results. Provide either query or next_cursor, never both. Continue other large match sets with next_cursor alone (plus optional session_id), omitting ordinal, view, depth and limit.",
     parameters: {
       type: "object",
       properties: {
@@ -854,24 +854,9 @@ const TOOL_SPECS = [
             "Opaque next_cursor from a prior browser_find. When supplied, omit query, ordinal, view, depth, and limit.",
         },
       },
-      oneOf: [
-        {
-          required: ["query"],
-          not: { required: ["next_cursor"] },
-        },
-        {
-          required: ["next_cursor"],
-          not: {
-            anyOf: [
-              { required: ["query"] },
-              { required: ["view"] },
-              { required: ["depth"] },
-              { required: ["limit"] },
-              { required: ["ordinal"] },
-            ],
-          },
-        },
-      ],
+      // Claude rejects top-level oneOf/anyOf/allOf in tool input schemas.
+      // Keep the wire envelope a plain object. toolPayload below still checks
+      // the exclusive query/cursor variants BEFORE sending any browser IPC.
       additionalProperties: false,
     },
     outputSchema: FIND_RESULT_SCHEMA,

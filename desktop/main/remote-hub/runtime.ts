@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import {receiveTelegramMedia} from "./telegram-media.ts";
+import { TelegramReplyReceipts, withTelegramLiveReplies, type TelegramReplyStore } from "./telegram-replies.ts";
 import {
   createDiscordGatewayProvider,
   DiscordTransportError,
@@ -55,6 +57,7 @@ interface WeixinRuntimePort {
 }
 
 interface BotRuntimePort {
+  notifyAgentActivity?(activity: import("@minke/harness-overlay/agent-activity-contract.ts").HubAgentActivity): Promise<void>;
   approvePairing(requestId: string): Promise<void>;
   connect(token: string): Promise<void>;
   disconnect(): Promise<void>;
@@ -170,6 +173,7 @@ export interface RemoteHubCapabilityRuntimeOptions {
 
 export interface TelegramBotDriverOptions {
   readonly fetch?: typeof globalThis.fetch;
+  readonly replyStore?: TelegramReplyStore;
 }
 
 export interface DiscordBotDriverOptions {
@@ -264,13 +268,13 @@ function inspectTelegramDirectMessage(
     return undefined;
   }
   const message = payload as unknown as TelegramInboundMessage;
+  const file=message.content.kind==="document"?message.content.document:message.content.kind==="audio"?message.content.audio:message.content.kind==="video"?message.content.video:message.content.kind==="voice"?message.content.voice:undefined;
+  const media=message.content.kind==="photo"?[{fileId:message.content.photo.fileId,name:"Photo.jpg",mediaType:"image/jpeg",size:message.content.photo.fileSize}]:file?[{fileId:file.fileId,name:file.fileName??(message.content.kind==="voice"?"Voice message.ogg":"Attachment"),mediaType:file.mimeType??"application/octet-stream",size:file.fileSize}]:undefined;
   return {
     conversationKind: "direct",
     senderLabel: telegramSenderLabel(sender),
-    ...(message.content.kind === "text" &&
-    typeof message.content.text === "string"
-      ? { text: message.content.text }
-      : {}),
+    ...(message.content.kind === "text" ? {text:message.content.text}:"caption" in message.content&&message.content.caption?{text:message.content.caption}:{}),
+    ...(media?{media}:{}),
   };
 }
 
@@ -386,6 +390,7 @@ export function createTelegramBotDriver(
 > {
   const driver: BotProviderDriver<TelegramBotIdentity> = {
     provider: "telegram",
+    liveReplies: options.replyStore !== undefined,
     agentReplyPayload(markdown) {
       return {
         kind: "rich-markdown",
@@ -393,6 +398,7 @@ export function createTelegramBotDriver(
       };
     },
     inspectMessage: inspectTelegramDirectMessage,
+    receiveMedia(token,items,signal){return receiveTelegramMedia(token,items,options.fetch??globalThis.fetch,signal);},
     async validate(token, { signal }) {
       return await validateTelegramBotToken(
         {
@@ -464,11 +470,12 @@ export function createTelegramBotDriver(
             "Telegram bot identity changed during connection",
           );
         }
-        return createTelegramGatewayProvider({
+        const provider = createTelegramGatewayProvider({
           accountKey: input.accountKey,
           generation: input.generation,
           transport,
         });
+        return options.replyStore ? withTelegramLiveReplies(provider, transport, options.replyStore) : provider;
       } catch (error) {
         await transport.close().catch(() => {});
         throw error;
@@ -699,6 +706,7 @@ export class RemoteHubCapabilityRuntime {
       new BotCapabilityRuntime({
         driver: createTelegramBotDriver({
           fetch: options.telegramFetch,
+          replyStore: new TelegramReplyReceipts(mailboxPath + ".telegram-replies.enc", () => options.vault.gatewayCipher()),
         }),
         mailboxPath,
         vault: options.vault,
@@ -727,6 +735,10 @@ export class RemoteHubCapabilityRuntime {
   }
 
   getSnapshot = (): RemoteHubSnapshot => this.#snapshot;
+
+  async notifyAgentActivity(activity: import("@minke/harness-overlay/agent-activity-contract.ts").HubAgentActivity): Promise<void> {
+    await this.#telegram.notifyAgentActivity?.(activity);
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);

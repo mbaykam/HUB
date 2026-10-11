@@ -1,0 +1,129 @@
+import { localSpeechCatalogSchema, localSpeechSchema, speechDownloadStatusSchema, type LocalSpeechConfig, type LocalSpeechCatalog } from "../../voice-profile-contract.ts";
+
+/** Character-owned speech settings with real auditions; no audio capture. */
+export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | null) {
+  const view = root.defaultView!, lifetime = new AbortController();
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => { const n = root.createElement(tag); if (text) n.textContent = text; return n; };
+  const button = (text: string, run: () => void) => { const n = el("button", text); n.type = "button"; n.addEventListener("click", run); return n; };
+  const panel = el("details"); panel.setAttribute("data-hub-speech-editor", ""); panel.open = !!seed; panel.append(el("summary", "Voice & languages"));
+  const status = el("p"); status.setAttribute("role", "status");
+  const field = (text: string, input: HTMLElement) => { const label = el("label"); label.append(el("span", text), input); panel.append(label); input.setAttribute("aria-label", text); };
+  const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = !!seed; field("Enable local speech", enabled);
+  const stt = el("select"); field("Speech recognition model", stt);
+  const language = el("select"); for (const [id, text] of [["auto", "Automatic · English / Türkçe"], ["en", "English"], ["tr", "Türkçe"]]) { const n = el("option", text); n.value = id!; language.append(n); }
+  language.value = seed?.stt.language ?? (seed?.stt.model.endsWith(".en") ? "en" : "auto"); field("Recognition language", language);
+  const engine = el("select"); field("Speech engine", engine);
+  const outputLanguage = language.cloneNode(true) as HTMLSelectElement; outputLanguage.value = seed?.tts.engine === "bilingual" || seed?.tts.engine === "supertonic" ? seed.tts.language ?? "auto" : "auto"; field("Spoken language", outputLanguage);
+  const quality = el("select"); for (const [id, text] of [["4", "Fast · 4 steps"], ["6", "Balanced · 6 steps"], ["8", "Detailed · 8 steps"]]) { const n = el("option", text); n.value = id!; quality.append(n); }
+  quality.value = String(seed?.tts.engine === "supertonic" ? seed.tts.steps ?? 6 : 6); field("Voice quality", quality);
+  const voiceHeading = el("h4", "Choose a voice · listen first"); panel.append(voiceHeading);
+  const voices = el("div"); voices.className = "hub-speech-voices"; panel.append(voices);
+  const turkish = button("▶ Türkçe · DFKI voice", () => void audition("tr")); panel.append(turkish);
+  const voiceMapping = el("p"); voiceMapping.setAttribute("data-speech-voice-mapping", ""); panel.append(voiceMapping);
+  let audio = el("audio"); audio.controls = true; audio.hidden = true; audio.setAttribute("playsinline", ""); panel.append(audio, status);
+  panel.append(el("p", "Speech stays on your PC. Automatic mode detects each utterance and switches the spoken language by sentence. Changes apply to the next call."));
+  const models = el("details"); models.append(el("summary", "Install speech models")); const downloads = el("div"); models.append(downloads); panel.append(models);
+  let catalog: LocalSpeechCatalog | undefined, selectedVoice = seed?.tts.voice ?? "F5", poll: number | undefined, samplePoll: number | undefined;
+  const samples = new Map<string, { url: string; audio: HTMLAudioElement }>(), flights = new Map<string, Promise<void>>();
+  const advanced = el("details"); advanced.append(el("summary", "Speech models & engines"), stt.parentElement!, engine.parentElement!, quality.parentElement!, models); panel.append(advanced);
+  const key = (item: { engine: string; model: string }) => `${item.engine}:${item.model}`;
+  let initialStt = seed ? key(seed.stt) : "nemotron:3.5-560ms", initialTts = seed ? key(seed.tts) : "supertonic:supertonic-3";
+  function ttsValue(voice = selectedVoice): LocalSpeechConfig["tts"] {
+    const item = catalog?.tts.find(item => key(item) === engine.value);
+    if (!item) throw new Error("Speech models are still loading.");
+    if (item.engine === "supertonic") return localSpeechSchema.shape.tts.parse({ engine: "supertonic", model: "supertonic-3", voice, language: outputLanguage.value, steps: Number(quality.value) });
+    if (item.engine === "piper") return { engine: "piper", model: item.model, voice: item.model };
+    if (item.engine === "bilingual") return { engine: "bilingual", model: "kokoro-piper", voice, turkishVoice: "tr_TR-dfki-medium", language: outputLanguage.value as "auto" };
+    return { engine: "kokoro", model: "82m", voice };
+  }
+  function voiceLabel(id: string) { return /^[FM][1-5]$/.test(id) ? `${id[0] === "F" ? "Female" : "Male"} ${id[1]} · multilingual` : id.startsWith("tr_") ? "DFKI · Turkish" : id.startsWith("en_") ? "LJ · American English" : `${id.slice(3).replace(/^./, c => c.toUpperCase())} · ${id[0] === "b" ? "British" : "American"} · ${id[1] === "f" ? "female" : "male"}`; }
+  const sampleKey = (lang: string, voice: string) => `${lang}:${lang === "tr" && engine.value.startsWith("bilingual") ? "tr_TR-dfki-medium" : voice}`;
+  function preload(lang: "en" | "tr", voice: string) {
+    const id=sampleKey(lang,voice);if(samples.has(id)||flights.has(id))return flights.get(id)??Promise.resolve();
+    const selection={tts:ttsValue(voice),language:lang};
+    const flight=(async()=>{
+      const response=await view.fetch("/api/hub/voice/preview",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"content-type":"application/json","x-hub-speech-preview":"1"},body:JSON.stringify(selection),signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(15000)])});
+      if(!response.ok)return;
+      const blob=await response.blob();if(lifetime.signal.aborted)return;
+      const url=view.URL.createObjectURL(blob),player=el("audio");player.preload="auto";player.src=url;player.controls=true;player.setAttribute("playsinline","");player.load();
+      samples.set(id,{url,audio:player});
+    })().catch(()=>{}).finally(()=>{flights.delete(id);});
+    flights.set(id,flight);return flight;
+  }
+  async function warmSamples(){
+    const engineKey=engine.value;
+    const item=catalog?.tts.find(item=>key(item)===engineKey);if(!item?.available)return;
+    const queue=item.voices.map(voice=>({voice,lang:voice.startsWith("tr_")?"tr" as const:"en" as const}));
+    if(item.engine==="supertonic")queue.push(...item.voices.map(voice=>({voice,lang:"tr" as const})));
+    if(item.engine==="bilingual")queue.unshift({voice:selectedVoice,lang:"tr"});
+    await Promise.all(Array.from({length:4},async()=>{while(queue.length&&!lifetime.signal.aborted&&engine.value===engineKey){const next=queue.shift()!;await preload(next.lang,next.voice);if(!lifetime.signal.aborted)renderVoices();}}));
+    if(!lifetime.signal.aborted&&engine.value===engineKey){view.clearTimeout(samplePoll);samplePoll=view.setTimeout(()=>void warmSamples(),10000);}
+  }
+  function renderVoices() {
+    const bilingual = engine.value === "bilingual:kokoro-piper";
+    const multilingual = engine.value === "supertonic:supertonic-3";
+    voiceHeading.textContent = bilingual ? "English voice · listen first" : "Choose a voice · listen first";
+    turkish.hidden = !bilingual;
+    voiceMapping.textContent = multilingual ? `${voiceLabel(selectedVoice)} · the same speaker in English and Türkçe.` : bilingual ? `English: ${voiceLabel(selectedVoice)}. Türkçe: DFKI. These are separate voices; the English voice cannot speak Turkish with this engine.` : "";
+    voiceMapping.hidden = !bilingual && !multilingual;
+    voices.replaceChildren(); const item = catalog?.tts.find(item => key(item) === engine.value);
+    outputLanguage.disabled = !bilingual && !multilingual;
+    quality.parentElement!.hidden = !multilingual;
+    turkish.hidden = item?.engine !== "bilingual"; turkish.disabled = !item?.available || !samples.has(sampleKey("tr",selectedVoice));
+    for (const id of item?.voices ?? []) {
+      const row = el("article"); row.toggleAttribute("data-selected", id === selectedVoice);
+      const choose = button(voiceLabel(id), () => { selectedVoice = id; renderVoices(); panel.dispatchEvent(new Event("change", { bubbles: true })); }); choose.setAttribute("aria-pressed", String(id === selectedVoice));
+      const ready=samples.has(sampleKey(id.startsWith("tr_")?"tr":"en",id));
+      const listen = button(ready ? multilingual ? "▶ English" : "▶ Listen" : "Loading…", () => void audition(id.startsWith("tr_") ? "tr" : "en", id)); listen.setAttribute("aria-label", `Listen to ${voiceLabel(id)}${multilingual ? " in English" : ""}`); listen.disabled = !item?.available || !ready;
+      row.append(choose, listen); voices.append(row);
+      if(multilingual){const trReady=samples.has(sampleKey("tr",id)); const trListen=button(trReady?"▶ Türkçe":"Loading…",()=>void audition("tr",id));trListen.setAttribute("aria-label",`Listen to ${voiceLabel(id)} in Turkish`);trListen.disabled=!item?.available||!trReady;row.append(trListen);}
+    }
+    if (!item?.available) voices.append(el("p", "Install this voice engine’s models below before using it."));
+  }
+  function audition(lang: "en" | "tr", voice = selectedVoice) {
+    const ready=samples.get(sampleKey(lang,voice));if(!ready)return;
+    audio.pause();if(audio!==ready.audio)audio.replaceWith(ready.audio);audio=ready.audio;audio.currentTime=0;audio.hidden=false;
+    // Play in the tap handler, with no request or synthesis; preserves iPhone activation.
+    void audio.play().then(()=>{status.textContent=`${voiceLabel(lang === "tr" && engine.value.startsWith("bilingual") ? "tr_TR-dfki-medium" : voice)} sample`;}).catch(()=>{status.textContent="Tap the audio play button to listen.";});
+  }
+  function renderCatalog() {
+    if (!catalog) return; const wantedStt = stt.value || initialStt, wantedTts = engine.value || initialTts;
+    stt.replaceChildren(); engine.replaceChildren();
+    for (const item of catalog.stt) { const n = el("option", `${item.engine === "nemotron" ? "Nemotron 3.5 · live English / Türkçe" : `Whisper ${item.model} · ${item.model.endsWith(".en") ? "English only" : "multilingual"}`}${item.available ? "" : " · install first"}`); n.value = key(item); n.disabled = !item.available; stt.append(n); }
+    for (const item of catalog.tts) { const n = el("option", `${item.engine === "supertonic" ? "Supertonic 3 · same voice in English / Türkçe" : item.engine === "bilingual" ? "Automatic · Kokoro English + Piper Türkçe" : item.engine === "kokoro" ? "Kokoro · English" : `Piper · ${item.model.startsWith("tr_") ? "Türkçe" : "English"}`}${item.available ? "" : " · install first"}`); n.value = key(item); engine.append(n); }
+    stt.value = wantedStt; engine.value = wantedTts; renderVoices(); void warmSamples(); downloads.replaceChildren();
+    for (const item of [...catalog.stt, ...catalog.tts]) {
+      if (item.available || !item.downloadable || !["whisper", "piper", "supertonic", "nemotron"].includes(item.engine)) continue;
+      const install = button(`Install ${item.model}`, () => void download({ engine: item.engine, model: item.model })); downloads.append(install);
+    }
+    if (!downloads.childElementCount) downloads.append(el("p", "All supported downloadable models are installed."));
+  }
+  async function load() {
+    const response = await view.fetch("/api/hub/voice/catalog", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(25000)]) });
+    if (!response.ok) throw new Error("Speech catalog could not load.");
+    catalog = localSpeechCatalogSchema.parse((await response.json()).speech); if (!lifetime.signal.aborted) renderCatalog();
+  }
+  async function download(selection?: { engine: string; model: string }) {
+    try {
+      const response = await view.fetch("/api/hub/voice/speech-models", { method: selection ? "POST" : "GET", credentials: "same-origin", cache: "no-store", headers: selection ? { "content-type": "application/json", "x-hub-speech-models": "1" } : undefined, body: selection ? JSON.stringify(selection) : undefined, signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(25000)]) });
+      if (!response.ok) throw new Error("Another model may be downloading. Check again shortly.");
+      const job = speechDownloadStatusSchema.parse(await response.json()).download;
+      if (lifetime.signal.aborted) return;
+      status.textContent = !job ? "No download running." : `${job.model} · ${job.phase}`;
+      if (job?.phase === "complete") await load();
+      else if (job && job.phase !== "failed") poll = view.setTimeout(() => void download(), 3000);
+    } catch (error) { if (!lifetime.signal.aborted) status.textContent = (error as Error).message; }
+  }
+  engine.addEventListener("change", () => { const item = catalog?.tts.find(item => key(item) === engine.value); if (!item?.voices.some(id => id === selectedVoice)) selectedVoice = item?.engine === "supertonic" ? "F5" : item?.voices[0] ?? ""; audio.pause(); renderVoices(); void warmSamples(); });
+  status.textContent = "Loading local speech models…";
+  void load().then(() => { status.textContent = "Listen to a sample before choosing a voice."; }).catch(error => { if (!lifetime.signal.aborted) status.textContent = error.message; });
+  return { panel, value(): LocalSpeechConfig | null {
+    if (!enabled.checked) return null;
+    const selectedStt = catalog?.stt.find(item => key(item) === stt.value);
+    if (!selectedStt) throw new Error("Choose an installed recognition model.");
+    const value = localSpeechSchema.parse({ stt: { engine: selectedStt.engine, model: selectedStt.model, language: language.value }, tts: ttsValue() });
+    if (value.stt.model.endsWith(".en") && language.value !== "en") throw new Error("Choose a multilingual Whisper model for automatic or Turkish recognition.");
+    if (!catalog?.stt.some(item => key(item) === key(value.stt) && item.available) || !catalog.tts.some(item => key(item) === key(value.tts) && item.available)) throw new Error("Install the selected speech models before saving.");
+    return value;
+  }, dispose() { lifetime.abort(); view.clearTimeout(poll); view.clearTimeout(samplePoll); audio.pause();audio.removeAttribute("src");for(const sample of samples.values()){sample.audio.pause();sample.audio.removeAttribute("src");view.URL.revokeObjectURL(sample.url);}samples.clear(); } };
+}

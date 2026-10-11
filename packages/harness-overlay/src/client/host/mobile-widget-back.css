@@ -1,0 +1,5 @@
+[data-hub-widget-back-edge]{position:absolute;left:0;top:0;width:16px;z-index:30;touch-action:pan-y;pointer-events:auto;background:transparent}
+[data-hub-widget-back-header]{touch-action:pan-y}
+[data-hub-widget-back-active]{transform:translate3d(var(--hub-widget-back-x,0px),0,0)!important;will-change:transform}
+[data-hub-widget-back-settling]{transition:transform 180ms cubic-bezier(.22,.8,.24,1)!important}
+@media(prefers-reduced-motion:reduce){[data-hub-widget-back-settling]{transition:none!important}}

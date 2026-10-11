@@ -1,0 +1,4 @@
+# Isolated Python 3.12 runtime. Existing Pipecat adapters, not a new speech stack.
+pipecat-ai[whisper,kokoro,webrtc,runner]==1.8.1
+pytest>=9,<10
+pytest-asyncio>=1,<2

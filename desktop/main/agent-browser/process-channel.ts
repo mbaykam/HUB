@@ -15,6 +15,7 @@ import {
   AgentBrowserError,
   asAgentBrowserError,
 } from "./cdp.ts";
+import { bindBrowserViewChannel, type BrowserViewHandler } from "./view-channel.ts";
 
 export interface AgentBrowserProcessChild {
   readonly connected: boolean;
@@ -32,7 +33,7 @@ export interface AgentBrowserProcessChild {
   ): unknown;
 }
 
-export interface AgentBrowserProcessHandler {
+export interface AgentBrowserProcessHandler extends Partial<BrowserViewHandler> {
   handleProcessRequest(
     request: AgentBrowserRequest,
     signal: AbortSignal,
@@ -82,6 +83,7 @@ export class AgentBrowserProcessChannel {
   readonly #owners = new Set<string>();
   readonly #ownerClosures = new Map<string, Promise<void>>();
   #disposed = false;
+  readonly #disposeViewer: (() => void) | undefined;
 
   constructor(
     child: AgentBrowserProcessChild,
@@ -91,6 +93,12 @@ export class AgentBrowserProcessChannel {
     this.#child = child;
     this.#handler = handler;
     this.#onDispose = onDispose;
+    if (handler.listOwnedBrowsers && handler.captureOwnedBrowser) {
+      this.#disposeViewer = bindBrowserViewChannel(child, {
+        listOwnedBrowsers: (owners) => handler.listOwnedBrowsers!(owners),
+        captureOwnedBrowser: (owner, session) => handler.captureOwnedBrowser!(owner, session),
+      }, () => new Set([...this.#owners].filter((owner) => !this.#ownerClosures.has(owner))));
+    }
     child.on("message", this.#handleMessage);
     child.on("error", this.#handleFailure);
     child.on("exit", this.#handleExit);
@@ -119,6 +127,7 @@ export class AgentBrowserProcessChannel {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#disposeViewer?.();
     this.#child.off("message", this.#handleMessage);
     this.#child.off("error", this.#handleFailure);
     this.#child.off("exit", this.#handleExit);

@@ -1,7 +1,7 @@
 {
   "name": "@lencx/minke-harness-overlay",
   "description": "HUB-owned DeepSeek Harness product extensions",
-  "version": "0.4.0",
+  "version": "0.4.26",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,8 +12,12 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./web-search": "./lib/web-search.js",
+    "./memory": "./lib/memory.js",
+    "./voice": "./lib/voice.js",
+    "./models": "./lib/models.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./characters": "./lib/characters.js"
   },
   "dsh": {
     "bundle": {
@@ -40,19 +44,39 @@
   "files": [
     "lib",
     "assets",
+    "voice/server.py",
+    "voice/supertonic_tts.py", "voice/streaming_asr.py", "voice/native_streaming_stt.py",
+    "voice/voice_pipeline.py",
+    "voice/playback_guard.py",
+    "voice/speech_settings.py",
+    "voice/speech_download.py",
+    "voice/hub_native_llm.py",
     "cordis.patch.yml"
   ],
   "license": "Apache-2.0",
   "dependencies": {
     "@lencx/minke-model-runtime": "workspace:*",
     "@lencx/minke-remote-access": "workspace:*",
-    "qrcode": "1.5.4"
+    "@pipecat-ai/client-js": "1.13.1",
+    "@pipecat-ai/small-webrtc-transport": "1.10.7",
+    "dompurify": "3.4.14",
+    "cytoscape": "3.34.2",
+    "vega": "6.4.0",
+    "vega-interpreter": "2.3.2",
+    "qrcode": "1.5.4",
+    "zod": "4.5.4"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-llm": "0.1.2-alpha.5",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.2-alpha.5"
+    "@deepseek-ai/dsh-tools": "0.1.2-alpha.5",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.2-alpha.5",
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-tool-subagent": "0.1.2-alpha.5"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
     "@deepseek-ai/dsh-llm": {
       "optional": true
     },

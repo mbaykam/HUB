@@ -49,10 +49,7 @@ export interface AgentTurnSessionControllerPort {
     readonly requestId: string;
     readonly sessionId: string;
     readonly mode: "queue";
-    readonly content: readonly {
-      readonly type: "text";
-      readonly text: string;
-    }[];
+    readonly content: readonly ({readonly type:"text";readonly text:string}|{readonly type:"image";readonly mediaType:string;readonly data:string;readonly name?:string})[];
   }, signal: AbortSignal): Promise<{
     readonly accepted: true;
   }>;
@@ -87,7 +84,9 @@ interface AgentTurnControlContext {
 export interface AgentTurnExecutionOptions {
   readonly pollIntervalMs?: number;
   readonly previewPublisher?: AgentTurnPreviewPublisher;
+  readonly prepareMedia?:(input:AgentTurnInput,signal:AbortSignal)=>Promise<{input:AgentTurnInput;images:readonly any[]}>;
 }
+const preparedImages=new WeakMap<AgentTurnInput,readonly any[]>();
 
 export interface AgentTurnPreviewPublisher {
   publish(input: {
@@ -215,7 +214,7 @@ function sameInput(
   return (
     left.operationId === right.operationId &&
     left.sessionId === right.sessionId &&
-    left.text === right.text
+    left.text === right.text&&JSON.stringify(left.media??[])===JSON.stringify(right.media??[])
   );
 }
 
@@ -228,6 +227,7 @@ function userMessageText(
   const blocks: string[] = [];
   for (const value of content) {
     const block = object(value);
+    if(block?.type==="image")continue;
     if (
       block?.type !== "text" ||
       typeof block.text !== "string"
@@ -271,6 +271,7 @@ function inputFingerprint(input: AgentTurnInput): string {
     .update(input.sessionId)
     .update("\u0000")
     .update(input.text)
+    .update(JSON.stringify(input.media??[]))
     .digest("hex");
 }
 
@@ -305,6 +306,8 @@ function assertPersistedInput(
   if (userMessageText(event) !== input.text) {
     throw operationConflict(input.operationId);
   }
+  const images=Array.isArray(event.data.content)?event.data.content.filter((b:any)=>b.type==="image").map((b:any)=>b.attachment?.attachmentId):[];
+  const expected=(preparedImages.get(input)??[]).map(b=>b.attachment?.attachmentId);if(JSON.stringify(images)!==JSON.stringify(expected))throw operationConflict(input.operationId);
 }
 
 function invalidControlState(
@@ -1002,7 +1005,7 @@ async function promptAgentTurn(
         requestId: input.operationId,
         sessionId: input.sessionId,
         mode: "queue",
-        content: externalPromptContent(input.text),
+        content: [...externalPromptContent(input.text),...(input.media??[]).filter(m=>/^image\/(png|jpeg|webp|gif)$/.test(m.mediaType)).map(m=>({type:"image" as const,mediaType:m.mediaType,data:m.data,name:m.name}))],
       }, signal),
   );
   if (prompted.accepted !== true) {
@@ -1181,6 +1184,7 @@ export async function runAgentTurnInHarness(
     );
   }
   throwIfAborted(signal);
+  if(input.media?.length){if(!options.prepareMedia)throw Error("Media admission unavailable");const prepared=await options.prepareMedia(input,signal);input=prepared.input;preparedImages.set(input,prepared.images);}
   const created = await controllerCall(
     "session.create",
     () => controller.create({ sessionId: input.sessionId }),

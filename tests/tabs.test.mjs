@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createFileSymlink } from "./helpers/file-symlink.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import {
@@ -7,7 +8,6 @@ import {
   mkdtemp,
   readFile,
   rm,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -990,7 +990,7 @@ test("Files writes atomically through symlinks and preserves permissions", async
   const edited = 'fn main() { println!("after"); }\n';
   await writeFile(target, initial, "utf8");
   await chmod(target, 0o640);
-  await symlink("target.rs", link);
+  if (!await createFileSymlink(t, "target.rs", link)) return;
   const initialMode = (await lstat(target)).mode & 0o7777;
   const runtime = new FileManagerRuntime({
     rootPath: directory,

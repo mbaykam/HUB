@@ -1,4 +1,9 @@
-# Minke Harness overlay
+# HUB Harness overlay
+
+HUB's current character/model, voice, knowledge and PWA features are described
+in the [project overview](../../README.md) and [setup guide](../../docs/setup.md).
+The package names and `minke-*` configuration namespaces below retain upstream
+compatibility; the product is maintained independently as HUB.
 
 This package is Minke's product-owned extension layer for DeepSeek Harness. It is installed into the generated desktop runtime and composed through the public `--patch` bundle seam. Nothing in this package is copied into or applied over `vendor/deepseek-harness`.
 
