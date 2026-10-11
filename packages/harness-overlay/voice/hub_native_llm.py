@@ -7,6 +7,7 @@ only each new final human transcription and receives public response text.
 import asyncio
 import json
 import re
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlsplit
@@ -282,6 +283,7 @@ class HubNativeLLMService(LLMService):
         has_text = False
         self._request_active = True
         if self._health:
+            self._health.begin_turn()
             self._health.model_active = True
             self._health.stage = 'thinking'
         await self.push_frame(LLMFullResponseStartFrame())
@@ -291,6 +293,8 @@ class HubNativeLLMService(LLMService):
             async for event in self._bridge.turn(utterance, text):
                 if event["type"] == "text":
                     has_text = True
+                    if self._health and self._health.first_text_at is None:
+                        self._health.first_text_at = time.perf_counter()
                     await self.stop_ttfb_metrics()
                     await self.push_frame(LLMTextFrame(event["text"]))
                 else:

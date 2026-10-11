@@ -13,6 +13,7 @@ async function fixture(overrides = {}, options = {}) {
   const web = createVoiceWeb({ reject: req => req.headers.cookie !== "synthetic-auth=1" ? 401 : undefined,
     history: overrides.history,
     presentations: overrides.presentations,
+    runtimeStatus: overrides.runtimeStatus,
     async open(signal, sessionId) { opened++; if (overrides.open) await overrides.open(signal, sessionId); return call; },
     async close(value) { assert.equal(value, call); closed++; if (overrides.close) await overrides.close(); },
   }, options);
@@ -23,6 +24,25 @@ async function fixture(overrides = {}, options = {}) {
   return { web, call, process, requests, post, url, get opened() { return opened; }, get closed() { return closed; }, async dispose() { try { await web.dispose(); } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } } };
 }
 const admission = () => ({ requestId: randomUUID(), requestedAt: Date.now() });
+
+test("preparation state is authenticated and independent of call occupancy", async () => {
+  let state = "warming";
+  const f = await fixture({ runtimeStatus: () => state });
+  try {
+    assert.equal((await fetch(f.url + "status")).status, 401);
+    const status = () => fetch(f.url + "status", { headers: { cookie: "synthetic-auth=1" } }).then(r => r.json());
+    assert.equal((await status()).runtime, "warming");
+    assert.equal((await status()).busy, false);
+    state = "ready";
+    await f.post("open", admission());
+    assert.equal((await status()).runtime, "ready");
+    assert.equal((await status()).busy, true);
+    await f.post("close", { callId: f.call.callId });
+    assert.equal((await status()).runtime, "ready");
+    assert.equal((await status()).busy, false);
+    assert.equal(f.opened, 1);
+  } finally { await f.dispose(); }
+});
 
 test("interruption requires authentication and current-call ownership without admitting a new call or proxying input", async () => {
   const f = await fixture();

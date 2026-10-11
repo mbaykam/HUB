@@ -1,5 +1,6 @@
 """A local, per-utterance multilingual streaming recognizer. No audio capture."""
 from functools import lru_cache
+import re
 import numpy as np
 from speech_settings import nemotron_path, whisper_path, seda_path
 
@@ -54,7 +55,7 @@ class StreamingRecognizer:
         # decoded audio, never a provisional guess, can start assistant work.
         from whisper_auto import AutomaticWhisperSTTService
         from pipecat.services.whisper.stt import WhisperSTTService
-        self.verifier = AutomaticWhisperSTTService(device='cpu', compute_type='int8',
+        self.verifier = AutomaticWhisperSTTService(device='cpu', compute_type='int8', beam_size=1,
             settings=WhisperSTTService.Settings(model=str(whisper_path('base')),
                 language=None if language=='auto' else language))
         seda_runtime()
@@ -66,6 +67,7 @@ class StreamingRecognizer:
         self.audio = bytearray()
         self.audio_bytes = 0
         self.result_language = None
+        self._final_text = None
         if self.verifier._preview:
             self.verifier._preview.reset()
         self.verifier._preview_language = None
@@ -107,9 +109,24 @@ class StreamingRecognizer:
                 self.stream.input_finished()
                 self.result_language='tr'
                 return turkish
+            if self.language != 'tr' and self.verifier._preview_language == 'en' and self.verifier._preview:
+                # Confirm the whole audio with both streaming decoders. Only
+                # exact, high-confidence English agreement takes the fast path;
+                # lone greetings, mixed/uncertain speech and changed words still
+                # use Whisper. A provisional preview never becomes user input.
+                native = self._finish_native()
+                confirmed, confidence = self.verifier._preview.finish('en')
+                words = re.findall(r'\w+', native.lower())
+                english = {'i','you','can','hear','me','please','the','what','in','is','we','this','that','my','english','yes','no','want','stop','wait'}
+                if (len(words) >= 3 and confidence >= .8 and
+                        len(set(words) & english) >= 2 and
+                        words == re.findall(r'\w+', confirmed.lower()) and
+                        not re.search(r'[\dğışçöü]', native.lower())):
+                    self.result_language = 'en'
+                    return native
             verified, code=self.verifier._transcribe_audio(segment)
             if verified:
-                self.stream.input_finished()
+                if self._final_text is None:self.stream.input_finished()
                 if turkish and self.language=='auto' and code=='tr':
                     self.result_language='tr'
                     return turkish
@@ -117,13 +134,17 @@ class StreamingRecognizer:
                 return verified
         # The streaming decoder has already processed long speech while the
         # caller spoke. Drain it only when no short-turn verifier succeeded.
-        self.stream.accept_waveform(16000, np.zeros(16000, dtype=np.float32))
-        self.stream.input_finished()
-        while self.runtime.is_ready(self.stream):
-            self.runtime.decode_stream(self.stream)
-        text = self.runtime.get_result(self.stream).strip()
+        text = self._finish_native()
         if not text and segment and not short:
             verified, code=self.verifier._transcribe_audio(segment)
             self.result_language=code
             return verified
         return text
+
+    def _finish_native(self):
+        if self._final_text is None:
+            self.stream.accept_waveform(16000, np.zeros(16000, dtype=np.float32))
+            self.stream.input_finished()
+            while self.runtime.is_ready(self.stream):self.runtime.decode_stream(self.stream)
+            self._final_text = self.runtime.get_result(self.stream).strip()
+        return self._final_text

@@ -20,11 +20,23 @@ class StreamingPreview:
         # stable. Plain provisional words appear while the caller is speaking.
         for recognizer in self.recognizers.values():recognizer.SetWords(True);recognizer.SetPartialWords(False)
         self.committed={code:[] for code in codes}
+        self.confirmed_words={code:[] for code in codes}
         self.last=''
 
     def reset(self):
         for recognizer in self.recognizers.values():recognizer.Reset()
         self.committed={code:[] for code in self.recognizers};self.last=''
+        self.confirmed_words={code:[] for code in self.recognizers}
+
+    def finish(self,code):
+        """Final audio decoding for agreement checks, never a draft submission."""
+        recognizer=self.recognizers.get(code)
+        if recognizer is None:return '',0
+        result=json.loads(recognizer.FinalResult())
+        text=' '.join(self.committed[code]+[result.get('text','')]).strip()
+        words=self.confirmed_words[code]+result.get('result',[])
+        confidence=sum(word.get('conf',0) for word in words)/max(1,len(words))
+        return text,confidence
 
     def feed(self,audio,hint=None):
         samples=np.frombuffer(audio,dtype='<i2').astype(np.float32)
@@ -37,6 +49,7 @@ class StreamingPreview:
             result=json.loads(recognizer.Result() if ended else recognizer.PartialResult())
             value=result.get('text' if ended else 'partial','').strip()
             if ended and value:self.committed[code].append(value)
+            if ended:self.confirmed_words[code].extend(result.get('result',[]))
             text=' '.join(self.committed[code]+([] if ended else [value])).strip()
             if not text:continue
             words=result.get('result' if ended else 'partial_result',[])

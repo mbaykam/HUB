@@ -22,6 +22,21 @@ class SpeechHealth:
         self.synthesizing = 0
         self.playback_gate = None
         self.user_speaking = False
+        self.last_input_sound = 0
+        self.input_end_at = None
+        self.model_start_at = None
+        self.first_text_at = None
+        self.first_pcm_at = None
+        self.first_playback_at = None
+        self.tts_ms = None
+
+    def begin_turn(self):
+        self.input_end_at = self.last_input_sound or None
+        self.model_start_at = time.perf_counter()
+        self.first_text_at = None
+        self.first_pcm_at = None
+        self.first_playback_at = None
+        self.tts_ms = None
 
     def snapshot(self):
         now = time.perf_counter()
@@ -36,7 +51,16 @@ class SpeechHealth:
                 "stage":('speaking' if gate.speaking else 'echo-tail') if paused else self.stage,
                 "decodeMs":self.decode_ms,"inputPaused":paused,
                 "inputPauseReason":gate.reason if gate else None,
-                "echoSuppressedFrames":gate.suppressed_frames if gate else 0}
+                "echoSuppressedFrames":gate.suppressed_frames if gate else 0,
+                "timing": {"asrAfterSoundMs": self._elapsed(self.input_end_at, self.model_start_at),
+                           "modelFirstTextMs": self._elapsed(self.model_start_at, self.first_text_at),
+                           "firstPcmAfterSoundMs": self._elapsed(self.input_end_at, self.first_pcm_at),
+                           "firstPlaybackAfterSoundMs": self._elapsed(self.input_end_at, self.first_playback_at),
+                           "ttsSynthesisMs": self.tts_ms}}
+
+    @staticmethod
+    def _elapsed(start, end):
+        return round(max(0, end-start)*1000) if start is not None and end is not None else None
 
 class SpeechHealthProbe(FrameProcessor):
     def __init__(self, health):
@@ -55,12 +79,16 @@ class SpeechHealthProbe(FrameProcessor):
             state.level = max(rms, state.level*.85)
             if rms > .0008:
                 state.last_loud_audio = state.last_audio
+                if not state.playback_gate or not state.playback_gate.blocked:
+                    state.last_input_sound = state.last_audio
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             state.speech_starts += 1
             state.user_speaking = True
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             state.user_speaking = False
         elif isinstance(frame, BotStartedSpeakingFrame):
+            if state.first_playback_at is None:
+                state.first_playback_at = time.perf_counter()
             state.user_speaking = False
             state.bot_speaking = True
             state.stage = 'speaking'

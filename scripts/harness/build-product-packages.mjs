@@ -410,7 +410,7 @@ const compatibilityFiles = [
   "config/harness-runtime.json", "pnpm-lock.yaml", ...runtimeConfig.patches,
   "packages/harness-overlay/package.json", "packages/harness-overlay/cordis.patch.yml",
   ...["index.js", "characters.js", "models.js", "memory.js", "voice.js", "web-search.js", "presentation-renderer.js"].map(name => `packages/harness-overlay/lib/${name}`),
-    ...["server.py", "voice_pipeline.py", "playback_guard.py", "speech_settings.py", "speech_download.py", "hub_native_llm.py", "bilingual_tts.py", "supertonic_tts.py", "streaming_asr.py", "native_streaming_stt.py", "speech_preview.py", "telegram_calls.py", "telegram_transport.py", "whisper_auto.py", "speech_health.py", "streaming_preview.py", "knowledge_extract.py"].map(name => `packages/harness-overlay/voice/${name}`),
+    ...["server.py", "runtime_server.py", "voice_pipeline.py", "playback_guard.py", "speech_segments.py", "speech_settings.py", "speech_download.py", "hub_native_llm.py", "bilingual_tts.py", "supertonic_tts.py", "streaming_asr.py", "native_streaming_stt.py", "speech_preview.py", "telegram_calls.py", "telegram_transport.py", "whisper_auto.py", "speech_health.py", "streaming_preview.py", "knowledge_extract.py"].map(name => `packages/harness-overlay/voice/${name}`),
   "packages/model-runtime/lib/index.js", "packages/model-runtime/lib/dsh.js",
 ];
 const compatibility = createHash("sha256");

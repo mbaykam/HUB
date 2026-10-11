@@ -22,6 +22,7 @@ import type { HubCharacters } from "./characters.ts";
 import { createVoiceTaskPolicies, type TaskPolicyContext, type TaskPolicyStorage } from "./host/voice-task-policy.ts";
 import { createSpeechPreviewHandler } from "./host/speech-preview.ts";
 import { voiceTranscript } from "./host/voice-transcript.ts";
+import { createPreparedVoiceRuntime } from "./host/voice-runtime.ts";
 
 export const name = "hub-voice";
 export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess"];
@@ -58,6 +59,7 @@ export function apply(ctx: Context, config: Config): void {
   let profileHandler: ReturnType<typeof createVoiceProfilesHandler> | undefined;
   let cleanupUncertain = false;
   let telegramListener: VoiceSidecar | undefined;
+  let preparedRuntime: ReturnType<typeof createPreparedVoiceRuntime> | undefined;
   let telegramState: "disabled" | "starting" | "ready" | "unavailable" = config.telegramCallAccount ? "starting" : "disabled";
   const taskPolicies = createVoiceTaskPolicies(ctx, ctx.storageDomain);
   const presentations = new PresentationRuntime();
@@ -107,8 +109,19 @@ export function apply(ctx: Context, config: Config): void {
     } });
     bridge = localBridge;
     if (lifetime.signal.aborted) { await localBridge.dispose(); return; }
+    preparedRuntime = createPreparedVoiceRuntime(ctx.subprocess, { python: config.python,
+      script: fileURLToPath(new URL("../voice/runtime_server.py", import.meta.url)),
+      bridgeUrl: localBridge.url, bridgeToken: localBridge.token }, lifetime.signal);
+    const selectedSpeech = () => {
+      const state = ctx.hubCharacters.store.snapshot();
+      const speech = state.characters.find(character => character.id === state.voiceId)?.speech;
+      if (!speech) throw new Error("Configure the voice character first");
+      return speech;
+    };
+    void preparedRuntime.prepare(selectedSpeech()).catch(() => {});
     web = createVoiceWeb({
       history,
+      runtimeStatus: () => preparedRuntime?.status() ?? "cold",
       transcript: sessionId => voiceTranscript(ctx.agents.get(sessionId)?.session.snapshotEvents() ?? []),
       presentations: {
         summary: sessionId => presentations.summary(sessionId),
@@ -132,7 +145,7 @@ export function apply(ctx: Context, config: Config): void {
         const profile = await ctx.hubCharacters.voiceProfile();
         const state = ctx.hubCharacters.store.snapshot();
         await validateVoiceModel(ctx.llm, profile.route, AbortSignal.any([signal, lifetime.signal]));
-        validateLocalSpeech(await speechCatalog(true), profile.speech);
+        validateLocalSpeech(await speechCatalog(), profile.speech);
         signal.throwIfAborted(); lifetime.signal.throwIfAborted();
         const call = await localBridge.open(sessionId, profile);
         try {
@@ -147,12 +160,7 @@ export function apply(ctx: Context, config: Config): void {
             return { ...call, sidecar, speech: profile.speech, transport,
               profile: { id: profile.id, name: profile.name, revision: state.revision, speech: profile.speech } };
           }
-          const sidecar = await startVoiceSidecar(ctx.subprocess, { python: config.python,
-            script: fileURLToPath(new URL("../voice/server.py", import.meta.url)),
-            bridgeUrl: localBridge.url, bridgeToken: localBridge.token, callId: call.callId,
-            speech: profile.speech,
-            ...(iceServers.length ? { iceServers } : {}),
-          }, AbortSignal.any([signal, lifetime.signal]));
+          const sidecar = await preparedRuntime!.open(call.callId, profile.speech, iceServers, signal);
           return { ...call, sidecar, profile: { id: profile.id, name: profile.name, revision: state.revision, speech: profile.speech }, ...(iceServers.length ? { iceServers } : {}) };
         } catch (error) {
           if (error instanceof VoiceSidecarCleanupError) cleanupUncertain = true;
@@ -195,7 +203,10 @@ export function apply(ctx: Context, config: Config): void {
           script: fileURLToPath(new URL("../voice/telegram_calls.py", import.meta.url)),
           bridgeUrl: localBridge.url, bridgeToken: localBridge.token, callId: randomUUID(),
           telegramAccount: config.telegramCallAccount,
+          speech: selectedSpeech(),
         }, lifetime.signal, { startupMs: 60000 });
+        const warmed = await telegramListener.request("/prepare", "POST", { speech: selectedSpeech() });
+        if (warmed.status !== 200 || warmed.body.ok !== true) throw new Error("Telegram speech models could not prepare");
         telegramState = "ready";
         void telegramListener.done.finally(() => { telegramState = "unavailable"; }).catch(() => {});
       } catch { telegramState = "unavailable"; }
@@ -250,6 +261,6 @@ export function apply(ctx: Context, config: Config): void {
     off.forEach(remove => remove()); lifetime.abort();
     await startup.catch(() => {});
     try { await web?.dispose(); }
-    finally { try { await telegramListener?.stop(); } finally { try { await bridge?.dispose(); } finally { await downloads.close(); await speechFlight?.catch(() => {}); try { await taskPolicies.close(); } finally { await profiles?.close(); await history?.close(); } } } }
+    finally { try { await preparedRuntime?.close(); } finally { try { await telegramListener?.stop(); } finally { try { await bridge?.dispose(); } finally { await downloads.close(); await speechFlight?.catch(() => {}); try { await taskPolicies.close(); } finally { await profiles?.close(); await history?.close(); } } } } }
   }, "hub-voice lifetime");
 }

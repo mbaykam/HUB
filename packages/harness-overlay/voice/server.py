@@ -282,6 +282,13 @@ def create_app(bridge: HubBridgeClient, control_token: str, *, worker_factory=bu
                 raise HTTPException(400, "ICE candidate rejected") from None
         return {"ok": True}
 
+    async def end_owned_call():
+        async with lock:
+            await close_call()
+
+    # A prepared runtime can own this application's lifespan without reusing
+    # any peer, transcript, runner, or capability from another call.
+    app.state.end_voice_call = end_owned_call
     return app
 
 

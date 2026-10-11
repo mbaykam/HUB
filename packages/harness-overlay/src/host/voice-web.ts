@@ -16,6 +16,7 @@ export interface VoiceWebPorts {
   history?: Awaited<ReturnType<typeof openConversationHistory>>;
   presentations?: { summary(sessionId: string): PresentationSummary | null; document(sessionId: string, id: string): Promise<string> };
   transcript?(sessionId: string): VoiceTranscriptLine[];
+  runtimeStatus?(): "cold" | "warming" | "ready" | "unavailable";
 }
 class RequestError extends Error {
   readonly status: number;
@@ -157,6 +158,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
       }
       if (path === "/api/hub/voice/status" && request.method === "GET") {
         send(response, 200, { enabled: true, busy: Boolean(current || opening || closing), serverTime: now(),
+          ...(ports.runtimeStatus ? { runtime: ports.runtimeStatus() } : {}),
           ...(current?.transport === "telegram" && !closing ? { externalCall: { ...publicCall(current), transport: "telegram", transcript: ports.transcript?.(current.sessionId) ?? [] } } : {}) }); return;
       }
       if (path === "/api/hub/voice/diagnostics" && request.method === "GET") {

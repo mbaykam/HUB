@@ -56,10 +56,25 @@ the active voice interface focused on the conversation.
 
 ## What streams
 
+With the optional voice runtime enabled, HUB prepares the selected local speech
+models after startup. PWA calls retain prepared model weights between calls;
+each call still gets fresh recognition, transcript buffers, controls and native
+authorization. The optional Telegram listener also prepares its selected speech
+models before reporting ready. Preparation never opens the microphone or sends
+a model request. Changing the speech configuration may require fresh preparation
+for the next call.
+
+A prepared call can still wait for ICE network negotiation. Check the configured
+STUN/TURN endpoints separately from speech-model preparation. A working relay
+can avoid a slow STUN attempt; verify relayed audio before changing those
+settings, since a successful local call alone does not verify remote access.
+
 Draft recognized words appear while you talk. Confirmed utterances enter the
 native model after the speech boundary. Public model text can reach TTS before
 the entire answer ends. Current local TTS synthesizes sentence-sized pieces and
-plays their PCM chunks; this is not fully token-by-token audio generation.
+plays their PCM chunks. Long sentences can start with a shorter phrase at a word
+boundary, preserving numbers and URLs. This is not fully token-by-token audio
+generation. Interrupting drops the old response's PCM before the next synthesis.
 
 The playback guard pauses recognition during assistant audio and its echo tail.
 Use **Interrupt** to stop a reply and speak again. This is a practical guard,
@@ -80,7 +95,7 @@ separate from pairing the text bot; see [Telegram](telegram.md).
 ## Verification
 
 ```powershell
-& '<voice-python>' -m pytest scripts/voice/test_native_llm.py scripts/voice/test_playback_guard.py -q
+& '<voice-python>' -m pytest scripts/voice/test_native_llm.py scripts/voice/test_playback_guard.py scripts/voice/test_prepared_runtime.py scripts/voice/test_speech_segments.py scripts/voice/test_speech_interruption.py -q
 node --experimental-transform-types scripts/voice/verify_native.mjs
 ```
 

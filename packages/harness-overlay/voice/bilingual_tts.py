@@ -1,6 +1,7 @@
 """Local English Kokoro + Turkish Piper; route each spoken sentence by language."""
 import asyncio
 import os
+import time
 from functools import lru_cache
 import numpy as np
 import onnxruntime as ort
@@ -63,13 +64,16 @@ class LocalSpeechSynthesizer:
 class BilingualTTSService(TTSService):
     def __init__(self, speech, *, health=None, **kwargs):
         super().__init__(push_start_frame=True, push_stop_frames=True,
-                         settings=TTSSettings(model=speech['model'], voice=speech["voice"]), **kwargs)
+                         settings=TTSSettings(model=speech['model'], voice=speech["voice"], language=None), **kwargs)
+        from speech_segments import SpeechSegmentAggregator
+        self._text_aggregator = SpeechSegmentAggregator()
         if speech['engine'] == 'supertonic':
             from supertonic_tts import SupertonicSynthesizer
             self.synthesizer = SupertonicSynthesizer(speech)
         else:
             self.synthesizer = LocalSpeechSynthesizer(speech)
         self.health = health
+        self._synthesis_lock = asyncio.Lock()
 
     async def run_tts(self, text, context_id):
         def synthesize_call_audio():
@@ -87,7 +91,21 @@ class BilingualTTSService(TTSService):
             self.health.synthesizing += 1
             if not self.health.bot_speaking:self.health.stage = 'thinking'
         try:
-            audio, rate = await asyncio.to_thread(synthesize_call_audio)
+            began = time.perf_counter()
+            async with self._synthesis_lock:
+                task = asyncio.create_task(asyncio.to_thread(synthesize_call_audio))
+                try:
+                    audio, rate = await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    # Stop playback immediately through Pipecat, but let the
+                    # bounded CPU synthesis finish before this voice is reused.
+                    # Its abandoned PCM must never enter a later response.
+                    await task
+                    raise
+            if self.health:
+                self.health.tts_ms = round((time.perf_counter() - began) * 1000)
+                if audio and self.health.first_pcm_at is None:
+                    self.health.first_pcm_at = time.perf_counter()
             async def chunks():
                 for start in range(0, len(audio), rate // 5 * 2):
                     yield audio[start:start + rate // 5 * 2]

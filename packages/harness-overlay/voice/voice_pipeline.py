@@ -121,6 +121,9 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     async def interrupt_voice():
         # Explicit user control may interrupt playback; it does not manufacture
         # a transcript, replay a task, or release the echo tail early.
+        # Clear the transport queue first. A foreground native turn or bounded
+        # CPU synthesis can take longer to settle than stopping audible output.
+        await transport.output().queue_frame(InterruptionFrame())
         await worker.queue_frame(InterruptionFrame())
     worker.interrupt_voice = interrupt_voice
     greeted = False

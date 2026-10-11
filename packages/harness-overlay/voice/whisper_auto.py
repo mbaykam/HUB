@@ -21,7 +21,10 @@ def whisper_runtime(path, device, compute_type):
     return WhisperModel(path, device=device, compute_type=compute_type)
 
 class AutomaticWhisperSTTService(EchoProtectedSTTMixin, WhisperSTTService):
-    def __init__(self, *, health=None, playback_gate=None, **kwargs):
+    def __init__(self, *, health=None, playback_gate=None, beam_size=3, **kwargs):
+        if beam_size not in (1, 3):
+            raise ValueError('Unsupported recognition beam')
+        self._beam_size = beam_size
         self.health=health
         self._preview_buffer=bytearray();self._last_language=None
         self._preview_language=None;self._preview_words=''
@@ -97,12 +100,12 @@ class AutomaticWhisperSTTService(EchoProtectedSTTMixin, WhisperSTTService):
                          'en': {'hello','hi','yes','no','thanks','okay'}}
             if code in greetings and draft and all(word in greetings[code] for word in draft):
                 language = code
-        segments, info = self._model.transcribe(samples, language=language, beam_size=3,
+        segments, info = self._model.transcribe(samples, language=language, beam_size=self._beam_size,
             condition_on_previous_text=False, no_speech_threshold=.6)
         if language is None and info.language not in ("en", "tr"):
             probabilities = dict(info.all_language_probs or [])
             language = max(("en", "tr"), key=lambda code: probabilities.get(code, 0))
-            segments, info = self._model.transcribe(samples, language=language, beam_size=3,
+            segments, info = self._model.transcribe(samples, language=language, beam_size=self._beam_size,
                 condition_on_previous_text=False, no_speech_threshold=.6)
         text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
         return text, info.language

@@ -7,6 +7,7 @@ import { MakerZIP } from "@electron-forge/maker-zip";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import type { ForgeConfig } from "@electron-forge/shared-types";
+import type { Metadata as WindowsInstallerMetadata } from "electron-winstaller/lib/options";
 import { cp, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pruneMacElectronLocales } from "./scripts/forge/electron-locales.ts";
@@ -23,6 +24,13 @@ const iconRoot = join(projectRoot, "resources", "icons");
 const appIcon = join(iconRoot, "icon.png");
 const sysPackageRoot = join(projectRoot, "packages", "sys");
 const macOSSigning = resolveMacOSSigningConfig(process.env);
+// Forge forwards these installer options, but its config type omits the field.
+const windowsInstallerFiles: Pick<WindowsInstallerMetadata, "additionalFiles"> = {
+  additionalFiles: [
+    { src: "LICENSES.chromium.html", target: "lib\\net45\\LICENSES.chromium.html" },
+    { src: "version", target: "lib\\net45\\version" },
+  ],
+};
 
 function logPackageStage(
   platform: string,
@@ -233,6 +241,7 @@ const config: ForgeConfig = {
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({
+      ...windowsInstallerFiles,
       name: "HUB",
       setupIcon: join(iconRoot, "icon.ico"),
     }),

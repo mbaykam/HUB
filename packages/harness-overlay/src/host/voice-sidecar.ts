@@ -18,9 +18,12 @@ export interface VoiceSubprocess {
     graceMs: number; signal: AbortSignal; env: Record<string, string | undefined>;
   }): ProcessHandle;
 }
+export type VoiceProcessRoute = "/offer" | "/status" | "/interrupt" | "/prepare" | "/admit" | "/release";
+export interface VoiceCallCapability { callId: string; token: string }
 export interface VoiceSidecar {
   done: ProcessHandle["done"];
-  request(path: "/offer" | "/status" | "/interrupt", method: "GET" | "POST" | "PATCH", body?: unknown, signal?: AbortSignal): Promise<{ status: number; body: Record<string, unknown> }>;
+  request(path: VoiceProcessRoute, method: "GET" | "POST" | "PATCH", body?: unknown, signal?: AbortSignal): Promise<{ status: number; body: Record<string, unknown> }>;
+  requestCall?(capability: VoiceCallCapability, path: "/offer" | "/status" | "/interrupt" | "/ice", method: "GET" | "POST" | "PATCH", body?: unknown, signal?: AbortSignal): Promise<{ status: number; body: Record<string, unknown> }>;
   stop(): Promise<void>;
 }
 export class VoiceSidecarCleanupError extends Error {
@@ -66,12 +69,12 @@ export async function startVoiceSidecar(subprocess: VoiceSubprocess, config: {
   let url = "";
   let exited = false;
   void child.done.then(() => { exited = true; }, () => { exited = true; });
-  async function send(path: "/offer" | "/status" | "/close" | "/ice" | "/interrupt", method: "GET" | "POST" | "PATCH", body?: unknown, requestSignal?: AbortSignal) {
+  async function send(path: VoiceProcessRoute | "/close" | "/ice" | "/call/offer" | "/call/status" | "/call/interrupt" | "/call/ice", method: "GET" | "POST" | "PATCH", body?: unknown, requestSignal?: AbortSignal, capability?: VoiceCallCapability) {
     if (exited) throw new Error("Voice process has exited");
     const response = await fetcher(url + path, { method, redirect: "error",
-      headers: { authorization: `Bearer ${controlToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      headers: { authorization: `Bearer ${capability?.token ?? controlToken}`, ...(capability ? { "x-hub-runtime-call": capability.callId } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.any([requestSignal ?? signal, AbortSignal.timeout(path === "/offer" ? 60_000 : 5000)]),
+      signal: AbortSignal.any([signal, ...(requestSignal ? [requestSignal] : []), AbortSignal.timeout(["/offer", "/call/offer", "/prepare", "/admit"].includes(path) ? 60_000 : 5000)]),
     });
     const reader = response.body?.getReader();
     if (!reader) throw new Error("Voice process returned no response");
@@ -135,6 +138,10 @@ export async function startVoiceSidecar(subprocess: VoiceSubprocess, config: {
   return {
     done: child.done,
     request: (path, method, body, requestSignal) => send(path, method, body, requestSignal),
+    requestCall(capability, path, method, body, requestSignal) {
+      if (!/^[A-Za-z0-9_-]{43}$/.test(capability.token) || !/^[A-Za-z0-9._-]{1,200}$/.test(capability.callId)) return Promise.reject(new Error("Invalid voice call capability"));
+      return send(`/call${path}`, method, body, requestSignal, capability);
+    },
     stop() {
       return stopping ??= (async () => {
         try { if (!exited) await send("/close", "POST", undefined, AbortSignal.timeout(3000)); }
