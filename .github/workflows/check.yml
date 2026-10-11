@@ -41,4 +41,5 @@ jobs:
         run: |
           python -m venv "$HOME/.dsh/runtimes/pipecat"
           "$HOME/.dsh/runtimes/pipecat/bin/python" -m pip install -r scripts/tests/requirements-media.txt
+          "$HOME/.dsh/runtimes/pipecat/bin/python" -c "import pypdf, defusedxml"
       - run: pnpm test:desktop
