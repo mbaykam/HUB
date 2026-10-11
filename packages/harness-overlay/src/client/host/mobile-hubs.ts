@@ -77,6 +77,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   let state: VoiceState = "idle", enabled = false, muted = false, loading = false, cancelledLoad = false,audioStage="listening";
   let inputPaused = false;
   let receivingAudio: boolean | undefined;
+  let audioConnection: string | undefined;
   let external: { callId: string; sessionId: string; profile?: { name: string } } | undefined, externalTranscriptKey = "", statusFlight = false,lastStatusAt=0;
   let frame: number | undefined;
   let conversation: HTMLElement | undefined;
@@ -117,7 +118,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     activity.update({ ...nativeSessions, observations: activitySignals.read(nativeSessions), pendingBySession: pendingSource?.getSnapshot() }, voiceSession, ctx.connection?.state ? ctx.connection.state.getSnapshot() ?? "connecting" : "connected");
     start.hidden = busy; start.disabled = !enabled || loading;
     controls.hidden = !busy;
-    liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":muted&&!external?"Microphone muted":audioStage==="echo-tail"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Check your microphone":"Listening to you";
+    liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":audioStage==="echo-tail"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
     mute.hidden = !!external; openCall.hidden = !voiceSession || viewingCall;
     interrupt.hidden = !busy || audioStage === "echo-tail" || !(state === "speaking" || state === "thinking");
     transcript.panel.hidden = !busy || !inHome;
@@ -166,7 +167,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   start.addEventListener("click", async () => {
     if (active()) return;
     transcript.reset();
-    liveWords.textContent="Speak naturally in English or Turkish.";liveWords.removeAttribute("data-interim");audioStage="listening";inputPaused=false;receivingAudio=undefined;
+    liveWords.textContent="Speak naturally in English or Turkish.";liveWords.removeAttribute("data-interim");audioStage="listening";inputPaused=false;receivingAudio=undefined;audioConnection=undefined;
     loading = true; cancelledLoad = false; muted = false; error.textContent = ""; render();
     try {
       if (!voice) {
@@ -247,6 +248,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
             const inputLevel = Math.min(1, Math.sqrt(Math.max(0, Number(audioState.inputLevel) || 0)) * 3);
             orb.style.setProperty("--input-level",String(inputLevel));
             receivingAudio = audioState.receivingAudio === true;
+            audioConnection = diagnostics.status;
             inputPaused=audioState.inputPaused===true;
             audioStage=audioState.stage;
             if((external || ["listening","thinking","speaking"].includes(state)) && ["listening","thinking","speaking"].includes(audioStage))state=audioStage as VoiceState;
