@@ -6,6 +6,7 @@ import type { HarnessClientContext } from "../core/context.ts";
 import type { createVoiceClient, VoiceState } from "../voice/browser-client.ts";
 import { createMobileActivity, createActivitySignals, type ActivityPendingSource } from "./mobile-activity.ts";
 import { returnToMobileHome } from "./mobile-home-navigation.ts";
+import { openMobileConversation } from "./mobile-session-navigation.ts";
 import { createMobileBrowserView } from "./mobile-browser-view.ts";
 import { createMobilePresentation } from "./mobile-presentation.ts";
 import { createMobileLiveTranscript } from "./mobile-live-transcript.ts";
@@ -52,14 +53,13 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     if (!id) return;
     openCall.disabled = true;
     try {
-      if (!ctx.sessions.list.getSnapshot().byId[id]) await ctx.sessions.refresh?.();
-      ctx.sessions.open(id);
+      await openMobileConversation(ctx.sessions, id);
     } catch { error.textContent = "The conversation could not open. Your call is still connected; try again."; }
     finally { openCall.disabled = false; }
   });
   const actions = root.createElement("div"); actions.setAttribute("data-voice-actions", ""); actions.append(mute, interrupt, end);
   controls.append(status, openCall, actions);
-  const writeHub = root.createElement("button"); writeHub.type = "button"; writeHub.textContent = "Write to HUB";
+  const writeHub = root.createElement("button"); writeHub.type = "button"; writeHub.textContent = "Back to voice";
   writeHub.addEventListener("click", () => returnToMobileHome(ctx));
   const error = root.createElement("p"); error.setAttribute("data-voice-error", ""); error.setAttribute("role", "status");
   const liveVoice=root.createElement("section");liveVoice.setAttribute("data-voice-now","");liveVoice.setAttribute("aria-label","Live voice");
@@ -69,7 +69,11 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const play = root.createElement("button"); play.type = "button"; play.textContent = "Tap to hear audio"; play.hidden = true;
   const transcript = createMobileLiveTranscript(root);
   hub.append(start, controls,liveVoice, transcript.panel, writeHub, play, error); root.body.append(audio);
-  const activity = createMobileActivity(root, id => ctx.sessions.open(id));
+  const activity = createMobileActivity(root, id => {
+    void openMobileConversation(ctx.sessions, id).catch(() => {
+      error.textContent = "Couldn’t open this task’s conversation. Try again; your voice call is still connected.";
+    });
+  });
   const browser = createMobileBrowserView(root);
   const presentation = createMobilePresentation(root); hub.append(presentation.button);
   let voice: ReturnType<typeof createVoiceClient> | undefined;
@@ -100,8 +104,9 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     const viewingCall = busy && !inHome && !!voiceSession && ctx.sessions.list.getSnapshot().current === voiceSession;
     writeHub.hidden = !viewingCall;
     conversation?.toggleAttribute("data-hub-voice-chat", viewingCall);
+    conversation?.toggleAttribute("data-hub-voice-active", busy);
     intro.hidden = !inHome || busy;
-    textHeading.hidden = !inHome;
+    textHeading.hidden = !inHome || busy;
     options.hidden = !conversation?.querySelector('[data-hub-chat-options]');
     options.setAttribute("aria-expanded", String(optionsOpen));
     conversation?.toggleAttribute("data-hub-options-open", optionsOpen);
@@ -149,7 +154,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     render();
   }
   function clearConversation() {
-    for (const name of ["data-hub-shared-input", "data-hub-voice-chat", "data-hub-home", "data-hub-options-open"]) conversation?.removeAttribute(name);
+    for (const name of ["data-hub-shared-input", "data-hub-voice-chat", "data-hub-voice-active", "data-hub-home", "data-hub-options-open"]) conversation?.removeAttribute(name);
     for (const node of conversation?.querySelectorAll('[data-hub-composer-stack],[data-hub-chat-options]') ?? []) { node.removeAttribute("data-hub-composer-stack"); node.removeAttribute("data-hub-chat-options"); }
   }
   function schedule() { if (!lifetime.signal.aborted && frame === undefined) frame = view!.requestAnimationFrame(reconcile); }

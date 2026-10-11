@@ -31,6 +31,7 @@
 [data-voice-shared-form] footer{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#a4a7bb;font-size:12px}
 [data-hub-shared-input] [data-slot="conversation.composer.bar"],[data-hub-shared-input] [data-composer-card]{display:none!important}
 [data-hub-voice-chat] [data-slot="conversation.composer.bar"],[data-hub-voice-chat] [data-composer-card]{display:none!important}
+[data-hub-voice-active] [data-slot="conversation.composer.bar"],[data-hub-voice-active] [data-composer-card],[data-hub-voice-active] [data-hub-chat-options]{display:none!important}
 [data-hub-voice-hub][hidden]{display:none!important}
 /* A growing live transcript must never be centered above the scroll origin.
  * Safe alignment preserves the calm Home layout when it fits, but starts at
@@ -112,6 +113,7 @@ html[data-minke-mobile-web] [data-hub-home] [data-composer-seat]{position:static
 [data-hub-activity] strong{font-size:13px;line-height:1.45}[data-hub-activity] span{font-size:11px;line-height:1.5}
 [data-voice-shared-form]{margin-top:10px}[data-voice-shared-form] textarea{min-height:72px}
 html[data-minke-mobile-web] [data-hub-home][data-hub-shared-input] [data-composer-seat]{padding-top:20px}
+html[data-minke-mobile-web] [data-hub-home][data-hub-voice-active] [data-composer-seat]{padding-top:20px}
 [data-hub-voice-hub]:not([data-home]):not([data-shared]){padding:10px 14px;margin-bottom:10px;border-radius:18px;background:#11172580}
 [data-hub-voice-hub]:not([data-home]) [data-voice-start]{min-height:44px}
 [data-hub-voice-hub]:not([data-home]) [data-voice-start] strong{font-size:16px;letter-spacing:-.2px}

@@ -225,7 +225,7 @@ export interface HarnessClientContext {
         >;
         readonly phase?: "pending" | "ready";
         readonly jobsBySession?: Readonly<Record<string, readonly HarnessSessionJob[]>>;
-        readonly subagentsByParent?: Readonly<Record<string, { readonly entries: readonly { readonly kind: string; readonly id: string; readonly label?: string; readonly activity?: string }[] }>>;
+        readonly subagentsByParent?: Readonly<Record<string, { readonly entries: readonly { readonly kind: string; readonly id: string; readonly label?: string; readonly activity?: string; readonly mode?: "one-shot" | "continuable" }[] }>>;
       };
       subscribe(listener: () => void): () => void;
     };
@@ -252,6 +252,10 @@ export interface HarnessClientContext {
      */
     scope?(sessionId: string): unknown;
     open(sessionId: string): void;
+    /** Open a child with the address confirmed by its direct parent's catalog. */
+    openSubagent?(address: { parentSessionId: string; childSessionId: string; mode: "one-shot" | "continuable" }): void;
+    /** Refresh a direct-child catalog before navigating to delegated work. */
+    refreshSubagents?(parentSessionId: string): Promise<void>;
     /** Refresh native membership before opening a call admitted outside UI RPC. */
     refresh?(): Promise<void>;
   };

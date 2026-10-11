@@ -5,6 +5,12 @@ in the [project overview](../../README.md) and [setup guide](../../docs/setup.md
 The package names and `minke-*` configuration namespaces below retain upstream
 compatibility; the product is maintained independently as HUB.
 
+During a voice session the mobile workspace keeps the live transcript and task
+list visible and hides the text composer. Ending voice restores the composer
+and its unsent draft. Opening delegated work refreshes its direct parent's native
+catalog and selects the child through that catalog address, so saved history
+loads without starting another task or interrupting the call.
+
 This package is Minke's product-owned extension layer for DeepSeek Harness. It is installed into the generated desktop runtime and composed through the public `--patch` bundle seam. Nothing in this package is copied into or applied over `vendor/deepseek-harness`.
 
 The host composition mounts the separate `@lencx/minke-model-runtime/dsh` adapter:

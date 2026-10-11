@@ -71,6 +71,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 200)); observer.disconnect(); return count;
   });
   assert.equal(mutations, 0, "Stable UI must not enter a MutationObserver render loop");
+  await page.getByRole('textbox', { name: 'Native text input' }).fill('Saved text draft');
   await page.locator('[data-voice-start]').click();
   await page.getByRole('button', { name: 'End voice', exact: true }).waitFor();
   await page.waitForFunction(() => Boolean(globalThis.options));
@@ -93,7 +94,8 @@ try {
     for (const state of ['connecting', 'listening', 'thinking', 'speaking', 'ending']) {
       await page.evaluate(state => globalThis.options.onState(state), state);
       assert.equal(await page.locator('[data-hub-voice-hub]').getAttribute('data-voice-state'), state);
-      assert.equal(await page.getByRole('textbox').count(), 1, 'The native HUB composer remains the only text box');
+      assert.equal(await page.locator('textarea').count(), 1, 'Voice preserves the mounted native composer');
+      assert.equal(await page.getByRole('textbox').count(), 0, 'Voice hides the text box');
       const contained = await page.evaluate(() => {
         const hub = document.querySelector('[data-hub-voice-hub]'), box = hub.getBoundingClientRect();
         return [...hub.querySelectorAll('[data-voice-controls], [data-voice-controls] button')].filter(element => !element.hidden).every(element => {
@@ -116,13 +118,13 @@ try {
     await page.waitForFunction(wanted => document.querySelector('[data-hub-voice-hub]').getAttribute('data-voice-state') === wanted, stage);
   }
   diagnosticStage='speaking';
-  await page.getByText('Listening paused during reply · Tap Interrupt to speak',{exact:true}).waitFor();
+  await page.getByText('Speaking',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Interrupt',exact:true}).click();
-  await page.getByText('Clearing speaker echo · Listening resumes shortly',{exact:true}).waitFor();
+  await page.getByText('Resuming listening…',{exact:true}).waitFor();
   await page.getByText('Listening to you',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>globalThis.interrupts),1);
   diagnosticStage='speaking';
-  await page.getByText('Listening paused during reply · Tap Interrupt to speak',{exact:true}).waitFor();
+  await page.getByText('Speaking',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Mute',exact:true}).click();
   await page.getByRole('button',{name:'Interrupt',exact:true}).click();
   await page.getByRole('button',{name:'Unmute',exact:true}).waitFor();
@@ -131,9 +133,9 @@ try {
   await page.getByText('Listening to you',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>globalThis.interrupts),2);
   diagnosticStage = undefined;
-  await page.getByRole("textbox", { name: "Native text input" }).fill("Write to HUB while speaking to Conversation");
+  assert.equal(await page.locator('textarea').inputValue(), 'Saved text draft');
   assert.equal(await page.locator('[data-voice-shared-form]').count(), 0);
-  assert.equal(await page.getByRole("textbox", { name: "Native text input" }).isVisible(), true);
+  assert.equal(await page.locator('textarea').isVisible(), false);
   await page.evaluate(() => { globalThis.byId.task={title:'Other chat',origin:'subagent'}; globalThis.current='task'; document.querySelector('[data-phase]').setAttribute('data-phase','active'); globalThis.changed(); });
   await page.getByRole('button',{name:'‹ Home',exact:true}).click();
   assert.equal(await page.getByRole('button',{name:'End voice',exact:true}).isVisible(),true);
@@ -147,6 +149,7 @@ try {
   await page.getByRole("button", { name: "End voice" }).click();
   await page.locator('[data-voice-start]').waitFor();
   assert.equal(await page.locator('[data-transcript-speaker]').count(), 0, 'Ending clears only the temporary live view');
+  assert.equal(await page.locator('textarea').inputValue(), 'Saved text draft', 'End voice restores the unsent draft');
   assert.equal(await page.getByRole("textbox", { name: "Native text input" }).isVisible(), true);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   if (process.argv[3] && !process.argv[3].startsWith('--')) await page.screenshot({ path: process.argv[3], fullPage: true });
