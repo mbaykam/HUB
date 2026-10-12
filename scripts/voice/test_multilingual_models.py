@@ -106,3 +106,23 @@ async def test_real_streaming_service_sends_drafts_then_one_final_and_keeps_loop
     assert drafts and down.index(drafts[0])<down.index(finals[0])
     assert health.preview_ready and health.decode_ms>0
     assert max(b-a for a,b in zip(ticks,ticks[1:])) < .5
+
+
+@pytest.mark.parametrize('code,text', [
+    ('tr','Yedi kere sekiz ne yapar?'),
+    ('en',"What's the meaning of life?"),
+])
+def test_reported_questions_preserve_numbers_and_intent(recognizer,code,text):
+    synth=SupertonicSynthesizer({**SPEECH,'voice':'F5'})
+    raw,rate=synth.synthesize(text,code)
+    samples=soxr.resample(np.frombuffer(raw,dtype='<i2').astype(np.float32)/32768,rate,16000)
+    samples*=.05/max(float(np.max(np.abs(samples))),.001)
+    raw=(samples*32767).astype('<i2').tobytes()
+    recognizer.reset()
+    for offset in range(0,len(raw),6400):recognizer.feed(raw[offset:offset+6400])
+    final=recognizer.finish(raw).lower()
+    if code=='tr':
+        assert ('yedi' in final or '7' in final) and ('sekiz' in final or '8' in final),final
+        assert 'kere' in final and 'ne yapar' in final and 'lira' not in final,final
+    else:
+        assert 'meaning of life' in final and 'pretty' not in final,final

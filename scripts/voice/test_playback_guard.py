@@ -58,7 +58,7 @@ async def test_gate_keeps_vad_clock_running_with_silence_and_allows_explicit_int
 def stt(monkeypatch):
     import native_streaming_stt as module
     class Recognizer:
-        language='auto'; result_language='en'
+        language='auto'; result_language='en'; result_source='fixture-verified'
         def __init__(self,*args): pass
         def reset(self): pass
         def feed(self,audio): return 'speaker echo'

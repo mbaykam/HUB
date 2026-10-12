@@ -58,6 +58,16 @@ def prepare_voice_models(speech=None):
         for future in futures:future.result()
 
 
+def voice_user_turn_params():
+    """Keep a short thinking pause inside the caller's current utterance."""
+    return LLMUserAggregatorParams(
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(confidence=0.5, start_secs=0.08, stop_secs=0.8, min_volume=0.0)),
+        user_turn_strategies=UserTurnStrategies(
+            start=[MinWordsUserTurnStartStrategy(min_words=1, use_interim=False)],
+            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=.2)]),
+    )
+
+
 def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, transport=None) -> PipelineWorker:
     """Build one call; the sidecar owns its runner and releases models on exit."""
     stt_model, tts_voice, model_path, voices_path = resolve_speech(speech or DEFAULT_SPEECH)
@@ -96,16 +106,7 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     llm = HubNativeLLMService(bridge, health=health)
     context = LLMContext()
     user, assistant = LLMContextAggregatorPair(
-        context, user_params=LLMUserAggregatorParams(
-            # Keep pauses within the utterance, while a finalized ASR result
-            # releases the turn without loading another semantic turn model.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(confidence=0.5, start_secs=0.08, stop_secs=0.5, min_volume=0.0)),
-            # VAD or provisional guesses must not cancel a pending answer.
-            # A validated final utterance can still interrupt and replace it.
-            user_turn_strategies=UserTurnStrategies(
-                start=[MinWordsUserTurnStartStrategy(min_words=1, use_interim=False)],
-                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=.2)]),
-        ),
+        context, user_params=voice_user_turn_params(),
     )
     worker = PipelineWorker(
         Pipeline([transport.input(), SpeechHealthProbe(health), PlaybackInputGuard(gate), stt,

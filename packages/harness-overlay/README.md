@@ -11,6 +11,14 @@ and its unsent draft. Opening delegated work refreshes its direct parent's nativ
 catalog and selects the child through that catalog address, so saved history
 loads without starting another task or interrupting the call.
 
+The multilingual speech recognizer owns the live draft. Isolated Turkish
+greetings keep the quick decoder; other short requests need whole-utterance
+agreement or final verification. Numeric requests receive final verification,
+and microphone padding stays inside the short-segment window. A secondary
+Turkish candidate cannot replace a verified request merely because its language
+matches. Brief pauses stay inside the current question. Recognition-source and
+segment-duration diagnostics are ephemeral and do not record microphone audio.
+
 This package is Minke's product-owned extension layer for DeepSeek Harness. It is installed into the generated desktop runtime and composed through the public `--patch` bundle seam. Nothing in this package is copied into or applied over `vendor/deepseek-harness`.
 
 The host composition mounts the separate `@lencx/minke-model-runtime/dsh` adapter:

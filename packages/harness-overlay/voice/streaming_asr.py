@@ -4,6 +4,12 @@ import re
 import numpy as np
 from speech_settings import nemotron_path, whisper_path, seda_path
 
+NUMBER_WORDS = frozenset('zero one two three four five six seven eight nine ten hundred thousand million sıfır bir iki üç dört beş altı yedi sekiz dokuz on yüz bin milyon'.split())
+
+
+def numeric_text(text):
+    return bool(re.search(r'\d', text) or set(re.findall(r'\w+', text.lower())) & NUMBER_WORDS)
+
 
 @lru_cache(maxsize=1)
 def nemotron_runtime():
@@ -67,6 +73,7 @@ class StreamingRecognizer:
         self.audio = bytearray()
         self.audio_bytes = 0
         self.result_language = None
+        self.result_source = None
         self._final_text = None
         if self.verifier._preview:
             self.verifier._preview.reset()
@@ -88,49 +95,51 @@ class StreamingRecognizer:
                 text, code = provisional
                 self.verifier._preview_words = text
                 self.verifier._preview_language = code
-                return text
+                # The selected multilingual recognizer owns the live draft;
+                # legacy previews fill its initial silence, not overwrite it.
+                return draft or text
         return draft
 
     def finish(self, audio=None):
         segment = audio if audio is not None else bytes(self.audio) if self.audio_bytes <= 16000*2*6 else b''
-        short=bool(segment) and self.audio_bytes <= 16000*2*4
+        # The segment includes VAD pre-roll and endpoint silence. Six seconds
+        # covers a normal short question plus those transport-owned margins.
+        short=bool(segment) and self.audio_bytes <= 16000*2*6
         if short:
             turkish=verify_turkish(segment) if self.language!='en' else ''
             words=set(turkish.lower().split())
             greetings={'merhaba','selam'}
             greeting=bool(words) and words.issubset(greetings)
-            # Two independent recognizers agreeing on distinctive Turkish
-            # words can release the validated short turn immediately. A
-            # provisional language guess alone cannot override English hello.
-            distinctive={'merhaba','selam','beni','duyuyor','duyuyorum','musun','hayır','lütfen','istiyorum','şunu','bunu','teşekkürler','ederim'}
-            draft=set(self.verifier._preview_words.lower().split())
-            agreed=self.verifier._preview_language=='tr' and len(words & draft & distinctive)>=2
-            if turkish and (self.language=='tr' or self.language=='auto' and (greeting or agreed)):
+            # Isolated greetings retain the short-audio decoder. Requests with
+            # values/actions need agreement on the whole text, not shared words.
+            if greeting:
                 self.stream.input_finished()
-                self.result_language='tr'
+                self.result_language='tr'; self.result_source='seda-greeting'
+                return turkish
+            native = self._finish_native()
+            if turkish and len(words) >= 3 and not numeric_text(native) and re.findall(r'\w+', native.lower()) == re.findall(r'\w+', turkish.lower()):
+                self.result_language='tr'; self.result_source='nemotron-seda-consensus'
                 return turkish
             if self.language != 'tr' and self.verifier._preview_language == 'en' and self.verifier._preview:
                 # Confirm the whole audio with both streaming decoders. Only
                 # exact, high-confidence English agreement takes the fast path;
                 # lone greetings, mixed/uncertain speech and changed words still
                 # use Whisper. A provisional preview never becomes user input.
-                native = self._finish_native()
                 confirmed, confidence = self.verifier._preview.finish('en')
                 words = re.findall(r'\w+', native.lower())
                 english = {'i','you','can','hear','me','please','the','what','in','is','we','this','that','my','english','yes','no','want','stop','wait'}
                 if (len(words) >= 3 and confidence >= .8 and
                         len(set(words) & english) >= 2 and
                         words == re.findall(r'\w+', confirmed.lower()) and
-                        not re.search(r'[\dğışçöü]', native.lower())):
+                        not numeric_text(native) and not re.search(r'[ğışçöü]', native.lower())):
                     self.result_language = 'en'
+                    self.result_source = 'nemotron-vosk-consensus'
                     return native
             verified, code=self.verifier._transcribe_audio(segment)
             if verified:
                 if self._final_text is None:self.stream.input_finished()
-                if turkish and self.language=='auto' and code=='tr':
-                    self.result_language='tr'
-                    return turkish
                 self.result_language = code
+                self.result_source = 'whisper-base-verified'
                 return verified
         # The streaming decoder has already processed long speech while the
         # caller spoke. Drain it only when no short-turn verifier succeeded.
@@ -138,7 +147,9 @@ class StreamingRecognizer:
         if not text and segment and not short:
             verified, code=self.verifier._transcribe_audio(segment)
             self.result_language=code
+            self.result_source='whisper-base-verified'
             return verified
+        self.result_source='nemotron'
         return text
 
     def _finish_native(self):

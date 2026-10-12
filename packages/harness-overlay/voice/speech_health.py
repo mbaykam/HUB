@@ -22,6 +22,9 @@ class SpeechHealth:
         self.synthesizing = 0
         self.playback_gate = None
         self.user_speaking = False
+        self.recognition_source = None
+        self.recognition_language = None
+        self.utterance_ms = None
         self.last_input_sound = 0
         self.input_end_at = None
         self.model_start_at = None
@@ -50,6 +53,7 @@ class SpeechHealth:
                 "partialText":self.partial_text if now-self.partial_at<15 else '',"previewReady":self.preview_ready,
                 "stage":('speaking' if gate.speaking else 'echo-tail') if paused else self.stage,
                 "decodeMs":self.decode_ms,"inputPaused":paused,
+                "recognition":{"source":self.recognition_source,"language":self.recognition_language,"audioMs":self.utterance_ms},
                 "inputPauseReason":gate.reason if gate else None,
                 "echoSuppressedFrames":gate.suppressed_frames if gate else 0,
                 "timing": {"asrAfterSoundMs": self._elapsed(self.input_end_at, self.model_start_at),

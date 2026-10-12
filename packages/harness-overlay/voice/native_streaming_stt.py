@@ -86,6 +86,10 @@ class LocalStreamingSTTService(EchoProtectedSTTMixin, SegmentedSTTService):
                 return
             text = await self.decode(self.recognizer.finish, audio)
             if text and self.accepts_decode(generation):
+                if self.health:
+                    self.health.recognition_source = self.recognizer.result_source
+                    self.health.recognition_language = self.recognizer.result_language
+                    self.health.utterance_ms = round(len(audio)/32)
                 code = self.recognizer.result_language
                 language = Language.TR if code=='tr' else Language.EN if code=='en' else self.language(text)
                 yield TranscriptionFrame(text, self._user_id, time_now_iso8601(), language)

@@ -119,6 +119,12 @@ try {
   }
   diagnosticStage='speaking';
   await page.getByText('Speaking',{exact:true}).waitFor();
+  const afterSdkStopped = await page.evaluate(() => {
+    globalThis.options.onState('listening');
+    return document.querySelector('[data-voice-now]>strong').textContent;
+  });
+  assert.equal(afterSdkStopped, 'Resuming listening…', 'SDK playback-stop cannot advertise an open mic before the backend echo guard releases it');
+  await page.getByText('Speaking',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Interrupt',exact:true}).click();
   await page.getByText('Resuming listening…',{exact:true}).waitFor();
   await page.getByText('Listening to you',{exact:true}).waitFor();

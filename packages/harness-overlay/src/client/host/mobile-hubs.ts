@@ -123,7 +123,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     activity.update({ ...nativeSessions, observations: activitySignals.read(nativeSessions), pendingBySession: pendingSource?.getSnapshot() }, voiceSession, ctx.connection?.state ? ctx.connection.state.getSnapshot() ?? "connecting" : "connected");
     start.hidden = busy; start.disabled = !enabled || loading;
     controls.hidden = !busy;
-    liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":audioStage==="echo-tail"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
+    liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":audioStage==="echo-tail"||inputPaused&&state==="listening"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
     mute.hidden = !!external; openCall.hidden = !voiceSession || viewingCall;
     interrupt.hidden = !busy || audioStage === "echo-tail" || !(state === "speaking" || state === "thinking");
     transcript.panel.hidden = !busy || !inHome;
