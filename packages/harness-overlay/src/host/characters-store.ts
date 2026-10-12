@@ -14,7 +14,7 @@ export class CharacterStore {
     catch(e){ if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;this.#state=charactersStateSchema.parse(await seed());await this.#write(this.#state); }
   }
   snapshot(){return charactersStateSchema.parse(this.#state);}
-  selected(sessionId?:string,s=this.snapshot()){const im=sessionId?.startsWith("minke-im-");const id=sessionId&&!im&&Object.hasOwn(s.bindings,sessionId)?s.bindings[sessionId]:s.mainId;return s.characters.find(c=>c.id===id)!;}
+  selected(sessionId?:string,s=this.snapshot()){const id=sessionId&&Object.hasOwn(s.bindings,sessionId)?s.bindings[sessionId]:s.mainId;return s.characters.find(c=>c.id===id)!;}
   async #write(s:HubCharactersState){const temp=join(this.root,randomUUID()+".tmp");await writeFile(temp,JSON.stringify(s,null,2)+"\n",{mode:0o600});await rename(temp,join(this.root,"characters.json"));}
   async change(value:unknown,validate:(character:HubCharacter)=>Promise<void>){
     const command=characterCommandSchema.parse(value);

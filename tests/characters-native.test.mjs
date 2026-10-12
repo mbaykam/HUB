@@ -49,6 +49,7 @@ const { createUserMessage } = await native('@deepseek-ai/dsh-llm');
 const { HubCharacters } = await import('../packages/harness-overlay/src/characters.ts');
 const { CamofoxRuntime } = await import('../packages/harness-overlay/src/host/camofox.ts');
 const { attachNativeVoiceTasks } = await import('../packages/harness-overlay/src/host/voice-tasks.ts');
+const { installModelSelection } = await import('../vendor/deepseek-harness/packages/core/agent/src/model-selection.ts');
 test('native character delegation uses the target model/persona while the coordinator remains separate', {timeout:25000}, async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-characters-native-'));
  const ctx=new Context();let facility,backend;
@@ -104,5 +105,42 @@ test('native character delegation uses the target model/persona while the coordi
   for(const name of ['hub_knowledge_search','hub_knowledge_read','hub_knowledge_write'])telegram.ctx.tools.register({name,description:'Synthetic saved note test',parameters:{type:'object',properties:{},additionalProperties:false},output:{schema:{type:'string'},render:(_args,value)=>[{type:'text',text:String(value)}]},execute:async()=>{if(name==='hub_knowledge_write')writeRan=true;return 'Relevant saved note';}});
   for(const name of ['hub_knowledge_search','hub_knowledge_read']){const result=await telegram.ctx.tools.execute({agent:telegram,name,arguments:{},callId:'knowledge-'+name,signal:AbortSignal.timeout(1000)});assert.equal(result.isError,false,JSON.stringify(result));}
   const denied=await telegram.ctx.tools.execute({agent:telegram,name:'hub_knowledge_write',arguments:{},callId:'knowledge-write-denied',signal:AbortSignal.timeout(1000)});assert.equal(denied.isError,true);assert.equal(writeRan,false);
+ }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-characters-native-'));await rm(root,{recursive:true,force:true});}
+});
+
+test('stale native selection is corrected before the first prompt and a greeting handoff persists without spawning a worker',{timeout:25000},async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-characters-native-'));
+ const ctx=new Context();let facility,backend;
+ try{
+  await mountAgentLoopTestDependencies(ctx,{systemPrompt:{persona:'You are powered by {{provider}}/{{model}}.'}});
+  await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});
+  await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'spawn'});await ctx.plugin(Storage);
+  backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
+  const main=new MockAdapter([toolCallResponse('old-greeting','hub_delegate',{character:'Mira',description:'Greet the user',prompt:'Say hello as Mira'}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.')]);
+  const fast=new MockAdapter([textResponse('Hi, I am Mira.'),textResponse('I run fast/mock.'),toolCallResponse('return-hub','hub_switch_character',{character:'HUB'})]);
+  ctx.llm.registerAdapter(['main'],main);ctx.llm.registerAdapter(['fast'],fast);ctx.llm.registerAdapter(['legacy'],new MockAdapter([textResponse('Must not run')]));
+  let deployment={provider:'main',model:'mock'};const selections=new Map();
+  ctx.on('agent/created',({agent})=>{const ref={current:{provider:'legacy',model:'old-qwen'},assembled:undefined};selections.set(agent.id,ref);installModelSelection(agent.ctx,ref);},{global:true});
+  Object.defineProperty(ctx,'agentDefaultModel',{value:{currentSelection:()=>deployment,saveSelection:async route=>{deployment={...route};}},configurable:true});
+  Object.defineProperty(ctx,'sessionController',{value:{selectModel:async({sessionId,...route})=>{selections.get(sessionId).current=route;ctx.agents.get(sessionId).session.append('model/selection',route);}},configurable:true});
+  Object.defineProperty(ctx,'storageDomain',{value:facility,configurable:true});Object.defineProperty(ctx,'connection',{value:{requestRejection:()=>undefined},configurable:true});Object.defineProperty(ctx,'webServer',{value:{register:()=>()=>{}},configurable:true});
+  const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'})));
+  const characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
+  const state=characters.store.snapshot(),voice=state.characters.find(c=>c.id===state.voiceId);
+  await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Mira',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
+  const parent=ctx.agentLoop.create('handoff-parent',{provider:'legacy',model:'old-qwen'});
+  async function say(agent,text){const before=agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length;agent.followup(createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}));const end=Date.now()+8000;while(agent.status!=='idle'||agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length<=before){assert.ok(Date.now()<end,'Turn did not settle');await new Promise(r=>setTimeout(r,10));}}
+  await say(parent,'Get Mira');
+  assert.equal(main.requests.length,1);assert.equal(fast.requests.length,1);
+  assert.match(JSON.stringify(main.requests[0]),/powered by main\/mock/);assert.doesNotMatch(JSON.stringify(main.requests[0]),/powered by legacy\/old-qwen/);
+  assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Character: Mira/);
+  assert.equal(ctx.agents.list().filter(a=>a.session.header.origin==='subagent').length,0);
+  assert.equal(characters.store.selected(parent.id).name,'Mira');assert.equal(deployment.provider,'main');
+  await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);
+  await say(parent,'Go back to HUB');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
+  const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');
+  const revision=characters.store.snapshot().revision;
+  const denied=await parent.ctx.tools.execute({agent:parent,name:'hub_switch_character',arguments:{character:'Mira'},callId:'notification-switch',signal:AbortSignal.timeout(1000)});
+  assert.equal(denied.isError,true);assert.equal(characters.store.snapshot().revision,revision);
  }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-characters-native-'));await rm(root,{recursive:true,force:true});}
 });

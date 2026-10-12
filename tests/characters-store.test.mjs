@@ -16,3 +16,14 @@ test('text conversation character does not change the Telegram main assistant',a
 });
 
 test("OpenRouter aliases can be assigned to characters without interpreting them as paths",()=>{const c=seed().characters[0];assert.equal(characterSchema.parse({...c,route:{provider:"openrouter",model:"vendor/model:free"}}).route.model,"vendor/model:free");assert.throws(()=>characterSchema.parse({...c,route:{provider:"openrouter",model:"model with spaces"}}));});
+
+test('an explicit Telegram handoff is durable and isolated to that conversation',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-character-store-'));
+ try{const store=new CharacterStore(root);await store.load(async()=>seed());const s=store.snapshot();
+ await store.change({action:'select',revision:s.revision,id:s.voiceId,sessionId:'minke-im-telegram-one'},async()=>{});
+ const copy=new CharacterStore(root);await copy.load(async()=>{throw Error('Must load saved binding')});
+ assert.equal(copy.selected('minke-im-telegram-one').id,s.voiceId);
+ assert.equal(copy.selected('minke-im-telegram-two').id,s.mainId);
+ assert.equal(copy.selected('new-text-chat').id,s.mainId);
+ }finally{assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-character-store-'));await rm(root,{recursive:true,force:true});}
+});

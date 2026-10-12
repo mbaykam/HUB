@@ -30,6 +30,9 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   options.addEventListener("click", () => { optionsOpen = !optionsOpen; render(); });
   const home = root.createElement("button"); home.type = "button"; home.textContent = "‹ Home";
   home.addEventListener("click", () => returnToMobileHome(ctx)); nav.append(home);
+  const identity = root.createElement("span"); identity.setAttribute("data-hub-active-character", ""); identity.hidden = true;
+  const identityName = root.createElement("strong"), identityModel = root.createElement("small"); identity.append(identityName, identityModel); nav.append(identity);
+  let identitySession: string | undefined, identityCheckedAt = 0, identityFlight = false;
   const hub = root.createElement("section"); hub.setAttribute("data-hub-voice-hub", ""); hub.setAttribute("aria-label", "Voice hub");
   const start = root.createElement("button"); start.type = "button"; start.setAttribute("data-voice-start", "");
   const voiceGlyph = root.createElement("span"); voiceGlyph.setAttribute("data-voice-glyph", ""); voiceGlyph.setAttribute("aria-hidden", "true");
@@ -95,6 +98,8 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   function render() {
     if (lifetime.signal.aborted) return;
     const inHome = isHome();
+    identity.hidden = inHome || identitySession !== ctx.sessions.list.getSnapshot().current;
+    if (!inHome && (identitySession !== ctx.sessions.list.getSnapshot().current || Date.now() - identityCheckedAt > 2000)) void checkIdentity();
     const busy = active();
     const viewingCall = busy && !inHome && !!voiceSession && ctx.sessions.list.getSnapshot().current === voiceSession;
     if (inHome && openCall.parentElement !== actions) actions.prepend(openCall);
@@ -162,6 +167,24 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   observer.observe(root.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-phase", "data-minke-mobile-web"] });
   const unsubscribe = ctx.sessions.list.subscribe(schedule);
   const unsubscribeConnection = ctx.connection?.state?.subscribe(schedule);
+  async function checkIdentity() {
+    if (identityFlight || lifetime.signal.aborted || root.hidden || isHome()) return;
+    const snapshot = ctx.sessions.list.getSnapshot(), id = snapshot.current;
+    if (!id || snapshot.byId[id]?.origin === "subagent") { identitySession = undefined; identity.hidden = true; return; }
+    identityFlight = true; identityCheckedAt = Date.now();
+    try {
+      const response = await view!.fetch("/api/hub/characters?sessionId=" + encodeURIComponent(id), { credentials: "same-origin", cache: "no-store", headers: { "x-hub-characters": "1" }, signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(5000)]) });
+      if (!response.ok) throw new Error();
+      const value = await response.json(), character = value.character;
+      if (ctx.sessions.list.getSnapshot().current !== id || typeof character?.name !== "string") return;
+      identitySession = id; identityName.textContent = character.name;
+      identityModel.textContent = character.route?.model ?? "Model not configured";
+      identity.title = character.route ? `${character.name} · ${character.route.provider}/${character.route.model}` : character.name;
+      identity.hidden = isHome();
+    } catch { identitySession = undefined; identity.hidden = true; }
+    finally { identityFlight = false; }
+  }
+  const identityPoll = view.setInterval(() => void checkIdentity(), 2000);
   // Expire finished jobs even when their native snapshots stop changing.
   // This is a local render tick, not another host polling loop.
   const refreshTime = view.setInterval(() => { if (!root.hidden && isHome()) schedule(); }, 60_000);
@@ -264,5 +287,5 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const callPoll = view.setInterval(() => {if(active()||Date.now()-lastStatusAt>=2500)void checkStatus();}, 500);
   const visibleStatus = () => { if (!root.hidden) void checkStatus(); }; root.addEventListener("visibilitychange", visibleStatus);
   void checkStatus();
-  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); activitySignals.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); audio.remove(); removeStyles(); };
+  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); audio.remove(); removeStyles(); };
 }

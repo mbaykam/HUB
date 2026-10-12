@@ -85,6 +85,15 @@ preserved across interruption. Missing input and runtime errors remain visible.
 
 ## Delegation and live views
 
+In a text or Telegram conversation, say **Get Mira** to switch the active
+speaker to Mira. Your following messages use her configured model in the same
+conversation. Say **Go back to HUB** to return. New conversations still start
+with HUB. The PWA chat header shows the active character and configured model.
+
+A request for another character to perform work remains a background task.
+For example, **Ask Mira to research this** delegates the research while keeping
+the current speaker available. An unconfigured character cannot take over.
+
 Ask Conversation to research something; it hands the task to HUB's configured
 model/tool policy. Work appears in the native conversation/work list and the
 completed reply can be spoken automatically when the caller is quiet. Open chat
