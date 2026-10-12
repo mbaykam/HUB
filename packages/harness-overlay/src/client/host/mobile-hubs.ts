@@ -22,12 +22,8 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   audio.setAttribute("playsinline", "");
   const removeStyles = installStyles(root);
   const nav = root.createElement("div"); nav.setAttribute("data-hub-home-nav", "");
-  const intro = root.createElement("header"); intro.setAttribute("data-hub-home-intro", "");
-  const welcome = root.createElement("h1"); welcome.textContent = "What’s on your mind?";
-  const invitation = root.createElement("p"); invitation.textContent = "Conversation for voice. HUB for messages. Ask either assistant to bring in a specialist.";
-  intro.append(welcome, invitation);
   const textHeading = root.createElement("div"); textHeading.setAttribute("data-hub-text-heading", "");
-  const textLabel = root.createElement("span"); textLabel.textContent = "Write to HUB";
+  const textLabel = root.createElement("span"); textLabel.textContent = "Write";
   const options = root.createElement("button"); options.type = "button"; options.textContent = "Chat options"; options.setAttribute("aria-expanded", "false");
   textHeading.append(textLabel, options);
   let optionsOpen = false;
@@ -36,12 +32,10 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   home.addEventListener("click", () => returnToMobileHome(ctx)); nav.append(home);
   const hub = root.createElement("section"); hub.setAttribute("data-hub-voice-hub", ""); hub.setAttribute("aria-label", "Voice hub");
   const start = root.createElement("button"); start.type = "button"; start.setAttribute("data-voice-start", "");
-  const voiceLabel = root.createElement("span"); voiceLabel.setAttribute("data-voice-kicker", ""); voiceLabel.textContent = "Speak";
   const voiceGlyph = root.createElement("span"); voiceGlyph.setAttribute("data-voice-glyph", ""); voiceGlyph.setAttribute("aria-hidden", "true");
   for (let index = 0; index < 5; index++) voiceGlyph.append(root.createElement("i"));
-  const title = root.createElement("strong"); title.textContent = "Talk to Conversation";
-  const hint = root.createElement("span"); hint.textContent = "Quick conversation · delegates complex work to HUB";
-  start.append(voiceLabel, title, hint, voiceGlyph);
+  const title = root.createElement("strong"); title.textContent = "Speak";
+  start.append(title, voiceGlyph);
   const controls = root.createElement("div"); controls.setAttribute("data-voice-controls", "");
   const status = root.createElement("span"); status.setAttribute("role", "status");
   const mute = root.createElement("button"); mute.type = "button"; mute.textContent = "Mute";
@@ -57,18 +51,19 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     } catch { error.textContent = "The conversation could not open. Your call is still connected; try again."; }
     finally { openCall.disabled = false; }
   });
-  const actions = root.createElement("div"); actions.setAttribute("data-voice-actions", ""); actions.append(mute, interrupt, end);
-  controls.append(status, openCall, actions);
-  const writeHub = root.createElement("button"); writeHub.type = "button"; writeHub.textContent = "Back to voice";
+  const actions = root.createElement("div"); actions.setAttribute("data-voice-actions", ""); actions.append(openCall, mute, interrupt, end);
+  controls.append(status, actions);
+  const writeHub = root.createElement("button"); writeHub.type = "button"; writeHub.textContent = "Voice"; writeHub.setAttribute("aria-label", "Back to voice"); writeHub.setAttribute("data-voice-back", "");
   writeHub.addEventListener("click", () => returnToMobileHome(ctx));
+  nav.append(writeHub);
   const error = root.createElement("p"); error.setAttribute("data-voice-error", ""); error.setAttribute("role", "status");
   const liveVoice=root.createElement("section");liveVoice.setAttribute("data-voice-now","");liveVoice.setAttribute("aria-label","Live voice");
   const orb=root.createElement("div");orb.setAttribute("data-voice-orb","");orb.setAttribute("aria-hidden","true");
-  const liveLabel=root.createElement("strong"),liveWords=root.createElement("p");liveWords.setAttribute("data-voice-live-words","");liveWords.textContent="Speak naturally in English or Turkish.";liveVoice.append(orb,liveLabel,liveWords);
+  const liveLabel=root.createElement("strong"),liveWords=root.createElement("p");liveWords.setAttribute("data-voice-live-words","");liveVoice.append(orb,liveLabel,liveWords);
   liveLabel.setAttribute("role", "status"); liveLabel.setAttribute("aria-live", "polite");
   const play = root.createElement("button"); play.type = "button"; play.textContent = "Tap to hear audio"; play.hidden = true;
   const transcript = createMobileLiveTranscript(root);
-  hub.append(start, controls,liveVoice, transcript.panel, writeHub, play, error); root.body.append(audio);
+  hub.append(start, controls,liveVoice, transcript.panel, play, error); root.body.append(audio);
   const activity = createMobileActivity(root, id => {
     void openMobileConversation(ctx.sessions, id).catch(() => {
       error.textContent = "Couldn’t open this task’s conversation. Try again; your voice call is still connected.";
@@ -102,10 +97,12 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     const inHome = isHome();
     const busy = active();
     const viewingCall = busy && !inHome && !!voiceSession && ctx.sessions.list.getSnapshot().current === voiceSession;
-    writeHub.hidden = !viewingCall;
+    if (inHome && openCall.parentElement !== actions) actions.prepend(openCall);
+    else if (!inHome && openCall.parentElement !== nav) nav.insertBefore(openCall, writeHub);
+    openCall.textContent = inHome ? "Open chat" : "Chat";
+    writeHub.hidden = inHome || !busy;
     conversation?.toggleAttribute("data-hub-voice-chat", viewingCall);
     conversation?.toggleAttribute("data-hub-voice-active", busy);
-    intro.hidden = !inHome || busy;
     textHeading.hidden = !inHome || busy;
     options.hidden = !conversation?.querySelector('[data-hub-chat-options]');
     options.setAttribute("aria-expanded", String(optionsOpen));
@@ -128,7 +125,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     interrupt.hidden = !busy || audioStage === "echo-tail" || !(state === "speaking" || state === "thinking");
     transcript.panel.hidden = !busy || !inHome;
     conversation?.removeAttribute("data-hub-shared-input");
-    status.textContent = external ? `Telegram · ${external.profile?.name ?? "Conversation"}` : hub.getAttribute("data-active-character") ?? "Conversation";
+    status.textContent = external ? `Telegram · ${external.profile?.name ?? "Mira"}` : hub.getAttribute("data-active-character") ?? "Mira";
     mute.disabled = loading || ["microphone", "starting", "connecting", "ending"].includes(state);
     mute.textContent = muted ? "Unmute" : "Mute"; mute.setAttribute("aria-pressed", String(muted));
   }
@@ -138,13 +135,12 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     // A running PWA call must retain End/Mute controls through a resize.
     const next = mobile || active() ? root.querySelector<HTMLElement>('[data-slot="conversation"] [data-phase]') : null;
     const seat = next?.querySelector<HTMLElement>("[data-composer-seat]");
-    if (!next || !seat) { hub.remove(); intro.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.panel.remove(); browser.update(false, new Map()); clearConversation(); conversation = undefined; return; }
+    if (!next || !seat) { hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.panel.remove(); browser.update(false, new Map()); clearConversation(); conversation = undefined; return; }
     if (conversation !== next) { clearConversation(); conversation = next; }
     if (nav.parentElement !== next) next.prepend(nav);
     const stack = seat.querySelector('[data-slot="conversation.composer.bar"]')?.parentElement ?? seat;
     stack.setAttribute("data-hub-composer-stack", "");
     if (hub.parentElement !== stack) stack.prepend(hub);
-    if (intro.parentElement !== stack) stack.prepend(intro);
     const nativeBar = seat.querySelector('[data-slot="conversation.composer.bar"]');
     if (nativeBar && textHeading.parentElement !== stack) stack.insertBefore(textHeading, nativeBar);
     const nativeOptions = stack.querySelector('[data-slot="conversation.hero.agentPreset"]')?.parentElement;
@@ -159,7 +155,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   }
   function schedule() { if (!lifetime.signal.aborted && frame === undefined) frame = view!.requestAnimationFrame(reconcile); }
   const observer = new view.MutationObserver(records => {
-    if (records.some(record => !hub.contains(record.target) && !intro.contains(record.target) && !textHeading.contains(record.target) && !nav.contains(record.target) && !activity.panel.contains(record.target) && !browser.panel.contains(record.target) && !browser.dialog.contains(record.target) && !(record.target instanceof Element && record.target.closest('[data-hub-characters]')) && !presentation.dialog.contains(record.target))) schedule();
+    if (records.some(record => !hub.contains(record.target) && !textHeading.contains(record.target) && !nav.contains(record.target) && !activity.panel.contains(record.target) && !browser.panel.contains(record.target) && !browser.dialog.contains(record.target) && !(record.target instanceof Element && record.target.closest('[data-hub-characters]')) && !presentation.dialog.contains(record.target))) schedule();
   });
   // Avoid observing our own changing text/controls; only seat replacement and
   // native phase/viewport changes schedule a reconciliation.
@@ -172,7 +168,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   start.addEventListener("click", async () => {
     if (active()) return;
     transcript.reset();
-    liveWords.textContent="Speak naturally in English or Turkish.";liveWords.removeAttribute("data-interim");audioStage="listening";inputPaused=false;receivingAudio=undefined;audioConnection=undefined;
+    liveWords.textContent="";liveWords.removeAttribute("data-interim");audioStage="listening";inputPaused=false;receivingAudio=undefined;audioConnection=undefined;
     loading = true; cancelledLoad = false; muted = false; error.textContent = ""; render();
     try {
       if (!voice) {
@@ -183,7 +179,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
           onState(value) { state = value; if (value === "idle") { transcript.reset(); root.dispatchEvent(new CustomEvent("hub:voice-history-changed")); voiceSession = undefined; muted = false; play.hidden = true; schedule(); } render(); },
           onSession(id) { voiceSession = id; void ctx.sessions.refresh?.().catch(() => {}); root.dispatchEvent(new CustomEvent("hub:voice-history-changed")); render(); },
           onCall(id) { presentation.setCall(id); },
-          onProfile(profile) { if(profile){hub.setAttribute("data-active-character", profile.name); title.textContent = profile.name;transcript.setAssistant(profile.name);}else{hub.removeAttribute("data-active-character");} render(); },
+          onProfile(profile) { if(profile){hub.setAttribute("data-active-character", profile.name);transcript.setAssistant(profile.name);}else{hub.removeAttribute("data-active-character");} render(); },
           onTranscript(role, text, final) { transcript.update(role, text, final);if(role==="user"){liveWords.textContent=text;liveWords.toggleAttribute("data-interim",!final);} },
           onActivity(event) {
             root.dispatchEvent(new CustomEvent("hub:voice-activity", { detail: { sessionId: voiceSession, event } }));
@@ -236,15 +232,15 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
       if (call?.transport === "telegram" && typeof call.callId === "string" && typeof call.sessionId === "string") {
         if (!external || external.callId !== call.callId) { transcript.reset(); externalTranscriptKey = ""; }
         external = call; voiceSession = call.sessionId; state = "listening";
-        transcript.setAssistant(call.profile?.name ?? "Conversation");
-        presentation.setCall(call.callId); hub.setAttribute("data-active-character", call.profile?.name ?? "Conversation");
+        transcript.setAssistant(call.profile?.name ?? "Mira");
+        presentation.setCall(call.callId); hub.setAttribute("data-active-character", call.profile?.name ?? "Mira");
         const lines = Array.isArray(call.transcript) ? call.transcript.filter((line: any) => ["user", "assistant"].includes(line?.role) && typeof line.text === "string" && typeof line.final === "boolean").slice(-60) : [];
         const next = JSON.stringify(lines); if (next !== externalTranscriptKey) { externalTranscriptKey = next; transcript.snapshot(lines); const spoken = lines.findLast((line: any) => line.role === "user"); if(spoken){liveWords.textContent=spoken.text;liveWords.removeAttribute("data-interim");} }
       } else if (external) {
         external = undefined; externalTranscriptKey = ""; voiceSession = undefined; state = "idle";
         transcript.reset(); presentation.setCall(undefined); hub.removeAttribute("data-active-character"); root.dispatchEvent(new CustomEvent("hub:voice-history-changed"));
       }
-      hint.textContent = enabled ? "Quick conversation · delegates complex work to HUB" : "Voice isn’t enabled on this host yet"; schedule();
+      start.title = enabled ? "" : "Voice isn’t enabled on this host yet"; schedule();
       if (active() && !loading && !["microphone", "starting", "ending"].includes(state)) {
         const response = await view!.fetch("/api/hub/voice/diagnostics", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)]) });
         if (response.ok) {
@@ -262,11 +258,11 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
           }
         }
       }
-    } catch { if (!enabled) { hint.textContent = "Voice couldn’t connect to HUB"; render(); } }
+    } catch { if (!enabled) { start.title = "Voice couldn’t connect to HUB"; render(); } }
     finally { statusFlight = false; }
   }
   const callPoll = view.setInterval(() => {if(active()||Date.now()-lastStatusAt>=2500)void checkStatus();}, 500);
   const visibleStatus = () => { if (!root.hidden) void checkStatus(); }; root.addEventListener("visibilitychange", visibleStatus);
   void checkStatus();
-  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); activitySignals.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); intro.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); audio.remove(); removeStyles(); };
+  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); activitySignals.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); audio.remove(); removeStyles(); };
 }

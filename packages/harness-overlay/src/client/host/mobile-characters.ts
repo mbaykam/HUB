@@ -31,14 +31,10 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     const response=await view.fetch("/api/hub/characters",{method:command?"POST":"GET",credentials:"same-origin",cache:"no-store",headers:{"x-hub-characters":"1",...(command?{"content-type":"application/json"}:{})},body:command?JSON.stringify(command):undefined,signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(15000)])});
     if(!response.ok)throw new Error(response.status===409?"Characters changed on another screen. Reopen before saving.":"Could not save this character. Check its model, speech and HUB connection.");
     const value=await response.json();if(value.tools)toolCatalog=value.tools;
-    const {tools:_tools,warning,...record}=value;warningMessage=typeof warning==="string"?warning:"";state=charactersStateSchema.parse(record);renderSummary();return state;
-  }
-  function renderSummary(){
-    if(!state)return;
-    const voice=state.characters.find(c=>c.id===state!.voiceId);const voiceTitle=root.querySelector('[data-voice-start] strong');const title=`Talk to ${voice?.name??"Conversation"}`;if(voiceTitle&&voiceTitle.textContent!==title&&!root.querySelector('[data-hub-voice-hub][data-active-character]'))voiceTitle.textContent=title;
+    const {tools:_tools,warning,...record}=value;warningMessage=typeof warning==="string"?warning:"";state=charactersStateSchema.parse(record);return state;
   }
   function grid(){
-    editorCleanup?.();editorCleanup=undefined;heading.textContent="Characters";content.replaceChildren();status.textContent=warningMessage||"HUB handles writing and Telegram messages. Conversation handles voice and delegates complex work to HUB. Ask for other characters by name.";dialog.scrollTop=0;
+    editorCleanup?.();editorCleanup=undefined;heading.textContent="Characters";content.replaceChildren();status.textContent=warningMessage||"HUB handles writing and Telegram messages. Your voice assistant delegates complex work to HUB. Ask for other characters by name.";dialog.scrollTop=0;
     if(!state)return;
     const list=el("div");list.className="hub-character-grid";
     for(const c of state.characters){
@@ -58,7 +54,7 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     const basics=tab("Profile"),modelPane=tab("Model"),voicePane=tab("Voice"),advanced=tab("Capabilities");
     function selectTab(name:string){for(const [key,pane]of panes)pane.hidden=key!==name;for(const [key,b]of tabs)b.setAttribute("aria-selected",String(key===name));}
     form.append(tabbar,...panes.values());selectTab("Profile");
-    basics.append(el("p",seed.id===state.mainId?"HUB · your assistant for writing and Telegram messages.":seed.id===state.voiceId?"Conversation · your voice assistant. Complex requests go to HUB.":"A specialist you can request by name in text or voice."));
+    basics.append(el("p",seed.id===state.mainId?`${seed.name} · your assistant for writing and Telegram messages.`:seed.id===state.voiceId?`${seed.name} · your voice assistant. Complex requests go to HUB.`:"A specialist you can request by name in text or voice."));
 
     const field=(name:string,input:HTMLElement,parent:HTMLElement=basics)=>{const label=el("label");label.append(el("span",name),input);parent.append(label);};
     const input=(value:string,max:number)=>{const n=el("input");n.value=value;n.maxLength=max;return n;};
@@ -90,11 +86,7 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     }
   }
   async function open(id?:string){const own=++epoch;if(!dialog.open)dialog.showModal();status.textContent="Loading characters…";try{await request();if(own!==epoch||!dialog.open)return;const c=state?.characters.find(c=>c.id===id);if(c)edit(c);else grid();}catch(e){status.textContent=(e as Error).message;}}
-  let frame:number|undefined;
-  function reconcile(){frame=undefined;renderSummary();}
-  const schedule=()=>{if(frame===undefined&&!lifetime.signal.aborted)frame=view.requestAnimationFrame(reconcile);};
-  const observer=new view.MutationObserver(records=>{if(records.some(r=>!dialog.contains(r.target)&&!(r.target instanceof Element&&r.target.closest('[data-hub-models]'))))schedule();});observer.observe(root.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-phase']});
-  const offSessions=ctx.sessions.list.subscribe(schedule),openEvent=()=>void open();view.addEventListener("hub:characters-open",openEvent);root.documentElement.setAttribute("data-hub-characters-enabled","");
-  void request().catch(()=>{});schedule();
-  return ()=>{lifetime.abort();observer.disconnect();offSessions();view.removeEventListener("hub:characters-open",openEvent);if(frame!==undefined)view.cancelAnimationFrame(frame);editorCleanup?.();removeBack();dialog.remove();root.documentElement.removeAttribute("data-hub-characters-enabled");removeStyles();};
+  const openEvent=()=>void open();view.addEventListener("hub:characters-open",openEvent);root.documentElement.setAttribute("data-hub-characters-enabled","");
+  void request().catch(()=>{});
+  return ()=>{lifetime.abort();view.removeEventListener("hub:characters-open",openEvent);editorCleanup?.();removeBack();dialog.remove();root.documentElement.removeAttribute("data-hub-characters-enabled");removeStyles();};
 }
