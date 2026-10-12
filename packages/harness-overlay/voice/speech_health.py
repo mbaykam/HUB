@@ -51,7 +51,7 @@ class SpeechHealth:
                 "recentSound": bool(self.last_loud_audio and now-self.last_loud_audio < 2),
                 "speechStarts": self.speech_starts, "transcriptions": self.transcriptions,
                 "partialText":self.partial_text if now-self.partial_at<15 else '',"previewReady":self.preview_ready,
-                "stage":('speaking' if gate.speaking else 'echo-tail') if paused else self.stage,
+                "stage":('speaking' if gate.speaking else 'thinking' if gate.pending_replies else 'echo-tail') if paused else self.stage,
                 "decodeMs":self.decode_ms,"inputPaused":paused,
                 "recognition":{"source":self.recognition_source,"language":self.recognition_language,"audioMs":self.utterance_ms},
                 "inputPauseReason":gate.reason if gate else None,

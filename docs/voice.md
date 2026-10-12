@@ -76,7 +76,9 @@ plays their PCM chunks. Long sentences can start with a shorter phrase at a word
 boundary, preserving numbers and URLs. This is not fully token-by-token audio
 generation. Interrupting drops the old response's PCM before the next synthesis.
 
-The playback guard pauses recognition during assistant audio and its echo tail.
+The playback guard pauses recognition from the first spoken reply text through
+the end of playback and its echo tail, including gaps while the next sentence
+is synthesized. It resumes automatically after the reply finishes.
 Use **Interrupt** to stop a reply and speak again. This is a practical guard,
 not full acoustic echo cancellation or unrestricted voice barge-in. Mute is
 preserved across interruption. Missing input and runtime errors remain visible.

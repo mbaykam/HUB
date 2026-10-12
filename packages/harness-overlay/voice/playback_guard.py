@@ -1,4 +1,4 @@
-"""Per-call speakerphone protection, driven by audio playback rather than LLM text.
+"""Per-call speakerphone protection through synthesis, playback and its tail.
 
 Browser/Telegram echo cancellation is best effort. Do not turn returned speaker
 audio into a new user command. Keep silence flowing through VAD while playback
@@ -6,10 +6,19 @@ and its short acoustic/network tail are blocked. No audio is retained here.
 """
 import asyncio
 import time
+from dataclasses import dataclass
 from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
-    InputAudioRawFrame, InterimTranscriptionFrame, TranscriptionFrame,
+    DataFrame, InputAudioRawFrame, InterimTranscriptionFrame, TranscriptionFrame,
+    InterruptionFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame,
+    LLMTextFrame, TTSSpeakFrame,
     VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+
+@dataclass
+class SpokenReplyFinishedFrame(DataFrame):
+    """Ordered behind TTS contexts and transport audio; never a client event."""
+    reply_id: int
 
 
 class PlaybackGate:
@@ -20,14 +29,32 @@ class PlaybackGate:
         self.until = 0
         self.generation = 0
         self.suppressed_frames = 0
+        self.pending_replies = set()
 
     @property
     def blocked(self):
-        return self.speaking or self.clock() < self.until
+        return self.speaking or bool(self.pending_replies) or self.clock() < self.until
 
     @property
     def reason(self):
-        return 'playback' if self.speaking else 'echo-tail' if self.blocked else None
+        return ('playback' if self.speaking else 'reply' if self.pending_replies
+                else 'echo-tail' if self.blocked else None)
+
+    def begin_reply(self, reply_id):
+        if reply_id not in self.pending_replies:
+            self.pending_replies.add(reply_id)
+            # Invalidate a decode that began before the response was queued.
+            self.generation += 1
+
+    def finish_reply(self, reply_id):
+        if reply_id in self.pending_replies:
+            self.pending_replies.remove(reply_id)
+            self.until = max(self.until, self.clock() + self.tail_seconds)
+
+    def interrupt_reply(self):
+        # Explicit Interrupt cancels queued synthesis. Actual playback still
+        # needs its transport stop signal and acoustic tail before unmuting.
+        self.pending_replies.clear()
 
     def observe(self, frame):
         if isinstance(frame, BotStartedSpeakingFrame) and not self.speaking:
@@ -40,6 +67,44 @@ class PlaybackGate:
         # transport's actual stopped signal starts the release countdown.
 
 
+class SpokenReplyProbe(FrameProcessor):
+    """Hold input from the first spoken text until all of that reply plays.
+
+    BotStopped can occur between slow sentences. A data-frame marker survives
+    neither interruption nor cancellation, and both TTS and the output transport
+    order it after their audio queues. A stale marker cannot release a new reply.
+    """
+    def __init__(self, gate):
+        super().__init__()
+        self.gate = gate
+        self.reply_id = None
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame):
+            self.gate.interrupt_reply()
+            self.reply_id = None
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, LLMFullResponseStartFrame):
+                self.reply_id = frame.id
+            elif isinstance(frame, LLMTextFrame) and not frame.skip_tts and frame.text.strip():
+                if self.reply_id is None:
+                    self.reply_id = frame.id
+                self.gate.begin_reply(self.reply_id)
+            elif isinstance(frame, TTSSpeakFrame) and frame.text.strip():
+                self.gate.begin_reply(frame.id)
+                await self.push_frame(frame, direction)
+                await self.push_frame(SpokenReplyFinishedFrame(frame.id), direction)
+                return
+            elif isinstance(frame, LLMFullResponseEndFrame):
+                reply_id, self.reply_id = self.reply_id, None
+                await self.push_frame(frame, direction)
+                if reply_id in self.gate.pending_replies:
+                    await self.push_frame(SpokenReplyFinishedFrame(reply_id), direction)
+                return
+        await self.push_frame(frame, direction)
+
+
 class PlaybackOutputProbe(FrameProcessor):
     def __init__(self, gate):
         super().__init__()
@@ -47,6 +112,10 @@ class PlaybackOutputProbe(FrameProcessor):
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
+        if isinstance(frame, SpokenReplyFinishedFrame):
+            if direction == FrameDirection.DOWNSTREAM:
+                self.gate.finish_reply(frame.reply_id)
+            return
         self.gate.observe(frame)
         await self.push_frame(frame, direction)
 

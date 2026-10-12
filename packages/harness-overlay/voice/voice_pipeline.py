@@ -23,7 +23,7 @@ from hub_native_llm import HubBridgeClient, HubNativeLLMService
 from speech_settings import DEFAULT_SPEECH, resolve_speech
 from whisper_auto import AutomaticWhisperSTTService
 from speech_health import SpeechHealth, SpeechHealthProbe, TranscriptionHealthProbe
-from playback_guard import PlaybackGate, PlaybackInputGuard, PlaybackOutputProbe
+from playback_guard import PlaybackGate, PlaybackInputGuard, PlaybackOutputProbe, SpokenReplyProbe
 from pipecat.frames.frames import InterruptionFrame
 
 
@@ -110,7 +110,8 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     )
     worker = PipelineWorker(
         Pipeline([transport.input(), SpeechHealthProbe(health), PlaybackInputGuard(gate), stt,
-                  PlaybackInputGuard(gate, mask_audio=False), TranscriptionHealthProbe(health), user, llm, tts,
+                  PlaybackInputGuard(gate, mask_audio=False), TranscriptionHealthProbe(health), user, llm,
+                  SpokenReplyProbe(gate), tts,
                   transport.output(), PlaybackOutputProbe(gate), assistant]),
         params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=16000,
                               enable_metrics=True, enable_usage_metrics=True),

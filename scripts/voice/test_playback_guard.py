@@ -5,11 +5,13 @@ import threading
 from pathlib import Path
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages/harness-overlay/voice'))
-from playback_guard import PlaybackGate, PlaybackInputGuard
+from playback_guard import (PlaybackGate, PlaybackInputGuard, PlaybackOutputProbe,
+    SpokenReplyProbe, SpokenReplyFinishedFrame)
 from speech_health import SpeechHealth
 from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
     InterruptionFrame, ErrorFrame, InputAudioRawFrame, TranscriptionFrame,
-    VADUserStartedSpeakingFrame)
+    VADUserStartedSpeakingFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame,
+    LLMTextFrame, TTSSpeakFrame)
 from pipecat.processors.frame_processor import FrameDirection
 
 
@@ -89,7 +91,8 @@ async def test_echo_never_enters_segment_or_draft_buffer_and_next_human_can_spea
 
 
 @pytest.mark.asyncio
-async def test_decode_that_finishes_after_playback_unmutes_is_still_discarded(stt):
+@pytest.mark.parametrize('synthesis_only', [False, True])
+async def test_decode_that_finishes_after_playback_unmutes_is_still_discarded(stt, synthesis_only):
     service,gate=stt; began=threading.Event(); release=threading.Event()
     def slow_finish(_audio):
         began.set();assert release.wait(3);return 'late speaker echo'
@@ -97,7 +100,10 @@ async def test_decode_that_finishes_after_playback_unmutes_is_still_discarded(st
     async def collect(): return [f async for f in service.run_stt(bytes(640))]
     decoding=asyncio.create_task(collect())
     while not began.is_set():await asyncio.sleep(.005)
-    gate.observe(BotStartedSpeakingFrame());gate.observe(BotStoppedSpeakingFrame())
+    if synthesis_only:
+        gate.begin_reply(1); gate.finish_reply(1)
+    else:
+        gate.observe(BotStartedSpeakingFrame());gate.observe(BotStoppedSpeakingFrame())
     await asyncio.sleep(.02);release.set()
     assert await decoding==[]
     assert not service.health.partial_text
@@ -115,3 +121,52 @@ async def test_cancel_waits_for_stream_decoder_before_resetting_it(stt):
     with pytest.raises(asyncio.CancelledError):await first
     await second
     assert order==['decoded','reset']
+
+
+def test_reply_remains_protected_between_sentences_and_stale_completion_cannot_unmute():
+    now = [10.0]; gate = PlaybackGate(clock=lambda:now[0])
+    gate.begin_reply(1)
+    assert gate.blocked and gate.reason == 'reply'
+    gate.observe(BotStartedSpeakingFrame()); gate.observe(BotStoppedSpeakingFrame())
+    now[0] += 2
+    assert gate.blocked and gate.reason == 'reply'
+    gate.interrupt_reply(); gate.begin_reply(2); gate.finish_reply(1)
+    assert gate.blocked
+    gate.finish_reply(2)
+    assert gate.reason == 'echo-tail'
+    now[0] += 1
+    assert not gate.blocked
+
+
+@pytest.mark.asyncio
+async def test_reply_probe_holds_first_text_and_notifications_until_ordered_playback_end():
+    from pipecat.tests.utils import run_test
+    gate = PlaybackGate()
+    probe = SpokenReplyProbe(gate)
+    start = LLMFullResponseStartFrame()
+    down, _ = await run_test(probe, frames_to_send=[start,LLMTextFrame('Hello.'),
+        LLMFullResponseEndFrame(),TTSSpeakFrame('Task finished.')])
+    markers = [f for f in down if isinstance(f,SpokenReplyFinishedFrame)]
+    assert len(markers) == 2 and gate.pending_replies == {f.reply_id for f in markers}
+    assert markers[0].reply_id == start.id
+    # These are private lifecycle markers; the client never sees them.
+    public, _ = await run_test(PlaybackOutputProbe(gate),frames_to_send=markers)
+    assert not any(isinstance(f,SpokenReplyFinishedFrame) for f in public)
+    assert not gate.pending_replies
+
+
+@pytest.mark.asyncio
+async def test_tool_only_response_does_not_hold_mic_and_manual_interrupt_cancels_pending_reply():
+    from pipecat.tests.utils import run_test, SleepFrame
+    gate = PlaybackGate()
+    await run_test(SpokenReplyProbe(gate),frames_to_send=[LLMFullResponseStartFrame(),
+        LLMFullResponseEndFrame(),LLMFullResponseStartFrame(),LLMTextFrame('Hello.'),
+        SleepFrame(.02), InterruptionFrame(), SleepFrame(.02)])
+    assert not gate.pending_replies and not gate.blocked
+
+
+def test_pending_synthesis_diagnostics_never_show_listening_or_echo_tail():
+    health = SpeechHealth(); gate = PlaybackGate(); health.playback_gate = gate
+    gate.begin_reply(1)
+    assert health.snapshot()['inputPaused'] and health.snapshot()['stage'] == 'thinking'
+    assert health.snapshot()['inputPauseReason'] == 'reply'

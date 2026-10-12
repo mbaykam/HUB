@@ -1,7 +1,7 @@
 {
   "name": "@lencx/minke-remote-access",
   "description": "HUB optional private remote-access lifecycles",
-  "version": "0.4.28",
+  "version": "0.4.29",
   "private": true,
   "type": "module",
   "scripts": {
