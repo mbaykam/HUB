@@ -18,8 +18,8 @@ for (const group of await readdir(packages, { withFileTypes: true })) {
     if (!pkg.isDirectory()) continue;
     const directory = new URL(`${group.name}/${pkg.name}/`, packages);
     let manifest; try { manifest = JSON.parse(await readFile(new URL("package.json", directory), "utf8")); } catch (error) { if (error.code === "ENOENT") continue; throw error; }
-    const main = manifest.exports?.["."]?.default ?? manifest.main;
-    if (main?.endsWith(".js")) entries.set(manifest.name, new URL(main, directory).href);
+    const packageEntry = manifest.exports?.["."]?.default ?? manifest.main;
+    if (packageEntry?.endsWith(".js")) entries.set(manifest.name, new URL(packageEntry, directory).href);
     for (const [key, value] of Object.entries(manifest.exports ?? {})) {
       const target = typeof value === "string" ? value : value?.default;
       if (key.startsWith("./") && target?.endsWith(".js")) entries.set(manifest.name + key.slice(1), new URL(target, directory).href);
