@@ -31,6 +31,7 @@ const taskFiles = Object.freeze({
     "github-actions-package.test.mjs",
     "github-release.test.mjs",
     "harness-session.test.mjs",
+    "harness-startup-recovery.test.mjs",
     "main-window-devtools.test.mjs",
     "macos-tray.test.mjs",
     "minke-config.test.mjs",

@@ -56,6 +56,14 @@ const MAX_CAPTURED_OUTPUT = 64 * 1024;
 const DEFAULT_STARTUP_TIMEOUT_MS = 90_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
 
+/** Only a bounded readiness delay is eligible for one cold-start recovery. */
+export class HarnessStartupTimeoutError extends Error {
+  constructor(timeoutMs: number, output: string) {
+    super(`Harness did not become ready within ${String(timeoutMs)} ms\n${output}`);
+    this.name = "HarnessStartupTimeoutError";
+  }
+}
+
 export interface HarnessRuntimeEndpoint {
   /** Clean loopback origin safe for persistence, diagnostics, and proxies. */
   readonly origin: string;
@@ -211,6 +219,7 @@ export class HarnessRuntime {
   #capturingReadiness = false;
   #stopping = false;
   #ready = false;
+  #startupGeneration = 0;
 
   constructor(options: HarnessRuntimeOptions) {
     this.#options = options;
@@ -220,6 +229,18 @@ export class HarnessRuntime {
   }
 
   async start(): Promise<HarnessRuntimeEndpoint> {
+    const generation = this.#startupGeneration;
+    try {
+      return await this.#startOnce(generation);
+    } catch (error) {
+      if (!(error instanceof HarnessStartupTimeoutError) ||
+          generation !== this.#startupGeneration) throw error;
+      console.warn("Harness cold start timed out; retrying once after cleanup.");
+      return await this.#startOnce(generation);
+    }
+  }
+
+  async #startOnce(generation: number): Promise<HarnessRuntimeEndpoint> {
     if (this.#child !== undefined) {
       throw new Error("Harness runtime is already running");
     }
@@ -232,6 +253,9 @@ export class HarnessRuntime {
       access(layout.productPatch),
     ]);
     await mkdir(this.#options.dshHome, { recursive: true });
+    if (generation !== this.#startupGeneration) {
+      throw new Error("Harness startup cancelled");
+    }
 
     this.#output = "";
     this.#readinessOutput = "";
@@ -286,9 +310,16 @@ export class HarnessRuntime {
       }
     });
 
-    const endpoint = await this.#waitUntilReady(child);
-    this.#ready = true;
-    return endpoint;
+    try {
+      const endpoint = await this.#waitUntilReady(child);
+      this.#ready = true;
+      return endpoint;
+    } catch (error) {
+      // Never leave the failed child alive behind the startup error dialog,
+      // nor overlap it with a retry. Public stop also cancels pending retries.
+      await this.#stopChild();
+      throw error;
+    }
   }
 
   /** Replace trusted remote authorities without restarting Harness. */
@@ -377,6 +408,11 @@ export class HarnessRuntime {
   }
 
   async stop(): Promise<void> {
+    this.#startupGeneration += 1;
+    await this.#stopChild();
+  }
+
+  async #stopChild(): Promise<void> {
     const child = this.#child;
     if (child === undefined) return;
 
@@ -464,9 +500,7 @@ export class HarnessRuntime {
         const timeout = setTimeout(
           () =>
             finish(
-              new Error(
-                `Harness did not become ready within ${String(timeoutMs)} ms\n${this.#output}`,
-              ),
+              new HarnessStartupTimeoutError(timeoutMs, this.#output),
             ),
           timeoutMs,
         );
