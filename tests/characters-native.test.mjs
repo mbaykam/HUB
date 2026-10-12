@@ -108,7 +108,7 @@ test('native character delegation uses the target model/persona while the coordi
  }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-characters-native-'));await rm(root,{recursive:true,force:true});}
 });
 
-test('stale native selection is corrected before the first prompt and a greeting handoff persists without spawning a worker',{timeout:25000},async()=>{
+test('model identity and natural conversation handoffs stay consistent without a greeting worker',{timeout:25000},async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-characters-native-'));
  const ctx=new Context();let facility,backend;
  try{
@@ -116,7 +116,7 @@ test('stale native selection is corrected before the first prompt and a greeting
   await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});
   await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'spawn'});await ctx.plugin(Storage);
   backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
-  const main=new MockAdapter([toolCallResponse('old-greeting','hub_delegate',{character:'Mira',description:'Greet the user',prompt:'Say hello as Mira'}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.')]);
+  const main=new MockAdapter([toolCallResponse('natural-handoff','hub_switch_character',{character:'Mira'}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.')]);
   const fast=new MockAdapter([textResponse('Hi, I am Mira.'),textResponse('I run fast/mock.'),toolCallResponse('return-hub','hub_switch_character',{character:'HUB'})]);
   ctx.llm.registerAdapter(['main'],main);ctx.llm.registerAdapter(['fast'],fast);ctx.llm.registerAdapter(['legacy'],new MockAdapter([textResponse('Must not run')]));
   let deployment={provider:'main',model:'mock'};const selections=new Map();
@@ -130,14 +130,14 @@ test('stale native selection is corrected before the first prompt and a greeting
   await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Mira',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
   const parent=ctx.agentLoop.create('handoff-parent',{provider:'legacy',model:'old-qwen'});
   async function say(agent,text){const before=agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length;agent.followup(createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}));const end=Date.now()+8000;while(agent.status!=='idle'||agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length<=before){assert.ok(Date.now()<end,'Turn did not settle');await new Promise(r=>setTimeout(r,10));}}
-  await say(parent,'Get Mira');
+  await say(parent,'Biraz Mira’yla sohbet etmek istiyorum; konuşmayı ona devretir misin?');
   assert.equal(main.requests.length,1);assert.equal(fast.requests.length,1);
   assert.match(JSON.stringify(main.requests[0]),/powered by main\/mock/);assert.doesNotMatch(JSON.stringify(main.requests[0]),/powered by legacy\/old-qwen/);
   assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Character: Mira/);
   assert.equal(ctx.agents.list().filter(a=>a.session.header.origin==='subagent').length,0);
   assert.equal(characters.store.selected(parent.id).name,'Mira');assert.equal(deployment.provider,'main');
   await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);
-  await say(parent,'Go back to HUB');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
+  await say(parent,'Let your main assistant take over our conversation again.');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
   const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');
   const revision=characters.store.snapshot().revision;
   const denied=await parent.ctx.tools.execute({agent:parent,name:'hub_switch_character',arguments:{character:'Mira'},callId:'notification-switch',signal:AbortSignal.timeout(1000)});

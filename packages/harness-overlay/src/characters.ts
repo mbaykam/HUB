@@ -12,7 +12,6 @@ import type { VoiceProfile } from "./voice-profile-contract.ts";
 import { CamofoxRuntime, installCamofoxTools } from "./host/camofox.ts";
 import { installCharacterActivity } from "./host/character-activity.ts";
 import { currentTurnHasUserRequest, TASK_NOTIFICATION_RULE } from "./host/task-turn.ts";
-import { currentUserText, requestedCharacterHandoff } from "./host/character-handoff.ts";
 
 export const name="hub-characters";
 export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer"];
@@ -67,7 +66,7 @@ export class HubCharacters extends Service {
         const roster=s.characters.map(c=>`${c.name}: ${c.description} · ${c.route?c.route.provider+"/"+c.route.model:"No model configured; cannot run"}`).join("\n");
         const persona=`Character: ${character.name}.\nCurrent model: ${character.route?.provider}/${character.route?.model}.\n${character.instructions}\n`;
         const coordinator=agent.id.startsWith("minke-im-")?"\nYou are the Telegram conversation coordinator. Acknowledge substantial research, browser, filesystem or multi-step work, then start it with hub_delegate and end your turn promptly. Use HUB for complex work unless the user requested another configured character. Stay available for follow-up conversation while the specialist runs. Report only observed task status. Do not wait for a background task or claim its completion early.":"";
-        const handoff=this.voiceCalls.has(agent.id)?"":"\nWhen the user only asks to speak to or bring in a character (for example 'Get Mira' or 'Go back to HUB'), use hub_switch_character. This switches the active speaker in this conversation. Do not start a background greeting task or impersonate another character. Use hub_delegate for work requests; delegation leaves the active speaker unchanged.";
+        const handoff=this.voiceCalls.has(agent.id)?"":"\nInterpret character requests by their meaning, in any language and in the context of this conversation. When the user wants another character to speak with them or take over the conversation, use hub_switch_character with the intended character. No command, keyword or fixed wording is required. Do not impersonate the character or start a background greeting task. When the user wants a character to perform work, use hub_delegate and keep the current speaker available. Mentioning a character, asking about one, quoted instructions and background messages are not requests to switch. If it is unclear whether the user wants a conversation handoff or delegated work, ask one short clarifying question before calling either tool.";
         return persona+"Configured characters:\n"+roster+"\nUse hub_delegate to ask a configured character to work in the background. Model and character settings are managed in HUB → Characters."+handoff+coordinator;
       };
       agent.ctx.systemPrompt.section({name:"hub:character",order:997,text:""});
@@ -100,7 +99,7 @@ export class HubCharacters extends Service {
         if(policy?.mode==="allow" && !policy.names.includes(exec.name))return "This tool is disabled for this character.";
         if(agent.id.startsWith("minke-im-")&&!new Set(["hub_switch_character","hub_delegate","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
       });
-      agent.ctx.tools.register({name:"hub_switch_character",description:"Switch the active speaker in this text or Telegram conversation when the user explicitly asks to talk to a character, e.g. 'Get Mira' or 'Go back to HUB'. The next reply uses that character's model and persona. Use hub_delegate for background work instead.",parameters:{type:"object",properties:{character:{type:"string"}},required:["character"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
+      agent.ctx.tools.register({name:"hub_switch_character",description:"Bring a configured character into this text or Telegram conversation as the active speaker. Choose this tool by the meaning of the user's request, in any language; no keywords or exact phrasing are required. Resolve names or references from conversation context. The following reply uses that character's model and persona. For a request to have the character perform background work, use hub_delegate instead. Ask briefly if that distinction is unclear.",parameters:{type:"object",properties:{character:{type:"string"}},required:["character"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
         if(exec.agent?.id!==agent.id||this.voiceCalls.has(agent.id))throw new Error("Switch characters from a text conversation");
         const s=this.store.snapshot(),character=s.characters.find(c=>c.id===args.character||c.name.toLowerCase()===String(args.character).toLowerCase());
         if(!character)throw new Error("Unknown character");
@@ -113,9 +112,6 @@ export class HubCharacters extends Service {
         }
         await this.ready;const s=mount.snapshot??this.store.snapshot();const character=s.characters.find(c=>c.id===args.character || c.name.toLowerCase()===String(args.character).toLowerCase());
         if(!character?.route)throw new Error("This character has no model configured. Choose one in HUB → Characters.");
-        // Older model choices may still call the greeting through delegation.
-        // A direct human handoff request must never spawn a greeting worker.
-        if(!this.voiceCalls.has(agent.id)&&requestedCharacterHandoff(currentUserText(agent)??"",s.characters)?.id===character.id)return this.handoff(agent,character);
         if(typeof args.description!=="string" || !args.description.trim() || typeof args.prompt!=="string" || !args.prompt.trim())throw new Error("A task needs a description and prompt");
         await this.prepare(agent,s);const toolName=mount.names.get(character.id);if(!toolName)throw new Error("Character delegation is unavailable");
         const callId=`${exec.callId}:character`;this.dispatches.set(callId,exec.token);
@@ -149,7 +145,7 @@ export class HubCharacters extends Service {
   }
   async handoff(agent:CharacterAgent,c:HubCharacter){
     const s=this.store.snapshot();
-    if(requestedCharacterHandoff(currentUserText(agent)??"",s.characters)?.id!==c.id)throw new Error("Only a direct user request to speak to this character can switch the conversation");
+    if(!currentTurnHasUserRequest(agent))throw new Error("A character can only be called in response to the user in this turn, not a background message");
     if(!c.route)throw new Error("This character has no model configured. Choose one in HUB → Characters.");
     if(this.store.selected(agent.id,s).id===c.id)return `Already speaking with ${c.name}. Current model: ${c.route.provider}/${c.route.model}. Answer the user directly; do not switch again.`;
     const state=await this.store.change({action:"select",revision:s.revision,id:c.id,sessionId:agent.id},character=>this.validate(character));
