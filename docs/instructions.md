@@ -1,9 +1,25 @@
 # AI instructions
 
-Open **Settings → HUB → AI instructions** on desktop or in the PWA. The source selector
-shows the shared Markdown files, each character's instructions and, when enabled,
-Knowledge AI's editorial instructions. The model overview explains which sources
-each assistant uses.
+Open **Settings → HUB → AI instructions** on desktop or in the PWA. Choose what you
+want to change from four sections. Each section explains who uses the instructions,
+labels the text field and gives an example as a placeholder. Examples are not
+active instructions and are never saved unless you write them yourself.
+
+- **Shared behavior** (`Ortak davranış`) sets conversational rules for all characters.
+- **About me** (`Benim hakkımda`) supplies your own preferences and background.
+- **Characters** (`Karakterler`) lets you pick a character and edit its own behavior.
+- **Knowledge AI** sets the curator's note-writing rules. Its model and automatic
+  processing settings remain in the separate Knowledge AI menu.
+
+The fields are optional. Blank shared fields add no extra rules. Save the selected
+section with **Save** (`Kaydet`). Unsaved drafts survive section changes and
+**Refresh** (`Yenile`) while the screen stays open; save each draft before closing
+the screen. **Undo changes** (`Değişikliği geri al`) returns the selected field to
+the latest loaded text. Refresh before undoing if you want an external editor's
+newer version. A stale draft cannot overwrite newer saved instructions.
+
+**Advanced** (`Gelişmiş`) contains the underlying paths, the model/source overview,
+read-only workspace rules and, when available, the last actual chat prompt.
 
 - **SOUL.md** contains your shared conversational behavior rules.
 - **USER.md** contains background and preferences you choose to supply to your
@@ -17,7 +33,7 @@ each assistant uses.
   this screen; manage those files through your existing file editor.
 
 SOUL.md and USER.md start empty. They add no behavior until you write something.
-Their real paths appear in the editor; changes made in an external editor are
+Their real paths appear under Advanced; changes made in an external editor are
 also read before the next model request. They are stored under the private
 character configuration directory, outside the source checkout. Earlier contents
 are retained privately, and a stale edit cannot overwrite a newer version.
