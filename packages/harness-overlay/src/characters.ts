@@ -12,6 +12,7 @@ import type { VoiceProfile } from "./voice-profile-contract.ts";
 import { CamofoxRuntime, installCamofoxTools } from "./host/camofox.ts";
 import { installCharacterActivity } from "./host/character-activity.ts";
 import { currentTurnHasUserRequest, TASK_NOTIFICATION_RULE } from "./host/task-turn.ts";
+import {installInstructionFiles} from "./host/instruction-files.ts";
 
 export const name="hub-characters";
 export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer"];
@@ -129,6 +130,7 @@ export class HubCharacters extends Service {
     ctx.on("session/event",(session:any,event:any)=>{if(event.type!=="turn/start"||this.voiceCalls.has(session.header.id))return;const mount=this.mounts.get(session.header.id);if(mount){try{mount.turnSnapshot=this.store.snapshot();}catch{}}},{global:true});
     for(const agent of ctx.agents.list())attach(agent as any);
     ctx.effect(()=>this.installWeb(),"HUB character management");
+    ctx.effect(()=>installInstructionFiles(ctx,this),"HUB editable instruction files");
   }
   async validate(c:HubCharacter){if(c.route)await this.host.llm.resolveCallConfig(c.route);}
   async syncNativeRoute(agent:CharacterAgent,c:HubCharacter){

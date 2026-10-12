@@ -47,6 +47,7 @@ const { JsonStorageBackend } = await native("@deepseek-ai/dsh-storage-json");
 
 const { createUserMessage } = await native('@deepseek-ai/dsh-llm');
 const { HubCharacters } = await import('../packages/harness-overlay/src/characters.ts');
+const { InstructionFiles } = await import('../packages/harness-overlay/src/host/instruction-files.ts');
 const { CamofoxRuntime } = await import('../packages/harness-overlay/src/host/camofox.ts');
 const { attachNativeVoiceTasks } = await import('../packages/harness-overlay/src/host/voice-tasks.ts');
 const { installModelSelection } = await import('../vendor/deepseek-harness/packages/core/agent/src/model-selection.ts');
@@ -129,11 +130,14 @@ test('model identity and natural conversation handoffs stay consistent without a
   const state=characters.store.snapshot(),voice=state.characters.find(c=>c.id===state.voiceId);
   await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Mira',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
   const parent=ctx.agentLoop.create('handoff-parent',{provider:'legacy',model:'old-qwen'});
+  const instructionFiles=new InstructionFiles(join(root,'characters','instructions'));await instructionFiles.load();const soul=instructionFiles.files().find(f=>f.id==='SOUL.md');await instructionFiles.save('SOUL.md',soul.hash,'Shared instruction proof for native requests.');
   async function say(agent,text){const before=agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length;agent.followup(createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}));const end=Date.now()+8000;while(agent.status!=='idle'||agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length<=before){assert.ok(Date.now()<end,'Turn did not settle');await new Promise(r=>setTimeout(r,10));}}
   await say(parent,'Biraz Mira’yla sohbet etmek istiyorum; konuşmayı ona devretir misin?');
   assert.equal(main.requests.length,1);assert.equal(fast.requests.length,1);
   assert.match(JSON.stringify(main.requests[0]),/powered by main\/mock/);assert.doesNotMatch(JSON.stringify(main.requests[0]),/powered by legacy\/old-qwen/);
   assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Character: Mira/);
+  assert.match(main.requests[0].system,/Shared instruction proof/);assert.match(fast.requests[0].system,/Shared instruction proof/);
+  const memory=ctx.agentLoop.create('hub-memory-instruction-test',{provider:'main',model:'mock'});const assembled=await ctx.systemPrompt.assemble({scope:memory});assert.ok(!assembled.sections.some(s=>s.text.includes('Shared instruction proof')));
   assert.equal(ctx.agents.list().filter(a=>a.session.header.origin==='subagent').length,0);
   assert.equal(characters.store.selected(parent.id).name,'Mira');assert.equal(deployment.provider,'main');
   await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);

@@ -43,6 +43,42 @@ Budgets are estimated guards, not a replacement for the provider's actual bill.
 A paused/failed job should be inspected before retrying. Capture failures do not
 need to block normal chat.
 
+**Test model connection** performs a small structured response without writing a
+note. A model listed in a catalog can still be unavailable to the current account.
+Unsupported-model or authentication failures stop that route's remaining queue;
+choose a working model or fix the connection, then test and recover failed jobs.
+The job list reports the failure code/message and distinguishes note updates,
+skipped episodes, archive-only results and rejected suggestions. Old generic
+completed records are not presented as proven note writes.
+Failures remain visible even after later successful jobs. If an old-source
+proposal would replace newer text, the same curator can make one budgeted
+correction before the unchanged chronology and human-edit checks run again.
+
+New capture excludes injected memory, runtime instructions and evaluation chats.
+Delegated work specifications are task data rather than fresh human preferences.
+With **confirmed-only** evidence, worker results remain archived until human
+confirmation; allowing useful explanations still cannot create personal
+preferences from a worker. Bilingual note language and real inline links remain
+independent of the chosen curator model.
+
+## Using knowledge as memory
+
+Before a new user request, permitted agents retrieve a small selection of saved
+notes automatically. Retrieval combines the current message, recent human
+conversation topics, a bounded number of explicitly classified personal
+preferences and directly linked notes. Multilingual local embeddings supplement
+keyword matching. Empty notes are excluded; the entire vault is not inserted.
+
+The model can also use its allowed knowledge search/read tools. Retrieval remains
+subject to character and native permissions, and has a deadline so it cannot
+indefinitely hold a voice reply. Current user corrections take precedence over
+historical notes. The **Usage** panel shows recent retrieved titles, why they were
+selected, empty searches and unavailable retrievals; open a title to inspect the
+saved content. This recent diagnostic list resets when the host restarts.
+
+Use [AI instructions](instructions.md) to inspect and edit shared character rules
+and the curator's separate editorial instructions.
+
 Connections should occur in meaningful prose. The validator rejects invented
 targets, empty notes and filler link lists. Source records and technical bookkeeping
 are maintained outside the ordinary reading text. You can also open/edit the

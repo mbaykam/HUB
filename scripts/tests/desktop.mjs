@@ -99,6 +99,8 @@ const taskFiles = Object.freeze({
     "agent-media.test.mjs",
     "knowledge-assets.test.mjs",
     "knowledge.test.mjs",
+    "knowledge-recall-instructions.test.mjs",
+    "instruction-settings.test.mjs",
     "memory-topics.test.mjs",
     "speech-model-downloads.test.mjs",
     "speech-preview.test.mjs",

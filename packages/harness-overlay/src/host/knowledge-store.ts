@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, writeFile, rename, lstat, realpath, unlink } 
 import { resolve, relative, join, basename } from "node:path";
 import type { KnowledgeGraph, KnowledgeNode, KnowledgeNote, KnowledgePlan, KnowledgeSource } from "../knowledge-contract.ts";
 import {KnowledgeAssets} from "./knowledge-assets.ts";
+import {boundedKnowledgeRecall} from "./knowledge-recall.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export async function atomicJson(path: string, value: unknown) {
@@ -14,7 +15,7 @@ export async function atomicJson(path: string, value: unknown) {
 const wiki = /\[\[([^\]\n]+)\]\]/g;
 const safeId = /^[a-zA-Z0-9_-]{3,100}$/;
 interface Stored extends KnowledgeNode { raw: string; body: string; front: string; path: string }
-interface Journal { id: string; state: "prepared" | "committed" | "undone" | "conflict"; source: KnowledgeSource; changes: { path: string; before: string | null; after: string; id: string }[] }
+interface Journal { id: string; state: "prepared" | "committed" | "undone" | "conflict"; source: KnowledgeSource; changes: { path: string; before: string | null; after: string; id: string;category?:string;beforeCategory?:string }[] }
 /** Markdown is canonical. Queue, provenance and undo are operational sidecars,
  * kept outside the vault so Obsidian never displays artificial graph nodes. */
 export class KnowledgeStore {
@@ -111,12 +112,25 @@ export class KnowledgeStore {
   }
   async search(query: string, limit = 12) {
     const terms = [...new Set(query.toLocaleLowerCase("tr").match(/[\p{L}\p{N}]{2,40}/gu) ?? [])].slice(0,80);
-    const notes=await this.scan();let semantic:{id:string;score:number}[]=[];
-    if(this.rank)try{semantic=await this.rank(query,notes,limit);}catch{/* Lexical search remains available if local model is down. */}
+    const notes=(await this.scan()).filter(n=>n.body.trim());let semantic:{id:string;score:number}[]=[];
+    if(this.rank)try{semantic=await boundedKnowledgeRecall(this.rank(query,notes,limit),AbortSignal.timeout(850));}catch{/* Lexical search remains available within the conversation deadline. */}
     return notes.map(note => ({ note, score: terms.reduce((s,t) => s + (note.title.toLocaleLowerCase("tr").includes(t) ? 6 : 0) + (note.body.toLocaleLowerCase("tr").includes(t) ? 1 : 0),0) + (semantic.find(s=>s.id===note.id && s.score>=.35)?.score??0)*15 }))
       .filter(n => n.score > 0).sort((a,b) => b.score-a.score).slice(0,limit).map(n => n.note);
   }
-  private async metadata(): Promise<Record<string,{ completedAt: number; sources: { id:string; completedAt:number; channel:string }[]; deleted?:boolean; title?:string; path?:string; lastHash?:string }>> {
+  /** Small relevant memory, stable human preferences and one-hop real links. */
+  async recall(query:string,topicContext=""){
+    const [direct,context,notes,meta]=await Promise.all([this.search(query,4),topicContext.trim()?this.search(topicContext,3):Promise.resolve([]),this.scan(),this.metadata()]);
+    const selected:{note:Stored;reason:string}[]=[];
+    const add=(note:Stored,reason:string)=>{if(note.body.trim()&&!selected.some(n=>n.note.id===note.id))selected.push({note,reason});};
+    for(const n of notes.filter(n=>meta[n.id]?.category==="preferences"&&!meta[n.id]?.deleted).sort((a,b)=>(meta[b.id]?.completedAt??0)-(meta[a.id]?.completedAt??0)).slice(0,2))add(n,"personal-preference");
+    for(const n of direct.slice(0,3))add(n,"current-message");
+    for(const n of context.slice(0,2))if(selected.length<6)add(n,"conversation-topic");
+    let neighbors=0;for(const {note} of [...selected])for(const link of note.body.matchAll(wiki)){
+      const related=this.resolveLink(link[1]!,notes,note);if(related&&selected.length<7&&neighbors<2&&!selected.some(n=>n.note.id===related.id)){add(related,"linked-note");neighbors++;}
+    }
+    return selected.slice(0,7);
+  }
+  private async metadata(): Promise<Record<string,{ completedAt: number; sources: { id:string; completedAt:number; channel:string }[]; category?:string;deleted?:boolean; title?:string; path?:string; lastHash?:string }>> {
     try { return JSON.parse(await readFile(join(this.root,"notes.json"),"utf8")); } catch (e:any) { if (e.code !== "ENOENT") throw e; return {}; }
   }
   async cutoff() {
@@ -189,7 +203,7 @@ export class KnowledgeStore {
         }
         if(/^\s*(?:#{1,6}\s*|[-*]\s*)?(?:part_of|related notes|connections|bağlantılar|ilgili notlar)\s*(?:[:\[]|$)/im.test(body) || /<!--|\[\[\s*(?:\||\]\])/i.test(body)) throw new Error("Artificial link or metadata clutter");
         const front=existing?.front || `---\nhub_id: ${JSON.stringify(change.id)}\ntitle: ${JSON.stringify(change.title)}\ntype: hub_knowledge\n---\n`;
-        journal.changes.push({id:change.id,path,before:existing?.raw??null,after:front+body+"\n"});
+        journal.changes.push({id:change.id,path,before:existing?.raw??null,after:front+body+"\n",category:change.category,beforeCategory:meta[change.id]?.category});
       }
       // Preserve all preexisting human frontmatter and exact before snapshots.
       await atomicJson(join(this.root,"journal",`${journal.id}.json`),journal);
@@ -203,7 +217,7 @@ export class KnowledgeStore {
     for(const c of journal.changes) { const path=await this.file(c.path); const now=await readFile(path,"utf8").catch((e:any)=>{if(e.code!=="ENOENT") throw e;return null;}); if(now!==c.before && now!==c.after) {journal.state="conflict";await atomicJson(join(this.root,"journal",`${journal.id}.json`),journal);throw new Error("Concurrent note edit; transaction needs review");} }
     for(const c of journal.changes) { const path=await this.file(c.path);const now=await readFile(path,"utf8").catch((e:any)=>{if(e.code!=="ENOENT")throw e;return null;});if(now!==c.before&&now!==c.after)throw new Error("Concurrent note edit during transaction");await mkdir(resolve(path,".."),{recursive:true}); const tmp=path+`.${journal.id}.tmp`;await writeFile(tmp,c.after,{mode:0o600});await rename(tmp,path); }
     const meta=await this.metadata(),source=journal.source;
-    for(const c of journal.changes)meta[c.id]={completedAt:Math.max(meta[c.id]?.completedAt??0,source.completedAt),sources:[...(meta[c.id]?.sources??[]).filter(s=>s.id!==source.id),{id:source.id,completedAt:source.completedAt,channel:source.channel}],title:basename(c.path,".md"),path:c.path,lastHash:digest(c.after)};
+    for(const c of journal.changes)meta[c.id]={completedAt:Math.max(meta[c.id]?.completedAt??0,source.completedAt),sources:[...(meta[c.id]?.sources??[]).filter(s=>s.id!==source.id),{id:source.id,completedAt:source.completedAt,channel:source.channel}],category:c.category??meta[c.id]?.category,title:basename(c.path,".md"),path:c.path,lastHash:digest(c.after)};
     await atomicJson(join(this.root,"notes.json"),meta);
     journal.state="committed";await atomicJson(join(this.root,"journal",`${journal.id}.json`),journal);
   }
@@ -215,7 +229,7 @@ export class KnowledgeStore {
     return this.exclusive(async()=>{const path=join(this.root,"journal",`${id}.json`),j=JSON.parse(await readFile(path,"utf8")) as Journal;if(j.state!=="committed")throw new Error("Revision cannot be undone");
       for(const c of j.changes) if(await readFile(await this.file(c.path),"utf8")!==c.after)throw new Error("A newer edit must be preserved");
       for(const c of j.changes) {const file=await this.file(c.path);if(c.before===null)await unlink(file);else {const tmp=file+`.${id}.tmp`;await writeFile(tmp,c.before);await rename(tmp,file);}}
-      const meta=await this.metadata();for(const c of j.changes){const m=meta[c.id];if(!m)continue;m.sources=m.sources.filter(s=>s.id!==j.source.id);m.completedAt=Math.max(0,...m.sources.map(s=>s.completedAt));if(c.before===null)m.deleted=true;}await atomicJson(join(this.root,"notes.json"),meta);
+      const meta=await this.metadata();for(const c of j.changes){const m=meta[c.id];if(!m)continue;m.sources=m.sources.filter(s=>s.id!==j.source.id);m.completedAt=Math.max(0,...m.sources.map(s=>s.completedAt));m.category=c.beforeCategory;if(c.before===null)m.deleted=true;}await atomicJson(join(this.root,"notes.json"),meta);
       j.state="undone";await atomicJson(path,j);
     });
   }

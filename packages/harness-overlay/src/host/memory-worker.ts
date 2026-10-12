@@ -46,8 +46,11 @@ export function createMemoryGenerator(ports: MemoryWorkerPorts, route: { provide
       await handle.agent.whenIdle();
       signal.throwIfAborted();
       const events = [...handle.agent.session.snapshotEvents()].reverse();
-      const end = events.find(event => event.type === "turn/end")?.data as { reason?: { kind?: string } } | undefined;
-      if (end?.reason?.kind !== "completed") throw new Error("Reflection did not complete");
+      const end = events.find(event => event.type === "turn/end")?.data as { reason?: { kind?: string;error?:{code?:string;message?:string} } } | undefined;
+      if (end?.reason?.kind !== "completed") {
+        const error=new Error(end?.reason?.error?.message??"Reflection did not complete");
+        Object.assign(error,{code:end?.reason?.error?.code??"REFLECTION_INCOMPLETE"});throw error;
+      }
       const answer = events.find(event => event.type === "assistant/message")?.data as {
         message?: { content?: { type: string; text?: string }[] };
       } | undefined;

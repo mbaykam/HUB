@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import {InstructionSettings} from "../preferences/InstructionSettings.tsx";
 import type {
   HarnessClientContext,
 } from "../core/context.ts";
@@ -265,6 +266,7 @@ export function installTabs(
   const preferencesT = ctx.locale.bind<PreferencesLocaleKey>(
     PREFERENCES_NAMESPACE,
   ) as PreferencesTranslate;
+  ctx.effect(()=>settings.register({id:"hub-instructions",order:1,label:()=>"AI instructions",icon:"preferences",render:()=> <InstructionSettings currentSession={()=>ctx.sessions.list.getSnapshot().current}/>}),"hub: instruction settings");
   if (
     terminalSettingsStore.available ||
     filesPort.available ||
