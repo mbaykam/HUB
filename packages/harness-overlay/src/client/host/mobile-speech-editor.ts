@@ -18,6 +18,9 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   quality.value = String(seed?.tts.engine === "supertonic" ? seed.tts.steps ?? 6 : 6); field("Voice quality", quality);
   const voiceHeading = el("h4", "Choose a voice · listen first"); panel.append(voiceHeading);
   const voices = el("div"); voices.className = "hub-speech-voices"; panel.append(voices);
+  const voiceRows = new Map<string, { row: HTMLElement; choose: HTMLButtonElement; listen: HTMLButtonElement; turkish?: HTMLButtonElement }>();
+  let voicesKey = "";
+  const voiceNotice = el("p", "Install this voice engine’s models below before using it.");
   const turkish = button("▶ Türkçe · DFKI voice", () => void audition("tr")); panel.append(turkish);
   const voiceMapping = el("p"); voiceMapping.setAttribute("data-speech-voice-mapping", ""); panel.append(voiceMapping);
   let audio = el("audio"); audio.controls = true; audio.hidden = true; audio.setAttribute("playsinline", ""); panel.append(audio, status);
@@ -66,19 +69,29 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
     turkish.hidden = !bilingual;
     voiceMapping.textContent = multilingual ? `${voiceLabel(selectedVoice)} · the same speaker in English and Türkçe.` : bilingual ? `English: ${voiceLabel(selectedVoice)}. Türkçe: DFKI. These are separate voices; the English voice cannot speak Turkish with this engine.` : "";
     voiceMapping.hidden = !bilingual && !multilingual;
-    voices.replaceChildren(); const item = catalog?.tts.find(item => key(item) === engine.value);
+    const item = catalog?.tts.find(item => key(item) === engine.value);
+    const nextKey = JSON.stringify([engine.value, item?.voices]);
+    if (nextKey !== voicesKey) { voicesKey = nextKey; voiceRows.clear(); voices.replaceChildren(); }
     outputLanguage.disabled = !bilingual && !multilingual;
     quality.parentElement!.hidden = !multilingual;
     turkish.hidden = item?.engine !== "bilingual"; turkish.disabled = !item?.available || !samples.has(sampleKey("tr",selectedVoice));
     for (const id of item?.voices ?? []) {
-      const row = el("article"); row.toggleAttribute("data-selected", id === selectedVoice);
-      const choose = button(voiceLabel(id), () => { selectedVoice = id; renderVoices(); panel.dispatchEvent(new Event("change", { bubbles: true })); }); choose.setAttribute("aria-pressed", String(id === selectedVoice));
+      let controls = voiceRows.get(id);
+      if (!controls) {
+        const row = el("article");
+        const choose = button(voiceLabel(id), () => { selectedVoice = id; renderVoices(); panel.dispatchEvent(new Event("change", { bubbles: true })); });
+        const listen = button("Loading…", () => void audition(id.startsWith("tr_") ? "tr" : "en", id));
+        const trListen = multilingual ? button("Loading…", () => void audition("tr", id)) : undefined;
+        row.append(choose, listen); if (trListen) row.append(trListen); voices.append(row);
+        controls = { row, choose, listen, turkish: trListen }; voiceRows.set(id, controls);
+      }
+      const { row, choose, listen, turkish: trListen } = controls;
+      row.toggleAttribute("data-selected", id === selectedVoice); choose.setAttribute("aria-pressed", String(id === selectedVoice));
       const ready=samples.has(sampleKey(id.startsWith("tr_")?"tr":"en",id));
-      const listen = button(ready ? multilingual ? "▶ English" : "▶ Listen" : "Loading…", () => void audition(id.startsWith("tr_") ? "tr" : "en", id)); listen.setAttribute("aria-label", `Listen to ${voiceLabel(id)}${multilingual ? " in English" : ""}`); listen.disabled = !item?.available || !ready;
-      row.append(choose, listen); voices.append(row);
-      if(multilingual){const trReady=samples.has(sampleKey("tr",id)); const trListen=button(trReady?"▶ Türkçe":"Loading…",()=>void audition("tr",id));trListen.setAttribute("aria-label",`Listen to ${voiceLabel(id)} in Turkish`);trListen.disabled=!item?.available||!trReady;row.append(trListen);}
+      listen.textContent = ready ? multilingual ? "▶ English" : "▶ Listen" : "Loading…"; listen.setAttribute("aria-label", `Listen to ${voiceLabel(id)}${multilingual ? " in English" : ""}`); listen.disabled = !item?.available || !ready;
+      if(trListen){const trReady=samples.has(sampleKey("tr",id));trListen.textContent=trReady?"▶ Türkçe":"Loading…";trListen.setAttribute("aria-label",`Listen to ${voiceLabel(id)} in Turkish`);trListen.disabled=!item?.available||!trReady;}
     }
-    if (!item?.available) voices.append(el("p", "Install this voice engine’s models below before using it."));
+    voiceNotice.hidden = !!item?.available; if (voiceNotice.parentElement !== voices) voices.append(voiceNotice);
   }
   function audition(lang: "en" | "tr", voice = selectedVoice) {
     const ready=samples.get(sampleKey(lang,voice));if(!ready)return;

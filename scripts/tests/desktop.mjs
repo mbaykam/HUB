@@ -105,6 +105,7 @@ const taskFiles = Object.freeze({
     "memory-topics.test.mjs",
     "speech-model-downloads.test.mjs",
     "speech-preview.test.mjs",
+    "speech-editor.test.mjs",
     "telegram-media.test.mjs",
     "telegram-voice.test.mjs",
     "ui-update.test.mjs",
