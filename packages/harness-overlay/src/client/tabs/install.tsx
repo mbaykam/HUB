@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import {InstructionSettings} from "../preferences/InstructionSettings.tsx";
+import { HubControlsSettings } from "../preferences/HubControlsSettings.tsx";
 import type {
   HarnessClientContext,
 } from "../core/context.ts";
@@ -210,11 +211,15 @@ export function installTabs(
       "minke-overlay: mobile sidebar drawer",
     );
     ctx.effect(
-      () => installMobileRightDrawer(document, ctx.sessions, conversationHistory),
+      () => installMobileRightDrawer(document),
       "minke-overlay: mobile right drawer",
     );
     ctx.effect(() => installMobileHubs(ctx), "hub: PWA voice and text hubs");
     ctx.effect(() => installMobileSettings(), "hub: phone-first native Settings navigation");
+    ctx.effect(() => settings.register({
+      id: "hub-controls", order: -1, label: () => "Assistants", icon: "preferences",
+      render: () => <HubControlsSettings sessions={ctx.sessions} history={conversationHistory} />,
+    }), "hub: assistants and integrations in Settings");
     ctx.inject?.(["uiWorkspace"], scope => {
       scope.effect(() => installMobileConversationVisibility(ctx, scope.get("uiWorkspace") as NavigationVisibilityPort, document, conversationHistory), "hub: PWA conversation visibility");
     });

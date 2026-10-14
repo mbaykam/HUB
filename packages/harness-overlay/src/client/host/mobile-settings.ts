@@ -45,7 +45,7 @@ export function installMobileSettings(root: Document = document): () => void {
     let selected: HTMLButtonElement | undefined;
     const descriptions: Record<string, string> = {
       General: "Appearance, language & conversations",
-      HUB: "Your workspace preferences", Minke: "Your workspace preferences",
+      HUB: "Characters, Knowledge AI, Telegram & workspace", Minke: "Characters, Knowledge AI, Telegram & workspace",
       Models: "Models, providers & connections",
       Plugins: "Extensions & integrations",
       "Agent presets": "Instructions & assistant behavior",

@@ -72,6 +72,10 @@ Conversation characters. Voice, knowledge curation and Telegram calls are
 **optional extensions requiring their own local runtime/profile setup**; they
 are not provisioned by the source command above.
 
+In the mobile PWA, open **Settings → HUB → Assistants** for characters,
+Knowledge AI, Telegram, provider usage and voice history. The right panel keeps
+the Knowledge graph available for browsing your notes and their connections.
+
 Follow the [setup guide](docs/setup.md) for model configuration, authenticated
 mobile access and optional capabilities. This repository includes code and
 application assets; it does not bundle accounts, provider credentials, personal

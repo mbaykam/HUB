@@ -43,6 +43,10 @@ const usageRuntime = readFileSync(
   ),
   "utf8",
 );
+const settingsControls = readFileSync(
+  new URL("../packages/harness-overlay/src/client/host/hub-settings-controls.ts", import.meta.url),
+  "utf8",
+);
 
 test("mobile right drawer tracks a full-canvas right-edge gesture", () => {
   assert.equal(clampMobileRightDrawerProgress(-1), 0);
@@ -123,12 +127,14 @@ test("mobile right drawer owns Settings and accessible dismissal", () => {
   );
   assert.match(
     installer,
-    /installMobileSidebarDrawer[\s\S]*installMobileRightDrawer\(document, ctx\.sessions, conversationHistory\)/u,
+    /installMobileSidebarDrawer[\s\S]*installMobileRightDrawer\(document\)/u,
   );
 });
 
-test("mobile right drawer contains the live provider usage meter", () => {
-  assert.match(runtime, /installMobileUsageMeter\(body, this\.#root\)/u);
+test("Knowledge drawer leaves assistant management and usage in Settings", () => {
+  assert.match(runtime, /installMobileMemoryGraph\(body, this\.#root\)/u);
+  assert.doesNotMatch(runtime, /installMobile(?:UsageMeter|Memory\(|Telegram|VoiceHistory)|hub:characters-open/u);
+  assert.match(settingsControls, /installMobileUsageMeter\(usage, root\)/u);
   assert.doesNotMatch(
     runtime,
     /body\.setAttribute\("aria-hidden", "true"\)/u,

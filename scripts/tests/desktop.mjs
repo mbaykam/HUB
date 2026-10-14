@@ -74,6 +74,7 @@ const taskFiles = Object.freeze({
     "mobile-sidebar-drawer.test.mjs",
     "mobile-right-drawer.test.mjs",
     "minke-settings.test.mjs",
+    "hub-settings-controls.test.mjs",
     "plugin-catalog.test.mjs",
     "pwa.test.mjs",
     "session-export.test.mjs",

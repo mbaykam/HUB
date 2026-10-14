@@ -1,0 +1,8 @@
+[data-hub-settings-controls] { min-width: 0; }
+[data-hub-settings-controls] > h3 { margin: 0 0 8px; font-size: 17px; font-weight: 500; }
+[data-hub-settings-controls] > p { margin: 0 0 20px; color: var(--dsw-alias-label-secondary); font-size: 14px; line-height: 1.5; }
+[data-hub-settings-connections] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+[data-hub-settings-connections] > button { width: 100%; min-height: 54px; margin: 0; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 18px; background: color-mix(in srgb, currentColor 4%, transparent); color: inherit; font: inherit; font-size: 15px; cursor: pointer; }
+[data-hub-settings-connections] > button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }
+html[data-minke-mobile-web] [data-hub-settings-controls] [data-minke-usage-toggle] { width: 100%; }
+[data-hub-settings-controls] [data-hub-voice-history] { margin-top: 12px; }
