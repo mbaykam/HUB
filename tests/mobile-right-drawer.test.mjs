@@ -5,6 +5,7 @@ import {
   JSDOM,
 } from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
 import {
+  MobileRightDrawerRuntime,
   MOBILE_RIGHT_DRAWER_FLING_VELOCITY,
   MOBILE_RIGHT_DRAWER_OPEN_THRESHOLD,
   clampMobileRightDrawerProgress,
@@ -41,10 +42,6 @@ const usageRuntime = readFileSync(
     "../packages/harness-overlay/src/client/host/mobile-usage-meter.ts",
     import.meta.url,
   ),
-  "utf8",
-);
-const settingsControls = readFileSync(
-  new URL("../packages/harness-overlay/src/client/host/hub-settings-controls.ts", import.meta.url),
   "utf8",
 );
 
@@ -131,10 +128,7 @@ test("mobile right drawer owns Settings and accessible dismissal", () => {
   );
 });
 
-test("Knowledge drawer leaves assistant management and usage in Settings", () => {
-  assert.match(runtime, /installMobileMemoryGraph\(body, this\.#root\)/u);
-  assert.doesNotMatch(runtime, /installMobile(?:UsageMeter|Memory\(|Telegram|VoiceHistory)|hub:characters-open/u);
-  assert.match(settingsControls, /installMobileUsageMeter\(usage, root\)/u);
+test("mobile provider usage keeps its existing compact presentation", () => {
   assert.doesNotMatch(
     runtime,
     /body\.setAttribute\("aria-hidden", "true"\)/u,
@@ -149,6 +143,26 @@ test("Knowledge drawer leaves assistant management and usage in Settings", () =>
   assert.match(styles, /data-minke-usage-toggle[\s\S]*width:\s*calc\(100% - 58px\)/u);
   assert.match(styles, /data-minke-usage-card[\s\S]*backdrop-filter:\s*blur/u);
   assert.match(styles, /data-minke-usage-progress-track/u);
+});
+
+test("Knowledge drawer renders only the graph while retaining access to Settings", async () => {
+  const dom = new JSDOM(`<!doctype html><html data-minke-mobile-web><body>
+    <div data-minke-mobile-sidebar-frame><main data-shell-overlay></main></div>
+    <div data-slot="sidebar.settings"><div><button aria-haspopup="dialog" aria-expanded="false">Settings</button></div></div>
+  </body></html>`, { url: "https://hub.test/", pretendToBeVisual: true });
+  Object.defineProperty(dom.window, "innerWidth", { value: 390 });
+  const root = dom.window.document;
+  const drawer = new MobileRightDrawerRuntime(root);
+  drawer.start();
+  try {
+    await new Promise(resolve => dom.window.requestAnimationFrame(() => dom.window.requestAnimationFrame(resolve)));
+    const body = root.querySelector("[data-minke-mobile-right-drawer-body]");
+    assert.equal(body.children.length, 1);
+    assert.equal(body.firstElementChild.tagName, "BUTTON");
+    assert.equal(body.firstElementChild.hasAttribute("data-hub-graph-tile"), true);
+    assert.equal(root.querySelector("[data-minke-mobile-right-drawer-settings]").textContent, "Settings");
+    assert.equal(root.querySelector("[data-minke-mobile-right-drawer]").getAttribute("aria-label"), "Knowledge");
+  } finally { drawer.dispose(); dom.window.close(); }
 });
 
 test("mobile usage stays compact until its dropdown is opened", () => {
