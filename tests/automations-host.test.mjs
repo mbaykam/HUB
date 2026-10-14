@@ -4,9 +4,19 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Readable} from 'node:stream';
-import {installAutomations} from '../packages/harness-overlay/src/host/automations.ts';
+import {installAutomations,automationActivity} from '../packages/harness-overlay/src/host/automations.ts';
+import {parseHubAgentActivity} from '../packages/harness-overlay/src/agent-activity-contract.ts';
 import {defaultAutomation} from '../packages/harness-overlay/src/automation-contract.ts';
 import {ProviderGate} from '../packages/harness-overlay/src/host/provider-gate.ts';
+
+test('long automation results produce accepted Telegram previews without replacing the durable result',()=>{
+ const job={title:'Fixture result',sourceSessionId:'minke-im-telegram-'+('a'.repeat(32))},run={id:'fixture-run',sessionId:'hub-automation-fixture'},answer='Observed result: '+('bilingual Türkçe / English. '.repeat(400));
+ const activity=automationActivity(job,run,'completed',answer);
+ assert.ok(activity);assert.equal(parseHubAgentActivity({...activity,text:answer}),undefined,'The old full-answer payload was silently rejected');
+ assert.equal(parseHubAgentActivity(activity),activity);assert.ok(activity.text.startsWith('Observed result: '));assert.ok(activity.text.endsWith('Full result is saved in HUB → Automations.'));assert.ok(activity.text.length<=8000);assert.ok(answer.length>activity.text.length);
+ assert.equal(automationActivity(job,run,'failed','Provider unavailable').text,'Provider unavailable');
+ assert.equal(automationActivity({...job,sourceSessionId:'untrusted-target'},run,'completed',answer),undefined);
+});
 
 test('automation HTTP service owns its character profile directory and authenticates before all mutations',async t=>{
  const root=await mkdtemp(join(tmpdir(),'hub-automation-host-'));t.after(()=>rm(root,{recursive:true,force:true}));let route,creates=0;
