@@ -17,11 +17,12 @@ for line in sys.stdin:
   r=json.loads(line); notes=r['notes']; valid={n['id'] for n in notes}; vectors=[]
   for n in notes:
    old=db.execute('SELECT hash,data FROM vectors WHERE id=?',(n['id'],)).fetchone()
-   if old and old[0]==n['hash']: vs=json.loads(old[1])
+   version=n['hash']+':full-chunks-v2'
+   if old and old[0]==version: vs=json.loads(old[1])
    else:
-    text=n['title']+'\n'+n['body']; chunks=[text[i:i+900] for i in range(0,len(text),700)][:80]
+    text=n['title']+'\n'+n['body']; chunks=[text[i:i+900] for i in range(0,len(text),700)]
     vs=[v.tolist() for v in model.embed(chunks)]
-    db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(n['id'],n['hash'],json.dumps(vs)))
+    db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(n['id'],version,json.dumps(vs)))
    vectors.append((n['id'],vs))
   db.commit()
   if r.get('op')=='layout':

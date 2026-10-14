@@ -1,6 +1,7 @@
 import { readFile,writeFile,rename,mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { HUB_AGENT_ACTIVITY_CHANNEL,parseHubAgentActivity,type HubAgentActivity } from "../agent-activity-contract.ts";
+import {operationFailure} from "./operation-failure.ts";
 
 /** Project observed child actions/results, never reasoning or tool arguments.
  * The Electron parent chooses the already-authorized Telegram destination. */
@@ -33,9 +34,9 @@ export function installCharacterActivity(ctx:any,root:string){
       publish({channel:HUB_AGENT_ACTIVITY_CHANNEL,version:1,rootSessionId:task.rootSessionId,taskId:session.header.id,eventId:session.header.id+":"+event.seq,status:"running",label:(task.label+" · "+action).replace(/[\u0000-\u001f]/g," ").slice(0,200)});
     }
     if(event.type==="turn/end"){
-      task.seq=event.seq;const reason=String(event.data?.reason??event.data?.endReason??"");
+      task.seq=event.seq;const failure=operationFailure(event.data?.reason??event.data?.endReason);
       if(!task.lastText){const last=session.snapshotEvents?.().filter((e:any)=>e.type==="assistant/message").at(-1);task.lastText=(last?.data?.message?.content??[]).filter((c:any)=>c.type==="text").map((c:any)=>c.text).join("\n").slice(0,8000);}
-      const failed=/error|fail|interrupt|cancel/i.test(reason);
+      const failed=!!failure;
       publish({channel:HUB_AGENT_ACTIVITY_CHANNEL,version:1,rootSessionId:task.rootSessionId,taskId:session.header.id,eventId:session.header.id+":"+event.seq,status:failed?"failed":"completed",label:task.label,text:task.lastText||undefined});task.lastText="";
     }
   },{global:true});

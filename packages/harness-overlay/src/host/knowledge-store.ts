@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile, rename, lstat, realpath, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rename, lstat, realpath, unlink,open } from "node:fs/promises";
 import { resolve, relative, join, basename } from "node:path";
 import type { KnowledgeGraph, KnowledgeNode, KnowledgeNote, KnowledgePlan, KnowledgeSource } from "../knowledge-contract.ts";
 import {KnowledgeAssets} from "./knowledge-assets.ts";
 import {boundedKnowledgeRecall} from "./knowledge-recall.ts";
+import {KnowledgeArchive} from "./knowledge-archive.ts";
+import {KnowledgeOrganization} from "./knowledge-organization.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export async function atomicJson(path: string, value: unknown) {
@@ -14,6 +16,15 @@ export async function atomicJson(path: string, value: unknown) {
 }
 const wiki = /\[\[([^\]\n]+)\]\]/g;
 const safeId = /^[a-zA-Z0-9_-]{3,100}$/;
+/** Bounded context does not truncate the stored original. Include late matching
+ * passages in long chats rather than repeatedly recalling only the greeting. */
+export function memoryExcerpt(body:string,query:string,max=6000){
+  if(body.length<=max)return body;
+  const terms=[...new Set(query.toLowerCase().match(/[\p{L}\p{N}]{3,40}/gu)??[])],lower=body.toLowerCase();
+  const positions=terms.map(t=>lower.lastIndexOf(t)).filter(n=>n>=0).sort((a,b)=>b-a);
+  const starts=[0,...positions.map(p=>Math.max(0,p-800))].filter((p,i,a)=>!a.slice(0,i).some(n=>Math.abs(n-p)<1500)).slice(0,4).sort((a,b)=>a-b),size=Math.floor((max-120)/starts.length);
+  return starts.map(p=>body.slice(p,p+size)).join("\n\n[... original conversation continues ...]\n\n");
+}
 interface Stored extends KnowledgeNode { raw: string; body: string; front: string; path: string }
 interface Journal { id: string; state: "prepared" | "committed" | "undone" | "conflict"; source: KnowledgeSource; changes: { path: string; before: string | null; after: string; id: string;category?:string;beforeCategory?:string }[] }
 /** Markdown is canonical. Queue, provenance and undo are operational sidecars,
@@ -21,11 +32,13 @@ interface Journal { id: string; state: "prepared" | "committed" | "undone" | "co
 export class KnowledgeStore {
   readonly vault: string; readonly root: string;
   readonly assets:KnowledgeAssets;
+  readonly archive:KnowledgeArchive;
+  readonly organization:KnowledgeOrganization;
   rank?: (query:string,notes:Stored[],limit:number)=>Promise<{id:string;score:number}[]>;
   similarities?:(notes:Stored[])=>Promise<NonNullable<KnowledgeGraph["similarities"]>>;
   private topicCache?:{key:string;value:Promise<NonNullable<KnowledgeGraph["similarities"]>>};
   private tail: Promise<unknown> = Promise.resolve();
-  constructor(vault: string, root: string) { this.vault = resolve(vault); this.root = resolve(root);this.assets=new KnowledgeAssets(this.vault,this.root); }
+  constructor(vault: string, root: string) { this.vault = resolve(vault); this.root = resolve(root);this.assets=new KnowledgeAssets(this.vault,this.root);this.archive=new KnowledgeArchive(this.vault,this.root);this.organization=new KnowledgeOrganization(this); }
   private async file(path: string) {
     if (!path || /[\u0000-\u001f:*?"<>|\\]/.test(path) || !path.endsWith(".md") || path.split("/").some(p => !p || p === "." || p === ".." || p.startsWith("."))) throw new Error("Invalid note path");
     const result = resolve(this.vault, path);
@@ -68,14 +81,16 @@ export class KnowledgeStore {
         if (entry.isDirectory()) { if (!/^(sessions|sources|control|Attachments)$/i.test(entry.name)) await visit(path); continue; }
         if (!entry.isFile() || !/\.md$/i.test(entry.name)) continue;
         const full = await this.file(path), info = await lstat(full);
-        if (info.size > 512_000) continue;
+        if(info.size>80_000_000)continue;
+        if(info.size>512_000){const handle=await open(full,"r");try{const head=Buffer.alloc(5000),{bytesRead}=await handle.read(head,0,head.length,0);if(!/^hub_kind:\s*conversation\s*$/m.test(head.subarray(0,bytesRead).toString("utf8")))continue;}finally{await handle.close();}}
         const raw = await readFile(full, "utf8");
         const front = raw.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)?.[0] ?? "";
         const body = raw.slice(front.length);
         const scalar = (key: string) => { const value = front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1]?.trim(); if (!value) return ""; try { return JSON.parse(value); } catch { return value.replace(/^['"]|['"]$/g, ""); } };
         const id = scalar("hub_id") || scalar("external_uuid") || scalar("uuid") || `legacy-${digest(path).slice(0,32)}`;
         const title = scalar("title") || body.match(/^#\s+(.+)$/m)?.[1] || basename(path, ".md");
-        notes.push({ id: String(id), title: String(title), permalink: path.slice(0,-3), hash: digest(raw), modifiedAt: info.mtimeMs, raw, front, body, path });
+        const kind=scalar("hub_kind")==="conversation"?"conversation":"note";
+        notes.push({ id: String(id), title: String(title), permalink: path.slice(0,-3), hash: digest(raw), modifiedAt: kind==="conversation"?Number(scalar("source_updated_at"))||info.mtimeMs:info.mtimeMs,kind,protected:kind==="conversation", raw, front, body, path });
       }
     };
     await visit("");
@@ -98,15 +113,16 @@ export class KnowledgeStore {
       if (!target) {if(/\.(png|jpe?g|webp|gif|pdf|docx|xlsx|csv|txt|mp3|wav|mp4)(?:\||$)/i.test(link[1]!))continue;unresolved++; continue; }
       if (target.id !== note.id && !edges.some(e => e.source === note.id && e.target === target.id)) edges.push({ source: note.id, target: target.id, label: "" });
     }
+    for(const relation of await this.organization.relations())if(notes.some(n=>n.id===relation.source)&&notes.some(n=>n.id===relation.target)&&!edges.some(e=>e.source===relation.source&&e.target===relation.target))edges.push(relation);
     let similarities:KnowledgeGraph["similarities"];
     if(this.similarities){const key=digest(notes.map(n=>n.id+":"+n.hash).sort().join("\n"));if(this.topicCache?.key!==key)this.topicCache={key,value:this.similarities(notes).catch(()=>[])};similarities=await this.topicCache.value;}
-    return { secondBrain: true, nodes: notes.map(({id,title,permalink,hash,modifiedAt}) => ({id,title,permalink,hash,modifiedAt})), edges,...(similarities?{similarities}:{}), page: 1, hasMore: false, partial: false, omittedRelations: unresolved, hiddenNodes: 0 };
+    return { secondBrain: true, nodes: notes.map(({id,title,permalink,hash,modifiedAt,kind,protected:readonly}) => ({id,title,permalink,hash,modifiedAt,kind,protected:readonly})), edges,...(similarities?{similarities}:{}), page: 1, hasMore: false, partial: false, omittedRelations: unresolved, hiddenNodes: 0 };
   }
   async note(id: string): Promise<KnowledgeNote> {
     const notes = await this.scan(), found = notes.find(n => n.id === id); if (!found) throw new Error("Note missing");
     const graph = await this.graph();
     const sourceMap = await this.metadata();
-    return { id, title: found.title, permalink: found.permalink, hash: found.hash, modifiedAt: found.modifiedAt, content: found.body,
+    return { id, title: found.title, permalink: found.permalink, hash: found.hash, modifiedAt: found.modifiedAt,kind:found.kind,protected:found.protected, content: found.body,
       backlinks: graph.nodes.filter(n => graph.edges.some(e => e.source === n.id && e.target === id)),
       links: graph.nodes.filter(n => graph.edges.some(e => e.target === n.id && e.source === id)), sources: sourceMap[id]?.sources ?? [] };
   }
@@ -128,7 +144,8 @@ export class KnowledgeStore {
     let neighbors=0;for(const {note} of [...selected])for(const link of note.body.matchAll(wiki)){
       const related=this.resolveLink(link[1]!,notes,note);if(related&&selected.length<7&&neighbors<2&&!selected.some(n=>n.note.id===related.id)){add(related,"linked-note");neighbors++;}
     }
-    return selected.slice(0,7);
+    const relations=await this.organization.relations();for(const {note} of [...selected])for(const edge of relations){const id=edge.source===note.id?edge.target:edge.target===note.id?edge.source:undefined,related=notes.find(n=>n.id===id);if(related&&selected.length<7&&neighbors<2&&!selected.some(n=>n.note.id===related.id)){add(related,"linked-note");neighbors++;}}
+    return selected.slice(0,7).map(s=>({...s,note:{...s.note,body:memoryExcerpt(s.note.body,query+" "+topicContext)}}));
   }
   private async metadata(): Promise<Record<string,{ completedAt: number; sources: { id:string; completedAt:number; channel:string }[]; category?:string;deleted?:boolean; title?:string; path?:string; lastHash?:string }>> {
     try { return JSON.parse(await readFile(join(this.root,"notes.json"),"utf8")); } catch (e:any) { if (e.code !== "ENOENT") throw e; return {}; }
@@ -156,6 +173,7 @@ export class KnowledgeStore {
       const notes=await this.scan(), meta=await this.metadata();
       const reserved=plan.changes.map(change => {
         const existing=notes.find(n=>n.id===change.id);
+        if(existing?.protected)throw new Error("Original conversations are read-only; create an explicitly requested note instead");
         if (meta[change.id]?.deleted) throw new Error("Deleted note cannot be resurrected");
         if (existing && meta[change.id]?.completedAt > source.completedAt) {
           const current=existing.body.trim(),proposed=change.body.trim(),date=new Date(source.completedAt).toISOString().slice(0,10);
@@ -222,7 +240,7 @@ export class KnowledgeStore {
     journal.state="committed";await atomicJson(join(this.root,"journal",`${journal.id}.json`),journal);
   }
   async edit(id:string,hash:string,content:string) {
-    return this.exclusive(async()=>{const n=(await this.scan()).find(n=>n.id===id);if(!n||n.hash!==hash) throw new Error("Note changed; reload before saving");if(typeof content!=="string"||content.length>128_000)throw new Error("Invalid note body");const path=await this.file(n.path),tmp=path+`.${randomUUID()}.tmp`;await writeFile(tmp,n.front+content);await rename(tmp,path);return this.note(id);});
+    return this.exclusive(async()=>{const n=(await this.scan()).find(n=>n.id===id);if(!n||n.hash!==hash) throw new Error("Note changed; reload before saving");if(n.protected)throw Error("Original conversations are read-only");if(typeof content!=="string"||content.length>128_000)throw new Error("Invalid note body");const path=await this.file(n.path),tmp=path+`.${randomUUID()}.tmp`;await writeFile(tmp,n.front+content);await rename(tmp,path);return this.note(id);});
   }
   async undo(id:string) {
     if(!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid revision");

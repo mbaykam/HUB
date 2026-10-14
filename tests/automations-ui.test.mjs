@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {JSDOM} from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
+import {installMobileAutomations} from '../packages/harness-overlay/src/client/host/mobile-automations.ts';
+import {installHubDeepLink} from '../packages/harness-overlay/src/client/host/hub-deep-link.ts';
+import {installKnowledgeControls} from '../packages/harness-overlay/src/client/host/mobile-knowledge.ts';
+import {defaultKnowledgeSettings} from '../packages/harness-overlay/src/knowledge-contract.ts';
+const flush=()=>new Promise(r=>setTimeout(r,15));
+function dom(){const d=new JSDOM('<!doctype html><main data-home></main><aside></aside>',{url:'https://hub.test/',pretendToBeVisual:true});d.window.ResizeObserver=class{observe(){}disconnect(){}};d.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};d.window.HTMLDialogElement.prototype.close=function(){this.open=false;};return d;}
+function button(root,text){return [...root.querySelectorAll('button')].find(b=>b.textContent===text);}
+test('right-panel automation form creates a structured watch and does not add Home controls or call a model',async()=>{
+ const d=dom(),root=d.window.document,calls=[];let state={revision:0,automations:[],blockedRoutes:[],hostRunsOnlyWhileOnline:true,characters:[{id:'mira',name:'Mira',route:{provider:'openai-codex',model:'gpt-6-luna'}}]};
+ d.window.fetch=async(url,request)=>{assert.equal(url,'/api/hub/automations');assert.equal(request.headers['x-hub-automations'],'1');if(request.body){const command=JSON.parse(request.body);calls.push(command);state={...state,revision:state.revision+1,automations:[{...command.automation,id:'created',status:'scheduled',state:'active',runs:[]}]};}return {ok:true,json:async()=>state};};
+ const dispose=installMobileAutomations(root.querySelector('aside'),root);try{root.querySelector('[data-hub-automations-tile]').click();await flush();button(root,'Yeni otomasyon').click();
+   const field=label=>root.querySelector('[aria-label="'+label+'"]');field('Ad').value='User fixture';field('Yapılacak iş').value='Read public changes.';field('Tetikleyici').value='watch';field('Tetikleyici').dispatchEvent(new d.window.Event('change'));field('Kaynak URL').value='https://example.org/data';field('JSON alan yolu').value='data.price';field('Koşul').value='above';field('Karşılaştırılacak değer').value='15';root.querySelector('form').dispatchEvent(new d.window.Event('submit',{cancelable:true,bubbles:true}));await flush();
+   assert.equal(calls.length,1);assert.deepEqual(calls[0].automation.trigger,{kind:'watch',url:'https://example.org/data',seconds:3600,rule:'above',value:'15',jsonPath:'data.price',fireOnFirst:false});assert.equal(calls[0].automation.notification,'pwa');assert.equal(calls[0].automation.allowWrites,false);assert.equal(root.querySelector('[data-home]').children.length,0);assert.ok(button(root,'Geçmiş'));button(root,'Geçmiş').click();assert.equal(root.querySelector('[data-hub-automations]').textContent.includes('Henüz çalıştırılmadı.'),true);
+ }finally{dispose();d.window.close();}
+});
+test('owned automation session links open native chat; arbitrary ids cannot navigate',async()=>{
+ const id='hub-automation-00000000-0000-4000-8000-000000000001-00000000-0000-4000-8000-000000000002',d=new JSDOM('<body></body>',{url:'https://hub.test/?hubSession='+id});const opened=[];let refreshed=0;const sessions={refresh:async()=>refreshed++,list:{getSnapshot:()=>({byId:{[id]:{}}}),subscribe:()=>()=>{}},open:id=>opened.push(id)};const dispose=installHubDeepLink({sessions},d.window.document);assert.deepEqual(opened,[id]);assert.equal(refreshed,1);dispose();d.window.close();
+ const unknown=new JSDOM('<body></body>',{url:'https://hub.test/?hubSession=arbitrary'});installHubDeepLink({sessions},unknown.window.document)();assert.equal(opened.length,1);unknown.window.close();
+});
+test('Knowledge menu explains protected originals and separates reviewed profile additions from source notes',async()=>{
+ const d=dom(),root=d.window.document,commands=[];const snapshot={secondBrain:true,enabled:true,status:'ready',vault:'fixture vault',settings:{...defaultKnowledgeSettings,mode:'automatic'},todayEstimatedCost:0,monthEstimatedCost:0,notes:1,counts:{queued:0,working:0,review:0,done:0,failed:0,'waiting-credit':0},jobs:[],embedding:'Fixture local',historyArchivesReady:true};
+ d.window.fetch=async(url,request)=>{if(request?.body)commands.push(JSON.parse(request.body));return {ok:true,json:async()=>String(url).includes('view=organization')?{reflections:[],suggestions:[{id:'suggestion-one',target:'USER.md',text:'Uses Telegram.',evidence:'I use Telegram.',at:1791900000000,status:'pending'}]}:String(url).includes('models')?{models:[],providers:[]}:snapshot};};
+ const dispose=installKnowledgeControls(root.querySelector('aside'),root,snapshot);try{button(root,'Knowledge AI ayarları').click();await flush();assert.equal(root.querySelector('[data-knowledge-menu]').textContent.includes('Konuşma metinlerini ve mevcut notlarını yeniden yazmaz.'),true);assert.ok(button(root,'Reflection'));button(root,'Reflection').click();assert.ok(button(root,'Profile ekle'));button(root,'Profile ekle').click();await flush();assert.deepEqual(commands,[{action:'profile-review',id:'suggestion-one',decision:'approve'}]);assert.equal(root.querySelector('[aria-label="Reflection ve ilişki açıklamalarının dili"]').value,'auto');}finally{dispose();d.window.close();}
+});

@@ -1,16 +1,12 @@
-# Knowledge AI and the second brain
+# Original conversations, memory and reflection
 
-[Documentation](README.md) · [Setup](setup.md)
+[Documentation](README.md) · [Setup](setup.md) · [Automations](automations.md)
 
-The current second-brain system stores normal Markdown notes in an
-Obsidian-compatible vault. Knowledge AI decides whether a completed conversation
-contains useful information, gathers related notes and proposes updates with
-relevant inline links. The host validates writes and preserves newer human edits.
+Knowledge keeps original conversations and human-requested notes in an Obsidian-compatible vault. Curator reads these records and organizes their relationships; it cannot rewrite or translate conversation bodies or automatically replace them with topic summaries.
 
-## Enable the optional Host entry
+## Storage and activation
 
-Choose a vault outside the source checkout and back it up independently. Merge
-this entry into the private `web` profile's existing `cordis.patch.yml`:
+Choose a vault outside the source checkout and back it up independently. Merge this optional entry into the private web profile's existing cordis.patch.yml:
 
 ```yaml
 - insert:
@@ -22,91 +18,36 @@ this entry into the private `web` profile's existing `cordis.patch.yml`:
         captureSince: 1791676800000
 ```
 
-Set `captureSince` once to the activation time in Unix milliseconds, for example
-the result of `node -p "Date.now()"`; keep that value on later restarts. It limits
-automatic capture of old conversations. The number above is an example, not a
-required date. Restart the host after configuring the entry.
+Set captureSince once to your activation time in Unix milliseconds; it limits old evidence admitted to automatic curation. The first startup archives existing eligible real conversations without model calls. Evaluation sessions, injected instructions and private reasoning are excluded. Existing legacy notes are preserved.
 
-The current second-brain path manages the vault directly. The older Basic Memory
-MCP reflection bridge remains available for legacy configurations and has
-different setup requirements; it is not the default recipe above.
+One conversation has one stable archive identity and one graph entry. Public messages, dates, speaker roles, interruptions and failures survive without model credits. Private JSON preserves originals; Conversations/ contains readable Markdown projections. Native history remains authoritative for the full runtime/tool transcript. Captured original files live under Attachments/; URLs remain in their original messages. Normal continuations do not duplicate a full day-long chat for every message. Source edits have separate history; a human edit to a projected body stops automatic replacement.
 
-## Choose how curation works
+## What Curator may do
 
-Open Knowledge AI settings and select an available curator provider/model.
-Use a low-cost model capable of producing the structured note updates. Set
-eligible chat sources, idle timing, automatic/review/manual behavior, note detail,
-language and budgets. Automatic language can follow the conversation instead of
-forcing all notes into a single language.
+Open **Settings → HUB → Assistants → Knowledge AI**. Select an explicit model, sources, timing, automatic/review/manual behavior, relation limits, reflection preferences and estimated budgets. Annotation language never translates the original conversation. Turkish and English can coexist.
 
-Budgets are estimated guards, not a replacement for the provider's actual bill.
-A paused/failed job should be inspected before retrying. Capture failures do not
-need to block normal chat.
+Curator has no tools. Its structured result can contain tags, relationships to existing records, short sourced observations and profile suggestions. The host checks identities, quoted evidence and scope. No blank targets, invented notes or filler link paragraphs are admitted.
 
-**Test model connection** performs a small structured response without writing a
-note. A model listed in a catalog can still be unavailable to the current account.
-Unsupported-model or authentication failures stop that route's remaining queue;
-choose a working model or fix the connection, then test and recover failed jobs.
-The job list reports the failure code/message and distinguishes note updates,
-skipped episodes, archive-only results and rejected suggestions. Old generic
-completed records are not presented as proven note writes.
-Failures remain visible even after later successful jobs. If an old-source
-proposal would replace newer text, the same curator can make one budgeted
-correction before the unchanged chronology and human-edit checks run again.
+Relationships and reflection live in private metadata. Valid relationships also project into the conversation's hub_related YAML property as real Obsidian wikilinks; the original body stays unchanged. Undo removes the organization revision without replacing the original conversation.
 
-New capture excludes injected memory, runtime instructions and evaluation chats.
-Delegated work specifications are task data rather than fresh human preferences.
-With **confirmed-only** evidence, worker results remain archived until human
-confirmation; allowing useful explanations still cannot create personal
-preferences from a worker. Bilingual note language and real inline links remain
-independent of the chosen curator model.
+**Reflection** is a brief useful observation, not a hidden reasoning transcript. The separate Reflection tab shows its source and date. AI interpretations are distinguished from verified user facts during memory retrieval.
+
+**USER.md** suggestions require genuine user evidence and explicit review. Character suggestions are restricted to the source character. Approval appends a dated, sourced addition while preserving existing operator instructions. Durable receipts prevent duplicate additions; newer human edits block undo. Curator cannot automatically rewrite shared SOUL.md, AGENTS.md, credentials, tool permissions or model routes. See [AI instructions](instructions.md).
+
+HUB and other permitted characters can create a new written note through hub_knowledge_write_note in response to a current human request. This is separate from automatic archiving and curation.
 
 ## Using knowledge as memory
 
-Before a new user request, permitted agents retrieve a small selection of saved
-notes automatically. Retrieval combines the current message, recent human
-conversation topics, a bounded number of explicitly classified personal
-preferences and directly linked notes. Multilingual local embeddings supplement
-keyword matching. Empty notes are excluded; the entire vault is not inserted.
+Before a new user request, permitted agents retrieve a bounded selection of relevant saved records. Retrieval combines the current message, recent topic, personal preferences and real linked neighbors. Local multilingual embeddings index chunks within a record; chunks do not create extra graph entries. Keyword matching remains available during indexing or failures. Late matching passages in long chats can be recalled.
 
-The model can also use its allowed knowledge search/read tools. Retrieval remains
-subject to character and native permissions, and has a deadline so it cannot
-indefinitely hold a voice reply. Current user corrections take precedence over
-historical notes. The **Usage** panel shows recent retrieved titles, why they were
-selected, empty searches and unavailable retrievals; open a title to inspect the
-saved content. This recent diagnostic list resets when the host restarts.
+The full vault is never inserted into a prompt. Relevant original excerpts and separately labeled reflections are historical, untrusted data; current user corrections take precedence. Allowed characters can additionally use hub_knowledge_search and hub_knowledge_read. Retrieval has a deadline so it cannot hold a voice response indefinitely. Usage shows recent recalled titles and selection reasons; this diagnostic list resets on restart.
 
-Use [AI instructions](instructions.md) to inspect and edit shared character rules
-and the curator's separate editorial instructions.
+## Credits, imports and media
 
-Connections should occur in meaningful prose. The validator rejects invented
-targets, empty notes and filler link lists. Source records and technical bookkeeping
-are maintained outside the ordinary reading text. You can also open/edit the
-Markdown vault directly in Obsidian.
+Original capture does not require credits. A quota failure preserves the Curator source queue and blocks the provider across HUB background queues. Connection checking and explicit recovery resume work; failed work is not reported as a successful note write. Daily/monthly guards are estimates, not a provider bill or Codex subscription percentages.
 
-## Graph and media
+Import your own ChatGPT/Gemini JSON, HTML or ZIP exports through the preview screen. Each source conversation retains one identity, original messages and available branch/media metadata. Processing chunks are operational units, not newly authored topic notes. Missing Gemini replies are not invented. Duplicate imports do not repeat admitted processing. The current upload limit remains 80 MB; larger archive handling is a separate planned extension.
 
-The PWA provides note search, backlinks, a reader and linked topic clouds. Links
-represent real note references; similarity information can organize nearby
-topics. Optional local multilingual embeddings improve retrieval/layout; without
-them, the keyword path remains available.
+Images and files can be preserved without being fully understood by AI. Selected document formats support local text extraction; general image OCR or audio/video interpretation is not promised. Optional dependencies are listed in scripts/tests/requirements-media.txt. Voice conversations retain public transcripts, not raw call recordings.
 
-Original images/files can be saved under the vault's attachments with controlled
-previews. URLs remain source references; optional extraction/download can fail
-on unavailable or restricted content. Keeping an original file does not mean
-every media format has been understood or transcribed by AI.
-Local document extraction needs `pypdf` and `defusedxml` in the default Python runtime under
-`~/.dsh/runtimes/pipecat`; the separately pinned dependency list is
-`scripts/tests/requirements-media.txt`. Without it, original files can still be
-retained while text extraction is unavailable.
-
-## Import older conversations
-
-Use the import screen with your own ChatGPT/Gemini export archives. Preview the
-sources first, then admit the import. This is an explicit backfill operation and
-may consume the curator provider's quota. It does not log in to those services,
-scrape their apps or automatically fetch account exports.
-
-Uncertain interrupted work is not silently replayed over newer notes. Review
-conflicts and newer human edits before retrying or undoing. Forgetting curated
-information does not delete the original conversation history.
+The older Basic Memory MCP bridge remains available for legacy configurations; it is not the second-brain path above.

@@ -1,4 +1,5 @@
 import { installMobileMemoryGraph } from "./mobile-memory-graph.ts";
+import {installMobileAutomations} from "./mobile-automations.ts";
 
 const MOBILE_WEB_ROOT_SELECTOR = "[data-minke-mobile-web]";
 const SHELL_OVERLAY_SELECTOR = "[data-shell-overlay]";
@@ -255,7 +256,7 @@ export class MobileRightDrawerRuntime {
     drawer.setAttribute(MOBILE_RIGHT_DRAWER_ATTRIBUTE, "");
     drawer.setAttribute("role", "dialog");
     drawer.setAttribute("aria-modal", "true");
-    drawer.setAttribute("aria-label", "Knowledge");
+    drawer.setAttribute("aria-label", "Knowledge and automations");
     drawer.setAttribute("aria-hidden", "true");
     drawer.setAttribute("inert", "");
 
@@ -283,7 +284,8 @@ export class MobileRightDrawerRuntime {
     drawer.append(header, body);
     frame.append(drawer);
     this.#drawer = drawer;
-    this.#disposeMemoryGraph = installMobileMemoryGraph(body, this.#root);
+    const disposeGraph=installMobileMemoryGraph(body,this.#root),disposeAutomations=installMobileAutomations(body,this.#root);
+    this.#disposeMemoryGraph=()=>{disposeGraph();disposeAutomations();};
   }
 
   #clearFrame(): void {

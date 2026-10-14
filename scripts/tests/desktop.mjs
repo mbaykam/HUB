@@ -99,6 +99,10 @@ const taskFiles = Object.freeze({
   ]),
   host: Object.freeze([
     "agent-media.test.mjs",
+    "automations.test.mjs",
+    "automations-ui.test.mjs",
+    "automations-host.test.mjs",
+    "knowledge-originals.test.mjs",
     "knowledge-assets.test.mjs",
     "knowledge.test.mjs",
     "knowledge-recall-instructions.test.mjs",

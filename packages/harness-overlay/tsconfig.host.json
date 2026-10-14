@@ -22,6 +22,7 @@
   },
   "include": [
     "src/knowledge-contract.ts",
+    "src/automation-contract.ts",
     "src/agent-browser-contract.ts",
     "src/agent-turn-contract.ts",
     "src/bookmarks-contract.ts",

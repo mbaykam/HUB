@@ -8,7 +8,7 @@ active instructions and are never saved unless you write them yourself.
 - **Shared behavior** (`Ortak davranış`) sets conversational rules for all characters.
 - **About me** (`Benim hakkımda`) supplies your own preferences and background.
 - **Characters** (`Karakterler`) lets you pick a character and edit its own behavior.
-- **Knowledge AI** sets the curator's note-writing rules. Its model and automatic
+- **Knowledge AI** sets the curator's relationship/reflection preferences. Its model and automatic
   processing settings remain in the separate Knowledge AI menu.
 
 The fields are optional. Blank shared fields add no extra rules. Save the selected
@@ -26,7 +26,7 @@ read-only workspace rules and, when available, the last actual chat prompt.
   conversational assistants. It is independent of automatic knowledge retrieval.
 - **Character instructions** belong to that character. Changing its model keeps
   its instructions; calling another character uses that character's instructions.
-- **Knowledge AI** has separate editorial instructions and fixed note-processing
+- **Knowledge AI** has separate editorial instructions and fixed read-only source/evidence
   rules. Its strict structured-output task does not inherit SOUL.md or USER.md.
 - **AGENTS.md** shows the existing native global instruction file. DeepSeek Harness
   can also load workspace/project instruction files. This source is read-only in

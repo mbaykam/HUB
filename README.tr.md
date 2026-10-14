@@ -21,7 +21,7 @@ seslerini ve araçlarını kendin seç.
   dönüşü.
 - Eşleştirilmiş Telegram botuyla tek mesajı güncelleyerek sohbet; ayrı bir
   kullanıcı hesabıyla isteğe bağlı gelen arama köprüsü.
-- Obsidian uyumlu Markdown vault, AI ile not bakımı, anlamlı satır içi bağlantılar,
+- Obsidian uyumlu Markdown vault, özgün konuşmaları koruyan AI ilişkilendirmesi, ayrı reflection kayıtları,
   kaynak/medya kayıtları, konu bulutları ve geçmiş sohbetleri içe aktarma.
 - OpenRouter model kataloğu, kurulu sağlayıcılar, yerel model seçenekleri ve
   karakter başına model/araç/delegasyon ayarları.
@@ -41,7 +41,7 @@ pnpm run harness:stage
 pnpm start
 ```
 
-Önce sağlayıcını bağlayıp HUB ve Conversation karakterlerini yapılandır.
+Önce sağlayıcını bağlayıp HUB ve ses karakterlerini yapılandır.
 Ses, Knowledge AI ve Telegram araması ek Python/runtime ve özel profil
 yapılandırması gerektirir; yukarıdaki komut bunları otomatik kurmaz.
 [Kurulum rehberi](docs/setup.md), [ses](docs/voice.md),
@@ -78,3 +78,5 @@ Metin ve görseller özgün; bu projelerle bağlılık iddiası yoktur.
 
 HUB kodu [Apache-2.0](LICENSE) lisanslıdır. Upstream bileşenler ve indirilen
 modeller kendi lisanslarını korur; [NOTICE](NOTICE).
+
+Otomasyonlar sağ panelde yönetilir: zaman, tekrar, takvim, kaynak değişimi ve HUB olayları. Çalışma geçmişi, araç izinleri ve limit bekleme durumları burada görünür. [Otomasyonlar](docs/automations.md) · [Knowledge](docs/knowledge.md).

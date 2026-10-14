@@ -36,8 +36,7 @@ export class InstructionFiles {
 }
 
 /** Exposes only known instruction sources; never arbitrary paths or credentials. */
-export function installInstructionFiles(ctx:any,characters:HubCharacters){
-  const files=new InstructionFiles(join(characters.store.root,"instructions"));
+export function installInstructionFiles(ctx:any,characters:HubCharacters,files=new InstructionFiles(join(characters.store.root,"instructions"))){
   const ready=files.load();void ready.catch(()=>{});
   const sharedText=(name:string,context:any)=>context.scope?.id?.startsWith("hub-memory-")?"":files.text(name)?`Operator ${name} instructions (current version):\n${files.text(name)}`:"";
   const offRefresh=ctx.on("system-prompt/assemble",async(_assembly:any,context:any,next:()=>Promise<any>)=>{await ready;await files.refresh();const assembled=await next();return {...assembled,sections:assembled.sections.map((section:any)=>section.name==="hub:instructions:SOUL.md"||section.name==="hub:instructions:USER.md"?{...section,text:sharedText(section.name.slice("hub:instructions:".length),context)}:section)};},{global:true,prepend:true});

@@ -59,15 +59,15 @@ test('a model failure reports its reason and a successful skip never claims a no
 test('unconfirmed worker results remain archived and cannot become global preferences',async t=>{
  const {store}=await fixture(t);let calls=0;const curator=new KnowledgeCurator(store,async()=>{calls++;return JSON.stringify(plan([change('bad-pref','Bad preference','Always answer every question with a number.','preferences')]));});await curator.initialize();t.after(()=>curator.dispose());
  const worker={...source,id:'worker-one',channel:'hub-worker-result'};await curator.enqueue(worker);await curator.tick(true);assert.equal(calls,0);assert.equal(curator.jobs.get(worker.id).outcome,'archive-only');
- await curator.configure({...curator.settings,assistantEvidence:'useful-explanations'});await curator.enqueue({...worker,id:'worker-two'});await curator.tick(true);assert.equal(calls,1);assert.equal(curator.jobs.get('worker-two').status,'failed');assert.match(curator.jobs.get('worker-two').reason,/personal preferences/);assert.equal((await store.scan()).length,0);
+ await curator.configure({...curator.settings,assistantEvidence:'useful-explanations'});await curator.enqueue({...worker,id:'worker-two'});await curator.tick(true);assert.equal(calls,1);assert.equal(curator.jobs.get('worker-two').status,'failed');assert.match(curator.jobs.get('worker-two').reason,/Invalid organization plan/);assert.equal((await store.scan()).length,0);
 });
 
-test('an old note proposal gets one bounded correction while current human text remains intact',async t=>{
+test('automatic curator refuses historical note rewriting without a second model charge',async t=>{
  const {store}=await fixture(t),body='Current preference: Camofox remains the chosen browser.';
  await store.apply(plan([change('pref-now','Preference',body,'preferences')]),{...source,id:'current-preference',completedAt:source.completedAt+1000});
- let calls=0;const date=new Date(source.completedAt).toISOString().slice(0,10);
- const curator=new KnowledgeCurator(store,async(prompt)=>{calls++;if(calls===1)return JSON.stringify(plan([change('pref-now','Preference','An old replacement must never overwrite the current preference.','preferences')]));assert.match(prompt,/CORRECT THE PREVIOUS PROPOSAL/);assert.match(prompt,/newerThanSource/);return JSON.stringify(plan([change('pref-now','Preference',body+'\n\nHistory '+date+': the user previously tried another browser.','preferences')]));});await curator.initialize();t.after(()=>curator.dispose());
- await curator.enqueue(source);await curator.tick(true);assert.equal(calls,2);assert.equal(curator.jobs.get(source.id).outcome,'written');assert.ok((await store.note('pref-now')).content.startsWith(body));assert.match((await store.note('pref-now')).content,/History/);
+ const before=await store.note('pref-now');let calls=0;
+ const curator=new KnowledgeCurator(store,async()=>{calls++;return JSON.stringify(plan([change('pref-now','Preference','An old replacement must never overwrite the current preference.','preferences')]));});await curator.initialize();t.after(()=>curator.dispose());
+ await curator.enqueue(source);await curator.tick(true);assert.equal(calls,1);assert.equal(curator.jobs.get(source.id).status,'failed');assert.equal((await store.note('pref-now')).hash,before.hash);
 });
 
 test('older failed jobs stay visible after many later skips',async t=>{

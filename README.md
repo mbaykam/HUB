@@ -32,7 +32,8 @@ HUB is an independent project, maintained separately from both upstream teams.
 | **Talk naturally** | Local speech recognition and synthesis, English/Turkish profiles, listenable voice previews and a live transcript. |
 | **Delegate real work** | A quick conversation model hands demanding tasks to the configured HUB character. Native tasks retain their history and tool policy; completed results can return to the active voice session. |
 | **Stay in Telegram** | A paired bot handles text and updates replies in place. An optional, separate Telegram user account supports incoming voice calls. |
-| **Build a second brain** | AI curation turns useful conversations into Obsidian-compatible Markdown notes, with relevant inline links, source records, media and a navigable graph. |
+| **Build a second brain** | Original conversations stay intact in an Obsidian-compatible vault. AI connects them and adds separate sourced reflections, with reviewable profile suggestions. |
+| **Manage automations** | Schedule, repeat or watch conditions from the PWA right panel, with task permissions, limits and durable run history. |
 | **Choose your stack** | Browse OpenRouter metadata and installed provider catalogs; configure character routes, voices, tools and delegation. Native provider plugins and local LM Studio/Ollama routes remain available. |
 | **Follow the work** | Review native tasks, open the related conversation, inspect browser work and view supported visual artifacts in the PWA. |
 
@@ -68,13 +69,14 @@ pnpm start
 ```
 
 Connect your model provider in Settings and configure the main HUB and
-Conversation characters. Voice, knowledge curation and Telegram calls are
+voice characters. Voice, knowledge curation and Telegram calls are
 **optional extensions requiring their own local runtime/profile setup**; they
 are not provisioned by the source command above.
 
 In the mobile PWA, open **Settings → HUB → Assistants** for characters,
 Knowledge AI, Telegram, provider usage and voice history. The right panel keeps
-the Knowledge graph available for browsing your notes and their connections.
+the Knowledge graph and Automations available for browsing records and managing
+timed or conditional work.
 
 Follow the [setup guide](docs/setup.md) for model configuration, authenticated
 mobile access and optional capabilities. This repository includes code and
@@ -94,8 +96,10 @@ flowchart LR
     PWA[Mobile PWA] <--> History[Native conversations and work]
     HUB --> History
     Conversation --> History
-    History -->|Eligible completed chats| Curator[Knowledge AI]
-    Curator --> Vault[Markdown vault and graph]
+    History -->|Original public conversations| Vault[Markdown vault and graph]
+    Vault -->|Read-only sources| Curator[Knowledge AI]
+    Curator --> Relations[Relationships and separate reflections]
+    Relations --> Vault
     PWA <--> Vault
 ```
 
@@ -110,10 +114,11 @@ Prompts and tool results go to that provider; Telegram messages go through
 Telegram, and browsing reaches the selected websites. Local operation of speech
 and storage does not make a hosted language model offline.
 
-Knowledge AI has configurable source selection, timing, note language, linking,
-review mode and budgets. It can skip low-value chats and preserves newer human
-edits. ChatGPT/Gemini archives can be imported explicitly. See
-[Knowledge](docs/knowledge.md) and [Voice](docs/voice.md).
+Knowledge AI has configurable source selection, timing, annotation language,
+relationships, reflection, review mode and budgets. Original conversations are
+archived even when a model fails; Curator cannot rewrite them. ChatGPT/Gemini
+archives can be imported explicitly. See [Knowledge](docs/knowledge.md),
+[Automations](docs/automations.md) and [Voice](docs/voice.md).
 
 HUB uses the native Harness permission model. Tools and trusted plugins can
 operate on the host with the permissions you grant. Keep credentials and runtime

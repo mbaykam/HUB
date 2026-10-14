@@ -1,7 +1,8 @@
 import { inflateRawSync } from "node:zlib";
 import { digest } from "./knowledge-store.ts";
-import type { KnowledgeSource } from "../knowledge-contract.ts";
-export interface KnowledgeImportPreview { sources: KnowledgeSource[]; conversations: number; messages: number; skipped: number; warnings: string[]; estimatedInputTokens: number }
+import type { KnowledgeSource,KnowledgeConversation,ConversationMessage } from "../knowledge-contract.ts";
+import {conversationSources} from "./knowledge-archive.ts";
+export interface KnowledgeImportPreview { sources: KnowledgeSource[]; records:KnowledgeConversation[]; conversations: number; messages: number; skipped: number; warnings: string[]; estimatedInputTokens: number }
 const text=(value:unknown):string=>typeof value==="string"?value:"";
 function assetPointers(value:any):string[]{return Array.isArray(value?.parts)?value.parts.filter((p:any)=>p&&typeof p==="object").flatMap((p:any)=>[p.asset_pointer,p.image_asset_pointer,p.file_id,p.file_name].filter((x:any)=>typeof x==="string")):[];}
 function content(value:any) { return Array.isArray(value?.parts) ? value.parts.flatMap((x:any)=>typeof x==="string"?[x]:x&&typeof x==="object"&&(x.asset_pointer||x.image_asset_pointer||x.file_id)?["Attached media: "+(x.file_name??"image or file")]:[]).join("\n") : text(value?.text); }
@@ -102,5 +103,29 @@ export function previewKnowledgeImport(files:{name:string;body:string}[]):Knowle
     }
   }
   const unique=[...new Map(sources.map(s=>[s.id,s])).values()].sort((a,b)=>a.completedAt-b.completedAt);
-  return {sources:unique,conversations,messages,skipped,warnings:[...warnings],estimatedInputTokens:unique.reduce((n,s)=>n+Buffer.byteLength(s.content),0)};
+  const records=originalImportRecords(files);
+  // Preserve the compatibility preview episodes; the live queue uses bounded
+  // typed chunks attached to the single canonical conversation identity.
+  return {sources:unique,records,conversations,messages,skipped,warnings:[...warnings],estimatedInputTokens:unique.reduce((n,s)=>n+Buffer.byteLength(s.content),0)};
 }
+export function originalImportRecords(files:{name:string;body:string}[]):KnowledgeConversation[]{
+  const records:KnowledgeConversation[]=[];
+  const add=(channel:string,id:string,title:string,messages:ConversationMessage[],raw:unknown)=>{const valid=messages.filter(m=>m.text.trim()&&Number.isSafeInteger(m.at)&&m.at>0);if(!valid.length)return;records.push({id:"conversation-"+digest(channel+":"+id).slice(0,32),externalId:id,title:title.slice(0,200),channel,messages:valid,createdAt:Math.min(...valid.map(m=>m.at)),updatedAt:Math.max(...valid.map(m=>m.at)),raw});};
+  for(const file of files){
+    if(/\.html$/i.test(file.name)){
+      for(const block of file.body.split(/(?=<div[^>]+class="[^\"]*outer-cell)/i).slice(1)){
+        if(!/Gemini|Bard/i.test(block))continue;const cell=block.match(/<div[^>]+class="[^"]*content-cell[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1];if(!cell)continue;
+        const lines=htmlText(cell).split("\n").map(s=>s.trim()).filter(Boolean),date=block.match(/<time[^>]+datetime="([^"]+)"/i)?.[1]??lines.find(l=>/\bGMT[+-]\d{2}:?\d{2}\b|\b\d{4}-\d{2}-\d{2}T[\d:.+Z-]+/.test(l));
+        const prompt=lines.filter(l=>l!==date).join("\n").replace(/^Gemini Apps\s*/i,"").replace(/^(?:Prompted|Asked)\s+/i,"").trim();add("gemini",digest(block),prompt,[{id:"user",role:"user",text:prompt,at:time(date)}],block);
+      }continue;
+    }
+    const data=JSON.parse(file.body);for(const entry of data){
+      if(entry?.mapping){const messages:ConversationMessage[]=[];for(const [key,node]of Object.entries(entry.mapping) as [string,any][]){const m=node.message,role=m?.author?.role;if(!["user","assistant"].includes(role))continue;messages.push({id:String(m.id??key),role,text:content(m.content),at:time(m.create_time??entry.create_time),parent:node.parent??undefined,branch:key});}
+        const id=String(entry.id??entry.conversation_id??digest(JSON.stringify(entry)));add("chatgpt",id,text(entry.title)||"ChatGPT conversation",messages,entry);
+      }else if(entry?.title&&(entry.time||entry.timestamp)&&(!entry.products||entry.products.some((p:unknown)=>/Gemini|Bard/i.test(text(p))))){const prompt=text(entry.title).replace(/^(?:Prompted|Asked|Sordunuz)\s+/i,""),answer=typeof entry.response==="string"?entry.response:typeof entry.answer==="string"?entry.answer:"",at=time(entry.time??entry.timestamp),id=text(entry.id)||digest(JSON.stringify(entry));
+        add("gemini",id,prompt,[{id:"user",role:"user",text:prompt,at},...(answer?[{id:"assistant",role:"assistant" as const,text:htmlText(answer),at}]:[])],entry);
+      }
+    }
+  }return [...new Map(records.map(r=>[r.id,r])).values()];
+}
+export {conversationSources as importedConversationSources};

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.38
+
+- Preserve original conversations, including failed/partial chats, as a single protected record independent of model credits; retain imported branch/media metadata.
+- Replace automatic note rewriting with sourced relationships, separate reflection and reviewed profile additions; project real Obsidian properties without modifying conversation bodies.
+- Add durable HUB-wide automations in the PWA right panel, with time/calendar/watch/event triggers, limits, permissions, run history and pause/recovery controls.
+- Share provider quota waiting across background queues and distinguish native failure from successful completion.
+
+
 ## 0.4.26 — source publication baseline
 
 This source snapshot consolidates the locally developed HUB capabilities and

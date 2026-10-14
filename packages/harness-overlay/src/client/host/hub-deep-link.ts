@@ -3,7 +3,9 @@ import type { HarnessClientContext } from "../core/context.ts";
 export function installHubDeepLink(ctx: Pick<HarnessClientContext, "sessions">, root: Document = document) {
   const view = root.defaultView!;
   const url = new URL(view.location.href), id = url.searchParams.get("hubSession"), panel = url.searchParams.get("hubPanel");
-  if (!id || !/^minke-im-(telegram|discord)-[a-f0-9]{32}$/.test(id)) return () => {};
+  const automation=!!id&&/^hub-automation-[a-f0-9-]{36}-[a-f0-9-]{36}$/.test(id);
+  if (!id || !automation&&!/^minke-im-(telegram|discord)-[a-f0-9]{32}$/.test(id)) return () => {};
+  if(automation)void ctx.sessions.refresh?.();
   let complete = false, opened = false, timer: number | undefined;
   const until = Date.now() + 20_000;
   function reconcile() {
@@ -16,7 +18,7 @@ export function installHubDeepLink(ctx: Pick<HarnessClientContext, "sessions">, 
     }
     if (Date.now() >= until) {
       complete = true;
-      const notice = root.createElement("div"); notice.setAttribute("role", "status"); notice.textContent = "This HUB conversation is not available yet. Send a message to the bot, then reopen the link.";
+      const notice = root.createElement("div"); notice.setAttribute("role", "status"); notice.textContent = automation?"This task session is unavailable. Refresh HUB and try again.":"This HUB conversation is not available yet. Send a message to the bot, then reopen the link.";
       notice.style.cssText = "position:fixed;bottom:16px;left:16px;right:16px;padding:16px;border-radius:14px;background:#202536;color:white;z-index:9999";
       const close = root.createElement("button"); close.type = "button"; close.textContent = "Dismiss"; close.addEventListener("click", () => notice.remove()); notice.append(close); root.body.append(notice); return;
     }

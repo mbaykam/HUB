@@ -51,6 +51,24 @@ const { InstructionFiles } = await import('../packages/harness-overlay/src/host/
 const { CamofoxRuntime } = await import('../packages/harness-overlay/src/host/camofox.ts');
 const { attachNativeVoiceTasks } = await import('../packages/harness-overlay/src/host/voice-tasks.ts');
 const { installModelSelection } = await import('../vendor/deepseek-harness/packages/core/agent/src/model-selection.ts');
+const {Readable}=await import('node:stream');
+test('saved automation executes on the selected native character route with a durable root session', {timeout:25000},async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-automation-native-')),ctx=new Context();let facility,backend;
+ try{
+  await mountAgentLoopTestDependencies(ctx);await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'spawn'});await ctx.plugin(Storage);
+  backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
+  const main=new MockAdapter([textResponse('Wrong model')]),fast=new MockAdapter([textResponse('Observed fixture automation result.')]);ctx.llm.registerAdapter(['main'],main);ctx.llm.registerAdapter(['fast'],fast);
+  Object.defineProperty(ctx,'agentDefaultModel',{value:{currentSelection:()=>({provider:'main',model:'mock'})},configurable:true});Object.defineProperty(ctx,'storageDomain',{value:facility,configurable:true});Object.defineProperty(ctx,'connection',{value:{requestRejection:()=>undefined},configurable:true});
+  const routes=new Map();Object.defineProperty(ctx,'webServer',{value:{register:r=>{routes.set(r.path,r);return ()=>routes.delete(r.path);}},configurable:true});
+  const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'}))),characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
+  let state=characters.store.snapshot();const voice=state.characters.find(c=>c.id===state.voiceId);await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Mira',route:{provider:'fast',model:'mock'},instructions:'Native automation persona proof.'}},c=>characters.validate(c));
+  const call=(command)=>new Promise((resolve,reject)=>{const req=Readable.from(command?[Buffer.from(JSON.stringify(command))]:[]);Object.assign(req,{method:command?'POST':'GET',headers:{'x-hub-automations':'1','content-type':'application/json'}});let status;Promise.resolve(routes.get('/api/hub/automations').handler(req,{writeHead:code=>status=code,end:text=>{const data=JSON.parse(text);status===200?resolve(data):reject(Error(data.detail));}})).catch(reject);});
+  state=await call();state=await call({action:'save',revision:state.revision,automation:{title:'Isolated native task',prompt:'Return the fixture result.',characterId:voice.id,trigger:{kind:'once',at:Date.now()+3600000},missed:'catch-up',tools:[],allowWrites:false,maxOutputTokens:512,maxSteps:1,dailyMaxRuns:1,dailyBudget:1,inputPrice:.1,outputPrice:.5,notification:'pwa'}});await call({action:'run-once',revision:state.revision,id:state.automations[0].id});
+  const until=Date.now()+18000;do{state=await call();if(state.automations[0].status==='completed')break;assert.ok(Date.now()<until,'Automation did not complete');await new Promise(r=>setTimeout(r,50));}while(true);
+  assert.equal(main.requests.length,0);assert.equal(fast.requests.length,1);assert.match(fast.requests[0].system,/Native automation persona proof/);assert.equal(state.automations[0].runs[0].result,'Observed fixture automation result.');assert.equal(state.automations[0].runs[0].route,'fast/mock');
+  const disk=JSON.parse(await readFile(join(root,'hub-automations','automations.json'),'utf8'));assert.equal(disk.automations[0].runs[0].status,'completed');assert.equal(ctx.agents.list().length,0);
+ }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-automation-native-'));await rm(root,{recursive:true,force:true});}
+});
 test('native character delegation uses the target model/persona while the coordinator remains separate', {timeout:25000}, async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-characters-native-'));
  const ctx=new Context();let facility,backend;
