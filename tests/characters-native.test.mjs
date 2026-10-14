@@ -33,7 +33,7 @@ const { TestSessionQuery } = await import("../vendor/deepseek-harness/packages/s
 
 const requireNative = createRequire(new URL("../vendor/deepseek-harness/package.json", import.meta.url));
 const native = name => import(entries.get(name) ?? pathToFileURL(requireNative.resolve(name)).href);
-const { Context } = await native("@deepseek-ai/cordis");
+const { Context, Service } = await native("@deepseek-ai/cordis");
 const { default: AgentLoop } = await native("@deepseek-ai/dsh-agent-loop");
 const { default: Persistence } = await native("@deepseek-ai/dsh-session-persistence-jsonl");
 const { default: Projections } = await native("@deepseek-ai/dsh-session-projection");
@@ -52,6 +52,20 @@ const { CamofoxRuntime } = await import('../packages/harness-overlay/src/host/ca
 const { attachNativeVoiceTasks } = await import('../packages/harness-overlay/src/host/voice-tasks.ts');
 const { installModelSelection } = await import('../vendor/deepseek-harness/packages/core/agent/src/model-selection.ts');
 const {Readable}=await import('node:stream');
+test('memory plugin mounts second brain through the real injected Cordis context without model calls', {timeout:10000},async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-memory-native-')),ctx=new Context(),routes=new Map();let modelCalls=0;
+ try{
+  const {ProviderGate}=await import('../packages/harness-overlay/src/host/provider-gate.ts');
+  const Memory=await import('../packages/harness-overlay/src/memory.ts');
+  const ports={agents:{list:()=>[],create:()=>{modelCalls++;throw Error('No model calls in startup test');}},tools:{register:()=>()=>{}},connection:{requestRejection:()=>undefined},webServer:{register:r=>{routes.set(r.path,r);return ()=>routes.delete(r.path);}},llm:{resolveCallConfig:()=>{modelCalls++;throw Error('No model calls in startup test');}},sessionQuery:{listSessions:async()=>[]},attachments:{},subprocess:{},hubCharacters:{quota:new ProviderGate(join(root,'providers')),instructions:new InstructionFiles(join(root,'instructions'))}};
+  class FixtureService extends Service{constructor(name,port){super(ctx,name);Object.assign(this,port);}}
+  for(const [name,port]of Object.entries(ports))new FixtureService(name,port);
+  await ctx.plugin(Memory,{secondBrain:true,vault:join(root,'vault'),knowledgeRoot:join(root,'knowledge'),captureSince:Date.now(),project:'fixture',provider:'fixture',model:'small'});
+  assert.ok(routes.has('/api/hub/memory'),'The actual plugin loader must mount Knowledge without an undeclared-service failure');
+  const reply=await new Promise((resolve,reject)=>{Promise.resolve(routes.get('/api/hub/memory').handler({method:'GET',url:'/api/hub/memory',headers:{}},{writeHead:code=>assert.equal(code,200),end:text=>resolve(JSON.parse(text))})).catch(reject);});
+  assert.equal(reply.secondBrain,true);assert.equal(reply.status,'ready');assert.equal(modelCalls,0);
+ }finally{await ctx.fiber.dispose();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-memory-native-'));await rm(root,{recursive:true,force:true});}
+});
 test('saved automation executes on the selected native character route with a durable root session', {timeout:25000},async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-automation-native-')),ctx=new Context();let facility,backend;
  try{

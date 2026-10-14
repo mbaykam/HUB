@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.39
+
+- Declare the Knowledge plugin's character-service dependency so the full desktop/PWA host boots correctly with the new shared quota and profile reflection features.
+- Cover Knowledge startup through the actual Cordis plugin loader without paid model calls.
+
 ## 0.4.38
 
 - Preserve original conversations, including failed/partial chats, as a single protected record independent of model credits; retain imported branch/media metadata.

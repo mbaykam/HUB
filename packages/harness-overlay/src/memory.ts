@@ -9,7 +9,7 @@ import { createMemoryGraph, memoryEntityId } from "./host/memory-graph.ts";
 import { applyKnowledge } from "./host/knowledge.ts";
 
 export const name = "hub-memory";
-export const inject = ["agents", "tools", "connection", "webServer", "llm", "sessionQuery", "attachments", "subprocess"];
+export const inject = ["agents", "tools", "connection", "webServer", "llm", "sessionQuery", "attachments", "subprocess", "hubCharacters"];
 export interface Config { project: string; provider: string; model: string; captureSince: number; topicNotes?: boolean; secondBrain?: boolean; vault?: string; knowledgeRoot?: string; embeddingPython?: string; embeddingRoot?: string }
 type Execute = (request: Omit<Parameters<MemoryPorts["execute"]>[0], "sessionId"> & { agent?: unknown }) => ReturnType<MemoryPorts["execute"]>;
 interface Context extends MemoryHooks {
