@@ -71,11 +71,14 @@ test("project aliases reject unknown and escaping specifiers", () => {
   );
 });
 
-test("the pinned HarnessError runtime alias matches only dsh-llm", () => {
+test("pinned native runtime aliases match exact package identities", () => {
   assert.deepEqual(EXACT_PATH_ALIASES, [{
     specifier: "@deepseek-ai/dsh-llm",
     target:
       "vendor/deepseek-harness/packages/llm/llm/lib/index.js",
+  }, {
+    specifier: "@deepseek-ai/dsh-goal-round-driver",
+    target: "vendor/deepseek-harness/packages/goal/goal-round-driver/lib/index.js",
   }]);
   assert.equal(
     fileURLToPath(
