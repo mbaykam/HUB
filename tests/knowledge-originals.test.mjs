@@ -28,7 +28,8 @@ test('host capture records a quota-failed chat even though successful episode ca
  const ctx=new Context();Object.assign(ctx,{attachments:undefined,get:()=>undefined,on:(name,fn)=>{handlers.set(name,fn);return ()=>{};},emit:()=>{},agents:{},sessionQuery:{listSessions:async()=>[]},webServer:{register:r=>{route=r;return ()=>{};}},connection:{requestRejection:()=>undefined},effect:fn=>effects.push(fn())});
  applyKnowledge(ctx,{vault:store.vault,knowledgeRoot:store.root,captureSince:0});
  const events=[message(0,'user','A request without credits.'),{seq:1,time:at+1,type:'turn/end',data:{turn:1,reason:{kind:'error',error:{code:'QUOTA',message:'No credits'}}}}],session={header:{id:'actual-failed-chat'},snapshotEvents:()=>events};
- handlers.get('session/event')(session,events[1]);await new Promise(r=>setTimeout(r,60));await effects[0]();
+ handlers.get('session/event')(session,events[1]);const expected=nativeConversation(session.header,events,'pwa'),until=Date.now()+3000;
+ while(true){try{await store.archive.read(expected.id);break;}catch(e){if(e.code!=='ENOENT'||Date.now()>=until)throw e;await new Promise(r=>setTimeout(r,10));}}await effects[0]();
  const c=nativeConversation(session.header,events,'pwa');assert.match((await store.archive.read(c.id)).messages[0].text,/without credits/);assert.equal(route.path,'/api/hub/memory');
 });
 test('original body and raw messages stay unchanged when real relations are projected for Obsidian',async t=>{
