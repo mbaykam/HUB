@@ -50,8 +50,11 @@ test("interpreted Vega updates existing bar geometry and labels when a local sig
   const input=parsePresentation(interactivePlanPresentation),view=new View(parse(input.spec,undefined,{ast:true}),{expr:expressionInterpreter,renderer:'none'});
   try{
     await view.runAsync();const initial=await view.toSVG();assert.match(initial,/10 min/);
+    const bars=()=>view.scenegraph().root.items[0].items.find(mark=>mark.marktype==='rect').items;
+    const firstHeight=bars().find(item=>item.datum.task==='Break').height,readingHeight=bars().find(item=>item.datum.task==='Reading').height;
     await view.signal('breakMinutes',12).runAsync();assert.equal(view.data('plan')[2].displayMinutes,12);
     const updated=await view.toSVG();assert.match(updated,/12 min/);assert.doesNotMatch(updated,/>10 min</);assert.notEqual(initial,updated);
+    assert.ok(bars().find(item=>item.datum.task==='Break').height>firstHeight,'The existing bar must resize, not just its label');assert.equal(bars().find(item=>item.datum.task==='Reading').height,readingHeight);
   }finally{view.finalize();}
 });
 
