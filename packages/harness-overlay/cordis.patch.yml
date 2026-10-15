@@ -9,6 +9,11 @@
 - id: directory-picker
   disabled: true
 
+# Base already provides the native goal state service. Only HUB's scheduler may
+# admit its bounded background rounds; the base automatic driver must not race it.
+- id: goal-round-driver
+  disabled: true
+
 - insert:
     - id: hub-directory-picker-browse
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
@@ -58,11 +63,6 @@
       name: '@deepseek-ai/dsh-subagent-spawn-in-process'
       config:
         providerName: hub-character-spawn
-
-    # Native goal state/round attribution; HUB admits bounded rounds under the
-    # saved user policy rather than mounting an unrestricted automatic driver.
-    - id: hub-goal-state
-      name: '@deepseek-ai/dsh-goal'
 
     - id: hub-characters
       name: '@lencx/minke-harness-overlay/characters'

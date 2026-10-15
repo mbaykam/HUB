@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire, registerHooks } from "node:module";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { mkdtemp, rm, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
@@ -33,6 +33,23 @@ const { TestSessionQuery } = await import("../vendor/deepseek-harness/packages/s
 
 const requireNative = createRequire(new URL("../vendor/deepseek-harness/package.json", import.meta.url));
 const native = name => import(entries.get(name) ?? pathToFileURL(requireNative.resolve(name)).href);
+test('the full Web profile reuses one native Goal service and leaves round admission to HUB', async () => {
+  const { loadOverlayPatches, composeEntries } = await native('@deepseek-ai/dsh-app-boot');
+  const layers = [
+    '../vendor/deepseek-harness/packages/bundle/base/cordis.patch.yml',
+    '../vendor/deepseek-harness/packages/bundle/web-app/cordis.patch.yml',
+    '../packages/harness-overlay/cordis.patch.yml',
+  ].map(file => loadOverlayPatches('hub-goal-profile-test', fileURLToPath(new URL(file, import.meta.url))));
+  const rows = [];
+  const visit = entries => { for (const row of entries) { rows.push(row); if (row.group && Array.isArray(row.config)) visit(row.config); } };
+  visit(composeEntries(layers));
+  const active = rows.filter(row => row.disabled !== true);
+  assert.equal(active.filter(row => row.name === '@deepseek-ai/dsh-goal').length, 1,
+    'Registering native Goal twice prevents the installed host from booting');
+  assert.equal(active.filter(row => row.name === '@deepseek-ai/dsh-goal-round-driver').length, 0,
+    'The base automatic driver must not bypass HUB background limits');
+  assert.equal(active.filter(row => row.id === 'hub-characters').length, 1);
+});
 const { Context, Service } = await native("@deepseek-ai/cordis");
 const { default: AgentLoop } = await native("@deepseek-ai/dsh-agent-loop");
 const { default: Persistence } = await native("@deepseek-ai/dsh-session-persistence-jsonl");

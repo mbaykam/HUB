@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.41
+
+- Fix desktop/PWA startup by reusing the base profile's native Goal service instead of registering it twice.
+- Disable the base automatic goal driver so background goal rounds follow HUB's saved limits and admission policy.
+
 ## 0.4.40
 
 - Add Goals to the mobile/desktop right panel: six-tab editing, character routes, approaches, named helpers, independent verification, resources, limits and evidence-backed completion.
