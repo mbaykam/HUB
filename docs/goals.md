@@ -43,6 +43,10 @@ the changed goal before applying them again. Editing one goal does not overwrite
 another goal's progress. New permissions apply immediately; owner changes use the
 next safe checkpoint and retain the native session context.
 
+A native work session's PWA header shows the character and model recorded for
+that session's latest round, labelled **Working** or **Last run**. Changing a
+character's model later does not rewrite the model shown for an earlier round.
+
 ## Timed and recurring starts
 
 Start immediately, once at a chosen time, at intervals of at least five minutes,

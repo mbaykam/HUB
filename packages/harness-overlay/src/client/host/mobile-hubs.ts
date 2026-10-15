@@ -9,6 +9,7 @@ import { returnToMobileHome } from "./mobile-home-navigation.ts";
 import { openMobileConversation } from "./mobile-session-navigation.ts";
 import { createMobileBrowserView } from "./mobile-browser-view.ts";
 import { createMobileLiveTranscript } from "./mobile-live-transcript.ts";
+import { readMobileSessionIdentity } from "./mobile-session-identity.ts";
 
 /** PWA-owned view layer. The native conversation, attachments, approvals and
  * workspace controls stay mounted; the audio owner survives Home/chat changes.
@@ -175,13 +176,12 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     if (!id || snapshot.byId[id]?.origin === "subagent") { identitySession = undefined; identity.hidden = true; return; }
     identityFlight = true; identityCheckedAt = Date.now();
     try {
-      const response = await view!.fetch("/api/hub/characters?sessionId=" + encodeURIComponent(id), { credentials: "same-origin", cache: "no-store", headers: { "x-hub-characters": "1" }, signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(5000)]) });
-      if (!response.ok) throw new Error();
-      const value = await response.json(), character = value.character;
-      if (ctx.sessions.list.getSnapshot().current !== id || typeof character?.name !== "string") return;
+      const character = await readMobileSessionIdentity(view!,id,AbortSignal.any([lifetime.signal, AbortSignal.timeout(5000)]));
+      if (ctx.sessions.list.getSnapshot().current !== id) return;
+      if (!character) { identitySession = undefined; identity.hidden = true; return; }
       identitySession = id; identityName.textContent = character.name;
-      identityModel.textContent = character.route?.model ?? "Model not configured";
-      identity.title = character.route ? `${character.name} · ${character.route.provider}/${character.route.model}` : character.name;
+      identityModel.textContent = character.model;
+      identity.title = character.title;
       identity.hidden = isHome();
     } catch { identitySession = undefined; identity.hidden = true; }
     finally { identityFlight = false; }
