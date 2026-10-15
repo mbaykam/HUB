@@ -14,6 +14,13 @@ Choose a configured character and purpose, then a trigger:
 
 Each job exposes its purpose, character/model, next time, status, tools, missed execution policy, daily run and estimated-cost limits, model step/output limits, notification preference and run history. Edit, pause, resume, cancel and manual test actions use concurrency checks; stale saves preserve another device's changes. Completed task sessions can be opened from history.
 
+Back, Close, Escape and the panel's back gesture keep unsaved form changes open.
+Save the settings or choose **Değişikliklerden vazgeç** (Discard changes) before
+leaving. Discard restores the saved settings, or an empty new form, without
+saving or running a task. A failed save leaves your edits available to retry.
+This protects navigation inside the panel; it does not retain drafts after a
+page reload or closing the browser.
+
 For longer outcomes, load the active [Goals](goals.md) in the editor and select
 a linked goal. The trigger queues that goal from its checkpoint, with its own
 character and allowance, without an additional automation model request. It
