@@ -14,6 +14,12 @@ Choose a configured character and purpose, then a trigger:
 
 Each job exposes its purpose, character/model, next time, status, tools, missed execution policy, daily run and estimated-cost limits, model step/output limits, notification preference and run history. Edit, pause, resume, cancel and manual test actions use concurrency checks; stale saves preserve another device's changes. Completed task sessions can be opened from history.
 
+For longer outcomes, load the active [Goals](goals.md) in the editor and select
+a linked goal. The trigger queues that goal from its checkpoint, with its own
+character and allowance, without an additional automation model request. It
+does not start a draft or override a human pause; its successful trigger receipt
+does not mean the goal has finished.
+
 Default tools are read-only search/knowledge tools intersected with character permissions. Additional tools require explicit permission in the saved task. Results are retained in the PWA. Opt-in Telegram notifications can be associated only with the originating authorized Telegram conversation; a PWA edit cannot invent a new destination.
 
 Every execution gets a durable receipt before dispatch. Only an observed successful native turn with a final result counts as completed. Quota failures retain the job and block the provider across background queues. Use explicit provider recovery after restoring capacity. A quota failure after possible external actions pauses the task for review instead of replaying it. Power loss during execution leaves an interrupted receipt and requires review.

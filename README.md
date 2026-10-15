@@ -34,6 +34,7 @@ HUB is an independent project, maintained separately from both upstream teams.
 | **Stay in Telegram** | A paired bot handles text and updates replies in place. An optional, separate Telegram user account supports incoming voice calls. |
 | **Build a second brain** | Original conversations stay intact in an Obsidian-compatible vault. AI connects them and adds separate sourced reflections, with reviewable profile suggestions. |
 | **Manage automations** | Schedule, repeat or watch conditions from the PWA right panel, with task permissions, limits and durable run history. |
+| **Work toward a goal** | Choose a character, acceptance criteria, resources and allowance. Follow milestones and evidence across background rounds, with editable settings, approvals and separate recurring results. |
 | **Choose your stack** | Browse OpenRouter metadata and installed provider catalogs; configure character routes, voices, tools and delegation. Native provider plugins and local LM Studio/Ollama routes remain available. |
 | **Follow the work** | Review native tasks, open the related conversation, inspect browser work and view supported visual artifacts in the PWA. |
 
@@ -75,8 +76,8 @@ are not provisioned by the source command above.
 
 In the mobile PWA, open **Settings → HUB → Assistants** for characters,
 Knowledge AI, Telegram, provider usage and voice history. The right panel keeps
-the Knowledge graph and Automations available for browsing records and managing
-timed or conditional work.
+the Knowledge graph, Automations and [Goals](docs/goals.md) available for browsing
+records, managing timed work and following longer outcomes.
 
 Follow the [setup guide](docs/setup.md) for model configuration, authenticated
 mobile access and optional capabilities. This repository includes code and

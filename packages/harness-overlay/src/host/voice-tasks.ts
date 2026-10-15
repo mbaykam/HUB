@@ -22,7 +22,7 @@ export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceMod
     ...(route.reasoningEffort ? { reasoning_effort: route.reasoningEffort } : {}) } : {};
   let active = true;
   const dispatched = new Map<string, unknown>();
-  const foreground = new Set([VOICE_TASK_TOOL, "hub_delegate", "hub_present", "hub_save_conversation", "list_agents", "send_message", "interrupt_agent", "list_subagent_models"]);
+  const foreground = new Set([VOICE_TASK_TOOL, "hub_delegate", "hub_goals_manage", "hub_automation_manage", "hub_present", "hub_save_conversation", "list_agents", "send_message", "interrupt_agent", "list_subagent_models"]);
   const canUseForeground = (name: string) => foreground.has(name) || /^hub_knowledge_(search|read)$/.test(name) || /^mcp__hub_memory__(read_note|write_note|edit_note|build_context|search_notes)$/.test(name);
   // Filter the MODEL's view, rather than restricting inherited execution
   // capabilities that the specialist needs. The native guard below still

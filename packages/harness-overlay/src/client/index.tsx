@@ -20,6 +20,7 @@ import { installShortcuts } from "./shortcuts/install.tsx";
 import { installTabs } from "./tabs/install.tsx";
 import { installHubDeepLink } from "./host/hub-deep-link.ts";
 import { installCharactersClient } from "./host/mobile-characters.ts";
+import {installDesktopRightPanel} from "./host/desktop-right-panel.ts";
 
 /** Cordis services required by this out-of-tree browser plugin. */
 export const inject = [
@@ -50,6 +51,7 @@ export function apply(ctx: HarnessClientContext): void {
   const tabsRuntimes = installTabs(ctx, minkeSettings);
   ctx.effect(() => installHubDeepLink(ctx), "hub: authenticated Telegram conversation links");
   ctx.effect(() => installCharactersClient(ctx), "hub: character management");
+  ctx.effect(()=>installDesktopRightPanel(),"hub: desktop secondary right panel");
   installShortcuts(ctx, tabsRuntimes, minkeSettings);
   installMinkeSettings(ctx, minkeSettings);
   installOnboarding(ctx);

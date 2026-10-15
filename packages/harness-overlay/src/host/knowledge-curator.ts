@@ -18,7 +18,7 @@ export class KnowledgeCurator {
   private costs:Record<string,number>={}; private running?:Promise<void>; private writing:Promise<unknown>=Promise.resolve();
   private checked?:{key:string;at:number};
   private blockedRoute?:{key:string;message:string;quota?:boolean};
-  constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate){this.store=store;this.generate=generate;}
+  constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate,readonly admit?:()=>undefined|(()=>void)){this.store=store;this.generate=generate;}
   async initialize(){
     await this.store.initialize();
     await this.store.organization.syncObsidianLinks();
@@ -60,7 +60,7 @@ export class KnowledgeCurator {
     return {ok:true,provider:settings.provider,model:settings.model,reasoningEffort:settings.reasoningEffort};
   }
   recordRecall(recall:KnowledgeRecall){this.recalls.unshift(recall);this.recalls=this.recalls.slice(0,20);}
-  tick(force=false){if(this.running||!this.settings.enabled||this.settings.mode==="manual"&&!force||this.lifetime.signal.aborted)return;this.running=this.run(force).catch(()=>{this.status="needs-attention";}).finally(()=>{this.running=undefined;});return this.running;}
+  tick(force=false){if(this.running||!this.settings.enabled||this.settings.mode==="manual"&&!force||this.lifetime.signal.aborted)return;const release=this.admit?.();if(this.admit&&!release)return;this.running=this.run(force).catch(()=>{this.status="needs-attention";}).finally(()=>{release?.();this.running=undefined;});return this.running;}
   private async run(force:boolean){
     await this.store.refreshInventory();
     const family=(j:KnowledgeJob)=>j.source.id.split("-turn-")[0]!;

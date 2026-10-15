@@ -4,7 +4,7 @@ export type AutomationTrigger =
  |{kind:"calendar";hour:number;minute:number;days:number[];timezone:string}
  |{kind:"watch";url:string;seconds:number;rule:"changed"|"contains"|"not-contains"|"above"|"below";value?:string;jsonPath?:string;fireOnFirst?:boolean}
  |{kind:"event";event:string;path?:string;operator?:"equals"|"contains"|"above"|"below";value?:string};
-export interface AutomationInput {title:string;prompt:string;characterId:string;trigger:AutomationTrigger;missed:"skip"|"catch-up";tools:string[];allowWrites:boolean;maxOutputTokens:number;maxSteps:number;dailyMaxRuns:number;dailyBudget:number;inputPrice:number;outputPrice:number;notification:"pwa"|"telegram";sourceSessionId?:string}
+export interface AutomationInput {title:string;prompt:string;characterId:string;trigger:AutomationTrigger;missed:"skip"|"catch-up";tools:string[];allowWrites:boolean;maxOutputTokens:number;maxSteps:number;dailyMaxRuns:number;dailyBudget:number;inputPrice:number;outputPrice:number;notification:"pwa"|"telegram";sourceSessionId?:string;goalId?:string}
 export type AutomationStatus="scheduled"|"checking"|"running"|"waiting-credit"|"budget-paused"|"delayed"|"failed"|"completed"|"paused"|"cancelled";
 export interface AutomationRun {id:string;at:number;dueAt:number;sessionId:string;route?:string;status:"running"|"completed"|"failed"|"waiting-credit"|"interrupted";result?:string;error?:string;code?:string;estimatedCost:number;finishedAt?:number}
 export interface HubAutomation extends AutomationInput {id:string;revision:number;state:"active"|"paused"|"cancelled"|"completed";status:AutomationStatus;createdAt:number;updatedAt:number;nextAt?:number;lastCheckAt?:number;lastValue?:string;lastMatch?:boolean;pendingEvent?:string;lastError?:string;runs:AutomationRun[]}

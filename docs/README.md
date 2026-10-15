@@ -9,6 +9,7 @@ Windows-first; optional voice/knowledge/calling require additional configuration
 | Configure local speech, voices and live transcription | [Voice](voice.md) |
 | Preserve conversations, connect memory and review reflections | [Knowledge](knowledge.md) |
 | Manage scheduled, repeated or conditional tasks | [Automations](automations.md) |
+| Run background outcomes with characters, checkpoints and evidenced results | [Goals](goals.md) |
 | Pair a text bot or understand incoming user-account calls | [Telegram](telegram.md) |
 | Configure optional browser capabilities and visual results | [Browsing](browsing.md) |
 | Understand project/component credits | [Sources](sources.md) |

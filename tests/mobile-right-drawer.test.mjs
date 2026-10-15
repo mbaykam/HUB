@@ -158,12 +158,13 @@ test("Right drawer renders Knowledge and Automations while retaining access to S
   try {
     await new Promise(resolve => dom.window.requestAnimationFrame(() => dom.window.requestAnimationFrame(resolve)));
     const body = root.querySelector("[data-minke-mobile-right-drawer-body]");
-    assert.equal(body.children.length, 2);
-    assert.equal(body.lastElementChild.hasAttribute("data-hub-automations-tile"),true);
+    assert.equal(body.children.length, 3);
+    assert.equal(body.children[1].hasAttribute("data-hub-automations-tile"),true);
+    assert.equal(body.lastElementChild.hasAttribute("data-hub-goals-tile"),true);
     assert.equal(body.firstElementChild.tagName, "BUTTON");
     assert.equal(body.firstElementChild.hasAttribute("data-hub-graph-tile"), true);
     assert.equal(root.querySelector("[data-minke-mobile-right-drawer-settings]").textContent, "Settings");
-    assert.equal(root.querySelector("[data-minke-mobile-right-drawer]").getAttribute("aria-label"), "Knowledge and automations");
+    assert.equal(root.querySelector("[data-minke-mobile-right-drawer]").getAttribute("aria-label"), "Knowledge, automations and goals");
   } finally { drawer.dispose(); dom.window.close(); }
 });
 

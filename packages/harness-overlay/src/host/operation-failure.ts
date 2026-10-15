@@ -7,5 +7,5 @@ export function operationFailure(reason:any):{kind:string;code:string;message:st
   return {kind,code,message,quota:isQuotaFailure({code,message})};
 }
 export function isQuotaFailure(error:any){
-  return /^(QUOTA|INSUFFICIENT_QUOTA|CREDITS_EXHAUSTED)$/i.test(String(error?.code??"")) || /insufficient (?:quota|credits|balance)|out of credits|credit balance.*(?:low|exhaust)|usage limit.*(?:reached|exceeded)|in_flight_budget_exhausted/i.test(String(error?.message??""));
+  return /^(QUOTA|INSUFFICIENT_QUOTA|INSUFFICIENT_CREDITS|CREDITS_EXHAUSTED|402)$/i.test(String(error?.code??"")) || /insufficient (?:quota|credits|balance)|out of credits|no credits|credit balance.*(?:low|exhaust)|usage limit.*(?:reached|exceeded)|in_flight_budget_exhausted/i.test(String(error?.message??""));
 }

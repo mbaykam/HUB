@@ -11,12 +11,14 @@ export function installMobileWidgetBack(surface: HTMLElement, header: HTMLElemen
   header.setAttribute("data-hub-widget-back-header", ""); surface.append(edge);
   let gesture: {id:number;x:number;y:number;lastX:number;at:number;dx:number;velocity:number;dragging:boolean} | undefined;
   let timer: number | undefined, suppressedUntil = 0, disposed = false;
+  let edgeFrame:number|undefined;
   const enabled = () => root.documentElement.hasAttribute("data-minke-mobile-web") && view.innerWidth < 1024;
   function positionEdge() {
     edge.hidden = !enabled();
     // Native graph dialog scrolls itself; Settings scrolls an inner section.
     // Keep the narrow navigation strip at the visible left edge in both cases.
-    edge.style.top = `${surface.scrollTop}px`; edge.style.height = `${surface.clientHeight}px`;
+    const top=`${surface.scrollTop}px`,height=`${surface.clientHeight}px`;
+    if(edge.style.top!==top)edge.style.top=top;if(edge.style.height!==height)edge.style.height=height;
   }
   function clear() {
     surface.removeAttribute("data-hub-widget-back-active"); surface.removeAttribute("data-hub-widget-back-settling");
@@ -68,8 +70,10 @@ export function installMobileWidgetBack(surface: HTMLElement, header: HTMLElemen
   surface.addEventListener("pointerdown",down,true);
   root.addEventListener("pointermove",move,{capture:true,passive:false}); root.addEventListener("pointerup",up,true); root.addEventListener("pointercancel",cancel,true);
   surface.addEventListener("click",click,true); surface.addEventListener("scroll",positionEdge,{passive:true}); view.addEventListener("resize",resize);
-  const observer = new view.ResizeObserver(positionEdge); observer.observe(surface); positionEdge();
-  return () => { disposed=true; gesture=undefined; clear(); observer.disconnect(); edge.remove(); header.removeAttribute("data-hub-widget-back-header");
+  // WebKit reports a resize loop if a resize callback writes a navigation
+  // child's geometry into that same surface. Position it on the next frame.
+  const observer = new view.ResizeObserver(()=>{if(edgeFrame===undefined)edgeFrame=view.requestAnimationFrame(()=>{edgeFrame=undefined;if(!disposed)positionEdge();});}); observer.observe(surface); positionEdge();
+  return () => { disposed=true; gesture=undefined; clear();if(edgeFrame!==undefined)view.cancelAnimationFrame(edgeFrame);observer.disconnect(); edge.remove(); header.removeAttribute("data-hub-widget-back-header");
     surface.removeEventListener("pointerdown",down,true); root.removeEventListener("pointermove",move,true); root.removeEventListener("pointerup",up,true); root.removeEventListener("pointercancel",cancel,true);
     surface.removeEventListener("click",click,true); surface.removeEventListener("scroll",positionEdge); view.removeEventListener("resize",resize); removeStyles();
   };

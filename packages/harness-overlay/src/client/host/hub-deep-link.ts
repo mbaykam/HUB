@@ -3,7 +3,7 @@ import type { HarnessClientContext } from "../core/context.ts";
 export function installHubDeepLink(ctx: Pick<HarnessClientContext, "sessions">, root: Document = document) {
   const view = root.defaultView!;
   const url = new URL(view.location.href), id = url.searchParams.get("hubSession"), panel = url.searchParams.get("hubPanel");
-  const automation=!!id&&/^hub-automation-[a-f0-9-]{36}-[a-f0-9-]{36}$/.test(id);
+  const automation=!!id&&/^hub-(?:automation|goal)-[a-f0-9-]{36}-[a-f0-9-]{36}$/.test(id);
   if (!id || !automation&&!/^minke-im-(telegram|discord)-[a-f0-9]{32}$/.test(id)) return () => {};
   if(automation)void ctx.sessions.refresh?.();
   let complete = false, opened = false, timer: number | undefined;

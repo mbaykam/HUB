@@ -6,7 +6,7 @@ import {isQuotaFailure} from "./operation-failure.ts";
 import type {AutomationInput,AutomationTrigger,HubAutomation,AutomationRun} from "../automation-contract.ts";
 import type {ProviderGate} from "./provider-gate.ts";
 interface State {revision:number;automations:HubAutomation[];blocked:Record<string,string>}
-export interface AutomationPorts {now():number;route(characterId:string):Promise<string>;read(url:string,signal:AbortSignal):Promise<string>;run(job:HubAutomation,run:AutomationRun,signal:AbortSignal):Promise<string>}
+export interface AutomationPorts {now():number;route(characterId:string):Promise<string>;read(url:string,signal:AbortSignal):Promise<string>;run(job:HubAutomation,run:AutomationRun,signal:AbortSignal):Promise<string>;admit?():undefined|(()=>void)}
 /** HUB-owned durable service, independent of whether any chat is open. Every
  * dispatch has a receipt before native execution. Uncertain runs never replay. */
 export class AutomationsStore {
@@ -50,7 +50,7 @@ export class AutomationsStore {
       job.pendingEvent=JSON.stringify({event:type,data}).slice(0,8000);job.nextAt=this.ports.now();changed=true;
     }if(changed)await this.save();
   });}
-  tick(){if(this.working||this.lifetime.signal.aborted)return this.working;this.working=this.runDue().finally(()=>this.working=undefined);return this.working;}
+  tick(){if(this.working||this.lifetime.signal.aborted)return this.working;const release=this.ports.admit?.();if(this.ports.admit&&!release)return;this.working=this.runDue().finally(()=>{release?.();this.working=undefined;});return this.working;}
   private async runDue(){
     let selected:HubAutomation|undefined,run:AutomationRun|undefined;
     const now=this.ports.now();
@@ -80,7 +80,7 @@ export class AutomationsStore {
         const current=this.state.automations.find(j=>j.id===job.id)!;if(current.state!=="active"||signal.aborted)return;
         if(watchValue!==undefined){current.lastValue=digest(watchValue);current.lastMatch=watchMatch;current.lastCheckAt=now;}
         if(!fire){current.nextAt=nextOccurrence(job.trigger,now);current.status="scheduled";await this.save();return;}
-        const estimate=job.maxSteps*((Buffer.byteLength(job.prompt+(job.pendingEvent??""))+32000)*job.inputPrice+job.maxOutputTokens*job.outputPrice)/1e6;
+        const estimate=job.goalId?0:job.maxSteps*((Buffer.byteLength(job.prompt+(job.pendingEvent??""))+32000)*job.inputPrice+job.maxOutputTokens*job.outputPrice)/1e6;
         const today=new Date(now).toISOString().slice(0,10),runs=current.runs.filter(r=>new Date(r.at).toISOString().slice(0,10)===today);
         if(runs.length>=job.dailyMaxRuns||runs.reduce((s,r)=>s+r.estimatedCost,0)+estimate>job.dailyBudget){current.status="budget-paused";current.lastError="Daily task budget/run limit reached; original task retained.";current.nextAt=Date.parse(today+"T00:00:00Z")+86400000;await this.save();return;}
         const id=randomUUID();run={id,at:now,dueAt:current.nextAt??now,sessionId:`hub-automation-${current.id}-${id}`,route:await this.ports.route(current.characterId),status:"running",estimatedCost:estimate};current.runs.push(run);current.status="running";current.pendingEvent=undefined;await this.save();
@@ -110,6 +110,7 @@ export function validateAutomation(value:any):AutomationInput {
   for(const [key,min,max]of [["maxOutputTokens",256,8192],["maxSteps",1,6],["dailyMaxRuns",1,48]] as const)if(!Number.isInteger(value[key])||value[key]<min||value[key]>max)throw Error("Invalid task limit: "+key);
   for(const key of ["dailyBudget","inputPrice","outputPrice"])if(!Number.isFinite(value[key])||value[key]<=0||value[key]>100)throw Error("Invalid usage estimate");
   if(!["pwa","telegram"].includes(value.notification)||value.notification==="telegram"&&!/^minke-im-telegram-[a-f0-9]{32}$/.test(value.sourceSessionId??""))throw Error("Telegram notifications require the originating authorized Telegram chat");
+  if(value.goalId!==undefined&&(typeof value.goalId!=="string"||!/^[-a-f0-9]{36}$/.test(value.goalId)))throw Error("Invalid linked goal ID");
   const t=value.trigger;if(!t||!["once","interval","calendar","watch","event"].includes(t.kind))throw Error("Choose a trigger");
   if(t.kind==="once"&&(!Number.isSafeInteger(t.at)||t.at<=0))throw Error("Invalid execution time");
   if(["interval","watch"].includes(t.kind)&&(!Number.isInteger(t.seconds)||t.seconds<300||t.seconds>31536000))throw Error("Intervals must be at least five minutes");
@@ -120,7 +121,7 @@ export function validateAutomation(value:any):AutomationInput {
   if(comparison&&(typeof t.value!=="string"||!t.value.trim()||t.value.length>1000||["above","below"].includes(comparison)&&!Number.isFinite(Number(t.value))))throw Error("Set a nonempty valid comparison value");
   if(t.kind==="event"&&t.operator&&!t.path)throw Error("Choose the event field to compare");
   if(t.jsonPath||t.path)if(typeof (t.jsonPath??t.path)!=="string"||!/^[a-zA-Z0-9_.-]{1,100}$/.test(t.jsonPath??t.path))throw Error("Use a simple JSON field path");
-  return structuredClone({title:value.title.trim(),prompt:value.prompt,characterId:value.characterId,trigger:t,missed:value.missed,tools:[...new Set(value.tools)] as string[],allowWrites:value.allowWrites,maxOutputTokens:value.maxOutputTokens,maxSteps:value.maxSteps,dailyMaxRuns:value.dailyMaxRuns,dailyBudget:value.dailyBudget,inputPrice:value.inputPrice,outputPrice:value.outputPrice,notification:value.notification,sourceSessionId:value.sourceSessionId});
+  return structuredClone({title:value.title.trim(),prompt:value.prompt,characterId:value.characterId,trigger:t,missed:value.missed,tools:[...new Set(value.tools)] as string[],allowWrites:value.allowWrites,maxOutputTokens:value.maxOutputTokens,maxSteps:value.maxSteps,dailyMaxRuns:value.dailyMaxRuns,dailyBudget:value.dailyBudget,inputPrice:value.inputPrice,outputPrice:value.outputPrice,notification:value.notification,sourceSessionId:value.sourceSessionId,goalId:value.goalId});
 }
 export function nextOccurrence(trigger:AutomationTrigger,after:number):number|undefined{
   if(trigger.kind==="once")return trigger.at;

@@ -17,12 +17,16 @@
       ],
       "@deepseek-ai/dsh-tool-subagent": [
         "../../vendor/deepseek-harness/packages/subagent/tool-subagent/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-goal-round-driver": [
+        "../../vendor/deepseek-harness/packages/goal/goal-round-driver/lib/types/index.d.ts"
       ]
     }
   },
   "include": [
     "src/knowledge-contract.ts",
     "src/automation-contract.ts",
+    "src/goal-contract.ts",
     "src/agent-browser-contract.ts",
     "src/agent-turn-contract.ts",
     "src/bookmarks-contract.ts",

@@ -1,7 +1,7 @@
 {
   "name": "@lencx/minke-harness-overlay",
   "description": "HUB-owned DeepSeek Harness product extensions",
-  "version": "0.4.39",
+  "version": "0.4.40",
   "private": true,
   "type": "module",
   "scripts": {
@@ -71,7 +71,9 @@
     "@deepseek-ai/dsh-tools": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-typert-protocol": "0.1.2-alpha.5",
     "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-tool-subagent": "0.1.2-alpha.5"
+    "@deepseek-ai/dsh-tool-subagent": "0.1.2-alpha.5",
+    "@deepseek-ai/dsh-goal": "0.1.2-alpha.5",
+    "@deepseek-ai/dsh-goal-round-driver": "0.1.2-alpha.5"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-tools": {

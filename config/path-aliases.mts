@@ -25,6 +25,10 @@ export const EXACT_PATH_ALIASES:
       target:
         "vendor/deepseek-harness/packages/llm/llm/lib/index.js",
     },
+    {
+      specifier: "@deepseek-ai/dsh-goal-round-driver",
+      target: "vendor/deepseek-harness/packages/goal/goal-round-driver/lib/index.js",
+    },
   ]);
 
 export const PATH_ALIASES: readonly PathAliasDefinition[] = Object.freeze([

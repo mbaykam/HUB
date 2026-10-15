@@ -59,6 +59,11 @@
       config:
         providerName: hub-character-spawn
 
+    # Native goal state/round attribution; HUB admits bounded rounds under the
+    # saved user policy rather than mounting an unrestricted automatic driver.
+    - id: hub-goal-state
+      name: '@deepseek-ai/dsh-goal'
+
     - id: hub-characters
       name: '@lencx/minke-harness-overlay/characters'
 

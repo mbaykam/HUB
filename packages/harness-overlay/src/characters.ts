@@ -15,9 +15,12 @@ import { currentTurnHasUserRequest, TASK_NOTIFICATION_RULE } from "./host/task-t
 import {installInstructionFiles,InstructionFiles} from "./host/instruction-files.ts";
 import {installAutomations} from "./host/automations.ts";
 import {providerGate,type ProviderGate} from "./host/provider-gate.ts";
+import {BackgroundAdmission} from "./host/background-admission.ts";
+import {installGoals} from "./host/goals.ts";
+import type {GoalsStore} from "./host/goals-store.ts";
 
 export const name="hub-characters";
-export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer"];
+export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals"];
 declare module "@deepseek-ai/cordis" { interface Context { hubCharacters:HubCharacters; } }
 type CharacterAgent={id:string;session:{header:{origin?:string;parentSession?:string};snapshotEvents():readonly {type:string;data?:unknown}[]};ctx:any};
 type Mount={revision:number;fibers:{dispose():Promise<void>}[];names:Map<string,string>;snapshot?:HubCharactersState;turnSnapshot?:HubCharactersState;loading?:Promise<void>;assembled?:{character:HubCharacter;state:HubCharactersState};voiceCharacter?:HubCharacter;nativeRoute?:string};
@@ -41,12 +44,15 @@ export class HubCharacters extends Service {
   readonly store:CharacterStore; readonly ready:Promise<void>;
   readonly instructions:InstructionFiles;
   readonly quota:ProviderGate;
+  readonly background:BackgroundAdmission;
+  goals?:GoalsStore;
   readonly voiceCalls=new Set<string>();
   readonly voiceAdmissions=new Map<string,HubCharactersState>();
   readonly mounts=new Map<string,Mount>();
   readonly dispatches=new Map<string,unknown>();
   constructor(ctx:CharacterHost,root=join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-characters"),camoRuntime?:CamofoxRuntime){
     super(ctx,"hubCharacters");this.host=ctx;this.store=new CharacterStore(root);this.instructions=new InstructionFiles(join(root,"instructions"));this.quota=providerGate(join(root,"..","hub-provider-health"));
+    this.background=new BackgroundAdmission(()=>ctx.agents.list().some((a:any)=>a.status!=="idle"&&!/^hub-(goal|automation|memory)-/.test(a.id)&&!/^hub-(goal|automation|memory)-/.test(a.session.header.parentSession??"")));
     ctx.effect(()=>installCharacterActivity(ctx,root),"HUB observed specialist activity");
     const lifetime=new AbortController();const camofox=camoRuntime??new CamofoxRuntime(ctx.subprocess,lifetime.signal);
     ctx.effect(()=>{const off=installCamofoxTools(ctx.tools,camofox);void camofox.ensure().catch(()=>{});return ()=>{lifetime.abort();off();};},"HUB Camofox web tools");
@@ -64,7 +70,7 @@ export class HubCharacters extends Service {
       }finally{await legacy.close();}
     });
     const attach=(agent:CharacterAgent)=>{
-      if(agent.session.header.origin==="subagent" || agent.id.startsWith("hub-automation-") || agent.id.startsWith("hub-memory-") || agent.id.startsWith("hub-character-eval-") || this.mounts.has(agent.id))return;
+      if(agent.session.header.origin==="subagent" || agent.id.startsWith("hub-automation-") || agent.id.startsWith("hub-memory-") || agent.id.startsWith("hub-goal-") || agent.id.startsWith("hub-character-eval-") || this.mounts.has(agent.id))return;
       const mount:Mount={revision:-1,fibers:[],names:new Map()};this.mounts.set(agent.id,mount);
       let selected:HubCharacter|undefined;
       const characterPrompt=(s:HubCharactersState,character:HubCharacter)=>{
@@ -102,7 +108,7 @@ export class HubCharacters extends Service {
         if(exec.name==="hub_switch_character")return; // Explicit user navigation has its own authorization check.
         const policy=selected?.tools;
         if(policy?.mode==="allow" && !policy.names.includes(exec.name))return "This tool is disabled for this character.";
-        if(agent.id.startsWith("minke-im-")&&!new Set(["hub_switch_character","hub_delegate","hub_automation_manage","hub_knowledge_write_note","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
+        if(agent.id.startsWith("minke-im-")&&!new Set(["hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_knowledge_write_note","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
       });
       agent.ctx.tools.register({name:"hub_switch_character",description:"Bring a configured character into this text or Telegram conversation as the active speaker. Choose this tool by the meaning of the user's request, in any language; no keywords or exact phrasing are required. Resolve names or references from conversation context. The following reply uses that character's model and persona. For a request to have the character perform background work, use hub_delegate instead. Ask briefly if that distinction is unclear.",parameters:{type:"object",properties:{character:{type:"string"}},required:["character"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
         if(exec.agent?.id!==agent.id||this.voiceCalls.has(agent.id))throw new Error("Switch characters from a text conversation");
@@ -136,6 +142,7 @@ export class HubCharacters extends Service {
     ctx.effect(()=>this.installWeb(),"HUB character management");
     ctx.effect(()=>installInstructionFiles(ctx,this,this.instructions),"HUB editable instruction files");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
+    ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");
   }
   async validate(c:HubCharacter){if(c.route)await this.host.llm.resolveCallConfig(c.route);}
   async syncNativeRoute(agent:CharacterAgent,c:HubCharacter){

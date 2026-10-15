@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.40
+
+- Add Goals to the mobile/desktop right panel: six-tab editing, character routes, approaches, named helpers, independent verification, resources, limits and evidence-backed completion.
+- Support immediate, timed, calendar, watch and event starts, with continuing outcomes or separate recurring results; automations can wake an active linked goal.
+- Resume native goal sessions across rounds and owner changes, preserve checkpoints and plan/history, require exact-operation approval, and inspect uncertain restart writes.
+- Share background admission and quota between Goals, Automations and Knowledge AI; keep goal working context out of automatic personal Knowledge capture.
+- Add checked output downloads and approved original-archive import previews without rewriting original conversations.
+
 ## 0.4.39
 
 - Declare the Knowledge plugin's character-service dependency so the full desktop/PWA host boots correctly with the new shared quota and profile reflection features.
