@@ -84,3 +84,7 @@ HUB kodu [Apache-2.0](LICENSE) lisanslıdır. Upstream bileşenler ve indirilen
 modeller kendi lisanslarını korur; [NOTICE](NOTICE).
 
 Otomasyonlar sağ panelde yönetilir: zaman, tekrar, takvim, kaynak değişimi ve HUB olayları. Çalışma geçmişi, araç izinleri ve limit bekleme durumları burada görünür. [Otomasyonlar](docs/automations.md) · [Knowledge](docs/knowledge.md).
+
+Knowledge'da bir nottan geri dönünce arama listesi ve okuma konumu korunur.
+Çalışma alanında başka bir yere geçmeden önce not düzenlemesini kaydet veya
+**Discard changes** ile açıkça vazgeç.

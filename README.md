@@ -132,6 +132,9 @@ archived even when a model fails; Curator cannot rewrite them. ChatGPT/Gemini
 archives can be imported explicitly. See [Knowledge](docs/knowledge.md),
 [Automations](docs/automations.md) and [Voice](docs/voice.md).
 
+In Knowledge, returning from a note keeps your filtered list and reading position.
+Save or explicitly discard a note edit before navigating away inside the workspace.
+
 HUB uses the native Harness permission model. Tools and trusted plugins can
 operate on the host with the permissions you grant. Keep credentials and runtime
 data outside the checkout, approve Telegram pairing deliberately, and use
