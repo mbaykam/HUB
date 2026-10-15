@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.42
+
+- Retain observed file and tool receipts when a goal is paused or a round fails, so resumed work can use completed actions without repeating them.
+- Keep paused goals visible in the default list, show counts and selected states on filters, and hide inactive next-work times.
+
 ## 0.4.41
 
 - Fix desktop/PWA startup by reusing the base profile's native Goal service instead of registering it twice.

@@ -154,6 +154,10 @@ export class GoalsStore {
         const g=this.state.goals.find(g=>g.id===job.id)!,r=g.rounds.find(r=>r.id===round!.id)!;r.finishedAt=this.ports.now();g.activeMs+=Math.max(0,r.finishedAt-r.at);
         // Changed settings cannot be satisfied by results against old criteria.
         const sameRevision=g.revision===selected!.revision;
+        // Observed effects remain true after pause or a policy edit. Retaining
+        // receipts grants no new authority and never accepts an old checkpoint.
+        const fresh:GoalEvidence[]=(result?.evidence??error?.goalEvidence??[]).filter((e:GoalEvidence)=>e.roundId===r.id&&!g.evidence.some(old=>old.id===e.id));
+        g.evidence.push(...fresh);g.cycles.find(c=>c.id===r.cycleId)?.evidence.push(...fresh.map(e=>e.id));
         if(error){r.status=signal.aborted?"interrupted":"failed";r.error=String(error.message??"Work round failed").slice(0,1500);this.record(g,"round-failed",r.error);
           if(g.state==="active"&&sameRevision){
             if(error.code==="GOAL_SESSION_BUSY"){g.status="waiting-foreground";g.nextAt=this.ports.now()+5000;g.reason=r.error;}
@@ -163,7 +167,6 @@ export class GoalsStore {
             else{g.status="scheduled";g.reason=r.error;g.nextAt=this.ports.now()+30000;}
           }
         }else if(result){r.status="done";r.summary=result.summary.slice(0,4000);r.nativeGoal=result.nativeGoal;g.consecutiveFailures=0;
-          const fresh=result.evidence.filter(e=>!g.evidence.some(old=>old.id===e.id));g.evidence.push(...fresh);g.cycles.at(-1)?.evidence.push(...fresh.map(e=>e.id));
           this.record(g,"checkpoint",result.checkpoint?.summary??r.summary??"Round ended.");
           if(sameRevision&&g.state==="active"){
             const cp=result.checkpoint;g.checkpoint=cp??g.checkpoint;

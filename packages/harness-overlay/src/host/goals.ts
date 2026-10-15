@@ -115,6 +115,13 @@ export async function executeGoalRound(ctx:any,characters:any,store:GoalsStore,g
     }
     goal=ctx.goals.disarm(a)!; // Durable completion follows the registry evidence commit, never precedes it.
     return {checkpoint,evidence,summary:checkpoint?.summary??summary,nativeGoal:{id:goal.id,revision:goal.revision,phase:goal.phase,roundsStarted:goal.roundsStarted},verified};
+  }catch(cause){
+    // Cancellation can follow a completed file/tool operation. Keep its actual
+    // receipt even though the interrupted round cannot certify completion.
+    throw Object.assign(new Error(cause instanceof Error?cause.message:"Goal round failed",{cause}),{
+      code:(cause as any)?.code,provider:(cause as any)?.provider,
+      goalEvidence:[...goalToolEvidence(a.session.snapshotEvents().slice(begin),round),...fileEvidence],
+    });
   }finally{signal.removeEventListener("abort",cancel);for(const f of fibers)await f.dispose();if(ctx.goals.get(a)?.phase==="active")ctx.goals.disarm(a);await handle.dispose();}
 }
 
