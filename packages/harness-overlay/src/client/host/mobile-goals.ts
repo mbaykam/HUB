@@ -21,7 +21,21 @@ export function installMobileGoals(container:HTMLElement,root:Document):()=>void
   const notice=el("p");notice.setAttribute("role","status");const body=el("section");dialog.append(header,notice,body);root.body.append(dialog);
   let state:GoalsSnapshot|undefined,editingId:string|undefined,editingRevision:number|undefined,dirty=false,busy=false,currentTab=0,filter="all",form:HTMLFormElement|undefined,activity:HTMLElement|undefined,summary:HTMLElement|undefined;
   const fields=new Map<string,HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>();let plan:GoalMilestone[]=[],planDirty=false,seenPlanRevision=-1,updatePlan:(()=>void)|undefined;
-  let activityVersion="",activityOwner:HTMLElement|undefined;
+  let activityVersion="",activityOwner:HTMLElement|undefined,restoringActivityFocus=false;
+  dialog.addEventListener("focusin",event=>{
+    const target=event.target as HTMLElement;
+    if(restoringActivityFocus||!body.contains(target)||target.closest(".goal-actions"))return;
+    // Native focus scrolling does not account for the sticky header/action bar.
+    view.requestAnimationFrame(()=>{
+      if(lifetime.signal.aborted||!dialog.open||root.activeElement!==target)return;
+      const bounds=dialog.getBoundingClientRect(),head=header.getBoundingClientRect(),actions=body.querySelector<HTMLElement>(".goal-actions")?.getBoundingClientRect(),rect=target.getBoundingClientRect();
+      if(!rect.height||!bounds.height)return;
+      const top=Math.max(bounds.top,head.bottom)+8,bottom=Math.min(bounds.bottom,actions?.height?actions.top:bounds.bottom)-8;
+      if(bottom<=top)return;
+      const delta=rect.height>bottom-top||rect.top<top?rect.top-top:Math.max(0,rect.bottom-bottom);
+      if(delta)dialog.scrollTop+=delta;
+    });
+  });
   const focusKey=<T extends HTMLElement>(node:T,key:string)=>{node.dataset.goalFocus=key;return node;};
   async function request(command?:unknown){const response=await view.fetch("/api/hub/goals",{credentials:"same-origin",cache:"no-store",headers:{"x-hub-goals":"1",...(command?{"content-type":"application/json"}:{})},method:command?"POST":"GET",body:command?JSON.stringify(command):undefined,signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(20000)])});const data=await response.json();if(!response.ok)throw Error(data.detail??"Could not load Goals.");return data as GoalsSnapshot&{changedId?:string};}
   async function load(){try{state=await request();tileCount.textContent=state.goals.length?`${state.goals.filter(g=>g.state==="active").length} active · ${state.goals.filter(g=>g.status.startsWith("needs-")).length} need you`:"Outcomes, progress and recurring work";if(editingId||form){updateProgress();if(activity)renderActivity();}else showList();notice.textContent="";}catch(e){notice.textContent=String((e as Error).message);}}
@@ -100,7 +114,7 @@ export function installMobileGoals(container:HTMLElement,root:Document):()=>void
     const log=el("details");log.dataset.goalDetails="history";log.append(focusKey(el("summary","Settings and checkpoint history"),"details:history"));for(const h of [...g.history].reverse().slice(0,150))log.append(el("p",`${date(h.at)} · ${h.kind}\n${h.message}`));activity.append(log);
     const plans=el("details");plans.dataset.goalDetails="plans";plans.append(focusKey(el("summary","Earlier milestone plans"),"details:plans"));for(const p of [...(g.planHistory??[])].reverse())plans.append(el("p",`Revision ${p.revision} · ${date(p.at)}\n${p.plan.map(s=>s.status+" · "+s.title).join("\n")}`));activity.append(plans);
     for(const node of activity.querySelectorAll<HTMLDetailsElement>("details[data-goal-details]"))node.open=open.has(node.dataset.goalDetails);
-    if(focused)[...activity.querySelectorAll<HTMLElement>("[data-goal-focus]")].find(node=>node.dataset.goalFocus===focused)?.focus({preventScroll:true});
+    if(focused){restoringActivityFocus=true;try{[...activity.querySelectorAll<HTMLElement>("[data-goal-focus]")].find(node=>node.dataset.goalFocus===focused)?.focus({preventScroll:true});}finally{restoringActivityFocus=false;}}
     dialog.scrollTop=scroll;
   }
   async function download(id:string,evidenceId:string){try{const response=await view.fetch("/api/hub/goals?view=artifact&id="+encodeURIComponent(id)+"&evidenceId="+encodeURIComponent(evidenceId),{credentials:"same-origin",headers:{"x-hub-goals":"1"},signal:lifetime.signal});const result=await response.json();if(!response.ok)throw Error(result.detail??"Output unavailable.");const bytes=Uint8Array.from(view.atob(result.data),(c:string)=>c.charCodeAt(0)),url=view.URL.createObjectURL(new view.Blob([bytes],{type:"application/octet-stream"})),a=el("a");a.href=url;a.download=result.name;root.body.append(a);a.click();a.remove();view.setTimeout(()=>view.URL.revokeObjectURL(url),10000);}catch(e){notice.textContent=(e as Error).message;}}

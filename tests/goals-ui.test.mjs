@@ -50,3 +50,27 @@ test('polling preserves expanded goal evidence, scroll and keyboard focus as new
   goal={...goal,revision:3,history:[{at:2,kind:'checkpoint',message:'New observed checkpoint'}]};poll();await flush();assert.equal(root.activeElement.dataset.goalFocus,'download:file:one');assert.equal(root.querySelector('[data-goal-details=evidence]').open,true);
  }finally{dispose();d.window.close();}
 });
+
+test('keyboard focus reveals goal controls covered by the sticky actions without moving visible controls',async()=>{
+ const {defaultGoal}=await import('../packages/harness-overlay/src/goal-contract.ts');
+ const d=fixture(),root=d.window.document,frames=[];
+ d.window.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
+ const goal={...structuredClone(defaultGoal),id:'focus-fixture',revision:1,title:'Focus fixture',criteria:[],characterId:'main',state:'paused',status:'paused',plan:[],rounds:[],cycles:[],evidence:[{id:'file:one',kind:'file',label:'Output',path:'C:/fixture/check.md',at:1}],approvals:[],history:[],criteriaEvidence:[],activeMs:0};
+ d.window.fetch=async()=>({ok:true,json:async()=>({revision:1,goals:[goal],characters:[{id:'main',name:'HUB',route:{provider:'mock',model:'mock'}}],tools:[]})});
+ const dispose=installMobileGoals(root.querySelector('aside'),root);
+ try{
+  root.querySelector('[data-hub-goals-tile]').click();await flush();button(root,'Open goal').click();button(root,'Activity & results').click();
+  const dialog=root.querySelector('dialog'),actions=root.querySelector('.goal-actions'),download=button(root,'Download checked output');root.querySelector('[data-goal-details=evidence]').open=true;
+  dialog.getBoundingClientRect=()=>({top:8,bottom:836,height:828});
+  dialog.querySelector('header').getBoundingClientRect=()=>({top:8,bottom:75,height:67});
+  actions.getBoundingClientRect=()=>({top:712,bottom:835,height:123});
+  dialog.scrollTop=492;download.getBoundingClientRect=()=>({top:784+(492-dialog.scrollTop),bottom:828+(492-dialog.scrollTop),height:44});
+  download.focus();for(const callback of frames.splice(0))callback(0);
+  assert.equal(root.activeElement,download);assert.ok(download.getBoundingClientRect().bottom<=704,'Focused download must clear the action bar with an8px gap');
+  const visible=root.querySelector('[data-goal-details=evidence] summary');visible.getBoundingClientRect=()=>({top:200,bottom:242,height:42});
+  const scroll=dialog.scrollTop;visible.focus();for(const callback of frames.splice(0))callback(0);assert.equal(dialog.scrollTop,scroll,'Already visible focus must not move reading position');
+  button(root,'Save changes').focus();for(const callback of frames.splice(0))callback(0);assert.equal(dialog.scrollTop,scroll,'Sticky actions must not scroll their own form');
+  visible.getBoundingClientRect=()=>({top:40,bottom:82,height:42});visible.focus();for(const callback of frames.splice(0))callback(0);
+  assert.equal(dialog.scrollTop,scroll-43,'Focus hidden behind the sticky header must move below it');
+ }finally{dispose();d.window.close();}
+});
