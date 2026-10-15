@@ -9,6 +9,7 @@ const inside=(root:string,path:string)=>{const r=relative(root,path);return r===
 export async function goalPath(g:HubGoal,raw:string,write:boolean,privateRoot:string|string[]){
   const workspace=resolve(g.workspace!);await mkdir(workspace,{recursive:true});
   const path=resolve(workspace,raw),roots=[workspace,...g.resources.writeFolders,...(write?[]:g.resources.folders)];
+  if(write&&inside(join(workspace,".goal-artifacts"),path))throw Error("Recorded artifact versions are read-only.");
   let cursor=path;while(true){try{await lstat(cursor);break;}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;const parent=dirname(cursor);if(parent===cursor)throw e;cursor=parent;}}
   const actual=resolve(await realpath(cursor),relative(cursor,path));
   const approved=await Promise.all(roots.map(async r=>{try{return await realpath(r);}catch{return resolve(r);}}));
@@ -20,15 +21,16 @@ export async function goalPath(g:HubGoal,raw:string,write:boolean,privateRoot:st
 }
 export async function goalFile(g:HubGoal,args:{action:string;path:string;content?:string},privateRoot:string|string[],roundId:string):Promise<{value:string;evidence?:GoalEvidence}>{
   const writing=args.action==="write",path=await goalPath(g,args.path,writing,privateRoot);
+  const retain=async(bytes:Buffer,sha:string)=>{const archived=join(g.workspace!,".goal-artifacts",sha,path.split(/[\\/]/).at(-1)!);await mkdir(dirname(archived),{recursive:true});try{await writeFile(archived,bytes,{flag:"wx",mode:0o600});}catch(e){if((e as NodeJS.ErrnoException).code!=="EEXIST")throw e;}if(createHash("sha256").update(await readFile(archived)).digest("hex")!==sha)throw Error("Recorded artifact version changed.");return archived;};
   if(args.action==="list"){const files=await readdir(path,{withFileTypes:true});return {value:JSON.stringify(files.slice(0,500).map(f=>({name:f.name,directory:f.isDirectory(),symbolicLink:f.isSymbolicLink()})))};}
   if(args.action==="read"){const info=await lstat(path);if(info.size>1048576||!info.isFile())throw Error("Select a text file under 1 MB; use a bounded import for archives.");return {value:await readFile(path,"utf8")};}
-  if(args.action==="verify"){const info=await lstat(path);if(!info.isFile()||info.size>25000000)throw Error("Verify a file under 25 MB.");const sha256=createHash("sha256").update(await readFile(path)).digest("hex"),id="file:"+sha256+":"+roundId;return {value:JSON.stringify({path,sha256,bytes:info.size,evidenceId:id}),evidence:{id,roundId,kind:"file",label:"Checked "+args.path,detail:"Existing file was read and SHA-256 checked; this receipt does not claim it was newly created.",path,sha256,at:Date.now()}};}
+  if(args.action==="verify"){const info=await lstat(path);if(!info.isFile()||info.size>25000000)throw Error("Verify a file under 25 MB.");const bytes=await readFile(path),sha256=createHash("sha256").update(bytes).digest("hex"),id="file:"+sha256+":"+roundId,artifactPath=await retain(bytes,sha256);return {value:JSON.stringify({path,artifactPath,sha256,bytes:info.size,evidenceId:id}),evidence:{id,roundId,kind:"file",label:"Checked "+args.path,detail:"Existing file was read, SHA-256 checked and retained; this receipt does not claim it was newly created.",path:artifactPath,sha256,at:Date.now()}};}
   if(writing){
     if(typeof args.content!=="string"||Buffer.byteLength(args.content)>1048576)throw Error("Output must be text under 1 MB.");
     await mkdir(dirname(path),{recursive:true});await goalPath(g,path,true,privateRoot); // Recheck after creating parents.
     const temp=join(dirname(path),`.hub-goal-${randomUUID()}.tmp`);await writeFile(temp,args.content,{flag:"wx",mode:0o600});await rename(temp,path);
-    const sha256=createHash("sha256").update(await readFile(path)).digest("hex"),id="file:"+sha256+":"+roundId;
-    return {value:JSON.stringify({path,sha256,evidenceId:id}),evidence:{id,roundId,kind:"file",label:"Saved "+args.path,detail:"Saved output was read back and SHA-256 checked.",path,sha256,at:Date.now()}};
+    const bytes=await readFile(path),sha256=createHash("sha256").update(bytes).digest("hex"),id="file:"+sha256+":"+roundId,artifactPath=await retain(bytes,sha256);
+    return {value:JSON.stringify({path,artifactPath,sha256,evidenceId:id}),evidence:{id,roundId,kind:"file",label:"Saved "+args.path,detail:"Saved output was read back, SHA-256 checked and retained as an artifact version.",path:artifactPath,sha256,at:Date.now()}};
   }
   throw Error("Choose list, read, write or verify.");
 }
