@@ -32,6 +32,23 @@ test('interrupted native run after a power loss needs review and never auto-repl
 test('pausing cancels in-flight work and prevents new runs; stale edits preserve configuration',async t=>{
  let entered;const started=new Promise(r=>entered=r);const f=await fixture(t,{run:async(_job,_run,signal)=>{entered();return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('Cancelled')),{once:true}));}});const job=await f.save();const stale=f.store.snapshot().revision;f.advance(1000);const pending=f.store.tick();await started;await assert.rejects(f.store.change({action:'cancel',revision:stale,id:job.id}),/changed/);await f.store.change({action:'pause',revision:f.store.snapshot().revision,id:job.id});await pending;await f.store.tick();assert.equal(f.store.snapshot().automations[0].status,'paused');assert.equal(f.store.snapshot().automations[0].runs.length,1);
 });
+
+test('editing a paused automation preserves pause across restart until explicit resume',async t=>{
+ const f=await fixture(t);const trigger={kind:'interval',seconds:300};const job=await f.save({trigger});
+ const edit=prompt=>f.store.change({action:'save',id:job.id,revision:f.store.snapshot().revision,automation:input({trigger,prompt})});
+ await edit('Edited active task.');assert.equal(f.store.snapshot().automations[0].state,'active');
+ await f.store.change({action:'pause',id:job.id,revision:f.store.snapshot().revision});
+ await edit('Edited task must remain paused.');
+ const saved=f.store.snapshot().automations[0];assert.equal(saved.state,'paused');assert.equal(saved.status,'paused');assert.equal(saved.nextAt,undefined);
+ let calls=0;const restored=new AutomationsStore(f.root,{...f.store.ports,run:async()=>{calls++;return 'Explicitly resumed fixture.';}});t.after(()=>restored.dispose());await restored.initialize();
+ f.advance(300000);await restored.tick();assert.equal(calls,0);assert.equal(restored.snapshot().automations[0].state,'paused');
+ await restored.change({action:'resume',id:job.id,revision:restored.snapshot().revision});await restored.tick();assert.equal(calls,0);
+ f.advance(300000);await restored.tick();assert.equal(calls,1);assert.equal(restored.snapshot().automations[0].runs.length,1);
+ // Editing a cancelled task is the existing, explicit reactivation path.
+ await restored.change({action:'cancel',id:job.id,revision:restored.snapshot().revision});
+ await restored.change({action:'save',id:job.id,revision:restored.snapshot().revision,automation:input({trigger})});
+ assert.equal(restored.snapshot().automations[0].state,'active');assert.equal(restored.snapshot().automations[0].status,'scheduled');assert.equal(restored.snapshot().automations[0].runs.length,1);
+});
 test('missed-once skip/catch-up and daily run budgets have explicit truthful outcomes',async t=>{
  const f=await fixture(t);await f.save({missed:'skip'});await f.save({missed:'catch-up'});f.advance(120000);await f.store.tick();await f.store.tick();assert.equal(f.calls(),1);assert.equal(f.store.snapshot().automations[0].lastError,'Missed while host was offline; skipped by your policy.');await f.save({trigger:{kind:'interval',seconds:300},dailyMaxRuns:1});f.advance(300000);await f.store.tick();f.advance(300000);await f.store.tick();const j=f.store.snapshot().automations.at(-1);assert.equal(j.status,'budget-paused');assert.equal(j.runs.length,1);
 });

@@ -30,7 +30,9 @@ export class AutomationsStore {
       const input=validateAutomation(command.automation);await this.ports.route(input.characterId);
       if(job?.status==="running"||job?.status==="checking")throw Error("Pause this task before changing it");
       if(!job&&this.state.automations.length>=200)throw Error("Automation limit reached; cancel and reuse a task");
-      const next:HubAutomation={...input,id:job?.id??randomUUID(),revision:(job?.revision??0)+1,state:"active",status:"scheduled",createdAt:job?.createdAt??now,updatedAt:now,nextAt:nextOccurrence(input.trigger,now),runs:job?.runs??[]};
+      // Saving configuration must not undo a user's pause or interruption review.
+      const paused=job?.state==="paused";
+      const next:HubAutomation={...input,id:job?.id??randomUUID(),revision:(job?.revision??0)+1,state:paused?"paused":"active",status:paused?"paused":"scheduled",createdAt:job?.createdAt??now,updatedAt:now,nextAt:paused?undefined:nextOccurrence(input.trigger,now),runs:job?.runs??[],lastError:paused?job.lastError:undefined};
       if(job)this.state.automations[this.state.automations.indexOf(job)]=next;else this.state.automations.push(next);
     }else if(command.action==="resume-credit"){
       if(!job)throw Error("Task missing");const route=await this.ports.route(job.characterId);delete this.state.blocked[route];
