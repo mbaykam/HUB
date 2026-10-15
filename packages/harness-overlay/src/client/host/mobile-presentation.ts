@@ -63,7 +63,9 @@ export function createMobilePresentation(root: Document) {
       latest = result.presentation === null ? undefined : parsePresentationSummary(result.presentation);
       button.hidden = !latest;
       if (latest) {
-        button.textContent = `${showing && showing !== latest.id ? "New visual" : "Open visual"} · ${latest.title}`;
+        const label = showing && showing !== latest.id ? "New visual" : "Open visual";
+        button.textContent = label === "New visual" ? label : "Visual";
+        button.setAttribute("aria-label", `${label} · ${latest.title}`); button.title = latest.title;
         update.hidden = !dialog.open || showing === latest.id;
         if (dialog.open && showing !== latest.id && following && !opening) void open();
         if (!seen.has(latest.id) && !dialog.open && !root.querySelector("dialog[open]")) void open();
@@ -96,10 +98,23 @@ export function createMobilePresentation(root: Document) {
 /** One canvas survives responsive layout and Home/chat navigation. */
 export function installConversationPresentation(ctx: HarnessClientContext, root: Document = document) {
   const canvas = createMobilePresentation(root);
-  canvas.button.setAttribute("data-hub-chat-visual", ""); root.body.append(canvas.button);
-  const selected = () => canvas.setSession(ctx.sessions.list.getSnapshot().current);
+  canvas.button.setAttribute("data-hub-chat-visual", "");
+  const view = root.defaultView!;
+  let voiceCall: string | undefined, frame: number | undefined;
+  function place() {
+    frame = undefined;
+    const target = ctx.sessions.list.getSnapshot().current
+      ? root.querySelector('[data-slot="conversation.session.header.utilities"]')
+      : voiceCall ? root.querySelector('[data-hub-voice-hub]') : null;
+    if (target && canvas.button.parentElement !== target) target.append(canvas.button);
+    else if (!target) canvas.button.remove();
+  }
+  const schedule = () => { if (frame === undefined) frame = view.requestAnimationFrame(place); };
+  const observer = new view.MutationObserver(schedule);
+  observer.observe(root.body, { childList: true, subtree: true });
+  const selected = () => { canvas.setSession(ctx.sessions.list.getSnapshot().current); schedule(); };
   const off = ctx.sessions.list.subscribe(selected); selected();
-  const call = (event: Event) => canvas.setCall((event as CustomEvent<{ callId?: string }>).detail?.callId);
+  const call = (event: Event) => { voiceCall = (event as CustomEvent<{ callId?: string }>).detail?.callId; canvas.setCall(voiceCall); schedule(); };
   root.addEventListener("hub:presentation-call", call);
-  return () => { off(); root.removeEventListener("hub:presentation-call", call); canvas.dispose(); };
+  return () => { off(); observer.disconnect(); if (frame !== undefined) view.cancelAnimationFrame(frame); root.removeEventListener("hub:presentation-call", call); canvas.dispose(); };
 }

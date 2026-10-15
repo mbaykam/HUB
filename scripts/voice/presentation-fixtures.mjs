@@ -13,6 +13,19 @@ export const interactivePresentation = {
   },
 };
 
+export const interactivePlanPresentation = {
+  title: "Explore a daily plan", kind: "vega",
+  spec: { width: 260, height: 160, background: "#111827",
+    signals: [{ name: "breakMinutes", value: 10, bind: { input: "range", min: 0, max: 20, step: 1 } }],
+    data: [{ name: "plan", values: [{ task: "Reading", minutes: 5 }, { task: "Coding", minutes: 15 }, { task: "Break", minutes: 10 }], transform: [{ type: "formula", as: "displayMinutes", expr: "datum.task === 'Break' ? breakMinutes : datum.minutes" }] }],
+    scales: [{ name: "x", type: "band", domain: { data: "plan", field: "task" }, range: "width", padding: .25 }, { name: "y", type: "linear", domain: [0, 20], range: "height" }],
+    marks: [
+      { type: "rect", from: { data: "plan" }, encode: { enter: { fill: { value: "#87cab8" } }, update: { x: { scale: "x", field: "task" }, width: { scale: "x", band: 1 }, y: { scale: "y", field: "displayMinutes" }, y2: { scale: "y", value: 0 } } } },
+      { type: "text", from: { data: "plan" }, encode: { update: { x: { scale: "x", field: "task", band: .5 }, y: { scale: "y", field: "displayMinutes", offset: -6 }, text: { signal: "datum.displayMinutes + ' min'" }, fill: { value: "#eef0fa" } } } },
+    ],
+  },
+};
+
 export const calculatorPresentation = {
   title: "Calculator", kind: "vega",
   spec: { width: 300, height: 160, background: "#101727",

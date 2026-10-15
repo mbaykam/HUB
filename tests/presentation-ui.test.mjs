@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { JSDOM } from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
-import { createMobilePresentation } from "@minke/harness-overlay/client/host/mobile-presentation.ts";
+import { createMobilePresentation, installConversationPresentation } from "@minke/harness-overlay/client/host/mobile-presentation.ts";
 
 const tick = (ms = 30) => new Promise(resolve => setTimeout(resolve, ms));
 test("canvas follows updates, can freeze/reopen, and cannot carry a visual into another chat", async () => {
@@ -34,4 +34,19 @@ test("canvas follows updates, can freeze/reopen, and cannot carry a visual into 
     canvas.setCall("call-fixture"); await tick(); assert.ok(requests.some(request => request.url.includes("/voice/") && request.headers["x-hub-voice-call"] === "call-fixture"));
     canvas.setCall(undefined); await tick(); assert.equal(canvas.dialog.open, false);
   } finally { canvas.dispose(); dom.window.close(); globalThis.Event = priorEvent; }
+});
+
+test("visual launcher follows native header replacement and voice Home without covering the composer",async()=>{
+ const dom=new JSDOM('<header data-slot="conversation.session.header.utilities"></header><main><div data-composer-seat></div><section data-hub-voice-hub></section></main>',{url:'http://localhost',pretendToBeVisual:true});
+ const {window}=dom,doc=window.document,priorEvent=globalThis.Event;globalThis.Event=window.Event;
+ window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new window.Event('close'));};
+ window.fetch=async()=>Response.json({presentation:null});
+ let current='hub-eval-canvas',changed;
+ const dispose=installConversationPresentation({sessions:{list:{getSnapshot:()=>({current}),subscribe:fn=>{changed=fn;return()=>{};}}}},doc);
+ try{
+  await tick(50);const button=doc.querySelector('[data-hub-chat-visual]'),header=doc.querySelector('header');assert.equal(button.parentElement,header);assert.equal(window.getComputedStyle(button).position,'static');assert.equal(doc.querySelector('[data-composer-seat]').contains(button),false);
+  const replacement=doc.createElement('header');replacement.setAttribute('data-slot','conversation.session.header.utilities');header.replaceWith(replacement);await tick(50);assert.equal(button.parentElement,replacement);
+  current=undefined;changed();doc.dispatchEvent(new window.CustomEvent('hub:presentation-call',{detail:{callId:'fixture-call'}}));await tick(50);assert.equal(button.parentElement,doc.querySelector('[data-hub-voice-hub]'));
+  current='hub-eval-canvas';changed();await tick(50);assert.equal(button.parentElement,replacement);
+ }finally{dispose();dom.window.close();globalThis.Event=priorEvent;}
 });

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { parsePresentation, parsePresentationSummary } from "@minke/harness-overlay/presentation-contract.ts";
 import { PresentationRuntime, presentationDocument } from "@minke/harness-overlay/host/presentation.ts";
-import { staticPresentation, interactivePresentation } from "../scripts/voice/presentation-fixtures.mjs";
+import { staticPresentation, interactivePresentation, interactivePlanPresentation } from "../scripts/voice/presentation-fixtures.mjs";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { createPresentationHandler } from "@minke/harness-overlay/host/presentation-web.ts";
 import { createServer } from "node:http";
 
@@ -27,6 +29,7 @@ test("native presentation tool is scoped, abort-safe, replaceable and revoked wh
   const runtime = new PresentationRuntime(); let definition, removed = 0;
   const agent = { id: "voice-one", ctx: { tools: { register(value) { definition = value; return () => removed++; } }, systemPrompt: { section() { return () => removed++; } } } };
   const off = runtime.attach(agent);
+  assert.match(definition.description,/encode\.update/);
   await assert.rejects(definition.execute(staticPresentation, { agent: { id: "foreign" }, signal: new AbortController().signal }));
   const aborted = new AbortController(); aborted.abort();
   await assert.rejects(definition.execute(staticPresentation, { agent, signal: aborted.signal }));
@@ -38,6 +41,18 @@ test("native presentation tool is scoped, abort-safe, replaceable and revoked wh
   assert.equal(runtime.summary("foreign"), null);
   off(); off(); assert.equal(removed, 2); assert.equal(runtime.summary(agent.id), null);
   await assert.rejects(definition.execute(staticPresentation, { agent, signal: new AbortController().signal }));
+});
+
+test("interpreted Vega updates existing bar geometry and labels when a local signal changes",async()=>{
+  const require=createRequire(new URL('../packages/harness-overlay/package.json',import.meta.url));
+  const {View,parse}=await import(pathToFileURL(require.resolve('vega')).href);
+  const {expressionInterpreter}=await import(pathToFileURL(require.resolve('vega-interpreter')).href);
+  const input=parsePresentation(interactivePlanPresentation),view=new View(parse(input.spec,undefined,{ast:true}),{expr:expressionInterpreter,renderer:'none'});
+  try{
+    await view.runAsync();const initial=await view.toSVG();assert.match(initial,/10 min/);
+    await view.signal('breakMinutes',12).runAsync();assert.equal(view.data('plan')[2].displayMinutes,12);
+    const updated=await view.toSVG();assert.match(updated,/12 min/);assert.doesNotMatch(updated,/>10 min</);assert.notEqual(initial,updated);
+  }finally{view.finalize();}
 });
 
 test("failed tool/prompt installation can retry without leaving a phantom presentation owner", () => {

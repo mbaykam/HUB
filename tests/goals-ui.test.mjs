@@ -14,7 +14,7 @@ test('a goal work link resolves only through the authenticated native session ca
 test('paused goals stay discoverable by default and do not advertise a scheduled next run',async()=>{
  const {defaultGoal}=await import('../packages/harness-overlay/src/goal-contract.ts');
  const d=fixture(),root=d.window.document;
- const paused={...structuredClone(defaultGoal),id:'paused-fixture',revision:1,title:'Paused fixture',characterId:'main',state:'paused',status:'paused',nextAt:Date.now()+60000,plan:[],planRevision:0,rounds:[],cycles:[],evidence:[],approvals:[],history:[],criteriaEvidence:[],activeMs:0};
+ const paused={...structuredClone(defaultGoal),id:'paused-fixture',revision:1,title:'Paused fixture',criteria:[],characterId:'main',state:'paused',status:'paused',nextAt:Date.now()+60000,plan:[],planRevision:0,rounds:[],cycles:[],evidence:[],approvals:[],history:[],criteriaEvidence:[],activeMs:0};
  const scheduled={...paused,id:'scheduled-fixture',title:'Scheduled fixture',state:'active',status:'scheduled'};
  const archived={...paused,id:'archived-fixture',title:'Archived fixture',state:'archived',status:'archived'};
  d.window.fetch=async()=>({ok:true,json:async()=>({revision:1,goals:[paused,scheduled,archived],characters:[{id:'main',name:'HUB',route:{provider:'mock',model:'mock'}}],tools:[]})});
@@ -29,5 +29,24 @@ test('paused goals stay discoverable by default and do not advertise a scheduled
   assert.ok(!cards.some(c=>c.textContent.includes('Archived fixture')));
   card.querySelector('button').click();assert.doesNotMatch(root.querySelector('.goal-summary').textContent,/Next work/);
   button(root,'Back').click();assert.ok([...root.querySelectorAll('article')].some(c=>c.textContent.includes('Paused fixture')));
+ }finally{dispose();d.window.close();}
+});
+
+test('polling preserves expanded goal evidence, scroll and keyboard focus as new receipts arrive',async()=>{
+ const {defaultGoal}=await import('../packages/harness-overlay/src/goal-contract.ts');
+ const d=fixture(),root=d.window.document;let poll;
+ d.window.setInterval=callback=>{poll=callback;return 1;};d.window.clearInterval=()=>{};
+ const receipt={id:'file:one',kind:'file',label:'Checked output',detail:'Verified fixture',path:'C:/fixture/check.md',sha256:'a'.repeat(64),at:1};
+ let goal={...structuredClone(defaultGoal),id:'poll-fixture',revision:1,title:'Poll fixture',criteria:[],characterId:'main',state:'paused',status:'paused',plan:[],planRevision:0,rounds:[],cycles:[],evidence:[receipt],approvals:[],history:[],criteriaEvidence:[],activeMs:0};
+ d.window.fetch=async(_url,options)=>{assert.equal(options.method,'GET');return {ok:true,json:async()=>({revision:goal.revision,goals:[structuredClone(goal)],characters:[{id:'main',name:'HUB',route:{provider:'mock',model:'mock'}}],tools:[]})};};
+ const dispose=installMobileGoals(root.querySelector('aside'),root);
+ try{
+  root.querySelector('[data-hub-goals-tile]').click();await flush();button(root,'Open goal').click();button(root,'Activity & results').click();
+  const dialog=root.querySelector('dialog'),initial=root.querySelector('[data-goal-details=evidence]');initial.open=true;initial.querySelector('summary').focus();dialog.scrollTop=240;
+  poll();await flush();assert.equal(root.querySelector('[data-goal-details=evidence]'),initial);assert.equal(root.activeElement,initial.querySelector('summary'));assert.equal(dialog.scrollTop,240);
+  goal={...goal,revision:2,evidence:[receipt,{...receipt,id:'file:two',label:'New checked output'}]};poll();await flush();
+  const updated=root.querySelector('[data-goal-details=evidence]');assert.notEqual(updated,initial);assert.equal(updated.open,true);assert.match(updated.querySelector('summary').textContent,/\(2\)/);assert.equal(root.activeElement,updated.querySelector('summary'));assert.equal(dialog.scrollTop,240);
+  const download=[...updated.querySelectorAll('button')].find(node=>node.dataset.goalFocus==='download:file:one');download.focus();
+  goal={...goal,revision:3,history:[{at:2,kind:'checkpoint',message:'New observed checkpoint'}]};poll();await flush();assert.equal(root.activeElement.dataset.goalFocus,'download:file:one');assert.equal(root.querySelector('[data-goal-details=evidence]').open,true);
  }finally{dispose();d.window.close();}
 });

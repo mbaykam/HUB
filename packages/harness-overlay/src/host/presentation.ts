@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { parsePresentation, PRESENTATION_TOOL, type Presentation, type PresentationSummary } from "../presentation-contract.ts";
 
+const reactiveGuidance = " For interactive Vega charts, put data/signal-dependent mark positions, sizes and labels in encode.update. encode.enter only initializes new marks and will leave controls disconnected from existing marks.";
+
 export interface PresentationTool {
   name: string; description: string; parameters: Record<string, unknown>;
   output: { schema: Record<string, unknown>; render(args: unknown, value: unknown): { type: "text"; text: string }[] };
@@ -28,7 +30,7 @@ export class PresentationRuntime {
     const state: { users: number; latest?: Presentation; release(): void } = { users: 1, release() {} };
     const offTool = agent.ctx.tools.register({
       name: PRESENTATION_TOOL,
-      description: "Show or update a concise visual explanation in this HUB conversation. Use passive HTML/SVG with inline styles for diagrams, or a self-contained Vega v6 JSON specification for interactive sliders/plots. No model JavaScript, links, external images or fetched data. The user can dismiss or reopen the canvas. Publishing is not proof the user has seen it.",
+      description: "Show or update a concise visual explanation in this HUB conversation. Use passive HTML/SVG with inline styles for diagrams, or a self-contained Vega v6 JSON specification for interactive sliders/plots. No model JavaScript, links, external images or fetched data. The user can dismiss or reopen the canvas. Publishing is not proof the user has seen it." + reactiveGuidance,
       parameters: { type: "object", properties: { title: { type: "string", maxLength: 120 }, kind: { type: "string", enum: ["html", "vega"] }, html: { type: "string", description: "Passive HTML/SVG, only for kind html" }, spec: { type: "object", description: "Vega v6 JSON with inline data, only for kind vega" } }, required: ["title", "kind"], additionalProperties: false },
       output: {
         schema: { type: "object", properties: { id: { type: "string" }, title: { type: "string" }, status: { type: "string", const: "available" } }, required: ["id", "title", "status"], additionalProperties: false },
@@ -44,7 +46,7 @@ export class PresentationRuntime {
     });
     let offPrompt: () => void;
     try {
-      offPrompt = agent.ctx.systemPrompt.section({ name: "hub:visual-explanations", order: 1001, text: "Use hub_present when a diagram or interactive example would materially help your explanation. Each call updates this conversation's canvas. Keep speaking naturally during voice. Prefer simple, readable dark visuals with pale text and blue/teal accents. HTML/SVG must be passive and use inline styles. Interactive examples use Vega v6 signals with standard range/select bindings and inline data; arbitrary JavaScript and external data/links are unavailable. Do not claim a visual was displayed or seen until the user confirms; the tool makes it available in HUB, and they may dismiss it." });
+      offPrompt = agent.ctx.systemPrompt.section({ name: "hub:visual-explanations", order: 1001, text: "Use hub_present when a diagram or interactive example would materially help your explanation. Each call updates this conversation's canvas. Keep speaking naturally during voice. Prefer simple, readable dark visuals with pale text and blue/teal accents. HTML/SVG must be passive and use inline styles. Interactive examples use Vega v6 signals with standard range/select bindings and inline data; arbitrary JavaScript and external data/links are unavailable. Do not claim a visual was displayed or seen until the user confirms; the tool makes it available in HUB, and they may dismiss it." + reactiveGuidance });
     } catch (error) { offTool(); throw error; }
     this.#sessions.set(agent.id, state);
     state.release = () => {

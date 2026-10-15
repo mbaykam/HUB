@@ -219,6 +219,7 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_delegate"))tools.push({name:"hub_delegate",description:"Delegate to a configured character from a text or voice conversation."});
           if(!tools.some(t=>t.name==="hub_switch_character"))tools.push({name:"hub_switch_character",description:"Switch the active speaker after an explicit request to speak to that character."});
           if(!tools.some(t=>t.name==="hub_task"))tools.push({name:"hub_task",description:"Start background work with the voice character’s default specialist. Available during a voice call."});
+          if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's sandboxed diagram or interactive chart in HUB."});
           send(200,{...this.store.snapshot(),tools});return;
         }
         if(req.method!=="POST"){send(405,{error:"method-not-allowed"});return;}
