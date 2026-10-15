@@ -14,6 +14,14 @@
 - id: goal-round-driver
   disabled: true
 
+# The desktop launcher supplies DSH_HOME, including after a data-home move.
+# Keep this disposable index separate from original chat logs. Opening it on
+# the first search keeps normal startup and the voice path free of index work.
+- id: session-query-sqlite
+  config:
+    path: !!js "process.env.DSH_HOME ? process.env.DSH_HOME + '/hub-session-search/index.db' : ':memory:'"
+    openAt: first-search
+
 - insert:
     - id: hub-directory-picker-browse
       name: '@deepseek-ai/dsh-host-directory-picker-browse'

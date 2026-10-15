@@ -117,6 +117,10 @@ the same call without opening a second microphone session.
 
 ## Models and data
 
+History search finds words inside your messages as well as conversation titles.
+Its local index is built on the first search and kept under the desktop's data
+folder; the original chat logs stay unchanged. The first search may take longer.
+
 Speech can run locally while the conversation model uses your selected provider.
 Prompts and tool results go to that provider; Telegram messages go through
 Telegram, and browsing reaches the selected websites. Local operation of speech

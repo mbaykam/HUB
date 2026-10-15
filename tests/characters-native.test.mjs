@@ -33,7 +33,7 @@ const { TestSessionQuery } = await import("../vendor/deepseek-harness/packages/s
 
 const requireNative = createRequire(new URL("../vendor/deepseek-harness/package.json", import.meta.url));
 const native = name => import(entries.get(name) ?? pathToFileURL(requireNative.resolve(name)).href);
-test('the full Web profile reuses one native Goal service and leaves round admission to HUB', async () => {
+async function composedWebProfile() {
   const { loadOverlayPatches, composeEntries } = await native('@deepseek-ai/dsh-app-boot');
   const layers = [
     '../vendor/deepseek-harness/packages/bundle/base/cordis.patch.yml',
@@ -43,12 +43,34 @@ test('the full Web profile reuses one native Goal service and leaves round admis
   const rows = [];
   const visit = entries => { for (const row of entries) { rows.push(row); if (row.group && Array.isArray(row.config)) visit(row.config); } };
   visit(composeEntries(layers));
-  const active = rows.filter(row => row.disabled !== true);
+  return rows.filter(row => row.disabled !== true);
+}
+test('the full Web profile reuses one native Goal service and leaves round admission to HUB', async () => {
+  const active = await composedWebProfile();
   assert.equal(active.filter(row => row.name === '@deepseek-ai/dsh-goal').length, 1,
     'Registering native Goal twice prevents the installed host from booting');
   assert.equal(active.filter(row => row.name === '@deepseek-ai/dsh-goal-round-driver').length, 0,
     'The base automatic driver must not bypass HUB background limits');
   assert.equal(active.filter(row => row.id === 'hub-characters').length, 1);
+});
+
+test('the HUB profile lazily indexes original chat content and finds it after a restart without rewriting the log', async () => {
+  const entry=(await composedWebProfile()).find(row=>row.id==='session-query-sqlite');
+  const {default:SessionStore,SessionId,SESSION_FORMAT_VERSION}=await native('@deepseek-ai/dsh-session');
+  const {default:Search}=await native('@deepseek-ai/dsh-session-query-sqlite');
+  const root=await mkdtemp(join(tmpdir(),'hub-eval-session-search-')),contexts=[];
+  const mount=async()=>{const ctx=new Context();contexts.push(ctx);await ctx.plugin(SessionStore);await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'originals'),compression:'none'});await ctx.plugin(Search,{...entry.config,path:join(root,'derived','search.db')});return ctx;};
+  try{
+    const ctx=await mount(),meta={version:SESSION_FORMAT_VERSION,id:SessionId('hub-eval-search-original'),createdAt:1,isSeeded:false,cwd:root};
+    await ctx.sessionPersistence.create(meta);
+    await ctx.sessionPersistence.append(meta.id,[{type:'user/message',seq:0,time:1,surfaceOp:'append',data:createUserMessage({content:[{type:'text',text:'A fictional telescope fixture needle.'}],source:{kind:'user'}})}]);
+    const original=ctx.sessionPersistence.locate(meta).path,before=await readFile(original);
+    await assert.rejects(readFile(join(root,'derived','search.db')),error=>error.code==='ENOENT','Startup must not build the index');
+    const found=await ctx.sessionQuery.searchSessions({query:'fixture needle'});assert.equal(found.items[0].header.id,meta.id);
+    assert.equal(entry.config.openAt,'first-search');assert.deepEqual(await readFile(original),before);
+    await ctx.fiber.dispose();
+    const reopened=await mount(),again=await reopened.sessionQuery.searchSessions({query:'telescope'});assert.equal(again.items[0].header.id,meta.id);assert.deepEqual(await readFile(original),before);
+  }finally{for(const ctx of contexts)await ctx.fiber.dispose();assert.ok(root.startsWith(join(tmpdir(),'hub-eval-session-search-')));await rm(root,{recursive:true,force:true});}
 });
 const { Context, Service } = await native("@deepseek-ai/cordis");
 const { default: AgentLoop } = await native("@deepseek-ai/dsh-agent-loop");

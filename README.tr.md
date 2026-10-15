@@ -53,6 +53,10 @@ Telegram kullanıcı hesabıyla çalışır.
 
 ## Durum ve veri
 
+Geçmiş araması, sohbet başlıklarının yanında mesajların içindeki kelimeleri de
+bulur. Yerel indeks ilk aramada hazırlanır ve masaüstü veri klasöründe saklanır;
+orijinal sohbet dosyaları değişmez. İlk arama daha uzun sürebilir.
+
 Speech ve notlar yerel olabilir; seçtiğin bulut modeline gönderilen istemler
 sağlayıcıya ulaşır. Telegram ve web erişimi de ilgili hizmetlerden geçer.
 Hesaplar, tokenlar, kişisel sohbetler, vaultlar ve model ağırlıkları depoya dahil
