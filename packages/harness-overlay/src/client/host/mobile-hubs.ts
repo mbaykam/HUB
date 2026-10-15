@@ -8,7 +8,6 @@ import { createMobileActivity, createActivitySignals, type ActivityPendingSource
 import { returnToMobileHome } from "./mobile-home-navigation.ts";
 import { openMobileConversation } from "./mobile-session-navigation.ts";
 import { createMobileBrowserView } from "./mobile-browser-view.ts";
-import { createMobilePresentation } from "./mobile-presentation.ts";
 import { createMobileLiveTranscript } from "./mobile-live-transcript.ts";
 
 /** PWA-owned view layer. The native conversation, attachments, approvals and
@@ -73,7 +72,10 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     });
   });
   const browser = createMobileBrowserView(root);
-  const presentation = createMobilePresentation(root); hub.append(presentation.button);
+  const presentation = {
+    setCall(callId: string | undefined) { root.dispatchEvent(new CustomEvent("hub:presentation-call", { detail: { callId } })); },
+    dispose() { this.setCall(undefined); },
+  };
   let voice: ReturnType<typeof createVoiceClient> | undefined;
   let voiceSession: string | undefined;
   let state: VoiceState = "idle", enabled = false, muted = false, loading = false, cancelledLoad = false,audioStage="listening";
@@ -160,7 +162,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   }
   function schedule() { if (!lifetime.signal.aborted && frame === undefined) frame = view!.requestAnimationFrame(reconcile); }
   const observer = new view.MutationObserver(records => {
-    if (records.some(record => !hub.contains(record.target) && !textHeading.contains(record.target) && !nav.contains(record.target) && !activity.panel.contains(record.target) && !browser.panel.contains(record.target) && !browser.dialog.contains(record.target) && !(record.target instanceof Element && record.target.closest('[data-hub-characters]')) && !presentation.dialog.contains(record.target))) schedule();
+    if (records.some(record => !hub.contains(record.target) && !textHeading.contains(record.target) && !nav.contains(record.target) && !activity.panel.contains(record.target) && !browser.panel.contains(record.target) && !browser.dialog.contains(record.target) && !(record.target instanceof Element && record.target.closest('[data-hub-characters],[data-hub-visual-dialog],[data-hub-chat-visual]')))) schedule();
   });
   // Avoid observing our own changing text/controls; only seat replacement and
   // native phase/viewport changes schedule a reconciliation.

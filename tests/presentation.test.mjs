@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { parsePresentation, parsePresentationSummary } from "@minke/harness-overlay/presentation-contract.ts";
 import { PresentationRuntime, presentationDocument } from "@minke/harness-overlay/host/presentation.ts";
 import { staticPresentation, interactivePresentation } from "../scripts/voice/presentation-fixtures.mjs";
+import { createPresentationHandler } from "@minke/harness-overlay/host/presentation-web.ts";
+import { createServer } from "node:http";
 
 test("visual contracts bound content and prevent external, prototype and explosive data inputs", () => {
   assert.deepEqual(parsePresentation(staticPresentation), staticPresentation);
@@ -51,4 +53,38 @@ test("visual document hashes only the fixed renderer and escapes model text out 
   assert.match(doc, /script-src 'sha256-/); assert.match(doc, /connect-src 'none'/); assert.match(doc, /worker-src 'none'/);
   assert.doesNotMatch(doc, /unsafe-eval/); assert.doesNotMatch(doc, /<script>parent/); assert.match(doc, /\\u003c\/script/);
   assert.throws(() => presentationDocument(item, "'</script>'"));
+});
+
+test("text and voice share one scoped tool without revoking the surviving conversation owner", async () => {
+  const runtime = new PresentationRuntime(); let tool, registrations = 0, removals = 0;
+  const agent = { id: "chat-one", ctx: { tools: { register(value) { registrations++; tool = value; return () => removals++; } }, systemPrompt: { section() { return () => {}; } } } };
+  const text = runtime.attach(agent), voice = runtime.attach(agent);
+  assert.equal(registrations, 1);
+  const result = await tool.execute(staticPresentation, { agent, signal: new AbortController().signal });
+  voice(); voice(); assert.equal(removals, 0); assert.equal(runtime.summary(agent.id).id, result.id);
+  text(); assert.equal(removals, 1); assert.equal(runtime.summary(agent.id), null);
+});
+
+test("conversation visual HTTP access requires authentication and exact session/document ownership", async () => {
+  const runtime = new PresentationRuntime(); let tool;
+  const agent = { id: "hub-eval-canvas", ctx: { tools: { register(value) { tool = value; return () => {}; } }, systemPrompt: { section() { return () => {}; } } } };
+  const off = runtime.attach(agent);
+  const result = await tool.execute(staticPresentation, { agent, signal: new AbortController().signal });
+  const server = createServer(createPresentationHandler(runtime, req => req.headers.cookie === "fixture=1" ? undefined : 401, async () => "document.body.dataset.ready='yes';"));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}/api/hub/`;
+  const headers = { cookie: "fixture=1", "x-hub-session": agent.id, "x-hub-presentation": result.id };
+  try {
+    assert.equal((await fetch(url + "presentation")).status, 401);
+    assert.equal((await fetch(url + "presentation", { headers: { ...headers, "sec-fetch-site": "cross-site" } })).status, 403);
+    assert.equal((await fetch(url + "presentation", { method: "POST", headers })).status, 405);
+    assert.equal((await fetch(url + "presentation", { headers: { ...headers, "x-hub-session": "../foreign" } })).status, 400);
+    assert.equal((await (await fetch(url + "presentation", { headers })).json()).presentation.id, result.id);
+    assert.equal((await (await fetch(url + "presentation", { headers: { ...headers, "x-hub-session": "foreign" } })).json()).presentation, null);
+    assert.equal((await fetch(url + "presentation-document", { headers: { ...headers, "x-hub-session": "foreign" } })).status, 404);
+    assert.match((await (await fetch(url + "presentation-document", { headers })).json()).document, /connect-src 'none'/);
+    const updated = await tool.execute(interactivePresentation, { agent, signal: new AbortController().signal });
+    assert.notEqual(updated.id, result.id);
+    assert.equal((await fetch(url + "presentation-document", { headers })).status, 404);
+  } finally { off(); await new Promise(resolve => server.close(resolve)); }
 });

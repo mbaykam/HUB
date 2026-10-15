@@ -1,9 +1,10 @@
 import { parsePresentationSummary, type PresentationSummary } from "../../presentation-contract.ts";
 import { defineOverlayStyle } from "../shared/style-runtime.ts";
 import styles from "./mobile-presentation.css";
+import type { HarnessClientContext } from "../core/context.ts";
 const installStyles = defineOverlayStyle("hub-mobile-presentation", styles);
 
-/** Only the active PWA voice lease can deliver a visual. This shell owns no
+/** The selected conversation or active voice lease can deliver a visual. This shell owns no
  * microphone, model, task or transcript and exposes no postMessage tool bridge. */
 export function createMobilePresentation(root: Document) {
   const view = root.defaultView!;
@@ -13,16 +14,20 @@ export function createMobilePresentation(root: Document) {
   const toolbar = root.createElement("header");
   const title = root.createElement("strong"); title.textContent = "Visual explanation";
   const close = root.createElement("button"); close.type = "button"; close.textContent = "Close";
+  const follow = root.createElement("button"); follow.type = "button"; follow.textContent = "Live updates"; follow.setAttribute("aria-pressed", "true");
+  const update = root.createElement("button"); update.type = "button"; update.textContent = "Show latest"; update.hidden = true;
   const status = root.createElement("p"); status.setAttribute("role", "status");
   const stage = root.createElement("div"); stage.setAttribute("data-visual-stage", "");
-  toolbar.append(title, close); dialog.append(toolbar, status, stage); root.body.append(dialog);
+  toolbar.append(title, follow, update, close); dialog.append(toolbar, status, stage); root.body.append(dialog);
   let callId: string | undefined, latest: PresentationSummary | undefined, showing: string | undefined;
+  let sessionId: string | undefined, selectedCall: string | undefined, following = true;
   let controller: AbortController | undefined, timer: ReturnType<typeof setTimeout> | undefined;
   let busy = false, opening = false, disposed = false, epoch = 0;
   const seen = new Set<string>();
   function schedule(delay = 1500) { clearTimeout(timer); if (!disposed && callId && !root.hidden) timer = setTimeout(() => void refresh(), delay); }
   async function request(action: string, owner: string, signal: AbortSignal, id?: string) {
-    const response = await view.fetch(`/api/hub/voice/${action}`, { credentials: "same-origin", cache: "no-store", headers: { "x-hub-voice-call": owner, ...(id ? { "x-hub-presentation": id } : {}) }, signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) });
+    const voice = owner.startsWith("voice:");
+    const response = await view.fetch(`/api/hub/${voice ? "voice/" : ""}${action}`, { credentials: "same-origin", cache: "no-store", headers: { [voice ? "x-hub-voice-call" : "x-hub-session"]: owner.slice(owner.indexOf(":") + 1), ...(id ? { "x-hub-presentation": id } : {}) }, signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) });
     if (!response.ok) throw new Error("Presentation unavailable");
     return await response.json();
   }
@@ -31,7 +36,7 @@ export function createMobilePresentation(root: Document) {
     const owner = callId, item = latest, version = epoch;
     opening = true; seen.add(item.id); if (seen.size > 128) seen.delete(seen.values().next().value!);
     title.textContent = item.title; status.textContent = "Opening visual…"; status.hidden = false;
-    if (!dialog.open) dialog.showModal(); close.focus(); stage.replaceChildren();
+    if (!dialog.open) { dialog.showModal(); close.focus(); } stage.replaceChildren();
     const pending = new AbortController();
     // Separate controller so polling cannot cancel the document load. Ending
     // the call invalidates its epoch and aborts this request through the event.
@@ -45,9 +50,9 @@ export function createMobilePresentation(root: Document) {
       frame.setAttribute("allow", "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; fullscreen 'none'");
       frame.referrerPolicy = "no-referrer";
       frame.srcdoc = result.document;
-      stage.replaceChildren(frame); showing = item.id; status.textContent = "Voice continues while you explore.";
+      stage.replaceChildren(frame); showing = item.id; update.hidden = true; status.textContent = selectedCall ? "Voice continues while you explore." : "Interactive controls run locally. Your conversation stays open.";
     } catch { if (!disposed && version === epoch && dialog.open) status.textContent = "This visual couldn’t open. Close it and try Open visual again."; }
-    finally { opening = false; root.removeEventListener("hub:presentation-stop", stop); }
+    finally { if (version === epoch) opening = false; root.removeEventListener("hub:presentation-stop", stop); }
   }
   async function refresh() {
     if (!callId || busy || disposed || root.hidden) return;
@@ -59,24 +64,42 @@ export function createMobilePresentation(root: Document) {
       button.hidden = !latest;
       if (latest) {
         button.textContent = `${showing && showing !== latest.id ? "New visual" : "Open visual"} · ${latest.title}`;
+        update.hidden = !dialog.open || showing === latest.id;
+        if (dialog.open && showing !== latest.id && following && !opening) void open();
         if (!seen.has(latest.id) && !dialog.open && !root.querySelector("dialog[open]")) void open();
       }
     } catch { /* A presentation outage must not interrupt voice or its input. */ }
     finally { busy = false; controller = undefined; schedule(); }
   }
   close.addEventListener("click", () => dialog.close());
+  follow.addEventListener("click", () => { following = !following; follow.setAttribute("aria-pressed", String(following)); if (following && latest?.id !== showing) void open(); });
+  update.addEventListener("click", () => void open());
   dialog.addEventListener("close", () => { root.dispatchEvent(new Event("hub:presentation-stop")); stage.replaceChildren(); showing = undefined; });
   button.addEventListener("click", () => void open());
   const visibility = () => { if (root.hidden) { clearTimeout(timer); controller?.abort(); } else schedule(0); };
   root.addEventListener("visibilitychange", visibility);
-  return {
-    button, dialog,
-    setCall(next: string | undefined) {
+  function selectOwner() {
+      const next = selectedCall ? "voice:" + selectedCall : sessionId ? "session:" + sessionId : undefined;
       if (next === callId) return;
       epoch++; controller?.abort(); clearTimeout(timer); root.dispatchEvent(new Event("hub:presentation-stop"));
-      callId = next; latest = undefined; showing = undefined; seen.clear(); button.hidden = true;
+      callId = next; latest = undefined; showing = undefined; opening = false; button.hidden = true; update.hidden = true;
       if (dialog.open) dialog.close(); stage.replaceChildren(); schedule(0);
-    },
+  }
+  return {
+    button, dialog,
+    setCall(next: string | undefined) { selectedCall = next; selectOwner(); },
+    setSession(next: string | undefined) { sessionId = next; selectOwner(); },
     dispose() { disposed = true; epoch++; callId = undefined; controller?.abort(); clearTimeout(timer); root.dispatchEvent(new Event("hub:presentation-stop")); root.removeEventListener("visibilitychange", visibility); dialog.close(); dialog.remove(); button.remove(); removeStyles(); },
   };
+}
+
+/** One canvas survives responsive layout and Home/chat navigation. */
+export function installConversationPresentation(ctx: HarnessClientContext, root: Document = document) {
+  const canvas = createMobilePresentation(root);
+  canvas.button.setAttribute("data-hub-chat-visual", ""); root.body.append(canvas.button);
+  const selected = () => canvas.setSession(ctx.sessions.list.getSnapshot().current);
+  const off = ctx.sessions.list.subscribe(selected); selected();
+  const call = (event: Event) => canvas.setCall((event as CustomEvent<{ callId?: string }>).detail?.callId);
+  root.addEventListener("hub:presentation-call", call);
+  return () => { off(); root.removeEventListener("hub:presentation-call", call); canvas.dispose(); };
 }

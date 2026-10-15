@@ -8,7 +8,6 @@ import { openNativeVoiceSession, validateVoiceModel, type VoiceModelCatalog, typ
 import { startVoiceSidecar, VoiceSidecarCleanupError, type VoiceSubprocess, type VoiceSidecar } from "./host/voice-sidecar.ts";
 import { createVoiceWeb } from "./host/voice-web.ts";
 import { openConversationHistory, type ConversationStorage } from "./host/conversation-history.ts";
-import { PresentationRuntime } from "./host/presentation.ts";
 import { parseVoiceIceServers, type VoiceIceServer } from "./voice-ice-contract.ts";
 import { attachNativeVoiceTasks } from "./host/voice-tasks.ts";
 import type { VoiceModelRoute } from "./host/voice-session.ts";
@@ -62,7 +61,7 @@ export function apply(ctx: Context, config: Config): void {
   let preparedRuntime: ReturnType<typeof createPreparedVoiceRuntime> | undefined;
   let telegramState: "disabled" | "starting" | "ready" | "unavailable" = config.telegramCallAccount ? "starting" : "disabled";
   const taskPolicies = createVoiceTaskPolicies(ctx, ctx.storageDomain);
-  const presentations = new PresentationRuntime();
+  const presentations = ctx.hubCharacters.presentations;
   let renderer: Promise<string> | undefined;
   let speechFlight: Promise<LocalSpeechCatalog> | undefined;
   let speechCache: { at: number; value: LocalSpeechCatalog } | undefined;

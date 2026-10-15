@@ -17,13 +17,18 @@ export interface PresentationAgent {
 /** Transient screen state only. Native tool arguments/results already retain
  * the original artifact in the ordinary conversation transcript. No new DB. */
 export class PresentationRuntime {
-  readonly #sessions = new Map<string, { token: symbol; latest?: Presentation }>();
+  readonly #sessions = new Map<string, { users: number; latest?: Presentation; release(): void }>();
   attach(agent: PresentationAgent): () => void {
-    if (this.#sessions.has(agent.id)) throw new Error("Presentation owner already attached");
-    const state: { token: symbol; latest?: Presentation } = { token: Symbol() };
+    const existing = this.#sessions.get(agent.id);
+    if (existing) {
+      existing.users++;
+      let active = true;
+      return () => { if (active) { active = false; if (--existing.users === 0) existing.release(); } };
+    }
+    const state: { users: number; latest?: Presentation; release(): void } = { users: 1, release() {} };
     const offTool = agent.ctx.tools.register({
       name: PRESENTATION_TOOL,
-      description: "Show the user a concise visual explanation in HUB's PWA while voice continues. Use passive HTML/SVG with inline styles for diagrams, or a self-contained Vega v6 JSON specification for interactive sliders/plots. No model JavaScript, links, external images or fetched data. The user can dismiss or reopen the canvas. Publishing is not proof the user has seen it.",
+      description: "Show or update a concise visual explanation in this HUB conversation. Use passive HTML/SVG with inline styles for diagrams, or a self-contained Vega v6 JSON specification for interactive sliders/plots. No model JavaScript, links, external images or fetched data. The user can dismiss or reopen the canvas. Publishing is not proof the user has seen it.",
       parameters: { type: "object", properties: { title: { type: "string", maxLength: 120 }, kind: { type: "string", enum: ["html", "vega"] }, html: { type: "string", description: "Passive HTML/SVG, only for kind html" }, spec: { type: "object", description: "Vega v6 JSON with inline data, only for kind vega" } }, required: ["title", "kind"], additionalProperties: false },
       output: {
         schema: { type: "object", properties: { id: { type: "string" }, title: { type: "string" }, status: { type: "string", const: "available" } }, required: ["id", "title", "status"], additionalProperties: false },
@@ -31,7 +36,7 @@ export class PresentationRuntime {
       },
       execute: async (args, exec) => {
         exec.signal.throwIfAborted();
-        if (exec.agent?.id !== agent.id || this.#sessions.get(agent.id) !== state) throw new Error("Visuals require this active voice conversation");
+        if (exec.agent?.id !== agent.id || this.#sessions.get(agent.id) !== state) throw new Error("Visuals require this active conversation");
         const input = parsePresentation(args);
         state.latest = { ...input, id: randomUUID(), createdAt: Date.now() };
         return { id: state.latest.id, title: state.latest.title, status: "available" };
@@ -39,15 +44,15 @@ export class PresentationRuntime {
     });
     let offPrompt: () => void;
     try {
-      offPrompt = agent.ctx.systemPrompt.section({ name: "hub:visual-explanations", order: 1001, text: "Use hub_present when a diagram or interactive example would materially help your spoken explanation. Keep speaking naturally while it is open. Prefer simple, readable dark visuals with pale text and blue/teal accents. HTML/SVG must be passive and use inline styles. Interactive examples use Vega v6 signals with standard range/select bindings and inline data; arbitrary JavaScript and external data/links are unavailable. Do not claim a visual was displayed or seen until the user confirms; the tool makes it available to their PWA, and they may dismiss it." });
+      offPrompt = agent.ctx.systemPrompt.section({ name: "hub:visual-explanations", order: 1001, text: "Use hub_present when a diagram or interactive example would materially help your explanation. Each call updates this conversation's canvas. Keep speaking naturally during voice. Prefer simple, readable dark visuals with pale text and blue/teal accents. HTML/SVG must be passive and use inline styles. Interactive examples use Vega v6 signals with standard range/select bindings and inline data; arbitrary JavaScript and external data/links are unavailable. Do not claim a visual was displayed or seen until the user confirms; the tool makes it available in HUB, and they may dismiss it." });
     } catch (error) { offTool(); throw error; }
     this.#sessions.set(agent.id, state);
-    let active = true;
-    return () => {
-      if (!active) return; active = false;
+    state.release = () => {
       try { offPrompt(); }
       finally { try { offTool(); } finally { if (this.#sessions.get(agent.id) === state) this.#sessions.delete(agent.id); } }
     };
+    let active = true;
+    return () => { if (active) { active = false; if (--state.users === 0) state.release(); } };
   }
   summary(sessionId: string): PresentationSummary | null {
     const item = this.#sessions.get(sessionId)?.latest;

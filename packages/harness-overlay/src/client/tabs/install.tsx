@@ -29,6 +29,7 @@ import {
   installMobileRightDrawer,
 } from "../host/mobile-right-drawer.ts";
 import { installMobileHubs } from "../host/mobile-hubs.ts";
+import { installConversationPresentation } from "../host/mobile-presentation.ts";
 import { installMobileSettings } from "../host/mobile-settings.ts";
 import { installMobileConversationVisibility, type NavigationVisibilityPort } from "../host/mobile-conversation-visibility.ts";
 import { VoiceHistoryClient } from "../host/voice-history.ts";
@@ -191,6 +192,7 @@ export function installTabs(
     filesPort,
     ctx.theme.getTheme().active.colorScheme,
   );
+  ctx.effect(() => installConversationPresentation(ctx), "hub: live conversation canvas");
   if (!tabsPort.embeddedWebAvailable) {
     const conversationHistory = new VoiceHistoryClient((input, init) => window.fetch(input, init));
     ctx.effect(() => () => conversationHistory.dispose(), "hub: PWA conversation metadata");

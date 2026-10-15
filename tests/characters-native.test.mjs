@@ -209,7 +209,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});
   await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'spawn'});await ctx.plugin(Storage);
   backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
-  const main=new MockAdapter([toolCallResponse('natural-handoff','hub_switch_character',{character:'Mira'}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.')]);
+  const main=new MockAdapter([toolCallResponse('natural-handoff','hub_switch_character',{character:'Mira'}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.'),toolCallResponse('text-canvas','hub_present',{title:'Native conversation canvas',kind:'html',html:'<p>Fixture plan</p>'}),textResponse('The visual is available.')]);
   const fast=new MockAdapter([textResponse('Hi, I am Mira.'),textResponse('I run fast/mock.'),toolCallResponse('return-hub','hub_switch_character',{character:'HUB'})]);
   ctx.llm.registerAdapter(['main'],main);ctx.llm.registerAdapter(['fast'],fast);ctx.llm.registerAdapter(['legacy'],new MockAdapter([textResponse('Must not run')]));
   let deployment={provider:'main',model:'mock'};const selections=new Map();
@@ -235,6 +235,10 @@ test('model identity and natural conversation handoffs stay consistent without a
   await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);
   await say(parent,'Let your main assistant take over our conversation again.');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
   const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');
+  await say(newChat,'Show the fixture plan as a visual.');
+  assert.equal(characters.presentations.summary(newChat.id)?.title,'Native conversation canvas');
+  assert.equal(characters.presentations.summary(parent.id),null);
+  assert.match(JSON.stringify(main.requests.at(-1)),/hub_present/);
   const revision=characters.store.snapshot().revision;
   const denied=await parent.ctx.tools.execute({agent:parent,name:'hub_switch_character',arguments:{character:'Mira'},callId:'notification-switch',signal:AbortSignal.timeout(1000)});
   assert.equal(denied.isError,true);assert.equal(characters.store.snapshot().revision,revision);

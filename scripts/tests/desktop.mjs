@@ -98,6 +98,7 @@ const taskFiles = Object.freeze({
     "window-theme.test.mjs",
   ]),
   host: Object.freeze([
+    "presentation-ui.test.mjs",
     "goals.test.mjs",
     "goals-ui.test.mjs",
     "agent-media.test.mjs",

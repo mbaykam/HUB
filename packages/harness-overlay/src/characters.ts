@@ -3,6 +3,7 @@ import * as nativeSubagent from "@deepseek-ai/dsh-tool-subagent";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ToolRunContext, ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { CharacterStore, CharacterConflict } from "./host/characters-store.ts";
@@ -18,6 +19,8 @@ import {providerGate,type ProviderGate} from "./host/provider-gate.ts";
 import {BackgroundAdmission} from "./host/background-admission.ts";
 import {installGoals} from "./host/goals.ts";
 import type {GoalsStore} from "./host/goals-store.ts";
+import { PresentationRuntime } from "./host/presentation.ts";
+import { createPresentationHandler } from "./host/presentation-web.ts";
 
 export const name="hub-characters";
 export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals"];
@@ -50,6 +53,7 @@ export class HubCharacters extends Service {
   readonly voiceAdmissions=new Map<string,HubCharactersState>();
   readonly mounts=new Map<string,Mount>();
   readonly dispatches=new Map<string,unknown>();
+  readonly presentations=new PresentationRuntime();
   constructor(ctx:CharacterHost,root=join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-characters"),camoRuntime?:CamofoxRuntime){
     super(ctx,"hubCharacters");this.host=ctx;this.store=new CharacterStore(root);this.instructions=new InstructionFiles(join(root,"instructions"));this.quota=providerGate(join(root,"..","hub-provider-health"));
     this.background=new BackgroundAdmission(()=>ctx.agents.list().some((a:any)=>a.status!=="idle"&&!/^hub-(goal|automation|memory)-/.test(a.id)&&!/^hub-(goal|automation|memory)-/.test(a.session.header.parentSession??"")));
@@ -72,6 +76,7 @@ export class HubCharacters extends Service {
     const attach=(agent:CharacterAgent)=>{
       if(agent.session.header.origin==="subagent" || agent.id.startsWith("hub-automation-") || agent.id.startsWith("hub-memory-") || agent.id.startsWith("hub-goal-") || agent.id.startsWith("hub-character-eval-") || this.mounts.has(agent.id))return;
       const mount:Mount={revision:-1,fibers:[],names:new Map()};this.mounts.set(agent.id,mount);
+      agent.ctx.effect(()=>this.presentations.attach(agent),"HUB conversation canvas");
       let selected:HubCharacter|undefined;
       const characterPrompt=(s:HubCharactersState,character:HubCharacter)=>{
         const roster=s.characters.map(c=>`${c.name}: ${c.description} · ${c.route?c.route.provider+"/"+c.route.model:"No model configured; cannot run"}`).join("\n");
@@ -108,7 +113,7 @@ export class HubCharacters extends Service {
         if(exec.name==="hub_switch_character")return; // Explicit user navigation has its own authorization check.
         const policy=selected?.tools;
         if(policy?.mode==="allow" && !policy.names.includes(exec.name))return "This tool is disabled for this character.";
-        if(agent.id.startsWith("minke-im-")&&!new Set(["hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_knowledge_write_note","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
+        if(agent.id.startsWith("minke-im-")&&!new Set(["hub_present","hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_knowledge_write_note","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
       });
       agent.ctx.tools.register({name:"hub_switch_character",description:"Bring a configured character into this text or Telegram conversation as the active speaker. Choose this tool by the meaning of the user's request, in any language; no keywords or exact phrasing are required. Resolve names or references from conversation context. The following reply uses that character's model and persona. For a request to have the character perform background work, use hub_delegate instead. Ask briefly if that distinction is unclear.",parameters:{type:"object",properties:{character:{type:"string"}},required:["character"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
         if(exec.agent?.id!==agent.id||this.voiceCalls.has(agent.id))throw new Error("Switch characters from a text conversation");
@@ -140,6 +145,12 @@ export class HubCharacters extends Service {
     ctx.on("session/event",(session:any,event:any)=>{if(event.type!=="turn/start"||this.voiceCalls.has(session.header.id))return;const mount=this.mounts.get(session.header.id);if(mount){try{mount.turnSnapshot=this.store.snapshot();}catch{}}},{global:true});
     for(const agent of ctx.agents.list())attach(agent as any);
     ctx.effect(()=>this.installWeb(),"HUB character management");
+    ctx.effect(()=>{
+      let renderer:Promise<string>|undefined;
+      const handler=createPresentationHandler(this.presentations,req=>ctx.connection.requestRejection(req),()=>renderer??=readFile(new URL("./presentation-renderer.js",import.meta.url),"utf8"));
+      const off=["presentation","presentation-document"].map(action=>ctx.webServer.register({kind:"exact",path:`/api/hub/${action}`,handler}));
+      return ()=>off.forEach(remove=>remove());
+    },"HUB conversation visuals");
     ctx.effect(()=>installInstructionFiles(ctx,this,this.instructions),"HUB editable instruction files");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
     ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");

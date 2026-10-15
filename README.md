@@ -37,6 +37,13 @@ HUB is an independent project, maintained separately from both upstream teams.
 | **Work toward a goal** | Choose a character, acceptance criteria, resources and allowance. Follow milestones and evidence across background rounds, with editable settings, approvals and separate recurring results. |
 | **Choose your stack** | Browse OpenRouter metadata and installed provider catalogs; configure character routes, voices, tools and delegation. Native provider plugins and local LM Studio/Ollama routes remain available. |
 | **Follow the work** | Review native tasks, open the related conversation, inspect browser work and view supported visual artifacts in the PWA. |
+| **Explore live visuals** | Ask your assistant for diagrams or interactive charts in a conversation canvas. Follow updates as the agent publishes them, pause updates to explore a version, or reopen a dismissed visual. |
+
+The conversation canvas supports passive HTML/SVG and self-contained Vega charts
+with local sliders and selectors. It shares the active conversation with voice;
+interactive controls do not require a model call. Visuals are scoped to their
+conversation and stay available while that session is loaded. They run in a
+sandbox without external network access or model-generated JavaScript.
 
 ### A quieter interface
 
