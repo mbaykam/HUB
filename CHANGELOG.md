@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix the Knowledge 2D view packing sparse sources into a narrow vertical strip. Use stable domain positions, fit after the canvas becomes visible, show separate 2D controls and provide a view-only reset for old saved arrangements.
+
 ## 0.4.48
 
 - Organize original Knowledge sources into configurable main domains and subdomains, with multiple memberships, reviewed lifecycle changes and compatible undo.

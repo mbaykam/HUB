@@ -9,7 +9,7 @@ import {JSDOM} from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
 const graphModule=import.meta.resolve('cytoscape');
 const rendererHook=registerHooks({resolve(specifier,context,next){
   if(specifier==='cytoscape'&&context.parentURL?.endsWith('/knowledge-workspace.ts'))return {
-    shortCircuit:true,url:'data:text/javascript,'+encodeURIComponent(`import cy from ${JSON.stringify(graphModule)}; export default options=>cy({...options,headless:true});`)
+    shortCircuit:true,url:'data:text/javascript,'+encodeURIComponent(`import cy from ${JSON.stringify(graphModule)}; export default options=>{const instance=cy({...options,headless:true});options.container.fixtureCy=instance;return instance;};`)
   };
   return next(specifier,context);
 }});
@@ -20,13 +20,14 @@ const noteId='00000000-0000-4000-8000-000000000001';
 const graph={nodes:[{id:noteId,title:'Reading list',permalink:'Notes/Reading list'}],edges:[]};
 const button=(root,label)=>[...root.querySelectorAll('button')].find(node=>node.textContent===label);
 async function fixture(t,options={}){
+  const displayedGraph=options.graph??graph;
   const dom=new JSDOM('<main></main>',{url:'https://hub.test/',pretendToBeVisual:true});
   const view=dom.window,root=view.document,requests=[];
   Object.defineProperty(view,'innerWidth',{value:390,configurable:true});
   view.ResizeObserver=class{observe(){}disconnect(){}};
   view.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
   view.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new view.Event('close'));};
-  const note={...graph.nodes[0],content:'Original reading plan.',hash:'a'.repeat(64),protected:!!options.protected,links:[],backlinks:[],sources:[],assets:[]};
+  const note={...displayedGraph.nodes[0],content:'Original reading plan.',hash:'a'.repeat(64),protected:!!options.protected,links:[],backlinks:[],sources:[],assets:[]};
   view.fetch=async(url,request)=>{
     requests.push({url,...request});
     if(request.method!=='GET'){
@@ -37,15 +38,17 @@ async function fixture(t,options={}){
       return {ok:true,json:async()=>structuredClone(note)};
     }
     const query=new URL(url,'https://hub.test').searchParams;
-    const value=query.get('view')==='note'?note:query.get('view')==='search'?{nodes:graph.nodes}:query.get('view')==='assets'?{assets:[]}:query.get('view')==='graph'?graph:{vault:'C:/fixture/vault'};
+    const value=query.get('view')==='note'?note:query.get('view')==='search'?{nodes:displayedGraph.nodes}:query.get('view')==='assets'?{assets:[]}:query.get('view')==='graph'?displayedGraph:{vault:'C:/fixture/vault'};
     return {ok:true,json:async()=>structuredClone(value)};
   };
-  const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,graph,()=>{});
+  const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,displayedGraph,()=>{});
   t.after(()=>{dispose();dom.window.close();});
-  button(root,'Notes').click();
-  root.querySelector('aside').scrollTop=180;
-  button(root,'Reading list').click();await setImmediate();
-  assert.equal(root.querySelector('dialog').dataset.mobilePane,'note');
+  if(options.openNote!==false){
+    button(root,'Notes').click();
+    root.querySelector('aside').scrollTop=180;
+    button(root,'Reading list').click();await setImmediate();
+    assert.equal(root.querySelector('dialog').dataset.mobilePane,'note');
+  }
   return {view,root,requests,note};
 }
 
@@ -128,4 +131,43 @@ test('original conversation records remain protected from manual note editing',a
   assert.equal(button(root,'Edit').disabled,true);button(root,'Edit').click();
   assert.equal(root.querySelector('[aria-label="Note Markdown"]').hidden,true);
   assert.ok(requests.every(request=>request.method==='GET'));
+});
+
+const sparseGraph={nodes:Array.from({length:98},(_,i)=>({id:'fixture-source-'+i,title:'Synthetic source '+(i+1),permalink:'Notes/Source '+i})),edges:[{source:'fixture-source-0',target:'fixture-source-1'}]};
+const frames=view=>new Promise(resolve=>view.requestAnimationFrame(()=>view.requestAnimationFrame(resolve)));
+function measurableCanvas(root){const canvas=root.querySelector('[data-graph-canvas]');Object.defineProperties(canvas,{clientWidth:{get:()=>canvas.hidden?0:360},clientHeight:{get:()=>canvas.hidden?0:612}});return canvas;}
+
+test('98 sparse records have a two-dimensional layout and their own working zoom controls',async t=>{
+  const {view,root}=await fixture(t,{graph:sparseGraph,openNote:false}),canvas=measurableCanvas(root),cy=canvas.fixtureCy;
+  assert.equal(canvas.hidden,true);
+  const points=cy.nodes().map(n=>n.position()),xs=points.map(p=>p.x),ys=points.map(p=>p.y),ratio=(Math.max(...xs)-Math.min(...xs))/(Math.max(...ys)-Math.min(...ys));
+  assert.equal(points.length,98);assert.equal(cy.edges().length,1);
+  assert.ok(points.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));
+  assert.ok(ratio>.4&&ratio<2.5,'sparse sources must occupy an area, not a four-column vertical strip');
+  button(root,'3D').click();await frames(view);
+  assert.equal(canvas.hidden,false);assert.equal(root.querySelector('[data-knowledge-cloud]').hidden,true);
+  assert.equal(root.querySelector('.knowledge-brain-controls').hidden,true);
+  const controls=root.querySelector('[aria-label="2D graph controls"]');assert.equal(controls.hidden,false);
+  const zoom=cy.zoom();controls.querySelector('[aria-label="Zoom in"]').click();assert.ok(cy.zoom()>zoom);
+  controls.querySelector('[aria-label="Zoom out"]').click();assert.ok(Math.abs(cy.zoom()-zoom)<1e-8);
+  assert.deepEqual(cy.nodes().map(n=>n.position()),points,'fitting a newly visible canvas must not repack the sources');
+  button(root,'2D').click();assert.equal(controls.hidden,true);assert.equal(root.querySelector('.knowledge-brain-controls').hidden,false);
+});
+
+test('2D source positions survive manual dragging, note navigation and reopening',async t=>{
+  const {view,root,requests}=await fixture(t,{graph:sparseGraph,openNote:false}),canvas=measurableCanvas(root),cy=canvas.fixtureCy;
+  button(root,'3D').click();await frames(view);
+  const node=cy.getElementById('fixture-source-5');node.position({x:777,y:888});node.emit('dragfree');
+  const saved=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'));saved['other-dataset-source']={x:12,y:34};view.localStorage.setItem('hub-knowledge-positions-v1',JSON.stringify(saved));
+  button(root,'Notes').click();button(root,'Graph').click();await frames(view);
+  assert.deepEqual(node.position(),{x:777,y:888});
+  assert.deepEqual(JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'))['fixture-source-5'],{x:777,y:888});
+  button(root,'Home').click();const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,sparseGraph,()=>{});t.after(dispose);
+  const reopened=measurableCanvas(root);button(root,'3D').click();await frames(view);
+  assert.deepEqual(reopened.fixtureCy.getElementById('fixture-source-5').position(),{x:777,y:888});
+  button(root,'Reset 2D layout').click();await frames(view);
+  assert.notDeepEqual(reopened.fixtureCy.getElementById('fixture-source-5').position(),{x:777,y:888});
+  const reset=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'));
+  assert.equal(reset['fixture-source-5'],undefined);assert.deepEqual(reset['other-dataset-source'],{x:12,y:34});
+  assert.equal(reopened.fixtureCy.nodes().length,98);assert.ok(requests.every(r=>r.method==='GET'));
 });

@@ -60,6 +60,12 @@ and inspect their quoted evidence. Many links within a domain are allowed;
 cross-domain bridges are shown separately. Similarity is a navigation hint, and
 an AI relationship remains an interpretation even when its sources are quoted.
 
+In **Graph options**, switch to **2D** for a flat view of the same stable domain
+clouds. Its zoom and **Fit graph** controls operate on the flat view; labels appear
+when there is enough room. Dragged record positions are kept on this device.
+**Reset 2D layout** restores the default positions for the displayed records if an
+older saved arrangement is unusable. It does not change notes or relationships.
+
 **Reflection** is a brief useful observation, not a hidden reasoning transcript. The separate Reflection tab shows its source and date. AI interpretations are distinguished from verified user facts during memory retrieval.
 
 **USER.md** suggestions require genuine user evidence and explicit review. Character suggestions are restricted to the source character. Approval appends a dated, sourced addition while preserving existing operator instructions. Durable receipts prevent duplicate additions; newer human edits block undo. Curator cannot automatically rewrite shared SOUL.md, AGENTS.md, credentials, tool permissions or model routes. See [AI instructions](instructions.md).
