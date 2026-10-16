@@ -1,0 +1,19 @@
+Graphify
+Copyright 2026 Safi Shamsi and the Graphify contributors.
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Portions of this software were contributed under the MIT License prior to the
+relicensing and remain available under those terms. The original MIT license
+text is retained in LICENSE-MIT.
+
+HUB adaptation:
+Source: https://github.com/Graphify-Labs/graphify
+Pinned commit: 10130e79ed9caf8f60d998073e097531eaa1a395 (version 0.9.91)
+Upstream components: graphify/serve.py, _get_trigram_index and _trigram_candidates.
+Adapted file: packages/harness-overlay/src/host/knowledge-lexical-index.ts
+Changes by HUB contributors, 2026: TypeScript implementation; exact full-body
+and title scoring with English/Turkish normalization; incremental source-edit
+and deletion invalidation; bounded index allocation and full-scan fallback.
+The source renderer, CLI, extractors, model backends and HTML viewer are not bundled.
+The adapted candidate index runs locally and has no model/provider dependency.

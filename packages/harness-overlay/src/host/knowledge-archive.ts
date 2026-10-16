@@ -5,12 +5,13 @@ import {atomicJson,digest} from "./knowledge-store.ts";
 import type {KnowledgeConversation,ConversationMessage,KnowledgeSource} from "../knowledge-contract.ts";
 import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
 import {operationFailure} from "./operation-failure.ts";
+import {KnowledgeMutationGate} from "./knowledge-mutation-gate.ts";
 
 /** Original messages are canonical private JSON; readable Markdown is a
  * lossless projection. Curator never owns either write path. */
 export class KnowledgeArchive {
   private writes:Promise<unknown>=Promise.resolve();
-  constructor(readonly vault:string,readonly root:string){}
+  constructor(readonly vault:string,readonly root:string,readonly mutations=new KnowledgeMutationGate()){}
   private file(id:string){if(!/^conversation-[a-f0-9]{32}$/.test(id))throw Error("Invalid conversation identity");return join(this.root,"conversations",id+".json");}
   private async projectionPath(id:string,discoverRename=true){
     const expected=join(this.vault,"Conversations",id+".md");try{if((await lstat(expected)).isSymbolicLink())throw Error("Linked archive file");return expected;}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
@@ -23,7 +24,8 @@ export class KnowledgeArchive {
     }};await visit(this.vault);if(found.length>1)throw Error("Duplicate original conversation identity; preserve and review the vault");return found[0]??expected;
   }
   async read(id:string):Promise<KnowledgeConversation>{return JSON.parse(await readFile(this.file(id),"utf8"));}
-  put(record:KnowledgeConversation){
+  put(record:KnowledgeConversation){return this.mutations.run(()=>this.putRecord(record));}
+  private putRecord(record:KnowledgeConversation){
     const task=this.writes.then(async()=>{
       if(!/^conversation-[a-f0-9]{32}$/.test(record.id)||!record.messages.length||!record.messages.every(m=>typeof m.text==="string"&&Number.isSafeInteger(m.at)&&m.at>0))throw Error("Invalid original conversation");
       const path=this.file(record.id),dir=join(this.vault,"Conversations");await mkdir(dir,{recursive:true});
@@ -46,7 +48,8 @@ export class KnowledgeArchive {
     });this.writes=task.catch(()=>{});return task;
   }
   async drain(){await this.writes;}
-  projectRelations(id:string,links:string[]){const task=this.writes.then(async()=>{
+  projectRelations(id:string,links:string[]){return this.mutations.run(()=>this.projectRecordRelations(id,links));}
+  private projectRecordRelations(id:string,links:string[]){const task=this.writes.then(async()=>{
     const original=await this.read(id),path=await this.projectionPath(id);if((await lstat(path)).isSymbolicLink())throw Error("Linked archive file");const current=await readFile(path,"utf8"),boundary=current.indexOf("\n---\n")+5;
     if(current.slice(boundary)!==conversationMarkdown(original).slice(conversationMarkdown(original).indexOf("\n---\n")+5))throw Error("Original body edited externally; relation projection deferred");
     if(links.some(l=>/[\[\]|\r\n]/.test(l)))throw Error("Invalid Obsidian target");
@@ -58,6 +61,9 @@ export function conversationMarkdown(c:KnowledgeConversation){
   const front=`---\nhub_id: ${JSON.stringify(c.id)}\ntitle: ${JSON.stringify(c.title)}\nhub_kind: conversation\nchannel: ${JSON.stringify(c.channel)}\nsource_updated_at: ${c.updatedAt}\n---\n`;
   return front+c.messages.map(m=>`## ${m.role} · ${new Date(m.at).toISOString()}${m.branch?" · branch "+m.branch:""}${m.interrupted?" · interrupted":""}\n\n${m.text}${m.assets?.length?"\n\n"+m.assets.map(a=>`[${a.name.replace(/[\[\]]/g,"")}](${a.path.startsWith("Attachments/")?"../":""}${a.path})`).join("\n"):""}`).join("\n\n")+"\n";
 }
+/** Exact UTF-16 offsets in the readable body, mapped back to immutable message
+ * text. Headings and generated attachment labels are never user statements. */
+export function conversationTextRanges(c:KnowledgeConversation){let cursor=0;return c.messages.map(message=>{const heading=`## ${message.role} · ${new Date(message.at).toISOString()}${message.branch?" · branch "+message.branch:""}${message.interrupted?" · interrupted":""}\n\n`,assets=message.assets?.length?"\n\n"+message.assets.map(a=>`[${a.name.replace(/[\[\]]/g,"")}](${a.path.startsWith("Attachments/")?"../":""}${a.path})`).join("\n"):"",start=cursor+heading.length;cursor=start+message.text.length+assets.length+2;return {message,start,end:start+message.text.length};});}
 export function nativeConversation(header:any,events:readonly any[],channel:string,inherited=0,cutoff=0):KnowledgeConversation|undefined {
   if(isKnowledgeEvaluation(header.id)||header.parentSession&&isKnowledgeEvaluation(header.parentSession))return;
   const messages:ConversationMessage[]=[];
@@ -76,6 +82,6 @@ export function nativeConversation(header:any,events:readonly any[],channel:stri
 /** Chunks are processing units only; one conversation remains one graph node. */
 export function conversationSources(c:KnowledgeConversation):KnowledgeSource[]{
   const sources:KnowledgeSource[]=[];
-  for(const m of c.messages.filter(m=>m.role!=="status"))for(let at=0,part=0;at<m.text.length;at+=14000,part++)sources.push({id:`archive-${digest(c.id+":"+m.id+":"+part).slice(0,40)}`,conversationId:c.id,sessionId:c.sessionId,channel:c.channel,completedAt:m.at,authorRole:m.role==="user"?"user":"assistant",evidenceVersion:2,content:`Original conversation: ${c.title}\nRole: ${m.role}\nMessage ID: ${m.id}\n${m.text.slice(at,at+14000)}`,assets:m.assets});
+  for(const m of c.messages.filter(m=>m.role!=="status"))for(let at=0,part=0;at<m.text.length;at+=14000,part++)sources.push({id:`archive-${digest(c.id+":"+m.id+":"+part).slice(0,40)}`,conversationId:c.id,sessionId:c.sessionId,channel:c.channel,completedAt:m.at,authorRole:m.role==="user"?"user":"assistant",evidenceVersion:2,spans:[{messageId:m.id,start:at,end:Math.min(m.text.length,at+14000),text:m.text.slice(at,at+14000),contentHash:digest(m.text),role:m.role==="status"?"task":m.role,occurredAt:m.at}],content:`Original conversation: ${c.title}\nRole: ${m.role}\nMessage ID: ${m.id}\n${m.text.slice(at,at+14000)}`,assets:m.assets});
   return sources;
 }

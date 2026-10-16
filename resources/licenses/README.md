@@ -15,3 +15,9 @@ not this copied resource directory. At HUB's pinned runtime revision:
 
 Optional speech models and external runtimes are downloaded/configured
 separately and retain their own license/model-card terms.
+
+Knowledge lexical candidate filtering adapts Graphify's trigram index into
+TypeScript. See [Graphify attribution and changes](graphify-NOTICE),
+[Apache-2.0 license](graphify-LICENSE), and the preserved historical
+[MIT license](graphify-LICENSE-MIT). No Graphify CLI, provider configuration,
+or Python runtime is bundled by this adaptation.

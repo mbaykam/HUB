@@ -14,9 +14,11 @@ import {currentTurnHasUserRequest} from "./task-turn.ts";
 import {redactKnowledgeSecrets} from "./knowledge-curator.ts";
 import {goalFile} from "./goal-files.ts";
 import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
+import {characterAuthorityPersona} from "./knowledge-identity.ts";
+import type {HubCharacter} from "../character-contract.ts";
 
 export class GoalAuthority extends Service {
-  constructor(ctx:any,readonly goalId:string,readonly allowWriteNote:boolean){super(ctx,"hubGoalAuthority");}
+  constructor(ctx:any,readonly goalId:string,readonly allowWriteNote:boolean,readonly character?:HubCharacter,readonly sessionId?:string){super(ctx,"hubGoalAuthority");}
 }
 const output={schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]};
 const approach={quick:"Keep a small plan; deliver concisely with essential checks.",balanced:"Plan milestones, work and verify at checkpoints. Replan when evidence changes.",thorough:"Compare primary sources, test your work, and explicitly check acceptance criteria.",custom:"Follow the user's custom approach instructions within the saved policy."};
@@ -39,7 +41,7 @@ export async function executeGoalRound(ctx:any,characters:any,store:GoalsStore,g
   const ownTools=new Set(["hub_goal_files","hub_goal_tool","hub_goal_checkpoint","hub_goal_delegate",...g.helpers.map(id=>"hub_goal_helper_"+id.replaceAll("-",""))]);
   const policy=()=>{const current=store.get(g.id);if(!current||current.state!=="active"||current.revision!==g.revision||signal.aborted)throw Error("Goal was paused or its saved permissions changed.");return current;};
   const options={sessionId:round.sessionId,meta:{cwd:g.resources.folders[0]??g.workspace},agentOptions:{...c.route,maxTokens:g.limits.maxOutputTokens},signal,setup(agentCtx:any){
-    new GoalAuthority(agentCtx,g.id,g.resources.knowledgeOutput&&chosen.includes("hub_knowledge_write_note"));
+    new GoalAuthority(agentCtx,g.id,g.resources.knowledgeOutput&&chosen.includes("hub_knowledge_write_note"),structuredClone(c),round.sessionId);
     agentCtx.tools.presentAs("native");
     // Native restrict filters inherited capabilities; scope-owned tools have
     // their own exemption. Guard dispatch and filter the actual request too.
@@ -82,7 +84,7 @@ export async function executeGoalRound(ctx:any,characters:any,store:GoalsStore,g
       const providers=ctx.subagents.list(),provider=providers.find((n:string)=>{const p=ctx.subagents.getProvider(n);return p?.prepareContinuable&&p.capabilities.agentOptions&&p.capabilities.persona&&p.capabilities.toolFilter;});if(!provider)throw Error("Native character delegation is unavailable.");
       for(const id of g.helpers){const helper=roster.find((c:any)=>c.id===id);if(!helper?.route)throw Error("An allowed helper has no model.");const toolName="hub_goal_helper_"+id.replaceAll("-","");
         const allowed=chosen.filter(n=>safe.has(n)&&(helper.tools.mode!=="allow"||helper.tools.names.includes(n)));
-        const fiber=a.ctx.plugin(nativeSubagent,{provider,toolName,backgroundMode:"continuable",enableRunInBackground:true,maxDepth:1,agentOptions:{...helper.route,maxTokens:g.limits.maxOutputTokens},persona:`You are ${helper.name}, a named specialist for goal ${g.title}.\n${helper.instructions}\nReturn observed sources/checks to the goal owner. Do not claim actions without evidence. Do not schedule or message others.`,toolFilter:{allow:allowed}});fibers.push(fiber);await fiber.await();
+        const fiber=a.ctx.plugin(nativeSubagent,{provider,toolName,backgroundMode:"continuable",enableRunInBackground:true,maxDepth:1,agentOptions:{...helper.route,maxTokens:g.limits.maxOutputTokens},persona:characterAuthorityPersona({...helper,tools:{mode:"allow",names:allowed}})+`You are ${helper.name}, a named specialist for goal ${g.title}.\n${helper.instructions}\nReturn observed sources/checks to the goal owner. Do not claim actions without evidence. Do not schedule or message others.`,toolFilter:{allow:allowed}});fibers.push(fiber);await fiber.await();
       }
       a.ctx.tools.register({name:"hub_goal_delegate",description:"Ask one of this goal's explicitly allowed helper characters for bounded read-only specialist work. Return its observed result; this does not change the main conversation speaker.",parameters:{type:"object",properties:{character:{type:"string"},description:{type:"string"},prompt:{type:"string"}},required:["character","description","prompt"],additionalProperties:false},output,execute:async(args:any,exec:any)=>{
         policy();const helper=roster.find((c:any)=>g.helpers.includes(c.id)&&(c.id===args.character||c.name.toLowerCase()===String(args.character).toLowerCase()));if(!helper)throw Error("Choose a helper enabled in this goal.");if(++steps>g.limits.maxSteps)throw Error("Goal step allowance exhausted.");

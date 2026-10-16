@@ -6,8 +6,10 @@ import type { KnowledgeJob, KnowledgePlan, KnowledgeSettings, KnowledgeSource, K
 import { defaultKnowledgeSettings } from "../knowledge-contract.ts";
 import {cleanKnowledgeSource} from "./knowledge-evidence.ts";
 import {organizationPrompt,validateCuration} from "./knowledge-organization.ts";
+import {changeKnowledgeDomains} from "./knowledge-domains.ts";
 import {isQuotaFailure} from "./operation-failure.ts";
 import type {ProviderGate} from "./provider-gate.ts";
+import {knowledgeRestoreHold,resumeRestoredKnowledgeWork,type KnowledgeRestoreHold} from "./knowledge-portable.ts";
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal)=>Promise<string>;
 const defaults=defaultKnowledgeSettings;
 const day=()=>new Date().toISOString().slice(0,10);
@@ -18,6 +20,7 @@ export class KnowledgeCurator {
   private costs:Record<string,number>={}; private running?:Promise<void>; private writing:Promise<unknown>=Promise.resolve();
   private checked?:{key:string;at:number};
   private blockedRoute?:{key:string;message:string;quota?:boolean};
+  restoredWork?:KnowledgeRestoreHold;
   constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate,readonly admit?:()=>undefined|(()=>void)){this.store=store;this.generate=generate;}
   async initialize(){
     await this.store.initialize();
@@ -27,23 +30,33 @@ export class KnowledgeCurator {
     try{this.blockedRoute=JSON.parse(await readFile(join(this.store.root,"model-health.json"),"utf8"))??undefined;}catch(e:any){if(e.code!=="ENOENT")throw e;}
     const files=await readdir(join(this.store.root,"jobs")).catch((e:any)=>{if(e.code!=="ENOENT")throw e;return [] as string[];});
     for(const file of files) {if(!file.endsWith(".json"))continue;const j=JSON.parse(await readFile(join(this.store.root,"jobs",file),"utf8")) as KnowledgeJob;if(j.status==="working"){j.status="failed";j.reason="HUB restarted during model processing; retry explicitly to avoid a duplicate charge.";}this.jobs.set(j.id,j);}
-    this.status=[...this.jobs.values()].some(j=>j.status==="failed")?"needs-attention":"ready";
+    this.restoredWork=await knowledgeRestoreHold(this.store);
+    this.status=this.restoredWork?.state==="needs-review"?"restored-work-paused":[...this.jobs.values()].some(j=>j.status==="failed")?"needs-attention":"ready";
   }
   private jobFile(id:string){return join(this.store.root,"jobs",`${digest(id)}.json`);}
-  async enqueue(source:KnowledgeSource){
+  async enqueue(source:KnowledgeSource,pass?:KnowledgeJob["pass"]){
     // Serialized check + durable enqueue prevents duplicate events/imports.
     const task=this.writing.then(async()=>{
-      const prior=this.jobs.get(source.id);if(prior){
+      const jobId=pass?.id??source.id,prior=this.jobs.get(jobId);if(prior){
         const assets=[...(prior.source.assets??[])];for(const a of source.assets??[])if(!assets.some(old=>old.id===a.id))assets.push(a);
         const urls=[...new Set([...(prior.source.urls??[]),...(source.urls??[])])].slice(0,30);
-        if(assets.length!==(prior.source.assets?.length??0)||urls.length!==(prior.source.urls?.length??0)){prior.source={...prior.source,assets,urls};await atomicJson(this.jobFile(source.id),prior);}
+        if(assets.length!==(prior.source.assets?.length??0)||urls.length!==(prior.source.urls?.length??0)){prior.source={...prior.source,assets,urls};await atomicJson(this.jobFile(jobId),prior);}
         return false;
       }
       if(typeof source.id!=="string" || !source.id || source.id.length>200 || !Number.isSafeInteger(source.completedAt) || source.completedAt<1 || typeof source.content!=="string" || !source.content.trim() || source.content.length>24000 || typeof source.channel!=="string" || source.channel.length>100)throw new Error("Invalid source episode");
       const cleaned=cleanKnowledgeSource(source);
-      const job:KnowledgeJob={id:source.id,source:{...cleaned,content:redactKnowledgeSecrets(cleaned.content)},status:"queued",attempts:0,updatedAt:Date.now(),queuedAt:Date.now()};await atomicJson(this.jobFile(job.id),job);this.jobs.set(job.id,job);return true;
+      const job:KnowledgeJob={id:jobId,...(pass?{pass}:{}),source:{...cleaned,content:redactKnowledgeSecrets(cleaned.content)},status:"queued",attempts:0,updatedAt:Date.now(),queuedAt:Date.now()};await atomicJson(this.jobFile(job.id),job);this.jobs.set(job.id,job);return true;
     });this.writing=task.catch(()=>{});return task;
   }
+  /** Explicitly selected, already admitted records only. Each host-issued pass
+   * is durable and idempotent on retry; it never rewrites original prose. */
+  async reorganize(nodeIds:string[]){
+    if(!Array.isArray(nodeIds)||!nodeIds.length||nodeIds.length>10||nodeIds.some(id=>typeof id!=="string")||new Set(nodeIds).size!==nodeIds.length)throw Error("Select between one and ten existing records");
+    const notes=await this.store.scan(),selected=nodeIds.map(id=>{const n=notes.find(n=>n.id===id);if(!n)throw Error("Selected source is unavailable");if(n.body.length>23500)throw Error("This source needs chunk selection; choose a shorter record for this bounded pass");return n;}),registry=await this.store.organization.domains(),passId=randomUUID(),ids:string[]=[];
+    for(const n of selected){const id="reorganize-"+passId+"-"+digest(n.id).slice(0,16),source:KnowledgeSource={id:"record-"+n.id,conversationId:n.id,completedAt:Math.max(1,Math.floor(n.modifiedAt)),channel:"pwa",authorRole:n.kind==="conversation"?"mixed":"user",content:n.body,evidenceVersion:2};await this.enqueue(source,{id,sourceHash:digest(n.body),policyHash:digest(JSON.stringify(this.settings)),registryRevision:registry.revision});ids.push(id);}
+    return {passId,queued:ids.length,jobIds:ids,automatic:this.settings.enabled&&this.settings.mode!=="manual"};
+  }
+  async repairProjections(){await this.store.organization.repairPending();for(const job of this.jobs.values())if(job.error?.code==="KNOWLEDGE_PROJECTION_PENDING"){job.error=undefined;job.reason="Saved organization and Obsidian projection repaired; no model call needed.";await atomicJson(this.jobFile(job.id),job);}this.status="ready";}
   async configure(settings:KnowledgeSettings){const before=this.routeKey();this.settings=validateSettings(settings);await atomicJson(join(this.store.root,"settings.json"),this.settings);if(before!==this.routeKey()){this.checked=undefined;this.blockedRoute=undefined;await atomicJson(join(this.store.root,"model-health.json"),null);}}
   private routeKey(){return JSON.stringify([this.settings.provider,this.settings.model,this.settings.reasoningEffort]);}
   async retry(id:string){const j=this.jobs.get(id);if(!j||!["failed","waiting-credit"].includes(j.status))throw new Error("Only failed or credit-waiting jobs may be retried");j.source=cleanKnowledgeSource(j.source);j.status="queued";j.updatedAt=Date.now();j.reason=undefined;j.error=undefined;await atomicJson(this.jobFile(id),j);}
@@ -60,42 +73,47 @@ export class KnowledgeCurator {
     return {ok:true,provider:settings.provider,model:settings.model,reasoningEffort:settings.reasoningEffort};
   }
   recordRecall(recall:KnowledgeRecall){this.recalls.unshift(recall);this.recalls=this.recalls.slice(0,20);}
-  tick(force=false){if(this.running||!this.settings.enabled||this.settings.mode==="manual"&&!force||this.lifetime.signal.aborted)return;const release=this.admit?.();if(this.admit&&!release)return;this.running=this.run(force).catch(()=>{this.status="needs-attention";}).finally(()=>{release?.();this.running=undefined;});return this.running;}
+  async resumeRestoredWork(){await resumeRestoredKnowledgeWork(this.store);this.restoredWork=await knowledgeRestoreHold(this.store);this.status="ready";return {resumed:true};}
+  tick(force=false){if(this.restoredWork?.state==="needs-review"){this.status="restored-work-paused";return;}if(this.running||!this.settings.enabled||this.settings.mode==="manual"&&!force||this.lifetime.signal.aborted)return;const release=this.admit?.();if(this.admit&&!release)return;this.running=this.run(force).catch(()=>{this.status="needs-attention";}).finally(()=>{release?.();this.running=undefined;});return this.running;}
   private async run(force:boolean){
     await this.store.refreshInventory();
     const family=(j:KnowledgeJob)=>j.source.id.split("-turn-")[0]!;
     const latest=new Map<string,number>();for(const j of this.jobs.values())latest.set(family(j),Math.max(latest.get(family(j))??0,j.queuedAt??j.updatedAt));
     const job=[...this.jobs.values()].filter(j=>j.status==="queued" && (force||Date.now()-(latest.get(family(j))??j.updatedAt)>=this.settings.idleSeconds*1000)).sort((a,b)=>a.source.completedAt-b.source.completedAt)[0];
     if(!job)return;const settings={...this.settings};
+    if(job.pass){const current=(await this.store.scan()).find(n=>n.id===job.source.conversationId);if(!current||digest(current.body)!==job.pass.sourceHash){job.status="failed";job.reason="Selected source changed; queue a fresh pass after reading it.";job.error={phase:"source validation",code:"KNOWLEDGE_SOURCE_CHANGED",message:job.reason};job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);this.status="needs-attention";return;}}
     if(this.blockedRoute?.key===this.routeKey()){this.status=this.blockedRoute.quota?"waiting-credit":"model-unavailable";return;}
     if(await this.gate?.reason(settings.provider)){this.status="waiting-credit";return;}
     if(!settings.channels.includes(sourceChannel(job.source))){job.status="done";job.outcome="skipped";job.reason="Seçili kanalların dışında; bilgi çıkarılmadı.";await atomicJson(this.jobFile(job.id),job);return;}
     if(job.source.completedAt<=await this.store.cutoff()){job.status="done";job.outcome="skipped";job.reason="Skipped: source is older than the saved forget policy.";await atomicJson(this.jobFile(job.id),job);return;}
     if(sourceChannel(job.source)==="workers"&&settings.assistantEvidence==="confirmed-only"){job.status="done";job.outcome="archive-only";job.reason="Görev sonucu arşivlendi. Seçili kurala göre kalıcı bilgi için kullanıcı doğrulaması gerekiyor.";await atomicJson(this.jobFile(job.id),job);return;}
-    const candidates=(await this.store.search(job.source.content,12)).map(n=>({...n,body:memoryExcerpt(n.body,job.source.content)}));
-    const graph=await this.store.graph(),prompt=organizationPrompt(job.source,candidates,settings);
+    const candidates=(await this.store.search(job.source.content,12)).map(n=>({...n,contentHash:digest(n.body),body:memoryExcerpt(n.body,job.source.content,6000,n.retrieval?.chunk)}));
+    const graph=await this.store.graph(),prompt=organizationPrompt(job.source,candidates,settings,await this.store.organization.domains());
     const reserve=((Buffer.byteLength(prompt)+12000)*settings.inputPrice+6000*settings.outputPrice)/1e6;
     if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget){this.status="budget-paused";return;}
     this.costs[day()]=(this.costs[day()]??0)+reserve;await atomicJson(join(this.store.root,"costs.json"),this.costs);
     job.status="working";job.attempts++;job.cost=(job.cost??0)+reserve;job.updatedAt=Date.now();this.status="processing";await atomicJson(this.jobFile(job.id),job);
-    let phase="model response";
+    let phase="model response",proposed:KnowledgeCuration|undefined;
     try{
       const result=await this.generate(prompt,settings,this.lifetime.signal);phase="organization validation";
       let raw=JSON.parse(result.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"") );
       // A legacy no-op is harmless; legacy note-authoring proposals are refused.
       if(!raw.version&&["skip","archive-only"].includes(raw.decision)&&!raw.changes?.length)raw={...raw,version:1,tags:[],relations:[],reflections:[],profileSuggestions:[]};
       validateCuration(raw,job.source,graph.nodes.map(n=>n.id));
-      const plan=raw as KnowledgeCuration;
+      if(raw.version===2)for(const relation of raw.relations){const target=candidates.find(n=>n.id===relation.targetId);if(!target||!target.body.includes(relation.targetEvidence!))throw Error("Relation target was not read or its quote was invented");relation.targetHash=target.contentHash;}
+      const plan=proposed=raw as KnowledgeCuration;
       if(settings.linking==="off"&&plan.relations.length||plan.relations.length>settings.maxLinks||settings.reflections===false&&plan.reflections.length||settings.profileSuggestions===false&&plan.profileSuggestions.length)throw Error("Organization exceeded selected permissions");
       if(settings.mode==="review"&&plan.decision==="organize"){
         await atomicJson(join(this.store.root,"reviews",`${digest(job.id)}.json`),plan);job.status="review";job.reason=plan.reason;job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);this.status="awaiting-review";return;
       }
-      phase="organization write";const revision=await this.store.organization.apply(plan,job.source);
+      phase="organization write";const revision=await this.store.organization.apply(plan,job.source,job.pass?.id);
       job.status="done";job.outcome=revision?"organized":plan.decision==="archive-only"?"archive-only":"skipped";job.revision=revision??undefined;job.error=undefined;job.reason=plan.reason;this.status="ready";
     }catch(error){
-      const e=error as {code?:string;message?:string};if(phase==="model response")this.checked=undefined;
+      const e=error as {code?:string;message?:string;revision?:string};if(phase==="model response")this.checked=undefined;
       job.error={phase,code:String(e.code??"KNOWLEDGE_PROCESSING_ERROR").slice(0,80),message:redactKnowledgeSecrets(String(e.message??"Knowledge processing failed")).slice(0,600)};job.reason=job.error.message;
       const quota=phase==="model response"&&isQuotaFailure(e);job.status=quota?"waiting-credit":"failed";this.status=quota?"waiting-credit":"needs-attention";
+      if(e.code==="KNOWLEDGE_PROJECTION_PENDING"){job.status="done";job.outcome="organized";job.revision=e.revision;job.error.phase="Obsidian projection";this.status="projection-pending";}
+      if(e.code==="DOMAIN_REVISION_CONFLICT"&&proposed){await atomicJson(join(this.store.root,"reviews",`${digest(job.id)}.json`),proposed);job.status="review";job.reason="Domains changed during processing. Preview and approve a validated rebase; another model call is not needed.";this.status="awaiting-review";}
       if(quota)await this.gate?.block(settings.provider,job.error.message);
       if(quota||phase==="model response"&&/not supported|unknown model|does not exist|authentication|unauthorized|invalid.*(?:key|token)|expired.*token/i.test(job.error.message)){
         this.blockedRoute={key:JSON.stringify([settings.provider,settings.model,settings.reasoningEffort]),message:job.error.message,quota};await atomicJson(join(this.store.root,"model-health.json"),this.blockedRoute);
@@ -104,8 +122,18 @@ export class KnowledgeCurator {
     job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);
   }
   monthCost(){return Object.entries(this.costs).filter(([d])=>d.startsWith(day().slice(0,7))).reduce((s,[,v])=>s+v,0);}
-  async review(id:string){const job=this.jobs.get(id);if(job?.status!=="review")throw new Error("No pending review");return {source:job.source,plan:JSON.parse(await readFile(join(this.store.root,"reviews",`${digest(id)}.json`),"utf8")) as KnowledgePlan};}
-  async decideReview(id:string,approve:boolean){const job=this.jobs.get(id)!,review=await this.review(id);if(approve){job.revision=await this.store.organization.apply(review.plan as unknown as KnowledgeCuration,review.source)??undefined;job.outcome=job.revision?"organized":"skipped";job.reason="Approved; original text preserved, relationships/reflections saved.";}else{job.outcome="rejected";job.reason="Rejected; original records unchanged.";}job.status="done";job.updatedAt=Date.now();await atomicJson(this.jobFile(id),job);this.status="ready";}
+  async review(id:string){const job=this.jobs.get(id);if(job?.status!=="review")throw new Error("No pending review");const saved=JSON.parse(await readFile(join(this.store.root,"reviews",`${digest(id)}.json`),"utf8")) as KnowledgeCuration,registry=await this.store.organization.domains(),stale=saved.version===2&&!!saved.domainOps?.length&&saved.expectedRegistryRevision!==registry.revision,plan=stale?{...saved,expectedRegistryRevision:registry.revision}:saved;if(stale)changeKnowledgeDomains(registry,plan.domainOps!,{actor:"curator",source:job.source,knownNodeIds:(await this.store.scan()).map(n=>n.id),expectedRevision:registry.revision,revisionId:"preview"});return {source:job.source,plan,stale,reviewHash:digest(JSON.stringify([plan,digest(job.source.content),registry.revision]))};}
+  async decideReview(id:string,approve:boolean,reviewHash?:string){
+    const job=this.jobs.get(id);if(job?.status!=="review")throw Error("No pending review");job.error=undefined;
+    if(approve){
+      const review=await this.review(id);if(review.stale&&reviewHash!==review.reviewHash)throw Error("Preview the current registry before approving this organization pass");
+      if(job.pass){const note=(await this.store.scan()).find(n=>n.id===job.source.conversationId);if(!note||digest(note.body)!==job.pass.sourceHash)throw Error("Selected source changed; preserve it and queue a fresh pass");}
+      try{job.revision=await this.store.organization.apply(review.plan,review.source,job.pass?.id)??undefined;}
+      catch(error){const e=error as {code?:string;revision?:string;message?:string};if(e.code!=="KNOWLEDGE_PROJECTION_PENDING")throw error;job.revision=e.revision;job.error={phase:"Obsidian projection",code:e.code,message:e.message!};}
+      job.outcome=job.revision?"organized":"skipped";job.reason=job.error?.message??"Approved; original text preserved, relationships/reflections saved.";
+    }else{job.outcome="rejected";job.reason="Rejected; original records unchanged.";}
+    job.status="done";job.updatedAt=Date.now();await atomicJson(this.jobFile(id),job);this.status=job.error?"projection-pending":"ready";
+  }
   async snapshot():Promise<KnowledgeStatus>{const counts={queued:0,working:0,review:0,done:0,failed:0,"waiting-credit":0},outcomes:Record<string,number>={};for(const j of this.jobs.values()){counts[j.status]++;if(j.status==="done"){const outcome=j.outcome??(j.revision?"written":"processed");outcomes[outcome]=(outcomes[outcome]??0)+1;}}return {secondBrain:true,enabled:this.settings.enabled,status:this.status==="ready"&&counts.failed?"needs-attention":this.status,vault:this.store.vault,settings:{...this.settings},todayEstimatedCost:this.costs[day()]??0,monthEstimatedCost:this.monthCost(),counts,jobs:[...this.jobs.values()].sort((a,b)=>Number(b.status==="failed"||b.status==="review")-Number(a.status==="failed"||a.status==="review")||b.updatedAt-a.updatedAt).slice(0,60).map(({source,...rest})=>rest),notes:(await this.store.scan()).filter(n=>n.body.trim()).length,embedding:this.embedding,historyArchivesReady:true,recalls:this.recalls,outcomes};}
   async dispose(){this.lifetime.abort();await this.running;await this.writing;await this.store.archive.drain();}
 }

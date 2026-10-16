@@ -1,0 +1,69 @@
+import type {DomainOperation,KnowledgeDomain,KnowledgeDomainState} from "../../knowledge-domain-contract.ts";
+
+type Registry=KnowledgeDomainState&{nodes:{id:string;title:string}[]};
+type Request=<T>(query:string,command?:unknown)=>Promise<T>;
+
+/** Domain organization is separate from original note editing. Every mutation
+ * uses a registry revision; leaving a draft never silently submits it. */
+export function createKnowledgeDomainsPanel(root:Document,request:Request,onChange:()=>Promise<void>,onFocus:(id:string)=>void){
+  const el=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const n=root.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
+  const button=(text:string,run:()=>void)=>{const n=el("button",text);n.type="button";n.addEventListener("click",run);return n;};
+  const option=(label:string,value:string)=>{const n=el("option",label);n.value=value;return n;};
+  const pane=el("section"),message=el("p"),content=el("div");pane.className="knowledge-domains-panel";pane.setAttribute("data-knowledge-domains","");pane.hidden=true;message.setAttribute("role","status");pane.append(message,content);
+  let registry:Registry|undefined,dirty=false,busy=false,disposed=false;
+  const title=(id?:string)=>registry?.domains.find(d=>d.id===id)?.title??"Main level";
+  function domainPath(id:string){const parts:string[]=[],seen=new Set<string>();let d=registry?.domains.find(d=>d.id===id);while(d&&!seen.has(d.id)){seen.add(d.id);parts.unshift(d.title);d=registry?.domains.find(parent=>parent.id===d!.parentId);}return parts.join(" / ");}
+  const alive=()=>registry!.domains.filter(d=>d.status!=="merged");
+  function canLeave(){if(dirty){message.textContent="Save or discard your domain changes before leaving.";pane.querySelector<HTMLInputElement>("input,select")?.focus();return false;}return !busy;}
+  function field(label:string,input:HTMLElement,parent:HTMLElement){const l=el("label",label);l.append(input);parent.append(l);return input;}
+  function text(label:string,value:string,parent:HTMLElement){const n=el("input");n.value=value;n.maxLength=100;field(label,n,parent);return n;}
+  function domainSelect(label:string,value:string|undefined,parent:HTMLElement,exclude?:string){const s=el("select");s.append(option("Main level",""));for(const d of alive())if(d.id!==exclude)s.append(option(`${domainPath(d.id)}${d.status==="inactive"?" · inactive":""}`,d.id));s.value=value??"";field(label,s,parent);return s;}
+  function guard(form:HTMLElement,ignore?:HTMLElement){dirty=false;const changed=(event:Event)=>{if(event.target!==ignore)dirty=true;};form.addEventListener("input",changed);form.addEventListener("change",changed);form.append(button("Discard domain changes",()=>{dirty=false;render();message.textContent="Domain draft discarded.";}));}
+  async function refresh(){registry=await request<Registry>("view=domains");if(!disposed)render();}
+  async function action(command:unknown,success:string){if(busy)return;busy=true;message.textContent="Saving…";try{await request("",command);dirty=false;await refresh();await onChange();message.textContent=success;}catch(error){message.textContent=(error as Error).message||"Couldn’t save. Your draft is preserved.";}finally{busy=false;}}
+  function commit(operations:DomainOperation[],maxActiveDomains?:number){return action({action:"domains",revision:registry!.revision,operations,maxActiveDomains},"Domain organization saved. Original records are unchanged.");}
+  function editor(domain?:KnowledgeDomain){
+    if(!canLeave())return;const form=el("fieldset");form.append(el("legend",domain?`Edit ${domain.title}`:"New domain"));
+    const name=text("Name",domain?.title??"",form),alias=text("Aliases (comma separated)",domain?.aliases.join(", ")??"",form),parent=domainSelect("Parent domain",domain?.parentId,form,domain?.id);
+    alias.maxLength=1200;const parseAliases=()=>alias.value.split(",").map(a=>a.trim()).filter(Boolean);
+    const lifecycle=(operations:DomainOperation[])=>{if(domain&&(name.value!==domain.title||JSON.stringify(parseAliases())!==JSON.stringify(domain.aliases)||(parent.value||undefined)!==domain.parentId)){message.textContent="Save or discard the name, aliases and parent changes before a lifecycle change.";return;}void commit(operations);};
+    form.append(button("Save domain",()=>{const operations:DomainOperation[]=domain?[{type:"rename",id:domain.id,title:name.value,aliases:parseAliases()},{type:"reparent",id:domain.id,...(parent.value?{parentId:parent.value}:{})}]:[{type:"create",ref:"new-domain",title:name.value,aliases:parseAliases(),...(parent.value?{parentId:parent.value}:{})}];void commit(operations);}));
+    if(domain){
+      form.append(el("p","Deactivating a domain also deactivates its children. Records remain searchable."));
+      form.append(button(domain.status==="active"?"Deactivate domain":"Activate domain",()=>lifecycle([{type:"status",id:domain.id,status:domain.status==="active"?"inactive":"active"}])));
+      const advanced=el("details");advanced.append(el("summary","Merge or split"));const target=domainSelect("Merge into",undefined,advanced,domain.id);target.firstElementChild?.remove();
+      advanced.append(button("Merge domains",()=>lifecycle([{type:"merge",id:domain.id,targetId:target.value}])));
+      advanced.append(el("p","Merge keeps the old identity as a redirect. Split moves only your selected memberships; it never copies or rewrites notes."));
+      const selections:{name:HTMLInputElement;ids:Set<string>}[]=[];
+      for(let i=0;i<2;i++){const group=el("fieldset");group.append(el("legend",`Split group ${i+1}`));const groupName=text("New group name","",group),ids=new Set<string>();for(const n of registry!.nodes.filter(n=>registry!.memberships.some(m=>m.nodeId===n.id&&m.domainId===domain.id))){const check=el("input");check.type="checkbox";check.addEventListener("change",()=>check.checked?ids.add(n.id):ids.delete(n.id));field(n.title,check,group);}selections.push({name:groupName,ids});advanced.append(group);}
+      const deactivate=el("input");deactivate.type="checkbox";field("Deactivate the original domain after splitting",deactivate,advanced);
+      advanced.append(button("Split selected memberships",()=>lifecycle([{type:"split",id:domain.id,groups:selections.map((g,i)=>({ref:`new-split-${i}`,title:g.name.value,nodeIds:[...g.ids]})),deactivateSource:deactivate.checked}])));form.append(advanced);
+    }
+    guard(form);content.replaceChildren(form);name.focus();
+  }
+  function memberships(){
+    if(!canLeave())return;const form=el("fieldset");form.append(el("legend","Record memberships"));const record=el("select");for(const n of registry!.nodes)record.append(option(n.title,n.id));field("Record",record,form);const checks=el("div");form.append(checks);const selected=new Map<string,HTMLInputElement>();
+    const draw=()=>{checks.replaceChildren();selected.clear();for(const d of alive()){const c=el("input");c.type="checkbox";c.checked=registry!.memberships.some(m=>m.nodeId===record.value&&m.domainId===d.id);selected.set(d.id,c);field(`${d.title}${d.parentId?` · ${title(d.parentId)}`:""}`,c,checks);}};
+    let currentRecord=record.value;record.addEventListener("change",()=>{if(dirty){message.textContent="Save or discard memberships before selecting another record.";record.value=currentRecord;return;}currentRecord=record.value;draw();});draw();
+    form.append(button("Save memberships",()=>{const operations:DomainOperation[]=[];for(const [id,c]of selected){const prior=registry!.memberships.some(m=>m.nodeId===record.value&&m.domainId===id);if(c.checked)operations.push({type:"assign",nodeId:record.value,domainId:id});else if(prior)operations.push({type:"unassign",nodeId:record.value,domainId:id});}void commit(operations);}));
+    guard(form,record);content.replaceChildren(form);
+  }
+  function capEditor(){
+    if(!canLeave())return;const form=el("fieldset");form.append(el("legend","Active main-domain limit"),el("p","Subdomains do not use main-domain slots. To lower the limit, explicitly choose any roots you want to deactivate. Nothing is removed."));const cap=el("input");cap.type="number";cap.min="1";cap.max="20";cap.value=String(registry!.maxActiveDomains);field("Maximum active main domains",cap,form);const deactivate=new Set<string>();
+    for(const d of alive().filter(d=>!d.parentId&&d.status==="active")){const c=el("input");c.type="checkbox";c.addEventListener("change",()=>c.checked?deactivate.add(d.id):deactivate.delete(d.id));field(`Deactivate ${d.title} and its children`,c,form);}
+    form.append(button("Save domain limit",()=>void commit([...deactivate].map(id=>({type:"status",id,status:"inactive"})),Number(cap.value))));guard(form);content.replaceChildren(form);
+  }
+  function organizeSelection(){
+    if(!canLeave())return;const form=el("fieldset");form.append(el("legend","Organize selected records"),el("p","Choose up to 10 existing records for a new Knowledge AI pass. Originals stay read-only. This uses your current curator and budget; manual mode keeps jobs queued until you run them."));const selected=new Set<string>();for(const n of registry!.nodes){const c=el("input");c.type="checkbox";c.addEventListener("change",()=>c.checked?selected.add(n.id):selected.delete(n.id));field(n.title,c,form);}form.append(button("Queue organization",()=>void action({action:"reorganize",nodeIds:[...selected]},"Selected records queued for Knowledge AI. No other sources were added.")));guard(form);content.replaceChildren(form);
+  }
+  async function previewProposal(id:string){if(!canLeave())return;message.textContent="Checking current impact…";try{const p=await request<{revision:number;previewHash:string;stale:boolean;affectedRecords:number;before:KnowledgeDomain[];after:KnowledgeDomain[]}>(`view=domain-preview&id=${encodeURIComponent(id)}`);const proposal=registry!.proposals.find(p=>p.id===id)!,panel=el("section");panel.append(el("h3","Review domain change"),el("p",proposal.evidence),el("p",`${p.affectedRecords} record memberships affected.${p.stale?" Refreshed against the current registry.":""}`));for(const [name,domains]of [["Before",p.before],["After",p.after]] as const){panel.append(el("h4",name));for(const d of domains.filter(d=>d.status!=="merged"))panel.append(el("p",`${d.title} · ${d.parentId?domains.find(a=>a.id===d.parentId)?.title??"Missing parent":"Main domain"} · ${d.status}`));}panel.append(button("Approve domain change",()=>void action({action:"domain-review",revision:p.revision,id,approve:true,previewHash:p.previewHash},"Reviewed domain change applied.")),button("Reject domain change",()=>void action({action:"domain-review",revision:p.revision,id,approve:false},"Domain proposal rejected.")),button("Back to domains",()=>render()));content.replaceChildren(panel);message.textContent="Review the impact before approving.";}catch(e){message.textContent=(e as Error).message;}}
+  function render(){
+    if(!registry||disposed)return;content.replaceChildren();dirty=false;const roots=alive().filter(d=>!d.parentId),active=roots.filter(d=>d.status==="active").length;content.append(el("h3","Knowledge domains"),el("p",`${active} / ${registry.maxActiveDomains} active main domains · ${registry.nodes.length} records`),el("p","Knowledge AI connects original records. A record can belong to several domains; inactive topics remain searchable."));
+    const actions=el("nav");actions.append(button("New domain",()=>editor()),button("Domain limit",capEditor),button("Record memberships",memberships),button("Organize records",organizeSelection));content.append(actions);
+    const tree=el("div");function branch(domain:KnowledgeDomain,depth=0){const card=el("section");card.className="knowledge-domain-card";card.style.marginInlineStart=`${depth*12}px`;const ids=new Set(registry!.memberships.filter(m=>m.domainId===domain.id).map(m=>m.nodeId));card.append(el("h4",domain.title),el("p",`${domain.status} · ${ids.size} direct records${domain.aliases.length?` · ${domain.aliases.join(", ")}`:""}`),button(`Focus ${domain.title}`,()=>{if(canLeave())onFocus(domain.id);}),button(`Edit ${domain.title}`,()=>editor(domain)));tree.append(card);for(const child of alive().filter(d=>d.parentId===domain.id))branch(child,depth+1);}for(const d of roots)branch(d);content.append(tree);if(!roots.length)content.append(el("p","No domains yet. Create a broad domain or organize a few selected records with Knowledge AI."));
+    const unassigned=registry.nodes.filter(n=>!registry!.memberships.some(m=>m.nodeId===n.id));content.append(el("p",`${unassigned.length} unassigned records · these stay available in Notes and search.`));
+    const pending=registry.proposals.filter(p=>p.status==="pending");if(pending.length){content.append(el("h3","Knowledge AI proposals"));for(const p of pending)content.append(button(`Review ${p.operation.type} proposal`,()=>void previewProposal(p.id)));}
+    const latest=registry.history.filter(h=>!h.undone).at(-1);if(latest){const history=el("details");history.append(el("summary","Recent changes & undo"));for(const h of registry.history.slice(-12).reverse())history.append(el("p",`${new Date(h.at).toLocaleString()} · ${h.actor} · ${h.operations.map(o=>o.type).join(", ")||"review"}${h.undone?" · undone":""}`));history.append(button("Undo latest domain change",()=>void action({action:"domain-undo",revision:registry!.revision,id:latest.id},"Latest domain change undone.")));content.append(history);}
+  }
+  return {pane,canLeave,async show(){pane.hidden=false;try{await refresh();message.textContent="";}catch(e){message.textContent=(e as Error).message;}},dispose(){disposed=true;}};
+}

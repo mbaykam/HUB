@@ -2,6 +2,7 @@ import { defineOverlayStyle } from "../shared/style-runtime.ts";
 import { pwaUiAsset } from "./mobile-ui-update.ts";
 import type { MemoryGraphPage } from "../../memory-graph-contract.ts";
 import type { openMemoryGraph } from "../memory/graph-browser.ts";
+import {projectKnowledgePreview} from "../memory/knowledge-layout.ts";
 import styles from "./mobile-memory-graph.css";
 const installStyles = defineOverlayStyle("hub-memory-graph-tile", styles);
 
@@ -31,15 +32,16 @@ export function installMobileMemoryGraph(container: HTMLElement, root: Document)
       data = await response.json() as MemoryGraphPage;
       if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) throw new Error("invalid");
       preview.replaceChildren();
-      const positions = new Map(data.nodes.slice(0, 12).map((node, index, all) => [node.id, { x: 120 + Math.cos(index * 2 * Math.PI / all.length) * (all.length === 1 ? 0 : 85), y: 55 + Math.sin(index * 2 * Math.PI / all.length) * 38 }]));
+      const positions = new Map(projectKnowledgePreview(data).map(p=>[p.id,p]));
+      preview.setAttribute("data-layout","knowledge-cloud");
       for (const edge of data.edges) {
         const a = positions.get(edge.source), b = positions.get(edge.target); if (!a || !b) continue;
         const line = root.createElementNS(preview.namespaceURI, "line");
         for (const [key, value] of Object.entries({ x1: a.x, y1: a.y, x2: b.x, y2: b.y })) line.setAttribute(key, String(value));
         preview.append(line);
       }
-      for (const p of positions.values()) { const dot = root.createElementNS(preview.namespaceURI, "circle"); dot.setAttribute("cx", String(p.x)); dot.setAttribute("cy", String(p.y)); dot.setAttribute("r", "5"); preview.append(dot); }
-      hint.textContent = data.nodes.length ? `${data.nodes.length}${data.hasMore ? "+" : ""} notes · explore connections` : "No knowledge notes on this page · open to explore";
+      for (const p of positions.values()) { const dot = root.createElementNS("http://www.w3.org/2000/svg", "circle"); dot.setAttribute("cx", String(p.x)); dot.setAttribute("cy", String(p.y)); dot.setAttribute("r",String(Math.max(1.8,Math.min(3.6,3.1-p.depth/1500))));dot.style.fill=p.color;preview.append(dot); }
+      hint.textContent = data.nodes.length ? `${positions.size} shown / ${data.nodes.length}${data.hasMore ? "+" : ""} records · explore` : "No knowledge records yet · open to explore";
     } catch { data = undefined; preview.replaceChildren(); hint.textContent = "Memory unavailable · tap to retry"; }
   }
   tile.addEventListener("click", async () => {

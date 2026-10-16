@@ -147,6 +147,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: 0.1.2-alpha.5
         version: 0.1.2-alpha.5(@deepseek-ai/cordis@4.0.2)
+      '@deepseek-ai/dsh-subagent':
+        specifier: ^0.1.2-alpha.5
+        version: 0.1.2-rc.1(2e38b20430991dc09b07995e1a89ac0f)
       '@deepseek-ai/dsh-tool-subagent':
         specifier: 0.1.2-alpha.5
         version: 0.1.2-alpha.5(65e6d68bb2c168177f150d9eed94892a)

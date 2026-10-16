@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {KnowledgeStore,digest} from '../packages/harness-overlay/src/host/knowledge-store.ts';
+import {relationRoots,relationScope} from '../packages/harness-overlay/src/host/knowledge-relations.ts';
+
+async function fixture(t){const dir=await mkdtemp(join(tmpdir(),'hub-relations-')),store=new KnowledgeStore(join(dir,'vault'),join(dir,'state'));t.after(()=>rm(dir,{recursive:true,force:true}));await mkdir(join(store.vault,'Notes'),{recursive:true});for(let i=0;i<42;i++)await writeFile(join(store.vault,'Notes',i+'.md'),`---\nhub_id: record-${i}\ntitle: Record ${i}\n---\nSource ${i} about interconnected systems.`);await store.initialize();return store;}
+
+test('more than thirty short links and selective long links survive reload, paging and further passes without a degree cap',async t=>{
+ const s=await fixture(t),ops=[{type:'create',ref:'new-a',title:'Research'},{type:'create',ref:'new-b',title:'Life'}];for(let i=0;i<42;i++)ops.push({type:'assign',nodeId:'record-'+i,domainId:i<36?'new-a':'new-b'});const state=await s.organization.changeDomains(0,ops),source={id:'original-source',conversationId:'record-0',completedAt:Date.now(),authorRole:'user',channel:'pwa',content:'I am researching interconnected systems.'},notes=await s.scan();
+ let lastPlan,lastId;for(let offset=1;offset<42;offset+=12){const plan={version:2,expectedRegistryRevision:state.revision,domainOps:[],decision:'organize',reason:'Sourced links',tags:[],relations:notes.filter(n=>Number(n.id.slice(7))>=offset&&Number(n.id.slice(7))<offset+12).map(n=>({targetId:n.id,label:'related research',predicate:'relates to',evidence:'interconnected systems',targetEvidence:n.body.trim(),targetHash:digest(n.body)})),reflections:[],profileSuggestions:[]};lastId=await s.organization.apply(plan,source,'pass-'+offset);lastPlan=plan;}
+ const reopened=new KnowledgeStore(s.vault,s.root),graph=await reopened.graph();assert.equal(graph.relationships.length,41);assert.equal(graph.relationships.filter(r=>r.scope==='short').length,35);assert.equal(graph.relationships.filter(r=>r.scope==='long').length,6);assert.ok(graph.relationships.every(r=>r.interpretation&&r.evidence.length===2));
+ let cursor='',seen=[];do{const page=await reopened.neighbors('record-0',cursor,11);assert.equal(page.total,41);seen.push(...page.items.map(r=>r.id));cursor=page.nextCursor;}while(cursor);assert.equal(new Set(seen).size,41);assert.equal(seen.length,41);assert.equal(await reopened.organization.apply(lastPlan,source,'pass-37'),lastId);assert.equal((await reopened.graph()).relationships.length,41);
+ const first=graph.relationships.find(r=>r.targetId==='record-1'),target=notes.find(n=>n.id==='record-1'),plan={...lastPlan,relations:[{targetId:'record-1',label:'alternative predicate',predicate:'contrasts with',evidence:'interconnected systems',targetEvidence:target.body.trim(),targetHash:digest(target.body)}]};const revision=await reopened.organization.apply(plan,source,'different-predicate');assert.equal((await reopened.graph()).relationships.filter(r=>r.targetId==='record-1').length,2);await reopened.organization.undo(revision);assert.equal((await reopened.graph()).relationships.find(r=>r.targetId==='record-1').id,first.id);
+});
+
+test('scope follows shared roots and multi-membership without fabricating cross-domain edges',()=>{
+ const state={domains:[{id:'a'},{id:'b'},{id:'child',parentId:'a'}],memberships:[{nodeId:'x',domainId:'child'},{nodeId:'x',domainId:'b'},{nodeId:'y',domainId:'a'},{nodeId:'z',domainId:'b'}]},roots=relationRoots(state);assert.equal(relationScope('x','y',roots),'short');assert.equal(relationScope('x','z',roots),'short');assert.equal(relationScope('y','z',roots),'long');assert.equal(relationScope('y','missing',roots),'unclassified');assert.equal(state.memberships.length,4);
+});
+
+test('stale target versions reject the combined transaction before any canonical commit',async t=>{
+ const s=await fixture(t),source={id:'source',conversationId:'record-0',completedAt:Date.now(),content:'interconnected systems',channel:'pwa'},target=(await s.scan()).find(n=>n.id==='record-1'),plan={version:2,expectedRegistryRevision:0,domainOps:[{type:'create',ref:'new-x',title:'Research',evidence:'interconnected systems'}],decision:'organize',reason:'Source',tags:[],relations:[{targetId:target.id,label:'related research',evidence:'interconnected systems',targetEvidence:target.body.trim(),targetHash:digest(target.body)}],reflections:[],profileSuggestions:[]};await writeFile(join(s.vault,target.path),target.raw+'\nHuman correction.');await assert.rejects(s.organization.apply(plan,source),/target evidence changed/);assert.equal((await s.organization.domains()).domains.length,0);assert.equal((await s.organization.state()).revisions.length,0);await assert.rejects(s.neighbors('record-0','not-a-cursor'),/changed/);
+});

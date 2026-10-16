@@ -64,6 +64,10 @@ test('returning from a searched Knowledge note restores the note list, query and
   assert.equal(root.querySelector('[data-graph-note]').hidden,true);
 });
 
+test('a source exposes its connections directly from the note toolbar without changing its text',async t=>{
+ const {root,requests,note}=await fixture(t);const details=root.querySelector('[data-graph-note] details');assert.equal(details.open,false);button(root,'Connections').click();assert.equal(details.open,true);assert.equal(requests.filter(request=>request.method==='POST').length,0);assert.equal(note.content,'Original reading plan.');
+});
+
 test('unsaved Knowledge edits survive navigation and closing until explicitly discarded',async t=>{
   const {view,root,requests,note}=await fixture(t),dialog=root.querySelector('dialog');
   button(root,'Edit').click();

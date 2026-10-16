@@ -14,14 +14,15 @@ const MAX=25_000_000;
 const mime:Record<string,string>={".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".gif":"image/gif",".pdf":"application/pdf",".mp3":"audio/mpeg",".wav":"audio/wav",".mp4":"video/mp4",".txt":"text/plain",".md":"text/markdown",".csv":"text/csv"};
 export function knowledgeUrls(text:string){const values=new Set<string>();for(const match of text.matchAll(/https?:\/\/[^\s<>"'\]\)]+/g)){try{const url=new URL(match[0].replace(/[.,;!?]+$/,""));if(!url.username&&!url.password&&url.href.length<=2000)values.add(url.href);}catch{}}return [...values].slice(0,30);}
 /** Originals belong to the real vault; only lookup metadata stays outside it. */
+import {KnowledgeMutationGate} from "./knowledge-mutation-gate.ts";
 export class KnowledgeAssets{
   subprocess?:VoiceSubprocess;
-  constructor(readonly vault:string,readonly root:string){}
-  async initialize(){await mkdir(join(this.vault,"Attachments"),{recursive:true});if((await lstat(join(this.vault,"Attachments"))).isSymbolicLink())throw Error("Linked attachment directory");await mkdir(join(this.root,"assets"),{recursive:true});}
+  constructor(readonly vault:string,readonly root:string,readonly mutations=new KnowledgeMutationGate()){}
+  initialize(){return this.mutations.run(async()=>{await mkdir(join(this.vault,"Attachments"),{recursive:true});if((await lstat(join(this.vault,"Attachments"))).isSymbolicLink())throw Error("Linked attachment directory");await mkdir(join(this.root,"assets"),{recursive:true});});}
   async list(){const {readdir}=await import("node:fs/promises");await this.initialize();const result:KnowledgeAsset[]=[];for(const name of (await readdir(join(this.root,"assets"))).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).slice(0,500)){try{result.push(await this.get(name.slice(0,-5)));}catch{}}return result;}
-  async bindImage(ref:string,asset:KnowledgeAsset){await mkdir(join(this.root,"image-originals"),{recursive:true});if(!/^[a-f0-9]{64}$/.test(ref))return;await writeFile(join(this.root,"image-originals",ref+".json"),JSON.stringify({id:asset.id}));}
+  bindImage(ref:string,asset:KnowledgeAsset){return this.mutations.run(async()=>{await mkdir(join(this.root,"image-originals"),{recursive:true});if(!/^[a-f0-9]{64}$/.test(ref))return;await writeFile(join(this.root,"image-originals",ref+".json"),JSON.stringify({id:asset.id}));});}
   async original(ref:string){if(!/^[a-f0-9]{64}$/.test(ref))return;try{const value=JSON.parse(await readFile(join(this.root,"image-originals",ref+".json"),"utf8"));return await this.get(value.id);}catch{return;}}
-  async rememberRequest(sessionId:string,rpcId:string,assets:KnowledgeAsset[]){await mkdir(join(this.root,"asset-requests"),{recursive:true});const key=createHash("sha256").update(sessionId+":"+rpcId).digest("hex");await writeFile(join(this.root,"asset-requests",key+".json"),JSON.stringify(assets.map(a=>a.id)));}
+  rememberRequest(sessionId:string,rpcId:string,assets:KnowledgeAsset[]){return this.mutations.run(async()=>{await mkdir(join(this.root,"asset-requests"),{recursive:true});const key=createHash("sha256").update(sessionId+":"+rpcId).digest("hex");await writeFile(join(this.root,"asset-requests",key+".json"),JSON.stringify(assets.map(a=>a.id)));});}
   async forRequest(sessionId:string,rpcId:string){try{const key=createHash("sha256").update(sessionId+":"+rpcId).digest("hex"),ids=JSON.parse(await readFile(join(this.root,"asset-requests",key+".json"),"utf8"));return await Promise.all(ids.map((id:string)=>this.get(id)));}catch{return [] as KnowledgeAsset[];}}
   async path(path:string){
     if(!path||path.length>500||/[\u0000-\u001f:*?"<>|\\]/.test(path)||path.split("/").some(p=>!p||p==="."||p===".."||p.startsWith(".")))throw Error("Invalid attachment path");
@@ -30,7 +31,8 @@ export class KnowledgeAssets{
     if(relative(await realpath(this.vault),await realpath(full)).startsWith(".."))throw Error("Outside vault");return full;
   }
   async get(id:string):Promise<KnowledgeAsset>{if(!/^[a-f0-9]{64}$/.test(id))throw Error("Invalid attachment identity");const asset=JSON.parse(await readFile(join(this.root,"assets",id+".json"),"utf8"));if(asset.id!==id)throw Error("Invalid attachment record");return asset;}
-  async save(bytes:Uint8Array,name:string):Promise<KnowledgeAsset>{
+  save(bytes:Uint8Array,name:string):Promise<KnowledgeAsset>{return this.mutations.run(()=>this.saveBytes(bytes,name));}
+  private async saveBytes(bytes:Uint8Array,name:string):Promise<KnowledgeAsset>{
     if(!bytes.length||bytes.length>MAX)throw Error("Attachment exceeds limit");await this.initialize();
     const id=createHash("sha256").update(bytes).digest("hex");try{const old=await this.get(id);await this.path(old.path);return old;}catch{}
     let clean=basename(name.replace(/\\/g,"/")).normalize("NFC").replace(/[\u0000-\u001f<>:"/\\|?*#\[\]^]/g," ").trim().replace(/[. ]+$/g,"").replace(/^\.+/,"").slice(0,120)||"Attachment";

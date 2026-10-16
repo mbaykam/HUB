@@ -1,7 +1,7 @@
 import { digest } from "./knowledge-store.ts";
 import type { KnowledgeSource } from "../knowledge-contract.ts";
 import { isKnowledgeEvaluation, KNOWLEDGE_MESSAGE_LABEL } from "./knowledge-evidence.ts";
-interface Message { role:"user"|"assistant"|"task"; text:string }
+interface Message { role:"user"|"assistant"|"task"; text:string;id?:string;at?:number;start?:number;contentHash?:string }
 /** Typed native events determine authorship. Never split a role label away
  * from a long message, or import a fork's inherited history as new evidence. */
 export function knowledgeTurnSources(header:{id:string;origin?:string;parentSession?:string},snapshot:readonly any[],end:any,inherited=0,forgetBefore=0):KnowledgeSource[]{
@@ -10,16 +10,16 @@ export function knowledgeTurnSources(header:{id:string;origin?:string;parentSess
   const worker=header.origin==="subagent";
   const extract=(e:any):Message|undefined=>{
     if(e.type==="user/message"&&e.data?.source?.kind==="user"){
-      let text=e.data.content?.flatMap((b:any)=>b.type==="text"?[b.text??""]:b.type==="image"?["Attached image: "+(b.attachment?.name??"Image")]:[]).join("\n");if(worker&&text)text=text.split("\nYour parent agent id is ")[0];return text?{role:worker?"task":"user",text}:undefined;
+      let text=e.data.content?.flatMap((b:any)=>b.type==="text"?[b.text??""]:b.type==="image"?["Attached image: "+(b.attachment?.name??"Image")]:[]).join("\n");if(worker&&text)text=text.split("\nYour parent agent id is ")[0];return text?{role:worker?"task":"user",text,id:String(e.seq??events.indexOf(e)),at:e.time}:undefined;
     }
-    if(e.type==="assistant/message"&&e.data?.interrupted!==true){const text=e.data.message?.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text??"").join("\n");return text?{role:"assistant",text}:undefined;}
+    if(e.type==="assistant/message"&&e.data?.interrupted!==true){const text=e.data.message?.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text??"").join("\n");return text?{role:"assistant",text,id:String(e.seq??events.indexOf(e)),at:e.time}:undefined;}
   };
   const current:Message[]=[];
   for(const e of events.slice(start+1)){if(e.type==="turn/end"||e.type==="turn/start")break;const m=extract(e);if(m)current.push(m);}
   if(!current.some(m=>m.role==="assistant")||!worker&&!current.some(m=>m.role==="user"))return [];
   const context=events.slice(0,start).filter(e=>!forgetBefore||Number.isSafeInteger(e.time)&&e.time>forgetBefore).flatMap(e=>{const m=extract(e);return m?[m]:[];}).slice(-4).map(m=>({...m,text:m.text.slice(-500)}));
   const chunks:Message[][]=[];let pending:Message[]=[];
-  for(const m of current)for(let offset=0;offset<m.text.length;offset+=5000){const fragment={role:m.role,text:m.text.slice(offset,offset+5000)};if(JSON.stringify([...pending,fragment]).length>13000){chunks.push(pending);pending=[];}pending.push(fragment);}
+  for(const m of current)for(let offset=0;offset<m.text.length;offset+=5000){const fragment={...m,text:m.text.slice(offset,offset+5000),start:offset,contentHash:digest(m.text)};if(JSON.stringify([...pending,fragment]).length>13000){chunks.push(pending);pending=[];}pending.push(fragment);}
   if(pending.length)chunks.push(pending);
-  return chunks.map((messages,i)=>({id:`hub-${digest(header.id)}-turn-${turn}-${i}`,sessionId:header.id,evidenceVersion:2 as const,completedAt:end.time,channel:worker?"hub-worker-result":"hub",content:`Prior conversation context (not new facts): ${JSON.stringify(context)}\n${KNOWLEDGE_MESSAGE_LABEL}${JSON.stringify(messages)}`}));
+  return chunks.map((messages,i)=>({id:`hub-${digest(header.id)}-turn-${turn}-${i}`,sessionId:header.id,evidenceVersion:2 as const,completedAt:end.time,channel:worker?"hub-worker-result":"hub",spans:messages.map(m=>({messageId:m.id!,text:m.text,start:m.start!,end:m.start!+m.text.length,contentHash:m.contentHash!,role:m.role,...(Number.isSafeInteger(m.at)?{occurredAt:m.at}:{} )})),content:`Prior conversation context (not new facts): ${JSON.stringify(context)}\n${KNOWLEDGE_MESSAGE_LABEL}${JSON.stringify(messages.map(({id,at,start,contentHash,...m})=>m))}`}));
 }
