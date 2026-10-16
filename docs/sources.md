@@ -29,6 +29,7 @@ OpenCode, and not claims of affiliation or endorsement.
 - [Pipecat](https://github.com/pipecat-ai/pipecat): local speech pipeline and WebRTC integration.
 - [Camofox Browser](https://github.com/redf0x1/camofox-browser): the Windows portable browser runtime used by the optional bridge; derived from [jo-inc/camofox-browser](https://github.com/jo-inc/camofox-browser).
 - [Cytoscape.js](https://js.cytoscape.org/): graph infrastructure.
+- [Graphify](https://github.com/Graphify-Labs/graphify/tree/10130e79ed9caf8f60d998073e097531eaa1a395): selected trigram candidate-filtering and community identity reconciliation adaptations, reviewed at this pinned revision on 16 October 2026. HUB does not embed its full CLI, AI extraction workflow or 2D viewer. Source/license attribution is retained in [Graphify notices](../resources/licenses/graphify-NOTICE).
 - [Supertonic 3 model](https://huggingface.co/Supertone/supertonic-3): multilingual voice styles.
 - [Sherpa ONNX](https://github.com/k2-fsa/sherpa-onnx): local streaming recognition infrastructure.
 - [Whisper](https://github.com/openai/whisper): speech recognition family supported by the local stack.

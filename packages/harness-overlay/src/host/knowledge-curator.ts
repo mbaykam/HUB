@@ -10,6 +10,8 @@ import {changeKnowledgeDomains} from "./knowledge-domains.ts";
 import {isQuotaFailure} from "./operation-failure.ts";
 import type {ProviderGate} from "./provider-gate.ts";
 import {knowledgeRestoreHold,resumeRestoredKnowledgeWork,type KnowledgeRestoreHold} from "./knowledge-portable.ts";
+import {conversationMarkdown,conversationTextRanges} from "./knowledge-archive.ts";
+export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal)=>Promise<string>;
 const defaults=defaultKnowledgeSettings;
 const day=()=>new Date().toISOString().slice(0,10);
@@ -51,10 +53,13 @@ export class KnowledgeCurator {
   }
   /** Explicitly selected, already admitted records only. Each host-issued pass
    * is durable and idempotent on retry; it never rewrites original prose. */
-  async reorganize(nodeIds:string[]){
+  async reorganize(nodeIds:string[],windows:OrganizationWindow[]=[]){
     if(!Array.isArray(nodeIds)||!nodeIds.length||nodeIds.length>10||nodeIds.some(id=>typeof id!=="string")||new Set(nodeIds).size!==nodeIds.length)throw Error("Select between one and ten existing records");
-    const notes=await this.store.scan(),selected=nodeIds.map(id=>{const n=notes.find(n=>n.id===id);if(!n)throw Error("Selected source is unavailable");if(n.body.length>23500)throw Error("This source needs chunk selection; choose a shorter record for this bounded pass");return n;}),registry=await this.store.organization.domains(),passId=randomUUID(),ids:string[]=[];
-    const admission=await this.store.admission.read();for(const n of selected){const entry=admission.records[n.id],id="reorganize-"+passId+"-"+digest(n.id).slice(0,16),source:KnowledgeSource={id:"record-"+n.id,conversationId:n.id,completedAt:Math.max(1,Math.floor(n.modifiedAt)),channel:"pwa",authorRole:n.kind==="conversation"?"mixed":"user",content:n.body,evidenceVersion:2,...(entry?{importBatchId:entry.batchId,importAdmissionId:entry.receiptId}:{})};await this.enqueue(source,{id,sourceHash:digest(n.body),policyHash:digest(JSON.stringify(this.settings)),registryRevision:registry.revision});ids.push(id);}
+    if(!Array.isArray(windows)||windows.length>10||new Set(windows.map(w=>w?.nodeId)).size!==windows.length||windows.some(w=>!w||!nodeIds.includes(w.nodeId)||!/^[a-f0-9]{64}$/.test(w.hash)||!Number.isSafeInteger(w.start)||!Number.isSafeInteger(w.end)||w.start<0||w.end<=w.start||w.end-w.start>23500))throw Error("Choose valid, versioned source excerpts");
+    const notes=await this.store.scan(),selected=nodeIds.map(id=>{const n=notes.find(n=>n.id===id),window=windows.find(w=>w.nodeId===id);if(!n)throw Error("Selected source is unavailable");if(window&&(window.hash!==digest(n.body)||window.end>n.body.length))throw Error("Source changed; preview the excerpt again");if(n.body.length>23500&&!window)throw Error("Preview and choose an excerpt of this long source before queuing");return {note:n,window};}),registry=await this.store.organization.domains(),passId=randomUUID(),ids:string[]=[];
+    const admission=await this.store.admission.read();for(const {note:n,window} of selected){const entry=admission.records[n.id],start=window?.start??0,end=window?.end??n.body.length,id="reorganize-"+passId+"-"+digest(n.id).slice(0,16),source:KnowledgeSource={id:"record-"+n.id,conversationId:n.id,completedAt:Math.max(1,Math.floor(n.modifiedAt)),channel:"pwa",authorRole:n.kind==="conversation"?"mixed":"user",content:n.body.slice(start,end),originalWindow:{contentHash:digest(n.body),start,end},evidenceVersion:2,...(entry?{importBatchId:entry.batchId,importAdmissionId:entry.receiptId}:{})};
+      if(n.kind==="conversation"){const original=await this.store.archive.read(n.id),markdown=conversationMarkdown(original),body=markdown.slice(markdown.indexOf("\n---\n")+5);if(body===n.body)source.spans=conversationTextRanges(original).flatMap(range=>{const a=Math.max(range.start,start),b=Math.min(range.end,end);if(a>=b||range.message.role==="status")return [];const from=a-range.start;return [{messageId:range.message.id,start:from,end:from+b-a,text:range.message.text.slice(from,from+b-a),contentHash:digest(range.message.text),role:range.message.role,occurredAt:range.message.at}];});}
+      await this.enqueue(source,{id,sourceHash:digest(n.body),policyHash:digest(JSON.stringify(this.settings)),registryRevision:registry.revision});ids.push(id);}
     return {passId,queued:ids.length,jobIds:ids,automatic:this.settings.enabled&&this.settings.mode!=="manual"};
   }
   async repairProjections(){await this.store.organization.repairPending();for(const job of this.jobs.values())if(job.error?.code==="KNOWLEDGE_PROJECTION_PENDING"){job.error=undefined;job.reason="Saved organization and Obsidian projection repaired; no model call needed.";await atomicJson(this.jobFile(job.id),job);}this.status="ready";}

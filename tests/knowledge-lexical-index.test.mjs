@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {setInterval as intervalTimer,clearInterval as clearTimer} from 'node:timers';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -21,6 +22,11 @@ test('indexed ranks equal the complete scan for bilingual, Unicode, short, commo
   assert.equal(index.candidates(['ai']),undefined);
   assert.equal(index.candidates(['entry']),undefined);
   assert.deepEqual([...index.candidates(['neverfound'])],[]);
+});
+
+test('cold host preparation yields to other work and serializes competing edited snapshots without changing ranks',async()=>{
+ const index=new KnowledgeLexicalIndex(),corpus=Array.from({length:3000},(_,i)=>({id:'cooperative-'+i,title:'Source '+i,body:('English Türkçe distinct source passage '+i+' ').repeat(12)+(i===1523?' rarezebra':''),modifiedAt:i})),progress=[],timer=intervalTimer(()=>progress.push(index.coverage.records),1);
+ try{const changed=corpus.map(n=>n.id==='cooperative-1523'?{...n,body:'A replacement quetzal passage.'}:n),[first,second]=await Promise.all([index.withSnapshot(corpus,()=>results(corpus,'rarezebra',[],registry,index)),index.withSnapshot(changed,()=>results(changed,'quetzal',[],registry,index))]);assert.deepEqual(first,results(corpus,'rarezebra'));assert.deepEqual(second,results(changed,'quetzal'));assert.ok(progress.some(n=>n>0&&n<corpus.length),'main event loop ran between index batches');}finally{clearTimer(timer);}
 });
 
 test('edits, renames and deletions invalidate old candidates even when timestamps stay identical',()=>{

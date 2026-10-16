@@ -32,7 +32,7 @@ HUB is an independent project, maintained separately from both upstream teams.
 | **Talk naturally** | Local speech recognition and synthesis, English/Turkish profiles, listenable voice previews and a live transcript. |
 | **Delegate real work** | A quick conversation model hands demanding tasks to the configured HUB character. Native tasks retain their history and tool policy; completed results can return to the active voice session. |
 | **Stay in Telegram** | A paired bot handles text and updates replies in place. An optional, separate Telegram user account supports incoming voice calls. |
-| **Build a second brain** | Original conversations stay intact in an Obsidian-compatible vault. AI connects them and adds separate sourced reflections, with reviewable profile suggestions. |
+| **Build a second brain** | Original conversations stay intact in an Obsidian-compatible vault. Explore 3D domains, cited connections and local group suggestions; review AI reflections and admit history in selected pilots. |
 | **Manage automations** | Schedule, repeat or watch conditions from the PWA right panel, with task permissions, limits and durable run history. |
 | **Work toward a goal** | Choose a character, acceptance criteria, resources and allowance. Follow milestones and evidence across background rounds, with editable settings, approvals and separate recurring results. |
 | **Choose your stack** | Browse OpenRouter metadata and installed provider catalogs; configure character routes, voices, tools and delegation. Native provider plugins and local LM Studio/Ollama routes remain available. |

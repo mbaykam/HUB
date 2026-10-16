@@ -20,12 +20,14 @@ Examples:
 - Fix a project issue: select the repository under Resources, grant the required
   write folders, and name the reproduction and regression checks. Additional
   command tools need approval of the actual command and target before execution.
-- Organize an existing ChatGPT/Gemini export: select its original JSON/ZIP as an
-  input, enable requested Knowledge outputs, and ask for an import preview and
-  preserved-original import. The operation requires its preview hash and your
-  approval. Organization is queued under the existing Knowledge AI settings;
-  queued processing is not represented as finished. The existing 80 MB import
-  ceiling still applies.
+- Inspect an existing ChatGPT/Gemini export: select its original JSON/HTML/ZIP as
+  an input, enable requested Knowledge outputs and ask for a private archive
+  preview. Keeping the complete archive private does not add it to memory. To
+  organize it, approve a specific selection of 1–50 conversations with the
+  unchanged preview identity and file checksum. Only that selection is admitted;
+  the current Knowledge AI settings and budget govern queued work. See
+  [archive and pilot controls](knowledge.md#credits-imports-and-media). The
+  existing 80 MB upload ceiling still applies.
 
 ## The six tabs
 

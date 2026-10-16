@@ -10,6 +10,7 @@
  * fallback. Candidates are always re-scored; they are never semantic truth.
  */
 import {knowledgeTextForms} from "./knowledge-recall.ts";
+import {setImmediate as yieldImmediate} from "node:timers/promises";
 
 interface RecordText {id:string;title:string;body:string}
 interface Entry extends RecordText {
@@ -35,6 +36,7 @@ export class KnowledgeLexicalIndex {
   private postingCount=0;
   private generation=0;
   private readonly limits:IndexLimits;
+  private rankingTail:Promise<unknown>=Promise.resolve();
 
   constructor(limits:Partial<IndexLimits>={}){
     this.limits={maxChars:4_000_000,maxPostings:1_000_000,maxRecordChars:128_000,...limits};
@@ -53,12 +55,12 @@ export class KnowledgeLexicalIndex {
     this.entries.delete(id);
   }
 
-  sync(notes:readonly RecordText[]){
+  private *syncSteps(notes:readonly RecordText[]){
     const current=new Map(notes.map(note=>[note.id,note]));
     let changed=false;
     for(const [id,entry] of this.entries){
       const note=current.get(id);
-      if(!note||entry.title!==note.title||entry.body!==note.body){this.remove(id);changed=true;}
+      if(!note||entry.title!==note.title||entry.body!==note.body){this.remove(id);changed=true;yield;}
     }
     for(const note of notes){
       if(this.entries.has(note.id))continue;
@@ -84,8 +86,19 @@ export class KnowledgeLexicalIndex {
       }
       if(!entry.grams)this.fallback.add(note.id);
       this.entries.set(note.id,entry);changed=true;
+      yield;
     }
     if(changed)this.generation++;
+  }
+  sync(notes:readonly RecordText[]){for(const _ of this.syncSteps(notes)){/* Synchronous compatibility for pure ranking callers. */}}
+  /** Host queries build a cold index in cooperative slices. Keep preparation
+   * and ranking in one generation so concurrent edits cannot mix snapshots. */
+  withSnapshot<T>(notes:readonly RecordText[],rank:()=>T):Promise<T>{
+    const next=this.rankingTail.then(async()=>{
+      await yieldImmediate();let until=Date.now()+8;
+      for(const _ of this.syncSteps(notes))if(Date.now()>=until){await yieldImmediate();until=Date.now()+8;}
+      return rank();
+    });this.rankingTail=next.catch(()=>{});return next;
   }
 
   /** undefined means scan all, NOT no hits. Non-indexed records always survive. */

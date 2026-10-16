@@ -37,7 +37,7 @@ export function memoryExcerpt(body:string,query:string,max=6000,chunk?:Knowledge
   return starts.map(p=>body.slice(p,p+size)).join("\n\n[... original conversation continues ...]\n\n");
 }
 interface Stored extends KnowledgeNode { raw: string; body: string; front: string; path: string;retrieval?:{kind:"lexical"|"semantic"|"domain-navigation";score:number;chunk?:KnowledgeSemanticHit["chunk"]} }
-interface ScanCoverage {files:number;noteSize:number;recordSize:number}
+interface ScanCoverage {files:number;noteSize:number;recordSize:number;indexed?:number}
 type SemanticLayout={edges:NonNullable<KnowledgeGraph["similarities"]>;coverage:KnowledgeSimilarityCoverage};
 interface RetiredEvidence {id:string;recordId:string;at:number;sourceHash:string;quoteHash:string}
 interface Journal { id: string; state: "prepared" | "committed" | "undone" | "conflict";forget?:RetiredEvidence; source: KnowledgeSource; changes: { path: string; before: string | null; after: string; id: string;category?:string;beforeCategory?:string }[] }
@@ -119,13 +119,17 @@ export class KnowledgeStore {
       }
     };
     await visit("");
-    if (new Set(notes.map(n => n.id)).size !== notes.length) throw new Error("Duplicate note identities; review vault before writing");
-    return notes;
+    // An import can prepare a new projection after this scan's first ledger
+    // read. Recheck at the end so a concurrent reader never sees half-admission.
+    const finalHeld=includeHeld?new Set<string>():await this.admission.blocked(),admitted=notes.filter(n=>!finalHeld.has(n.id));if(coverage)coverage.files=Math.max(0,coverage.files-(notes.length-admitted.length));
+    if (new Set(admitted.map(n => n.id)).size !== admitted.length) throw new Error("Duplicate note identities; review vault before writing");
+    return admitted;
   }
   resolveLink(target: string, notes: Stored[], from?: Stored): Stored | undefined {
     return new KnowledgeLinkIndex(notes).resolve(target,from);
   }
-  async graph(): Promise<KnowledgeGraph> {
+  async graph(admissionRetry=0): Promise<KnowledgeGraph> {
+    const admissionRevision=(await this.admission.read()).revision;
     const coverage={files:0,noteSize:0,recordSize:0},notes = (await this.scan(coverage)).filter(n=>n.body.trim()), edges: KnowledgeGraph["edges"] = [],documentRelations:NonNullable<KnowledgeGraph["relationships"]>=[],present=new Set(notes.map(n=>n.id)),links=new KnowledgeLinkIndex(notes),edgeKeys=new Set<string>(); let unresolved = 0;
     const addEdge=(edge:KnowledgeGraph["edges"][number])=>{const key=edge.source+"\0"+edge.target;if(edgeKeys.has(key))return false;edgeKeys.add(key);edges.push(edge);return true;};
     for (const note of notes) for (const link of note.body.matchAll(wiki)) {
@@ -144,7 +148,7 @@ export class KnowledgeStore {
     if(similarities)similarities=similarities.filter(e=>relationScope(e.source,e.target,roots)!=="long"||e.score>=.72);
     const omitted=coverage.noteSize+coverage.recordSize;
     const graph:KnowledgeGraph={ secondBrain: true, nodes: notes.map(({id,title,permalink,hash,modifiedAt,kind,protected:readonly}) => ({id,title,permalink,hash,modifiedAt,kind,protected:readonly})), edges,relationships,...(similarities?{similarities,similarityCoverage}:{}),sourceCoverage:{...coverage,indexed:notes.length,omitted},domains:registry.domains,memberships:registry.memberships.filter(m=>present.has(m.nodeId)).map(({nodeId,domainId})=>({nodeId,domainId})),registryRevision:registry.revision,maxActiveDomains:registry.maxActiveDomains,page: 1, hasMore: false, partial: omitted>0, omittedRelations: unresolved, hiddenNodes: omitted };
-    this.communityIndex??=new KnowledgeCommunities(this.root);try{graph.communityCandidates=await this.communityIndex.update(graph);}catch{/* A rebuildable suggestion cache must never make original knowledge unavailable. */}return graph;
+    this.communityIndex??=new KnowledgeCommunities(this.root);try{graph.communityCandidates=await this.communityIndex.update(graph);}catch{/* A rebuildable suggestion cache must never make original knowledge unavailable. */}if((await this.admission.read()).revision!==admissionRevision){if(admissionRetry<1)return this.graph(admissionRetry+1);throw Error("Knowledge admission is changing; refresh the graph after the archive operation finishes");}return graph;
   }
   async neighbors(id:string,cursor="",limit=30){if(!Number.isInteger(limit)||limit<1||limit>100)throw Error("Choose a neighborhood page size between 1 and 100");const graph=await this.graph(),topology=new KnowledgeTopology(graph);if(!topology.nodes.has(id))throw Error("Knowledge record missing");const all=topology.neighbors(id),offset=cursor?all.findIndex(r=>r.id===cursor)+1:0;if(cursor&&offset===0)throw Error("Neighborhood changed; refresh before continuing");const page=all.slice(offset,offset+limit);return {recordId:id,total:all.length,items:page.map(r=>({...r,node:topology.nodes.get(r.sourceId===id?r.targetId:r.sourceId)!})),nextCursor:offset+page.length<all.length?page.at(-1)!.id:null};}
   async connectionPath(sourceId:string,targetId:string){return new KnowledgeTopology(await this.graph()).path(sourceId,targetId);}
@@ -165,14 +169,16 @@ export class KnowledgeStore {
     const graph = await this.graph();
     const sourceMap = await this.metadata();
     const incoming=new Set<string>(),outgoing=new Set<string>();for(const edge of graph.edges){if(edge.target===id)incoming.add(edge.source);if(edge.source===id)outgoing.add(edge.target);}
+    await this.admission.assert({conversationId:id});
     return { id, title: found.title, permalink: found.permalink, hash: found.hash, modifiedAt: found.modifiedAt,kind:found.kind,protected:found.protected, content: found.body,
       backlinks: graph.nodes.filter(n => incoming.has(n.id)),
       links: graph.nodes.filter(n => outgoing.has(n.id)), sources: sourceMap[id]?.sources ?? [] };
   }
-  async search(query: string, limit = 12) {
-    const notes=(await this.scan()).filter(n=>n.body.trim()),registry=await this.organization.domains();let semantic:KnowledgeSemanticHit[]=[];
+  async organizationSource(id:string,offset=0){const source=(await this.scan()).find(n=>n.id===id);if(!source)throw Error("Source is not admitted or available");if(!Number.isSafeInteger(offset)||offset<0||offset>=source.body.length)throw Error("Choose an existing source passage");let start=offset;if(start&&/[\uDC00-\uDFFF]/.test(source.body[start]!))start--;let end=Math.min(source.body.length,start+12000);if(end<source.body.length&&/[\uDC00-\uDFFF]/.test(source.body[end]!))end--;return {nodeId:id,title:source.title,hash:digest(source.body),totalChars:source.body.length,start,end,content:source.body.slice(start,end),nextOffset:end<source.body.length?end:null};}
+  async search(query: string, limit = 12,coverage?:ScanCoverage) {
+    const notes=(await this.scan(coverage)).filter(n=>n.body.trim()),registry=await this.organization.domains();if(coverage)coverage.indexed=notes.length;let semantic:KnowledgeSemanticHit[]=[];
     if(this.rank)try{semantic=await boundedKnowledgeRecall(this.rank(query,notes,Math.max(24,limit)),AbortSignal.timeout(850));}catch{/* Lexical fallback is bounded independently of a late local index. */}
-    return fuseKnowledgeRanks(notes,query,registry,semantic,limit,this.lexicalIndex);
+    const result=await this.lexicalIndex.withSnapshot(notes,()=>fuseKnowledgeRanks(notes,query,registry,semantic,limit,this.lexicalIndex)),blocked=await this.admission.blocked();return result.filter(n=>!blocked.has(n.id));
   }
   async citations(note:Stored,query:string,budget=1200,exact?:{start:number;end:number;text:string}[]):Promise<KnowledgeEvidence[]>{
     const spans=exact??knowledgeExcerptSpans(note.body,query,budget,note.retrieval?.chunk);
@@ -183,8 +189,8 @@ export class KnowledgeStore {
     return spans.map(span=>({sourceId:note.id,contentHash:digest(note.body),quote:span.text,start:span.start,end:span.end,occurredAt:Math.floor(note.modifiedAt),...(note.kind==="conversation"?{locator:"external-markdown:"+note.permalink}:{})}));
   }
   /** Small relevant memory, stable human preferences and one-hop real links. */
-  async recall(query:string,topicContext=""){
-    const [direct,context,notes,meta]=await Promise.all([this.search(query,4),topicContext.trim()?this.search(topicContext,3):Promise.resolve([]),this.scan(),this.metadata()]);
+  async recall(query:string,topicContext="",coverage?:ScanCoverage){
+    const [direct,context,notes,meta]=await Promise.all([this.search(query,4,coverage),topicContext.trim()?this.search(topicContext,3):Promise.resolve([]),this.scan(),this.metadata()]);
     const selected:{note:Stored;reason:string}[]=[];
     const add=(note:Stored,reason:string)=>{if(note.body.trim()&&!selected.some(n=>n.note.id===note.id))selected.push({note,reason});};
     for(const n of notes.filter(n=>meta[n.id]?.category==="preferences"&&!meta[n.id]?.deleted).sort((a,b)=>(meta[b.id]?.completedAt??0)-(meta[a.id]?.completedAt??0)).slice(0,2))add(n,"personal-preference");
@@ -195,7 +201,7 @@ export class KnowledgeStore {
       const related=linkIndex.resolve(link[1]!,note);if(related&&selected.length<7&&neighbors<2&&!selected.some(n=>n.note.id===related.id)){add(related,"linked-note");neighbors++;}
     }
     const adjacency=new Map<string,Set<string>>();for(const edge of await this.organization.relations())for(const [from,to]of [[edge.source,edge.target],[edge.target,edge.source]]){if(!adjacency.has(from!))adjacency.set(from!,new Set());adjacency.get(from!)!.add(to!);}for(const {note} of [...selected])for(const id of adjacency.get(note.id)??[]){const related=byId.get(id);if(related&&selected.length<7&&neighbors<2&&!selected.some(n=>n.note.id===related.id)){add(related,"linked-note");neighbors++;}}
-    return Promise.all(selected.slice(0,7).map(async s=>({...s,reason:s.note.retrieval?.kind==="domain-navigation"?"domain-navigation":s.reason,citations:await this.citations(s.note,query+" "+topicContext),note:{...s.note,body:memoryExcerpt(s.note.body,query+" "+topicContext,1200,s.note.retrieval?.chunk)}})));
+    const result=await Promise.all(selected.slice(0,7).map(async s=>({...s,reason:s.note.retrieval?.kind==="domain-navigation"?"domain-navigation":s.reason,citations:await this.citations(s.note,query+" "+topicContext),note:{...s.note,body:memoryExcerpt(s.note.body,query+" "+topicContext,1200,s.note.retrieval?.chunk)}}))),blocked=await this.admission.blocked();return result.filter(s=>!blocked.has(s.note.id));
   }
   private async metadata(): Promise<Record<string,{ completedAt: number; sources: { id:string; completedAt:number; channel:string }[]; category?:string;deleted?:boolean; title?:string; path?:string; lastHash?:string }>> {
     try { return JSON.parse(await readFile(join(this.root,"notes.json"),"utf8")); } catch (e:any) { if (e.code !== "ENOENT") throw e; return {}; }
@@ -210,11 +216,11 @@ export class KnowledgeStore {
   exclusive<T>(task: () => Promise<T>): Promise<T> { return this.mutations.run(()=>{const next=this.tail.then(task,task); this.tail=next.catch(()=>{}); return next;}); }
   async noteDates(){return Object.fromEntries(Object.entries(await this.metadata()).map(([id,n])=>[id,n.completedAt]));}
   async refreshInventory(){return this.exclusive(async()=>{
-    const coverage={files:0,noteSize:0,recordSize:0},notes=await this.scan(coverage),meta=await this.metadata(),present=new Set(notes.map(n=>n.id)),held=await this.admission.blocked();let changed=false,deleted=false;
+    const admissionBefore=(await this.admission.read()).revision,coverage={files:0,noteSize:0,recordSize:0},notes=await this.scan(coverage),meta=await this.metadata(),present=new Set(notes.map(n=>n.id)),held=await this.admission.blocked(),admissionAfter=(await this.admission.read()).revision;let changed=false,deleted=false;
     // An incomplete inventory cannot prove that an identity disappeared: a
     // source may have grown or been renamed beyond the existing scan limits.
     // Do not turn an indexing omission into a durable global forget cutoff.
-    if(!coverage.noteSize&&!coverage.recordSize)for(const id of Object.keys(meta))if(!present.has(id)&&!held.has(id)&&!meta[id]?.deleted){meta[id]!.deleted=true;changed=true;deleted=true;}
+    if(!coverage.noteSize&&!coverage.recordSize&&admissionBefore===admissionAfter)for(const id of Object.keys(meta))if(!present.has(id)&&!held.has(id)&&!meta[id]?.deleted){meta[id]!.deleted=true;changed=true;deleted=true;}
     if(deleted)await this.saveForgetPolicy(Date.now());
     for(const n of notes){const prior=meta[n.id];if(!prior){meta[n.id]={completedAt:Math.round(n.modifiedAt),sources:[],title:n.title,path:n.path,lastHash:n.hash};changed=true;}
       else if(!prior.lastHash || prior.lastHash!==n.hash){prior.completedAt=Math.max(prior.completedAt,Math.round(n.modifiedAt));prior.lastHash=n.hash;prior.title=n.title;prior.path=n.path;changed=true;}}

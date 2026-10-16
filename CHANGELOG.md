@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.48
+
+- Organize original Knowledge sources into configurable main domains and subdomains, with multiple memberships, reviewed lifecycle changes and compatible undo.
+- Show filled 3D domain clouds, distance-sensitive labels, counted display budgets and paged sourced connections without limiting stored node degree.
+- Add multilingual cited recall, source coverage and context estimates, responsive local indexing, explained graph paths and local group suggestions adapted in part from Graphify.
+- Keep exact history exports in a private quarantine; preview messages, admit selected pilots and withdraw batches while preserving originals, shared files and later edits.
+- Add verified complete dataset backups and separate-copy restore with saved background work held for review.
+
 ## 0.4.42
 
 - Retain observed file and tool receipts when a goal is paused or a round fails, so resumed work can use completed actions without repeating them.

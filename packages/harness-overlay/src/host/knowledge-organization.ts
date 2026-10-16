@@ -43,6 +43,7 @@ export class KnowledgeOrganization {
     await this.store.admission.assert(source);
     validateCuration(plan,source,(await this.store.scan()).map(n=>n.id));
     if(plan.decision!=="organize")return null;
+    if(source.originalWindow){const note=(await this.store.scan()).find(n=>n.id===source.conversationId),w=source.originalWindow;if(!note||digest(note.body)!==w.contentHash||note.body.slice(w.start,w.end)!==source.content)throw Object.assign(Error("Selected source changed; preview a fresh passage before organizing"),{code:"KNOWLEDGE_SOURCE_CHANGED"});}
     if(source.completedAt<=await this.store.cutoff())throw Error("Source precedes forget policy");
     const state=await this.state(),old=state.revisions.find(r=>(r.passId??r.sourceId)===passId);if(old){if(old.sourceHash&&old.sourceHash!==digest(source.content))throw Error("Organization pass source changed; create a new pass");if(old.undone)return null;await this.syncObsidianLinks();if(old.projection==="pending"){old.projection="ready";await atomicJson(join(this.store.root,"organization.json"),state);}return old.id;}
     const targets=await this.store.scan();for(const target of targets.filter(n=>n.kind==="conversation"&&plan.relations.some(r=>r.targetId===n.id)))(target as typeof target&{messages?:unknown}).messages=(await this.store.archive.read(target.id)).messages;const id=randomUUID(),revision={id,sourceId:source.id,passId,sourceHash:digest(source.content),at:Date.now(),plan,source,projection:"pending" as const};state.relationRecords=addRevisionRelations(this.relationRecords(state),revision,targets);if(plan.version===2&&plan.domainOps?.length)state.domainState=changeKnowledgeDomains(state.domainState,plan.domainOps,{expectedRevision:plan.expectedRegistryRevision!,actor:"curator",source,knownNodeIds:(await this.store.scan()).map(n=>n.id),revisionId:id});state.revisions.push(revision);
@@ -92,6 +93,7 @@ export class KnowledgeOrganization {
 }
 function userText(source:KnowledgeSource){
   if(source.channel==="hub-worker-result"||source.authorRole==="assistant")return "";
+  if(source.spans)return source.spans.filter(s=>s.role==="user").map(s=>s.text).join("\n");
   const at=source.content.indexOf(KNOWLEDGE_MESSAGE_LABEL);
   if(at>=0)try{return JSON.parse(source.content.slice(at+KNOWLEDGE_MESSAGE_LABEL.length)).filter((m:any)=>m.role==="user").map((m:any)=>m.text).join("\n");}catch{return "";}
   return source.authorRole==="user"?source.content:"";
