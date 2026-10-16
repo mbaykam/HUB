@@ -6,6 +6,7 @@ Windows-first; optional voice/knowledge/calling require additional configuration
 | Goal | Guide |
 | --- | --- |
 | Build HUB, choose models and connect the mobile PWA | [Setup](setup.md) |
+| Manage shared speech, character voices, model options and the Tasks screen | [Settings](settings.md) |
 | Configure local speech, voices and live transcription | [Voice](voice.md) |
 | Preserve conversations, connect memory and review reflections | [Knowledge](knowledge.md) |
 | Manage scheduled, repeated or conditional tasks | [Automations](automations.md) |

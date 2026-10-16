@@ -4,6 +4,7 @@ const identifier = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._/-]
 const modelIdentifier = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._/:-]*$/);
 export const voiceRouteSchema = z.object({
   provider: identifier, model: modelIdentifier, reasoningEffort: identifier.optional(),
+  temperature:z.number().min(0).max(2).optional(),maxTokens:z.number().int().min(1).max(1000000).optional(),
 }).strict();
 // These are configuration identifiers, not paths or executable commands.
 // The host must separately resolve their availability before admitting audio.

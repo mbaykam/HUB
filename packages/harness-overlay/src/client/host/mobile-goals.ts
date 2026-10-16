@@ -2,6 +2,7 @@ import {defaultGoal,type GoalsSnapshot,type GoalInput,type HubGoal,type GoalTrig
 import {defineOverlayStyle} from "../shared/style-runtime.ts";
 import {installMobileWidgetBack} from "./mobile-widget-back.ts";
 import styles from "./mobile-goals.css";
+import type {WorkEditor,WorkEditorOptions} from "./work-editor.ts";
 const installStyles=defineOverlayStyle("hub-goals",styles);
 export const goalStatusLabels:Record<string,string>={draft:"Draft",scheduled:"Scheduled",planning:"Planning",working:"Working",verifying:"Verifying","waiting-hours":"Waiting for working hours","waiting-foreground":"Waiting for your conversation","waiting-credit":"Waiting for credits / quota","waiting-budget":"Work allowance reached","needs-input":"Needs your input","needs-approval":"Needs approval",paused:"Paused",completed:"Completed",stopped:"Stopped",archived:"Archived"};
 const lines=(s:string)=>s.split("\n").map(s=>s.trim()).filter(Boolean);
@@ -11,14 +12,14 @@ const inView=(g:HubGoal,key:string)=>key==="all"?g.state!=="archived":key==="act
 const localDate=(at:number)=>new Date(at-new Date(at).getTimezoneOffset()*60000).toISOString().slice(0,16);
 /** One editor for draft, settings and observed progress. Switching tabs never
  * submits changes or discards inputs; refreshing activity never overwrites edits. */
-export function installMobileGoals(container:HTMLElement,root:Document):()=>void {
-  const instance="hub-goals-"+Math.random().toString(36).slice(2);const view=root.defaultView!;if(!view)return ()=>{};const removeStyles=installStyles(root),lifetime=new AbortController();
+export function installMobileGoals(container:HTMLElement,root:Document,options?:WorkEditorOptions):WorkEditor {
+  const instance="hub-goals-"+Math.random().toString(36).slice(2);const view=root.defaultView!;const removeStyles=installStyles(root),lifetime=new AbortController();
   const el=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const e=root.createElement(tag);if(text!==undefined)e.textContent=text;return e;};
   const button=(text:string,fn:()=>void)=>{const b=el("button",text);b.type="button";b.addEventListener("click",fn);return b;};
   const tile=button("",()=>{dialog.showModal();void load();});tile.setAttribute("data-hub-goals-tile","");const tileCount=el("span","Outcomes, progress and recurring work");tile.append(el("strong","Goals"),tileCount);container.append(tile);
   const dialog=el("dialog");dialog.setAttribute("data-hub-goals","");dialog.setAttribute("aria-label","Goals");
   const header=el("header"),back=button("Back",()=>showList()),heading=el("h2","Goals"),close=button("Close",()=>{if(dirty){notice.textContent="Save or discard your changes before closing.";return;}dialog.close();});back.hidden=true;header.append(back,heading,close);
-  const notice=el("p");notice.setAttribute("role","status");const body=el("section");dialog.append(header,notice,body);root.body.append(dialog);
+  const notice=el("p");notice.setAttribute("role","status");const body=el("section");dialog.append(header,notice,body);(options?.host??root.body).append(dialog);if(options){tile.hidden=true;dialog.setAttribute("data-work-editor","");dialog.addEventListener("close",()=>options.back());}
   let state:GoalsSnapshot|undefined,editingId:string|undefined,editingRevision:number|undefined,dirty=false,busy=false,currentTab=0,filter="all",form:HTMLFormElement|undefined,activity:HTMLElement|undefined,summary:HTMLElement|undefined;
   const fields=new Map<string,HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>();let plan:GoalMilestone[]=[],planDirty=false,seenPlanRevision=-1,updatePlan:(()=>void)|undefined;
   let activityVersion="",activityOwner:HTMLElement|undefined,restoringActivityFocus=false;
@@ -118,8 +119,8 @@ export function installMobileGoals(container:HTMLElement,root:Document):()=>void
     dialog.scrollTop=scroll;
   }
   async function download(id:string,evidenceId:string){try{const response=await view.fetch("/api/hub/goals?view=artifact&id="+encodeURIComponent(id)+"&evidenceId="+encodeURIComponent(evidenceId),{credentials:"same-origin",headers:{"x-hub-goals":"1"},signal:lifetime.signal});const result=await response.json();if(!response.ok)throw Error(result.detail??"Output unavailable.");const bytes=Uint8Array.from(view.atob(result.data),(c:string)=>c.charCodeAt(0)),url=view.URL.createObjectURL(new view.Blob([bytes],{type:"application/octet-stream"})),a=el("a");a.href=url;a.download=result.name;root.body.append(a);a.click();a.remove();view.setTimeout(()=>view.URL.revokeObjectURL(url),10000);}catch(e){notice.textContent=(e as Error).message;}}
-  const offBack=installMobileWidgetBack(dialog,header,()=>{if(form)showList();else dialog.close();});
+  const offBack=options?()=>{}:installMobileWidgetBack(dialog,header,()=>{if(form)showList();else dialog.close();});
   const timer=view.setInterval(()=>{if(dialog.open&&!busy)void load();},5000);
   dialog.addEventListener("cancel",event=>{if(dirty){event.preventDefault();notice.textContent="Save or discard your changes before closing.";}});
-  return ()=>{lifetime.abort();view.clearInterval(timer);offBack();tile.remove();dialog.remove();removeStyles();};
+  return Object.assign(()=>{lifetime.abort();view.clearInterval(timer);offBack();tile.remove();dialog.remove();removeStyles();},{async open(id?:string){if(!dialog.open){if(options)dialog.show();else dialog.showModal();}await load();if(state)edit(id?state.goals.find(g=>g.id===id):undefined);},canLeave(){if(dirty){notice.textContent="Save or discard your changes before leaving.";return false;}return true;}});
 }

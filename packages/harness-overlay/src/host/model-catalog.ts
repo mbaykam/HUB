@@ -21,14 +21,15 @@ export function parseOpenRouterModels(value: unknown): HubCatalogModel[] {
     if (!safeId(m.id) || typeof m.name !== "string" || !positive(m.context_length)) continue;
     const architecture = record(m.architecture ?? {});
     if (Array.isArray(architecture.output_modalities) && !architecture.output_modalities.includes("text")) continue;
-    const params: string[] = Array.isArray(m.supported_parameters) ? m.supported_parameters.filter((x: unknown) => typeof x === "string") : [];
+    const params: string[] = Array.isArray(m.supported_parameters) ? [...new Set<string>(m.supported_parameters.filter((x: unknown) => typeof x === "string"&&/^[a-z][a-z0-9_]{0,79}$/.test(x)).slice(0,100))] : [];
+    const defaults=Object.fromEntries(Object.entries(m.default_parameters??{}).filter(([k,v])=>params.includes(k)&&(v===null||typeof v==="boolean"||typeof v==="number"&&Number.isFinite(v)||typeof v==="string"&&v.length<200))) as Record<string,number|string|boolean|null>;
     const prompt = Number(m.pricing?.prompt), completion = Number(m.pricing?.completion);
     result.set(m.id, { provider: "openrouter", id: m.id, name: m.name.slice(0, 240),
       description: typeof m.description === "string" ? m.description.slice(0, 1200) : undefined,
       contextWindow: m.context_length, ...(positive(m.top_provider?.max_completion_tokens) ? { maxTokens: m.top_provider.max_completion_tokens } : {}),
       ...(positive(m.created) ? { created: m.created } : {}),
       input: Array.isArray(architecture.input_modalities) ? architecture.input_modalities.filter((x: unknown) => ["text", "image", "audio", "file"].includes(String(x))) : ["text"],
-      tools: params.includes("tools"), reasoning: params.includes("reasoning"),
+      tools: params.includes("tools"), reasoning: params.includes("reasoning")||params.includes("reasoning_effort"),supportedParameters:params,defaults,
       ...(m.pricing?.prompt != null && m.pricing?.completion != null && Number.isFinite(prompt) && prompt >= 0 && Number.isFinite(completion) && completion >= 0 ? { pricing: { input: prompt * 1e6, output: completion * 1e6 } } : {}),
       enabled: false, source: "provider" });
   }
@@ -49,7 +50,7 @@ export function parseCodexModelData(value: unknown): Record<string, any>[] {
     ids.add(m.id);
     const thinking: Record<string, string | null> = {};
     for (const [key, level] of Object.entries(record(m.thinkingLevelMap ?? {}))) {
-      if (!["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(key) || (level !== null && typeof level !== "string")) throw new Error("Incompatible reasoning catalogue");
+      if (!/^[a-z][a-z0-9_-]{0,39}$/.test(key) || (level !== null && (typeof level !== "string"||level.length>80))) throw new Error("Incompatible reasoning catalogue");
       thinking[key] = level as string | null;
     }
     // No arbitrary headers/auth/transport URLs or executable compatibility fields.
@@ -142,7 +143,7 @@ export class ModelCatalogStore {
         // Preserve the exact provider response for strict cache parsing.
         const data = { at, openrouter: openrouter.map(m => ({ id: m.id, name: m.name, description: m.description, context_length: m.contextWindow,
           created: m.created, architecture: { input_modalities: m.input, output_modalities: ["text"] }, top_provider: { max_completion_tokens: m.maxTokens },
-          supported_parameters: [...(m.tools ? ["tools"] : []), ...(m.reasoning ? ["reasoning"] : [])],
+          supported_parameters: m.supportedParameters??[],default_parameters:m.defaults??{},
           ...(m.pricing ? { pricing: { prompt: String(m.pricing.input / 1e6), completion: String(m.pricing.output / 1e6) } } : {}) })), codex };
         await atomic(join(this.root, "codex-models.json"), { version: 1, models: codex });
         await atomic(join(this.root, "catalog.json"), data);

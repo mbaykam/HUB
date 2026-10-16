@@ -44,6 +44,7 @@
     "src/telegram-control-contract.ts",
     "src/voice-ice-contract.ts",
     "src/voice-profile-contract.ts",
+    "src/speech-settings-contract.ts",
     "src/minke-host-contract.ts",
     "src/pwa-contract.ts",
     "src/trusted-host-control-contract.ts",

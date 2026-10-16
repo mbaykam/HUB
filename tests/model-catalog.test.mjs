@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseOpenRouterModels, parseCodexModelData, extractCodexTarData, ModelCatalogStore } from '@minke/harness-overlay/host/model-catalog.ts';
@@ -15,10 +15,17 @@ test('provider catalogue keeps prices, capabilities and exact identities; exclud
   assert.equal(models.length,1); assert.deepEqual(models[0].pricing,{input:1,output:4});assert.equal(models[0].tools,true);assert.equal(models[0].enabled,false);
   assert.throws(()=>parseOpenRouterModels({data:[]}));
 });
+
+test('supported parameters and disclosed defaults survive a saved catalogue reload',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-catalog-options-')),store=new ModelCatalogStore(root);
+ try{const m={...providerModel,supported_parameters:['tools','reasoning','temperature','top_p','min_p','verbosity','max_tokens'],default_parameters:{temperature:.6,top_p:.9,verbosity:'medium',unknown:'ignored'}};await writeFile(join(root,'catalog.json'),JSON.stringify({at:new Date().toISOString(),openrouter:[m],codex:[codex]}));await store.load();const result=store.snapshot().openrouter[0];assert.deepEqual(result.supportedParameters,m.supported_parameters);assert.deepEqual(result.defaults,{temperature:.6,top_p:.9,verbosity:'medium'});assert.equal(result.tools,true);
+ }finally{store.dispose();await rm(root,{recursive:true,force:true});}
+});
 test('Codex metadata cannot change transport/auth, inject unsupported reasoning or exceed capacity',()=>{
   const parse=m=>parseCodexModelData({'openai-codex-responses':{model:m}});
   assert.equal(parse(codex)[0].id,'gpt-6.1-sol');
-  for(const change of [{baseUrl:'https://evil.example'},{api:'openai-responses'},{provider:'openai'},{maxTokens:900000},{thinkingLevelMap:{ultra:'ultra'}}])assert.throws(()=>parse({...codex,...change}));
+  for(const change of [{baseUrl:'https://evil.example'},{api:'openai-responses'},{provider:'openai'},{maxTokens:900000},{thinkingLevelMap:{'bad level':'high'}}])assert.throws(()=>parse({...codex,...change}));
+  assert.equal(parse({...codex,thinkingLevelMap:{ultra:'ultra'}})[0].thinkingLevelMap.ultra,'ultra','new metadata levels may be retained; only installed adapter levels are selectable');
   assert.throws(()=>extractCodexTarData(Buffer.from('not an archive')));
 });
 test('failed refresh is bounded and does not perform inference or touch provider credentials',async()=>{
@@ -47,7 +54,9 @@ test('model API rejects untrusted writes, validates identities and preserves unr
     assert.equal((await fetch(url,{method:'POST',headers:{...headers,'sec-fetch-site':'cross-site'},body:'{"action":"default","provider":"openai-codex","model":"gpt-5.6-luna"}'})).status,403);
     assert.equal((await fetch(url,{method:'POST',headers,body:'{"action":"default","provider":"openai","model":"gpt-5.6-luna"}'})).status,404);
     assert.equal(defaults,0);
-    const catalogue=await(await fetch(url,{headers})).json();assert.deepEqual(catalogue.models[0].efforts,[{id:'low',name:'Low'},{id:'high',name:'High'}]);
+    const catalogue=await(await fetch(url,{headers})).json();assert.deepEqual(catalogue.models[0].efforts,[{id:'low',name:'Low'},{id:'high',name:'High'}]);assert.ok(catalogue.models[0].editableParameters.includes('max_tokens'));
+    assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'select',provider:'openai-codex',model:'gpt-5.6-luna',sessionId:'session-test',temperature:.5})})).status,409,'unknown Codex temperature support must not be offered or silently applied');
+    assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'select',provider:'openai-codex',model:'gpt-5.6-luna',sessionId:'session-test',maxTokens:12000})})).status,200);assert.equal(selection.maxTokens,12000);selection=undefined;
     assert.equal((await fetch(url,{method:"POST",headers,body:JSON.stringify({action:"enable",provider:"openai-codex",model:"gpt-5.6-luna"})})).status,200);assert.equal(defaults,0);assert.equal(selection,undefined);
     const reply=await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'select',provider:'openai-codex',model:'gpt-5.6-luna',sessionId:'session-test'})});
     assert.equal(reply.status,200);assert.deepEqual(selection,{sessionId:'session-test',provider:'openai-codex',model:'gpt-5.6-luna'});assert.equal(defaults,0);

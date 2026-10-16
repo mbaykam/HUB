@@ -145,7 +145,7 @@ test("mobile provider usage keeps its existing compact presentation", () => {
   assert.match(styles, /data-minke-usage-progress-track/u);
 });
 
-test("Right drawer renders Knowledge and Automations while retaining access to Settings", async () => {
+test("Right drawer renders Knowledge and one Tasks entry while retaining access to Settings", async () => {
   const dom = new JSDOM(`<!doctype html><html data-minke-mobile-web><body>
     <div data-minke-mobile-sidebar-frame><main data-shell-overlay></main></div>
     <div data-slot="sidebar.settings"><div><button aria-haspopup="dialog" aria-expanded="false">Settings</button></div></div>
@@ -158,13 +158,12 @@ test("Right drawer renders Knowledge and Automations while retaining access to S
   try {
     await new Promise(resolve => dom.window.requestAnimationFrame(() => dom.window.requestAnimationFrame(resolve)));
     const body = root.querySelector("[data-minke-mobile-right-drawer-body]");
-    assert.equal(body.children.length, 3);
-    assert.equal(body.children[1].hasAttribute("data-hub-automations-tile"),true);
-    assert.equal(body.lastElementChild.hasAttribute("data-hub-goals-tile"),true);
+    assert.equal(body.children.length, 2);
+    assert.equal(body.lastElementChild.hasAttribute("data-hub-work-tile"),true);
     assert.equal(body.firstElementChild.tagName, "BUTTON");
     assert.equal(body.firstElementChild.hasAttribute("data-hub-graph-tile"), true);
     assert.equal(root.querySelector("[data-minke-mobile-right-drawer-settings]").textContent, "Settings");
-    assert.equal(root.querySelector("[data-minke-mobile-right-drawer]").getAttribute("aria-label"), "Knowledge, automations and goals");
+    assert.equal(root.querySelector("[data-minke-mobile-right-drawer]").getAttribute("aria-label"), "Knowledge and tasks");
   } finally { drawer.dispose(); dom.window.close(); }
 });
 

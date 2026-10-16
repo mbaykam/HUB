@@ -1,11 +1,11 @@
 import { localSpeechCatalogSchema, localSpeechSchema, speechDownloadStatusSchema, type LocalSpeechConfig, type LocalSpeechCatalog } from "../../voice-profile-contract.ts";
 
-/** Character-owned speech settings with real auditions; no audio capture. */
-export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | null) {
+/** Global engine editor or character voice-only picker, with cached auditions. */
+export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | null, options:{voiceOnly?:boolean;global?:boolean}={}) {
   const view = root.defaultView!, lifetime = new AbortController();
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => { const n = root.createElement(tag); if (text) n.textContent = text; return n; };
   const button = (text: string, run: () => void) => { const n = el("button", text); n.type = "button"; n.addEventListener("click", run); return n; };
-  const panel = el("details"); panel.setAttribute("data-hub-speech-editor", ""); panel.open = !!seed; panel.append(el("summary", "Voice & languages"));
+  const panel = el("details"); panel.setAttribute("data-hub-speech-editor", ""); panel.open = !!seed; panel.append(el("summary", options.voiceOnly?"Voice":"Speech & languages"));
   const status = el("p"); status.setAttribute("role", "status");
   const field = (text: string, input: HTMLElement) => { const label = el("label"); label.append(el("span", text), input); panel.append(label); input.setAttribute("aria-label", text); };
   const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = !!seed; field("Enable local speech", enabled);
@@ -29,6 +29,8 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   let catalog: LocalSpeechCatalog | undefined, selectedVoice = seed?.tts.voice ?? "F5", poll: number | undefined, samplePoll: number | undefined;
   const samples = new Map<string, { url: string; audio: HTMLAudioElement }>(), flights = new Map<string, Promise<void>>();
   const advanced = el("details"); advanced.append(el("summary", "Speech models & engines"), stt.parentElement!, engine.parentElement!, quality.parentElement!, models); panel.append(advanced);
+  if(options.voiceOnly){enabled.checked=true;enabled.parentElement!.remove();language.parentElement!.remove();outputLanguage.parentElement!.remove();advanced.remove();panel.append(el("p","Speech engines and language detection are shared. Change them in Settings → Speech. This character only chooses a voice."));}
+  if(options.global){enabled.checked=true;enabled.parentElement!.remove();advanced.open=true;panel.insertBefore(advanced,voiceHeading);const defaultVoice=el("details");defaultVoice.append(el("summary","Default voice"),voiceHeading,voices,turkish,voiceMapping);panel.insertBefore(defaultVoice,audio);}
   const key = (item: { engine: string; model: string }) => `${item.engine}:${item.model}`;
   let initialStt = seed ? key(seed.stt) : "nemotron:3.5-560ms", initialTts = seed ? key(seed.tts) : "supertonic:supertonic-3";
   function ttsValue(voice = selectedVoice): LocalSpeechConfig["tts"] {
@@ -79,7 +81,7 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
       let controls = voiceRows.get(id);
       if (!controls) {
         const row = el("article");
-        const choose = button(voiceLabel(id), () => { selectedVoice = id; renderVoices(); panel.dispatchEvent(new Event("change", { bubbles: true })); });
+        const choose = button(voiceLabel(id), () => { selectedVoice = id; renderVoices(); panel.dispatchEvent(new view.Event("change", { bubbles: true })); });
         const listen = button("Loading…", () => void audition(id.startsWith("tr_") ? "tr" : "en", id));
         const trListen = multilingual ? button("Loading…", () => void audition("tr", id)) : undefined;
         row.append(choose, listen); if (trListen) row.append(trListen); voices.append(row);
@@ -131,6 +133,7 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   status.textContent = "Loading local speech models…";
   void load().then(() => { status.textContent = "Listen to a sample before choosing a voice."; }).catch(error => { if (!lifetime.signal.aborted) status.textContent = error.message; });
   return { panel, value(): LocalSpeechConfig | null {
+    if(options.voiceOnly&&!catalog)return seed;
     if (!enabled.checked) return null;
     const selectedStt = catalog?.stt.find(item => key(item) === stt.value);
     if (!selectedStt) throw new Error("Choose an installed recognition model.");

@@ -15,6 +15,20 @@ export function installMobileSettings(root: Document = document): () => void {
   let mounted: HTMLElement | undefined;
   let frame: number | undefined;
   let disposed = false;
+  // HUB owns character instructions, model browsing and tool permissions. The
+  // inherited native pages are deployment editors, often read-only on a PWA.
+  // Keep them available in the host shell, outside the personal-assistant PWA.
+  const legacy=new Set<HTMLElement>();
+  function tidyNavigation(){
+    const pwa=root.documentElement.hasAttribute("data-minke-mobile-web");
+    for(const nav of root.querySelectorAll<HTMLElement>('[data-slot="sidebar.settings"] [role="dialog"] > nav')){
+      for(const b of nav.querySelectorAll<HTMLButtonElement>(":scope > div:last-child > button")){
+        if(pwa&&/^(Models|Plugins|Agent presets|模型|插件|智能体预设)$/i.test(b.textContent?.trim()??"")){if(!b.hasAttribute("data-hub-legacy-setting")){b.setAttribute("data-hub-legacy-setting","");legacy.add(b);}}
+        else if(legacy.has(b)){b.removeAttribute("data-hub-legacy-setting");legacy.delete(b);}
+      }
+      const config=nav.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Open configuration file"]');if(pwa&&config&&!config.hasAttribute("data-hub-legacy-setting")){config.setAttribute("data-hub-legacy-setting","");legacy.add(config);}
+    }
+  }
   function mount(dialog: HTMLElement) {
     const nav = dialog.querySelector<HTMLElement>(":scope > nav");
     const content = nav?.nextElementSibling as HTMLElement | null;
@@ -117,6 +131,7 @@ export function installMobileSettings(root: Document = document): () => void {
   function reconcile() {
     frame = undefined;
     if (disposed) return;
+    tidyNavigation();
     const mobile = root.documentElement.hasAttribute("data-minke-mobile-web") && view!.innerWidth < 1024;
     const dialog = mobile ? root.querySelector<HTMLElement>('[data-slot="sidebar.settings"] [role="dialog"]') : null;
     if (mounted !== dialog) { disposePanel?.(); disposePanel = undefined; refreshPanel = undefined; mounted = undefined; if (dialog) mount(dialog); }
@@ -129,5 +144,5 @@ export function installMobileSettings(root: Document = document): () => void {
   observer.observe(root.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-current"] });
   observer.observe(root.documentElement, { attributes: true, attributeFilter: ["data-minke-mobile-web"] });
   view.addEventListener("resize", schedule); schedule();
-  return () => { disposed = true; observer.disconnect(); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); disposePanel?.(); removeStyles(); };
+  return () => { disposed = true; observer.disconnect(); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); disposePanel?.();for(const b of legacy)b.removeAttribute("data-hub-legacy-setting");removeStyles(); };
 }

@@ -8,7 +8,7 @@ import { voiceProfileSchema, type VoiceProfile } from "../voice-profile-contract
 import { attachVoiceProfilePolicy } from "./voice-profile-policy.ts";
 import type { createVoiceTaskPolicies } from "./voice-task-policy.ts";
 
-export interface VoiceModelRoute { provider: string; model: string; reasoningEffort?: string }
+export interface VoiceModelRoute { provider: string; model: string; reasoningEffort?: string;temperature?:number;maxTokens?:number }
 export interface VoiceModelCatalog {
   resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{
     provider: string; id: string; reasoning?: { efforts: readonly { id: string; name?: string }[] };
@@ -100,11 +100,11 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
     if (subject.id !== sessionId) return config;
     // Route only this voice session; Session Controller's selectModel would
     // also change the user's saved default for unrelated desktop conversations.
-    const { reasoningEffort: _reasoning, ...base } = config;
+    const { reasoningEffort: _reasoning,temperature:_temperature, ...base } = config;
     // Spoken brevity belongs in the persona, not a token cap that also cuts
     // off structured tool arguments (a modest interactive Vega spec can exceed
     // 1024 tokens before its short spoken explanation has even started).
-    return { ...base, provider: route.provider, model: route.model, maxTokens: 4096,
+    return { ...base, provider: route.provider, model: route.model, maxTokens: route.maxTokens??4096,...(route.temperature===undefined?{}:{temperature:route.temperature}),
       ...route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(route.reasoningEffort) } };
   }, { prepend: true });
   let offPresentation: (() => void) | undefined;

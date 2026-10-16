@@ -13,6 +13,12 @@ test('placement is stable across source order and changing the screen size needs
  const g=graph(12);g.edges=[{source:'record-1',target:'record-2'}];const a=knowledgeLayout(g),b=knowledgeLayout({...g,nodes:[...g.nodes].reverse()});assert.deepEqual(a,b);
  assert.deepEqual(projectKnowledgePreview(g),projectKnowledgePreview({...g,nodes:[...g.nodes].reverse()}));
 });
+
+test('unassigned records have individual tints without inventing domains; index suggestions color a group alongside canonical domains',()=>{
+ const g=graph(8),before=JSON.stringify(g),plain=knowledgeLayout(g);assert.equal(plain.groups.length,1);assert.ok(new Set(plain.points.map(p=>p.color)).size>3);assert.equal(JSON.stringify(g),before);
+ g.domains=[{id:'confirmed',title:'Confirmed',status:'active'}];g.memberships=[{nodeId:'record-0',domainId:'confirmed'}];g.communityCandidates={groups:[{id:'local-cluster',label:'Related sources',memberIds:['record-1','record-2','record-0']}]};
+ const layout=knowledgeLayout(g);assert.equal(layout.points.find(p=>p.id==='record-0').domainId,'confirmed');const a=layout.points.find(p=>p.id==='record-1'),b=layout.points.find(p=>p.id==='record-2');assert.equal(a.color,b.color);assert.equal(a.domainId,'suggested:local-cluster');assert.deepEqual(a.domainIds,[]);assert.ok(layout.groups.find(g=>g.id===a.domainId).name.startsWith('Suggested'));
+});
 test('explicit domain hierarchy groups records without inventing factual edges or hiding inactive knowledge',()=>{
  const g=graph(8);g.domains=[{id:'projects',title:'Projects',status:'active'},{id:'hub',title:'HUB',parentId:'projects',status:'active'},{id:'learning',title:'Learning',status:'inactive'}];g.memberships=[{nodeId:'record-0',domainId:'hub'},{nodeId:'record-1',domainId:'projects'},{nodeId:'record-2',domainId:'learning'}];
  const before=JSON.stringify(g),{points,groups}=knowledgeLayout(g),p=id=>points.find(p=>p.id===id);assert.equal(p('record-0').group,p('record-1').group);assert.notEqual(p('record-1').group,p('record-2').group);assert.ok(groups.some(g=>g.name==='Learning'));assert.equal(JSON.stringify(g),before);assert.equal(points.length,8);

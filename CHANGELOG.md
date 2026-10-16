@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.49
+
+- Centralize speech engines, language detection and quality in Settings; keep character voice choices and cached auditions separate while preserving existing selections and active calls.
+- Combine Goals and automations in one Tasks window, with common filters, status and pause/resume controls plus the existing detailed editors.
+- Focus PWA settings on HUB, add a functional model catalogue entry and show provider capabilities, defaults and exact adapter reasoning levels with editable output and supported temperature controls.
+- Color unassigned records individually, show suggested communities alongside confirmed domains and explain the graph legend and shared workspace memory scope.
 
 - Fix the Knowledge 2D view packing sparse sources into a narrow vertical strip. Use stable domain positions, fit after the canvas becomes visible, show separate 2D controls and provide a view-only reset for old saved arrangements.
 

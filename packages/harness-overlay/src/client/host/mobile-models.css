@@ -11,6 +11,7 @@
 .hub-model-toolbar input { grid-column:1/-1; width:100%; }
 .hub-model-note { opacity:.7; font-size:13px; line-height:1.5; }
 .hub-model-list { display:grid; gap:10px; margin-top:12px; }
+.hub-model-list details{margin:12px 0;padding:10px 0;border-top:1px solid #ffffff16}.hub-model-list summary{cursor:pointer;min-height:44px;padding:10px 0}.hub-model-list label{display:flex;flex-direction:column;gap:7px;margin:12px 0;font-size:13px}.hub-model-list small{display:block;overflow-wrap:anywhere;line-height:1.5;color:#b8c3d9;font-size:12px;margin:8px 0}
 .hub-model-list article { border:1px solid #ffffff16; border-radius:16px; padding:16px; background:#ffffff04; }
 .hub-model-list h3 { font-size:16px; margin:0 0 7px; }
 .hub-model-list p { font-size:12px; line-height:1.5; margin:6px 0; overflow-wrap:anywhere; opacity:.72; }

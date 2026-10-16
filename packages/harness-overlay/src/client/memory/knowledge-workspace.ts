@@ -20,6 +20,7 @@ export function openKnowledgeWorkspace(container:HTMLElement,root:Document,initi
   const dark=root.documentElement.classList.contains("dark")||root.documentElement.hasAttribute("data-ds-dark-theme")||root.body.hasAttribute("data-ds-dark-theme");dialog.dataset.knowledgeTheme=dark?"dark":"light";
   const header=el("header"),heading=el("h2","Knowledge"),close=btn("Home",()=>requestClose());header.append(heading,close);
   const status=el("p");status.setAttribute("role","status");
+  const colorKey=el("details");colorKey.className="knowledge-color-key";colorKey.append(el("summary","Colors & memory scope"));const colorLegend=el("div");colorKey.append(colorLegend,el("p","Domain colors show confirmed organization. Suggested groups come from the local index and do not create facts or links. Unassigned records have individual tints until organized."),el("p","Knowledge is shared across HUB workspaces and characters, subject to each character’s access. A workspace is the working folder for files and tools; changing it does not create a separate memory vault."));
   const nav=el("nav"),layout=el("section");layout.className="knowledge-layout";
   const sidebar=el("aside"),search=el("input");search.type="search";search.placeholder="Search notes…";search.setAttribute("aria-label","Search knowledge");
   const tree=el("div");tree.setAttribute("data-knowledge-tree","");sidebar.append(search,tree);
@@ -34,7 +35,7 @@ export function openKnowledgeWorkspace(container:HTMLElement,root:Document,initi
     {selector:"edge",style:{width:1.2,"line-color":"#8a95ab","curve-style":"bezier"}},
     {selector:".dim",style:{opacity:.15}},{selector:":selected",style:{"background-color":"#a28cdd"}}
   ]});
-  const cloud=createKnowledgeCloud(root,id=>void open(id));graphPane.prepend(cloud.canvas,cloud.controls);let use3D=true;canvas.hidden=true;
+  const cloud=createKnowledgeCloud(root,id=>void open(id));graphPane.prepend(cloud.canvas,cloud.controls);graphPane.append(colorKey);let use3D=true;canvas.hidden=true;
   const domainPanel=createKnowledgeDomainsPanel(root,request,load,id=>{showGraph();cloud.focusDomain(id);},id=>void open(id));layout.append(domainPanel.pane);
   const dataPanel=createKnowledgeDataPanel(root,async<T>(query:string,command?:unknown)=>{const result=await request<T>(query,command);if(["start-import","withdraw-import"].includes((command as {action?:string})?.action??""))await load();return result;});layout.append(dataPanel.pane);
   const neighbors=createKnowledgeNeighbors(root,request,id=>void open(id),(relationId,index,evidence)=>void inspectEvidence(relationId,index,evidence));
@@ -95,7 +96,7 @@ export function openKnowledgeWorkspace(container:HTMLElement,root:Document,initi
   function list(nodes:KnowledgeNode[]){tree.replaceChildren();const folders=new Map<string,HTMLDetailsElement>();for(const n of nodes){const folder=n.permalink.includes("/")?n.permalink.slice(0,n.permalink.lastIndexOf("/")):"Notes";let group=folders.get(folder);if(!group){group=el("details");group.open=true;group.append(el("summary",folder));tree.append(group);folders.set(folder,group);}const b=btn(n.title,()=>void open(n.id));b.setAttribute("data-note-id",n.id);group.append(b);}}
   function filter(){cloud.select(active?.id,filterLocal);cy.elements().removeClass("dim");if(filterLocal&&active){const selected=cy.getElementById(active.id);cy.elements().not(selected.closedNeighborhood()).addClass("dim");}}
   function render(next:KnowledgeGraph){
-    graph=next;cloud.update(next);const points=new Map(knowledgeLayout(next).points.map(p=>[p.id,p]));cy.batch(()=>{
+    graph=next;cloud.update(next);const spatial=knowledgeLayout(next);colorLegend.replaceChildren();for(const group of spatial.groups.filter(g=>!g.parentId&&g.members.length)){const key=el("span",`${group.name} · ${group.members.length}`);key.style.borderLeft=`8px solid ${group.color}`;key.style.padding="4px 10px";key.style.display="inline-block";colorLegend.append(key);}const points=new Map(spatial.points.map(p=>[p.id,p]));cy.batch(()=>{
       const nodeIds=new Set(next.nodes.map(n=>n.id));cy.nodes().filter(n=>!nodeIds.has(n.id())).remove();
       for(const n of next.nodes){const point=points.get(n.id)!,old=cy.getElementById(n.id),color=point.color.replaceAll(" ",",");if(old.length)old.data({label:n.title,color});else{const saved=positions[n.id],position=Number.isFinite(saved?.x)&&Number.isFinite(saved?.y)?saved:{x:(point.x*.94-point.z*.3)*2.4,y:(point.y*.94+point.z*.12)*2.4};cy.add({data:{id:n.id,label:n.title,displayLabel:"",color},position});}}
       const edges=new Set(next.edges.map(e=>`link:${e.source}:${e.target}`));cy.edges().filter(e=>!edges.has(e.id())).remove();

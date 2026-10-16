@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Knowledge](knowledge.md)
 
-The PWA's **right panel → Automations** manages tasks independently of an open conversation. It adds no automation dashboard to Home. A permitted character can also manage tasks with hub_automation_manage in response to the user's natural-language request.
+The PWA's **right panel → Tasks → Routines** manages scheduled and conditional work alongside Goals, independently of an open conversation. Use **New task → Run on a schedule or condition** to add one. It adds no automation dashboard to Home. A permitted character can also manage tasks with hub_automation_manage in response to the user's natural-language request.
 
 Choose a configured character and purpose, then a trigger:
 

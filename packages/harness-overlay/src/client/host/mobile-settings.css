@@ -1,3 +1,4 @@
+[data-slot="sidebar.settings"] [data-hub-legacy-setting]{display:none!important}
 /* Markers exist only on phone/tablet PWA dialogs. Native desktop styles and
  * all native settings values/actions remain owned by their original modules. */
 /* Focus must not scroll the off-canvas sidebar's containing frame. Unlike

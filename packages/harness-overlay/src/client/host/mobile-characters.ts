@@ -4,6 +4,7 @@ import { charactersStateSchema, type HubCharacter, type HubCharactersState } fro
 import { installMobileModels } from "./mobile-models.ts";
 import { installMobileWidgetBack } from "./mobile-widget-back.ts";
 import { createSpeechEditor } from "./mobile-speech-editor.ts";
+import {speechSettingsSchema,characterSpeech,type SpeechSettings} from "../../speech-settings-contract.ts";
 import styles from "./mobile-characters.css";
 const installStyles=defineOverlayStyle("hub-characters",styles);
 
@@ -25,13 +26,14 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
   dialog.append(header,status,content);root.body.append(dialog);
   const removeBack=installMobileWidgetBack(dialog,header,()=>dialog.close());
   let state:HubCharactersState|undefined,toolCatalog:{name:string;description:string}[]=[],busy=false,epoch=0,warningMessage="",editorCleanup:(()=>void)|undefined;
+  let speechSettings:SpeechSettings|undefined;
   dialog.addEventListener("close",()=>{editorCleanup?.();editorCleanup=undefined;});
   const picture=(c:HubCharacter)=>{const image=el("img");image.src=characterAvatar(c);image.alt="";image.width=64;image.height=64;return image;};
   async function request(command?:unknown){
     const response=await view.fetch("/api/hub/characters",{method:command?"POST":"GET",credentials:"same-origin",cache:"no-store",headers:{"x-hub-characters":"1",...(command?{"content-type":"application/json"}:{})},body:command?JSON.stringify(command):undefined,signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(15000)])});
     if(!response.ok)throw new Error(response.status===409?"Characters changed on another screen. Reopen before saving.":"Could not save this character. Check its model, speech and HUB connection.");
     const value=await response.json();if(value.tools)toolCatalog=value.tools;
-    const {tools:_tools,warning,...record}=value;warningMessage=typeof warning==="string"?warning:"";state=charactersStateSchema.parse(record);return state;
+    const {tools:_tools,warning,sharedSpeech,...record}=value;if(sharedSpeech)speechSettings=speechSettingsSchema.parse(sharedSpeech);warningMessage=typeof warning==="string"?warning:"";state=charactersStateSchema.parse(record);return state;
   }
   function grid(){
     editorCleanup?.();editorCleanup=undefined;heading.textContent="Characters";content.replaceChildren();status.textContent=warningMessage||"HUB handles writing and Telegram messages. Your voice assistant delegates complex work to HUB. Ask for other characters by name.";dialog.scrollTop=0;
@@ -64,7 +66,7 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     const preview=picture(seed);basics.prepend(preview);avatar.addEventListener("change",()=>{seed.avatar=avatar.value as HubCharacter["avatar"];preview.src=characterAvatar(seed);});
     const instructions=el("textarea");instructions.rows=4;instructions.value=seed.instructions;instructions.maxLength=12000;field("Personality & instructions",instructions);
     const brain=el("section");brain.append(el("h3","Model"));const modelLabel=el("p",seed.route?`${seed.route.provider} · ${seed.route.model}${seed.route.reasoningEffort?" · "+seed.route.reasoningEffort:""}`:"No model configured");brain.append(modelLabel);modelPane.append(brain);
-    editorCleanup=installMobileModels(brain,root,()=>ctx.sessions.list.getSnapshot().current,{beforeManageProviders(){dialog.close();},choose(m,effort){seed.route={provider:m.provider,model:m.id,...(effort?{reasoningEffort:effort}:{})};modelLabel.textContent=`${m.name} · ${m.provider}${effort?" · "+effort:""}`;}});
+    editorCleanup=installMobileModels(brain,root,()=>ctx.sessions.list.getSnapshot().current,{initialRoute:seed.route??undefined,choose(m,effort,parameters){seed.route={provider:m.provider,model:m.id,...(effort?{reasoningEffort:effort}:{}),...parameters};modelLabel.textContent=`${m.name} · ${m.provider}${effort?" · "+effort:""}${parameters.maxTokens?" · "+parameters.maxTokens+" output tokens":""}`;}});
     const clearModel=button("Leave unconfigured",()=>{seed.route=null;modelLabel.textContent="No model configured";});brain.append(clearModel);
     clearModel.disabled=seed.id===state.mainId||seed.id===state.voiceId;
     const delegate=el("select");const none=el("option","No default delegation target");none.value="";delegate.append(none);
@@ -74,7 +76,8 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     const names=new Map(toolCatalog.map(t=>[t.name,t.description]));for(const n of selected)if(!names.has(n))names.set(n,"Not currently available");
     for(const [n,d]of names){const checkbox=el("input");checkbox.type="checkbox";checkbox.checked=selected.has(n);checkboxes.set(n,checkbox);field(n,checkbox,choices);checkbox.parentElement!.title=d;}
     const showPolicy=()=>{for(const [n,checkbox]of checkboxes){checkbox.disabled=inherit.checked;checkbox.checked=inherit.checked||selected.has(n);}};showPolicy();inherit.addEventListener("change",showPolicy);tools.append(choices,el("p","Tools remain subject to HUB’s existing permissions. Delegated work uses the target character’s configured tools."));advanced.append(tools);
-    const speechEditor=createSpeechEditor(root,seed.speech);voicePane.append(speechEditor.panel);
+    const speechEditor=createSpeechEditor(root,speechSettings?characterSpeech(speechSettings.speech,seed.speech):seed.speech,{voiceOnly:true});voicePane.append(speechEditor.panel);
+    if(speechSettings&&seed.speech&&seed.speech.tts.engine!==speechSettings.speech.tts.engine)voicePane.prepend(el("p","This character’s previous voice belongs to a different engine. Calls use the shared default voice until you choose a voice below."));
     const modelCleanup=editorCleanup;editorCleanup=()=>{modelCleanup?.();speechEditor.dispose();};
     const save=el("button","Save character");save.type="submit";form.append(save);content.append(form);
     form.addEventListener("submit",event=>{event.preventDefault();if(!name.value.trim()){selectTab("Profile");name.focus();status.textContent="Give this character a name.";return;}seed.name=name.value;seed.description=description.value;seed.instructions=instructions.value;seed.delegateTo=delegate.value||null;seed.tools=inherit.checked?{mode:"inherit"}:{mode:"allow",names:[...checkboxes].filter(([,c])=>c.checked).map(([n])=>n)};

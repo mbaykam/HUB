@@ -35,3 +35,11 @@ test('loading another sample preserves an already ready audition button and its 
     assert.deepEqual(editor.value(), seed);
   } finally { release?.(); editor.dispose(); dom.window.close(); }
 });
+
+test('character voice editor cannot change engines or language and keeps voice previews',async()=>{
+ const dom=new JSDOM('<main></main>',{url:'https://hub.test',pretendToBeVisual:true}),view=dom.window;
+ view.HTMLMediaElement.prototype.load=()=>{};view.HTMLMediaElement.prototype.pause=()=>{};view.URL.createObjectURL=()=> 'blob:fixture';view.URL.revokeObjectURL=()=>{};
+ view.fetch=async url=>url.endsWith('/catalog')?Response.json({speech:{stt:[{engine:'nemotron',model:'3.5-560ms',available:true,reason:null}],tts:[{engine:'supertonic',model:'supertonic-3',available:true,reason:null,voices:['F2','F5']}]}}):new Response(Buffer.alloc(48));
+ const seed={stt:{engine:'nemotron',model:'3.5-560ms',language:'auto'},tts:{engine:'supertonic',model:'supertonic-3',voice:'F5',language:'auto',steps:6}},editor=createSpeechEditor(view.document,seed,{voiceOnly:true});view.document.querySelector('main').append(editor.panel);
+ try{await new Promise(r=>setTimeout(r,30));assert.equal(editor.panel.querySelectorAll('select').length,0);assert.equal(editor.panel.querySelectorAll('input[type=checkbox]').length,0);const choose=[...editor.panel.querySelectorAll('button')].find(b=>b.textContent==='Female 2 · multilingual');choose.click();assert.equal(editor.value().tts.voice,'F2');assert.deepEqual(editor.value().stt,seed.stt);assert.equal(editor.value().tts.steps,6);assert.ok(editor.panel.querySelector('[aria-label="Listen to Female 2 · multilingual in English"]'));}finally{editor.dispose();view.close();}
+});

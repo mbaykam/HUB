@@ -7,6 +7,8 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ToolRunContext, ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { CharacterStore, CharacterConflict } from "./host/characters-store.ts";
+import {SharedSpeechSettings} from "./host/speech-settings.ts";
+import {characterSpeech} from "./speech-settings-contract.ts";
 import { openVoiceProfiles } from "./host/voice-profiles.ts";
 import { characterCommandSchema, type HubCharacter, type HubCharactersState } from "./character-contract.ts";
 import type { VoiceProfile } from "./voice-profile-contract.ts";
@@ -46,6 +48,7 @@ type CharacterHost=Context & {
 export class HubCharacters extends Service {
   readonly host:CharacterHost;
   readonly store:CharacterStore; readonly ready:Promise<void>;
+  readonly speechSettings:SharedSpeechSettings;
   readonly instructions:InstructionFiles;
   readonly quota:ProviderGate;
   readonly background:BackgroundAdmission;
@@ -56,7 +59,7 @@ export class HubCharacters extends Service {
   readonly dispatches=new Map<string,unknown>();
   readonly presentations=new PresentationRuntime();
   constructor(ctx:CharacterHost,root=join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-characters"),camoRuntime?:CamofoxRuntime){
-    super(ctx,"hubCharacters");this.host=ctx;this.store=new CharacterStore(root);this.instructions=new InstructionFiles(join(root,"instructions"));this.quota=providerGate(join(root,"..","hub-provider-health"));
+    super(ctx,"hubCharacters");this.host=ctx;this.store=new CharacterStore(root);this.speechSettings=new SharedSpeechSettings(root);this.instructions=new InstructionFiles(join(root,"instructions"));this.quota=providerGate(join(root,"..","hub-provider-health"));
     this.background=new BackgroundAdmission(()=>ctx.agents.list().some((a:any)=>a.status!=="idle"&&!/^hub-(goal|automation|memory)-/.test(a.id)&&!/^hub-(goal|automation|memory)-/.test(a.session.header.parentSession??"")));
     ctx.effect(()=>installCharacterActivity(ctx,root),"HUB observed specialist activity");
     const lifetime=new AbortController();const camofox=camoRuntime??new CamofoxRuntime(ctx.subprocess,lifetime.signal);
@@ -73,7 +76,7 @@ export class HubCharacters extends Service {
         const characters:HubCharacter[]=[main,...voices.profiles.map(p=>({id:p.id,name:voiceName(p),avatar:"voice" as const,description:"Fast spoken conversation · delegates complex work to HUB",instructions:p.instructions,route:p.route,speech:p.speech,tools:p.tools,delegateTo:mainId})),{id:randomUUID(),name:"Devil",avatar:"devil",description:"Choose your own model to activate",instructions:"Speak in the user's configured Devil character style. Follow the user's requested role and report your capabilities accurately.",route:null,speech:null,tools:{mode:"inherit"},delegateTo:null}];
         return {revision:0,mainId,voiceId:voices.selectedId,characters,bindings:{}};
       }finally{await legacy.close();}
-    });
+    }).then(()=>this.speechSettings.load(()=>{const s=this.store.snapshot();return s.characters.find(c=>c.id===s.voiceId)!.speech!;}));
     const attach=(agent:CharacterAgent)=>{
       if(agent.session.header.origin==="subagent" || agent.id.startsWith("hub-automation-") || agent.id.startsWith("hub-memory-") || agent.id.startsWith("hub-goal-") || agent.id.startsWith("hub-character-eval-") || this.mounts.has(agent.id))return;
       const mount:Mount={revision:-1,fibers:[],names:new Map()};this.mounts.set(agent.id,mount);
@@ -106,7 +109,7 @@ export class HubCharacters extends Service {
         const config=await next();
         if(!selected.route)throw new Error("This character needs a model. Open HUB → Characters.");
         await this.validate(selected);
-        const {reasoningEffort:_effort,...base}=config;
+        const {reasoningEffort:_effort,temperature:_temperature,...base}=config;
         return {...base,...selected.route};
       },{prepend:true});
       agent.ctx.tools.guard((exec:any)=>{
@@ -194,7 +197,7 @@ export class HubCharacters extends Service {
       for(const c of s.characters){
         if(!c.route)continue;
         const toolName=`hub_character_${c.id.replaceAll("-","")}`;
-        const fiber=agent.ctx.plugin(nativeSubagent,{provider,toolName,backgroundMode:"continuable",enableRunInBackground:true,maxDepth:3,agentOptions:{...c.route,maxTokens:8192},persona:characterAuthorityPersona(c)+`Character: ${c.name}.\n${c.instructions}\nExecution role: you are the specialist worker for this delegated task. Perform the requested work directly with your configured tools and report verified results to the parent. Do not turn this task into another coordinator unless the request explicitly needs additional workers. For live prices, use a current public source, name its quote currency and timestamp, and include a source URL. Never substitute a remembered price.`, ...(c.tools.mode==="allow"?{toolFilter:{allow:c.tools.names}}:{})});
+        const fiber=agent.ctx.plugin(nativeSubagent,{provider,toolName,backgroundMode:"continuable",enableRunInBackground:true,maxDepth:3,agentOptions:{...c.route,maxTokens:c.route.maxTokens??8192},persona:characterAuthorityPersona(c)+`Character: ${c.name}.\n${c.instructions}\nExecution role: you are the specialist worker for this delegated task. Perform the requested work directly with your configured tools and report verified results to the parent. Do not turn this task into another coordinator unless the request explicitly needs additional workers. For live prices, use a current public source, name its quote currency and timestamp, and include a source URL. Never substitute a remembered price.`, ...(c.tools.mode==="allow"?{toolFilter:{allow:c.tools.names}}:{})});
         await fiber.await();
         mount.fibers.push(fiber);mount.names.set(c.id,toolName);
       }
@@ -202,7 +205,8 @@ export class HubCharacters extends Service {
       mount.snapshot=s;
     })();try{await mount.loading;}finally{mount.loading=undefined;}
   }
-  async voiceProfile():Promise<VoiceProfile>{await this.ready;const s=this.store.snapshot(),c=s.characters.find(c=>c.id===s.voiceId)!;if(!c.route || !c.speech)throw new Error("Configure the voice character first");this.voiceAdmissions.set(c.id,s);return {id:c.id,name:c.name,instructions:c.instructions,route:c.route,speech:c.speech,tools:c.tools};}
+  speechFor(character?:HubCharacter){const s=this.store.snapshot(),c=character??s.characters.find(c=>c.id===s.voiceId)!;return characterSpeech(this.speechSettings.snapshot().speech,c.speech);}
+  async voiceProfile():Promise<VoiceProfile>{await this.ready;const s=this.store.snapshot(),c=s.characters.find(c=>c.id===s.voiceId)!;if(!c.route)throw new Error("Configure the voice character first");this.voiceAdmissions.set(c.id,s);return {id:c.id,name:c.name,instructions:c.instructions,route:c.route,speech:this.speechFor(c),tools:c.tools};}
   async beginVoice(agent:CharacterAgent,profile:VoiceProfile){await this.ready;const s=this.voiceAdmissions.get(profile.id)??this.store.snapshot();await this.prepare(agent,s);this.voiceCalls.add(agent.id);const c=s.characters.find(c=>c.id===profile.id);const mount=this.mounts.get(agent.id);if(mount){mount.assembled=undefined;mount.voiceCharacter=c;mount.turnSnapshot=s;mount.nativeRoute=undefined;}const target=s.characters.find(t=>t.id===(c?.delegateTo??s.mainId));const name=target?.route?mount?.names.get(target.id):undefined;return {toolName:name,targetName:target?.name,release:()=>{this.voiceCalls.delete(agent.id);this.voiceAdmissions.delete(profile.id);if(mount){mount.voiceCharacter=undefined;mount.assembled=undefined;mount.turnSnapshot=undefined;mount.nativeRoute=undefined;}},allowNested:(exec:any)=>this.dispatches.has(exec.callId)&&this.dispatches.get(exec.callId)===exec.parent};}
   installWeb(){
     return this.host.webServer.register({kind:"exact",path:"/api/hub/characters",handler:async(req:IncomingMessage,res:ServerResponse)=>{
@@ -224,7 +228,7 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_switch_character"))tools.push({name:"hub_switch_character",description:"Switch the active speaker after an explicit request to speak to that character."});
           if(!tools.some(t=>t.name==="hub_task"))tools.push({name:"hub_task",description:"Start background work with the voice character’s default specialist. Available during a voice call."});
           if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's sandboxed diagram or interactive chart in HUB."});
-          send(200,{...this.store.snapshot(),tools});return;
+          send(200,{...this.store.snapshot(),tools,sharedSpeech:this.speechSettings.snapshot()});return;
         }
         if(req.method!=="POST"){send(405,{error:"method-not-allowed"});return;}
         if(!/^application\/json(?:;|$)/i.test(String(req.headers["content-type"]??""))){send(415,{error:"json-required"});return;}

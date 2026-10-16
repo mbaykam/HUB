@@ -2,12 +2,13 @@ import {defaultAutomation,type AutomationsSnapshot,type HubAutomation,type Autom
 import {defineOverlayStyle} from "../shared/style-runtime.ts";
 import {installMobileWidgetBack} from "./mobile-widget-back.ts";
 import styles from "./mobile-automations.css";
+import type {WorkEditor,WorkEditorOptions} from "./work-editor.ts";
 const installStyles=defineOverlayStyle("hub-automations",styles);
 const labels:Record<string,string>={scheduled:"Planlandı",checking:"Kaynağı kontrol ediyor",running:"Çalışıyor","waiting-credit":"Kredi / limit bekliyor","budget-paused":"Günlük sınır bekleniyor",delayed:"Gecikti",failed:"İnceleme gerekli",completed:"Tamamlandı",paused:"Duraklatıldı",cancelled:"İptal edildi",interrupted:"Kesintiye uğradı"};
 
 /** Right-panel entry. The Home conversation surface remains focused. */
-export function installMobileAutomations(container:HTMLElement,root:Document):()=>void{
-  const view=root.defaultView!;if(!view)return ()=>{};
+export function installMobileAutomations(container:HTMLElement,root:Document,options?:WorkEditorOptions):WorkEditor{
+  const view=root.defaultView!;
   const removeStyles=installStyles(root),lifetime=new AbortController();
   const el=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const n=root.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
   const btn=(label:string,action:()=>void)=>{const b=el("button",label);b.type="button";b.addEventListener("click",action);return b;};
@@ -15,7 +16,7 @@ export function installMobileAutomations(container:HTMLElement,root:Document):()
   const dialog=el("dialog");dialog.setAttribute("data-hub-automations","");dialog.setAttribute("aria-label","Otomasyonlar");
   const header=el("header");header.append(el("h2","Otomasyonlar"),btn("Kapat",()=>{if(canLeaveEditor())dialog.close();}));
   const status=el("p");status.setAttribute("role","status");status.tabIndex=-1;const content=el("section"),list=el("div"),form=el("form"),history=el("section");history.hidden=true;form.hidden=true;
-  const toolbar=el("nav");toolbar.append(btn("Yeni otomasyon",()=>edit()),btn("Yenile",()=>void load()));content.append(toolbar,list,form,history);dialog.append(header,status,content);root.body.append(dialog);
+  const toolbar=el("nav");toolbar.append(btn("Yeni otomasyon",()=>edit()),btn("Yenile",()=>void load()));content.append(toolbar,list,form,history);dialog.append(header,status,content);(options?.host??root.body).append(dialog);if(options){tile.hidden=true;dialog.setAttribute("data-work-editor","");dialog.addEventListener("close",()=>options.back());}
   let state:AutomationsSnapshot|undefined,editingId:string|undefined,baseline="";
   const fields=new Map<string,HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>();
   const formSnapshot=()=>JSON.stringify([...fields].filter(([,input])=>form.contains(input)).map(([key,input])=>[key,input.value,input instanceof view.HTMLInputElement&&input.type==="checkbox"?input.checked:undefined]));
@@ -70,6 +71,6 @@ export function installMobileAutomations(container:HTMLElement,root:Document):()
   async function load(){try{state=await request();if(!hasUnsavedChanges())status.textContent="Bu bilgisayardaki işler · sadece HUB açıkken çalışır";render();}catch(e){if(!lifetime.signal.aborted)status.textContent=(e as Error).message;}}
   async function command(data:Record<string,unknown>,back=false){try{state=await request({...data,revision:state!.revision});status.textContent="Kaydedildi";if(back){baseline=formSnapshot();showList();}else render();}catch(e){const message=(e as Error).message;await load();status.textContent=message;}}
   dialog.addEventListener("cancel",event=>{if(!canLeaveEditor())event.preventDefault();});
-  const offBack=installMobileWidgetBack(dialog,header,()=>{if(!form.hidden||!history.hidden)showList();else dialog.close();});const timer=view.setInterval(()=>{if(dialog.open&&!root.hidden)void load();},5000);
-  return ()=>{lifetime.abort();view.clearInterval(timer);offBack();dialog.remove();tile.remove();removeStyles();};
+  const offBack=options?()=>{}:installMobileWidgetBack(dialog,header,()=>{if(!form.hidden||!history.hidden)showList();else dialog.close();});const timer=view.setInterval(()=>{if(dialog.open&&!root.hidden)void load();},5000);
+  return Object.assign(()=>{lifetime.abort();view.clearInterval(timer);offBack();dialog.remove();tile.remove();removeStyles();},{async open(id?:string){if(!dialog.open){if(options)dialog.show();else dialog.showModal();}await load();if(state)edit(id?state.automations.find(j=>j.id===id):undefined);},canLeave:canLeaveEditor});
 }

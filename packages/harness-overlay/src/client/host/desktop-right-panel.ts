@@ -1,5 +1,5 @@
-import {installMobileGoals} from "./mobile-goals.ts";
-import {installMobileAutomations} from "./mobile-automations.ts";
+import {installMobileWork} from "./mobile-work.ts";
+
 import {installMobileMemoryGraph} from "./mobile-memory-graph.ts";
 import {defineOverlayStyle} from "../shared/style-runtime.ts";
 const style=defineOverlayStyle("hub-desktop-secondary-panel",`
@@ -11,7 +11,7 @@ const style=defineOverlayStyle("hub-desktop-secondary-panel",`
 /** The same right-panel features are reachable in the desktop and wide PWA.
  * Keep the native tool-detail column intact; this is a secondary global panel. */
 export function installDesktopRightPanel(root:Document=document){const removeStyle=style(root),button=root.createElement("button"),panel=root.createElement("aside"),header=root.createElement("header"),label=root.createElement("strong"),close=root.createElement("button"),body=root.createElement("div");
-  button.type="button";button.textContent="Panel";button.setAttribute("data-hub-desktop-panel-open","");button.setAttribute("aria-label","Open Knowledge, Automations and Goals");button.setAttribute("aria-expanded","false");panel.setAttribute("data-hub-desktop-right-panel","");panel.setAttribute("aria-label","Knowledge, automations and goals");panel.hidden=true;label.textContent="Your workspace";close.type="button";close.textContent="Close";header.append(label,close);panel.append(header,body);root.body.append(button,panel);
+  button.type="button";button.textContent="Panel";button.setAttribute("data-hub-desktop-panel-open","");button.setAttribute("aria-label","Open Knowledge and Tasks");button.setAttribute("aria-expanded","false");panel.setAttribute("data-hub-desktop-right-panel","");panel.setAttribute("aria-label","Knowledge and tasks");panel.hidden=true;label.textContent="Your workspace";close.type="button";close.textContent="Close";header.append(label,close);panel.append(header,body);root.body.append(button,panel);
   const setOpen=(open:boolean)=>{panel.hidden=!open;button.setAttribute("aria-expanded",String(open));};button.addEventListener("click",()=>setOpen(!!panel.hidden));close.addEventListener("click",()=>setOpen(false));const dismiss=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!root.querySelector("dialog[open]")){setOpen(false);button.focus();}};root.addEventListener("keydown",dismiss);
-  const disposers=[installMobileMemoryGraph(body,root),installMobileAutomations(body,root),installMobileGoals(body,root)];return ()=>{for(const dispose of disposers)dispose();root.removeEventListener("keydown",dismiss);button.remove();panel.remove();removeStyle();};
+  const disposers=[installMobileMemoryGraph(body,root),installMobileWork(body,root)];return ()=>{for(const dispose of disposers)dispose();root.removeEventListener("keydown",dismiss);button.remove();panel.remove();removeStyle();};
 }

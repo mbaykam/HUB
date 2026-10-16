@@ -15,6 +15,7 @@ import type { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { openVoiceProfiles, type VoiceProfileStorage } from "./host/voice-profiles.ts";
 import { createVoiceProfilesHandler } from "./host/voice-profiles-web.ts";
 import { readLocalSpeechCatalog, validateLocalSpeech } from "./host/local-speech.ts";
+import {SpeechSettingsConflict} from "./host/speech-settings.ts";
 import { createSpeechModelDownloads, createSpeechModelsHandler } from "./host/speech-model-downloads.ts";
 import type { VoiceProfile, LocalSpeechCatalog } from "./voice-profile-contract.ts";
 import type { HubCharacters } from "./characters.ts";
@@ -112,10 +113,7 @@ export function apply(ctx: Context, config: Config): void {
       script: fileURLToPath(new URL("../voice/runtime_server.py", import.meta.url)),
       bridgeUrl: localBridge.url, bridgeToken: localBridge.token }, lifetime.signal);
     const selectedSpeech = () => {
-      const state = ctx.hubCharacters.store.snapshot();
-      const speech = state.characters.find(character => character.id === state.voiceId)?.speech;
-      if (!speech) throw new Error("Configure the voice character first");
-      return speech;
+      return ctx.hubCharacters.speechFor();
     };
     void preparedRuntime.prepare(selectedSpeech()).catch(() => {});
     web = createVoiceWeb({
@@ -227,6 +225,20 @@ export function apply(ctx: Context, config: Config): void {
     if (!profileHandler || lifetime.signal.aborted || cleanupUncertain) { response.writeHead(503, { "cache-control": "no-store" }); response.end(); return; }
     await profileHandler(request, response);
   } }));
+  off.push(ctx.webServer.register({kind:"exact",path:"/api/hub/voice/settings",async handler(req,res){
+    const send=(code:number,value:unknown)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};
+    const rejection=ctx.connection.requestRejection(req);
+    if(rejection||req.headers["sec-fetch-site"]==="cross-site"||req.headers["x-hub-speech-settings"]!=="1"){send(rejection??403,{error:"unauthorized"});return;}
+    try{
+      await ctx.hubCharacters.ready;
+      if(req.method==="GET"){send(200,ctx.hubCharacters.speechSettings.snapshot());return;}
+      if(req.method!=="POST"){send(405,{error:"method-not-allowed"});return;}
+      if(!/^application\/json(?:;|$)/i.test(String(req.headers["content-type"]??""))){send(415,{error:"json-required"});return;}
+      let size=0;const chunks:Buffer[]=[];for await(const chunk of req){size+=chunk.length;if(size>16000){send(413,{error:"body-too-large"});return;}chunks.push(chunk);}
+      const saved=await ctx.hubCharacters.speechSettings.change(JSON.parse(Buffer.concat(chunks).toString("utf8")),async speech=>validateLocalSpeech(await speechCatalog(true),speech));
+      send(200,saved);
+    }catch(e){send(e instanceof SpeechSettingsConflict?409:400,{error:e instanceof SpeechSettingsConflict?"revision-conflict":"invalid-speech-settings"});}
+  }}));
   off.push(ctx.webServer.register({ kind: "exact", path: "/api/hub/voice/speech-models",
     handler: createSpeechModelsHandler(downloads, request => ctx.connection.requestRejection(request)),
   }));

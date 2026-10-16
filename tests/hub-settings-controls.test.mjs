@@ -30,7 +30,7 @@ test("Settings opens existing characters and Telegram controls without changing 
     f.dom.window.addEventListener("hub:characters-open", () => characterOpens++);
     f.container.querySelector("[data-hub-characters-launcher]").click();
     assert.equal(characterOpens, 1);
-    f.container.querySelector("[data-hub-models-launcher]").click();
+    [...f.container.querySelectorAll("button")].find(b=>b.textContent==="Telegram").click();
     await setImmediate();
     assert.equal(f.root.querySelector('[aria-label="Telegram connection"]').open, true);
     const memory = f.container.querySelector("[data-hub-memory]");

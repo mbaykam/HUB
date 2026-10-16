@@ -4,6 +4,10 @@ export interface HubCatalogModel {
   input: string[]; tools: boolean; reasoning: boolean;
   pricing?: { input: number; output: number };
   efforts?: { id: string; name: string }[];
+  supportedParameters?:string[];
+  defaults?:Record<string,number|string|boolean|null>;
+  editableParameters?:string[];
+  defaultEffort?:string;
   enabled: boolean; source: "provider" | "installed" | "upstream";
   favorite?: boolean;
 }

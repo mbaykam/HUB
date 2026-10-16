@@ -4,6 +4,7 @@ export interface LayoutGraph {
   similarities?:{source:string;target:string;score:number}[];
   domains?:{id:string;title:string;parentId?:string;status:string;mergedInto?:string;createdAt?:number}[];
   memberships?:{nodeId:string;domainId:string}[];
+  communityCandidates?:{groups:{id:string;label:string;memberIds:string[]}[]};
 }
 export interface CloudPosition {id:string;label:string;group:number;domainId:string;domainIds:string[];rootIds:string[];color:string;x:number;y:number;z:number}
 export interface CloudGroup {id:string;name:string;parentId?:string;level:number;status:string;members:string[];color:string;radius:number;x:number;y:number;z:number}
@@ -29,14 +30,17 @@ export function knowledgeLayout(graph:LayoutGraph,options:{focusDomain?:string;d
     // Rendezvous hashing is a stable presentation choice, not UUID primacy.
     choices.sort((a,b)=>(ancestors.get(b)?.length??0)-(ancestors.get(a)?.length??0)||knowledgeHash(n.id+b)-knowledgeHash(n.id+a));labels.set(n.id,preferred&&choices.includes(preferred)?preferred:choices[0]??"unassigned");
   }
+  // The index's suggested communities are display groups, not canonical
+  // memberships. Use them for unassigned records even when domains exist.
+  const suggestions=new Map<string,string>();for(const c of graph.communityCandidates?.groups??[]){const id="suggested:"+c.id;suggestions.set(id,c.label);for(const member of c.memberIds)if(labels.get(member)==="unassigned")labels.set(member,id);}
   const groups:CloudGroup[]=[],byGroup=new Map<string,CloudGroup>(),occupied:CloudGroup[]=[];
   const roots=[...domains.values()].filter(d=>!d.parentId).sort((a,b)=>(a.createdAt??0)-(b.createdAt??0)||a.id.localeCompare(b.id));
   for(const d of roots){let p=vector(d.id+":anchor",230+unit(d.id)*100);for(let attempt=0;attempt<64&&occupied.some(g=>Math.hypot(p.x-g.x,p.y-g.y,p.z-g.z)<245);attempt++)p=vector(d.id+":anchor:"+attempt,260+attempt*9);const g:CloudGroup={id:d.id,name:d.title,level:0,status:d.status,members:[],color:knowledgeColor(d.id),radius:112,...p};groups.push(g);byGroup.set(g.id,g);occupied.push(g);}
   const ordered=[...domains.values()].filter(d=>d.parentId).sort((a,b)=>(ancestors.get(a.id)?.length??0)-(ancestors.get(b.id)?.length??0)||(a.createdAt??0)-(b.createdAt??0)||a.id.localeCompare(b.id));
   for(const d of ordered){const parent=byGroup.get(d.parentId!);if(!parent)continue;const siblings=groups.filter(g=>g.parentId===parent.id);let offset=vector(d.id+":anchor",parent.radius*.62);for(let attempt=0;attempt<48&&siblings.some(g=>Math.hypot(parent.x+offset.x-g.x,parent.y+offset.y-g.y)<parent.radius*.66);attempt++)offset=vector(d.id+":anchor:"+attempt,parent.radius*.62);const rootId=ancestors.get(d.id)?.at(-1)??d.id,g:CloudGroup={id:d.id,name:d.title,parentId:d.parentId,level:parent.level+1,status:d.status,members:[],color:knowledgeColor(rootId),radius:parent.radius*.32,x:parent.x+offset.x,y:parent.y+offset.y,z:parent.z+offset.z};groups.push(g);byGroup.set(g.id,g);}
-  const legacyIds=[...new Set([...labels.values()].filter(id=>!byGroup.has(id)))].sort();for(const id of legacyIds){const central=nodes.find(n=>labels.get(n.id)===id),p=domains.size||legacyIds.length>1?vector(id+":anchor",id==="unassigned"?0:260):{x:0,y:0,z:0},g:CloudGroup={id,name:id==="unassigned"?"Unassigned":central?.title??"Related records",level:0,status:"active",members:[],color:knowledgeColor(id),radius:112,...p};groups.push(g);byGroup.set(id,g);}
+  const legacyIds=[...new Set([...labels.values()].filter(id=>!byGroup.has(id)))].sort();for(const id of legacyIds){const central=nodes.find(n=>labels.get(n.id)===id),p=domains.size||legacyIds.length>1?vector(id+":anchor",id==="unassigned"?0:260):{x:0,y:0,z:0},g:CloudGroup={id,name:id==="unassigned"?"Unassigned":suggestions.has(id)?"Suggested · "+suggestions.get(id):central?.title??"Related records",level:0,status:"active",members:[],color:id==="unassigned"?"hsl(220 12% 62%)":knowledgeColor(id),radius:112,...p};groups.push(g);byGroup.set(id,g);}
   const rootIds=groups.filter(g=>!g.parentId).map(g=>g.id),rootIndex=new Map(rootIds.map((id,i)=>[id,i]));
-  const points:CloudPosition[]=nodes.map(n=>{const domainId=labels.get(n.id)!,g=byGroup.get(domainId)!,domainIds=[...(memberships.get(n.id)??[])].sort(),recordRoots=[...new Set(domainIds.map(id=>ancestors.get(id)?.at(-1)??id))].sort(),rootId=ancestors.get(domainId)?.at(-1)??domainId,offset=vector(n.id,Math.cbrt(unit(n.id+":radius"))*g.radius*.88);g.members.push(n.id);return {id:n.id,label:n.title,group:rootIndex.get(rootId)??0,domainId,domainIds,rootIds:recordRoots,color:knowledgeColor(rootId),x:g.x+offset.x,y:g.y+offset.y,z:g.z+offset.z};});
+  const points:CloudPosition[]=nodes.map(n=>{const domainId=labels.get(n.id)!,g=byGroup.get(domainId)!,domainIds=[...(memberships.get(n.id)??[])].sort(),recordRoots=[...new Set(domainIds.map(id=>ancestors.get(id)?.at(-1)??id))].sort(),rootId=ancestors.get(domainId)?.at(-1)??domainId,offset=vector(n.id,Math.cbrt(unit(n.id+":radius"))*g.radius*.88);g.members.push(n.id);const color=domainId==="unassigned"?`hsl(${Math.round(unit(n.id+":record-tint")*360)} 35% 68%)`:knowledgeColor(rootId);return {id:n.id,label:n.title,group:rootIndex.get(rootId)??0,domainId,domainIds,rootIds:recordRoots,color,x:g.x+offset.x,y:g.y+offset.y,z:g.z+offset.z};});
   for(const g of [...groups].sort((a,b)=>b.level-a.level))if(g.parentId){const parent=byGroup.get(g.parentId);if(parent)parent.members.push(...g.members);}
   return {points,groups};
 }

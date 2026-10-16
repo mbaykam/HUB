@@ -2,13 +2,13 @@
 
 [Documentation](README.md) · [Automations](automations.md)
 
-Open the **right panel → Goals** in the mobile PWA, or **Panel → Goals** in
-the desktop / wide PWA. Goals work independently of the chat you are using.
+Open **right panel → Tasks** in the mobile PWA, or **Panel → Tasks** in the
+wide PWA. Goals and routines share one list. Goals work independently of the chat you are using.
 Saving a draft does not start a model.
 
 ## Start with an outcome
 
-Choose **New goal**, then enter a name, the desired outcome, one acceptance
+Choose **New task → Work toward a goal**, then enter a name, the desired outcome, one acceptance
 criterion per line, an owner character, optional input files and an active-work
 allowance. Save the draft and press **Start** when ready. A character without
 a configured model can own a draft but cannot start it.

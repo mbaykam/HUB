@@ -4,10 +4,11 @@ import { join, isAbsolute } from "node:path";
 import { ModelCatalogStore } from "./host/model-catalog.ts";
 import { installTelegramWeb } from "./host/telegram-web.ts";
 import type { HubCatalogModel, HubModelCatalog } from "./model-catalog-contract.ts";
+import {voiceRouteSchema} from "./voice-profile-contract.ts";
 
 export const name = "hub-models";
 export const inject = ["llm", "settings", "sessionController", "agentDefaultModel", "connection", "webServer"];
-interface Model { id: string; name: string; provider: string; contextWindow?: number; maxTokens?: number; reasoning?: { efforts: { id: string; name?: string }[] } }
+interface Model { id: string; name: string; provider: string; contextWindow?: number; maxTokens?: number;context?:{contextWindow:number};defaultMaxTokens?:number;inputModalities?:string[]; reasoning?: { efforts: { id: string; name?: string }[];defaultEffort?:string } }
 interface Context {
   llm: { listProviders(): { id: string; name: string }[]; listModels(id: string): Promise<Model[]>; resolveModelInfo?(provider: string, model: string): Promise<Model>; resolveCallConfig(value: { provider: string; model: string; reasoningEffort?: string }): Promise<{ provider: string; model: string; reasoningEffort?: string }> };
   settings: { describe(options: { redactSecrets: true }): { ns: string; revision: number }[]; get(ns: string): unknown; mutate(ns: string, operations: { op: "set"; path: string[]; value: unknown }[], revision: number): Promise<void> };
@@ -42,13 +43,14 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
       for (const m of await ctx.llm.listModels(p.id)) {
         // listModels is identity-only in native DSH; resolve the authoritative vocabulary.
         const info = ctx.llm.resolveModelInfo ? await ctx.llm.resolveModelInfo(p.id, m.id) : m;
-        active.set(`${p.id}/${m.id}`, { provider: p.id, id: m.id, name: m.name, contextWindow: info.contextWindow, maxTokens: info.maxTokens,
-          input: ["text"], tools: true, reasoning: !!info.reasoning, efforts: info.reasoning?.efforts.map(e => ({ id: e.id, name: e.name ?? e.id })), enabled: true, source: "installed" });
+        active.set(`${p.id}/${m.id}`, { provider: p.id, id: m.id, name: m.name, contextWindow: info.context?.contextWindow??info.contextWindow, maxTokens: info.maxTokens,
+          defaults:info.defaultMaxTokens?{max_tokens:info.defaultMaxTokens}:{},defaultEffort:info.reasoning?.defaultEffort,
+          input: info.inputModalities??["text"], tools: true, reasoning: !!info.reasoning, efforts: info.reasoning?.efforts.map(e => ({ id: e.id, name: e.name ?? e.id })), enabled: true, source: "installed" });
       }
     }
     for (const m of current.openrouter ?? []) {
       const key = `${m.provider}/${m.id}`, enabled = active.get(key);
-      active.set(key, { ...m, enabled: !!enabled, ...(enabled?.efforts ? { efforts: enabled.efforts } : {}) });
+      active.set(key, { ...m, enabled: !!enabled, ...(enabled?.efforts ? { efforts: enabled.efforts,defaultEffort:enabled.defaultEffort } : {}) });
     }
     for (const m of current.codex ?? []) {
       const key = `openai-codex/${m.id}`, enabled = active.get(key);
@@ -56,7 +58,7 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
         tools: true, reasoning: m.reasoning, enabled: !!enabled, source: "upstream", ...(enabled?.efforts ? { efforts: enabled.efforts } : {}) });
     }
     const favorites = await store.favorites();
-    return { providers, models: [...active.values()].map(m => ({ ...m, favorite: favorites.has(JSON.stringify([m.provider, m.id])) })), refreshedAt: current.at ?? null, stale: current.stale, ...(current.warning ? { warning: current.warning } : {}) };
+    return { providers, models: [...active.values()].map(m => ({ ...m,editableParameters:["max_tokens",...(m.provider==="openrouter"&&m.supportedParameters?.includes("temperature")?["temperature"]:[]),...(m.efforts?.length?["reasoning_effort"]:[])], favorite: favorites.has(JSON.stringify([m.provider, m.id])) })), refreshedAt: current.at ?? null, stale: current.stale, ...(current.warning ? { warning: current.warning } : {}) };
   }
   async function enable(model: HubCatalogModel) {
     if (model.enabled) return;
@@ -93,18 +95,20 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
       if (!["select", "default", "enable"].includes(command.action) || !safe(command.provider) || !safe(command.model)
         || (command.reasoningEffort !== undefined && !safe(command.reasoningEffort))
         || (command.action === "select" && !safe(command.sessionId))
-        || Object.keys(command).some(k => !["action", "provider", "model", "reasoningEffort", "sessionId"].includes(k))) { send(res, 400, { error: "bad-request" }); return; }
+        || Object.keys(command).some(k => !["action", "provider", "model", "reasoningEffort", "sessionId","temperature","maxTokens"].includes(k))) { send(res, 400, { error: "bad-request" }); return; }
       const model = (await snapshot()).models.find(m => m.provider === command.provider && m.id === command.model);
       if (!model) { send(res, 404, { error: "model-unavailable" }); return; }
       await enable(model);
-      const selection = { provider: model.provider, model: model.id, ...(command.reasoningEffort ? { reasoningEffort: command.reasoningEffort } : {}) };
+      const selection = voiceRouteSchema.parse({ provider: model.provider, model: model.id, ...(command.reasoningEffort ? { reasoningEffort: command.reasoningEffort } : {}),...(command.temperature!==undefined?{temperature:command.temperature}:{}),...(command.maxTokens!==undefined?{maxTokens:command.maxTokens}:{}) });
+      if(selection.temperature!==undefined&&!model.editableParameters?.includes("temperature"))throw Error("Temperature unavailable");
+      if(selection.maxTokens!==undefined&&selection.maxTokens>(model.maxTokens??model.contextWindow??1000000))throw Error("Output limit exceeded");
       if (command.action === "enable") { await ctx.llm.resolveCallConfig(selection); send(res, 200, { available: selection }); return; }
       if (command.action === "select") {
         await ctx.sessionController.selectModel({ sessionId: command.sessionId, ...selection });
         send(res, 200, { selected: selection, alsoSavedForNewChats: true });
       } else {
         const resolved = await ctx.llm.resolveCallConfig(selection);
-        const normalized = { provider: resolved.provider, model: resolved.model, ...(resolved.reasoningEffort ? { reasoningEffort: resolved.reasoningEffort } : {}) };
+        const normalized = {...selection,provider: resolved.provider, model: resolved.model, ...(resolved.reasoningEffort ? { reasoningEffort: resolved.reasoningEffort } : {}) };
         await ctx.agentDefaultModel.saveSelection(normalized);
         send(res, 200, { selected: normalized });
       }

@@ -5,6 +5,8 @@ import { installMobileUsageMeter } from "./mobile-usage-meter.ts";
 import { installMobileVoiceHistory, type VoiceHistorySessions } from "./mobile-voice-history.ts";
 import type { VoiceHistoryClient } from "./voice-history.ts";
 import styles from "./hub-settings-controls.css";
+import {installSpeechSettings} from "./mobile-speech-settings.ts";
+import {installMobileModels} from "./mobile-models.ts";
 
 const installStyles = defineOverlayStyle("hub-settings-controls", styles);
 
@@ -20,9 +22,9 @@ export function installHubSettingsControls(
   const removeStyles = installStyles(root);
   container.setAttribute("data-hub-settings-controls", "");
   const heading = root.createElement("h3");
-  heading.textContent = "Assistants & integrations";
+  heading.textContent = "HUB settings";
   const intro = root.createElement("p");
-  intro.textContent = "Manage your characters, saved knowledge and Telegram connection.";
+  intro.textContent = "Characters, speech, memory and connections.";
   const connections = root.createElement("div");
   connections.setAttribute("data-hub-settings-connections", "");
   const characters = root.createElement("button");
@@ -33,6 +35,8 @@ export function installHubSettingsControls(
     view.dispatchEvent(new view.Event("hub:characters-open"));
   });
   connections.append(characters);
+  const removeSpeech=installSpeechSettings(connections,root);
+  const removeModels=installMobileModels(connections,root,()=>undefined,{browseOnly:true});
   const knowledge = root.createElement("div");
   const usage = root.createElement("div");
   const voiceHistory = root.createElement("div");
@@ -49,7 +53,7 @@ export function installHubSettingsControls(
     root.querySelector<HTMLButtonElement>("[data-minke-mobile-right-drawer-close]")?.click();
   }, history);
   return () => {
-    removeVoiceHistory(); removeUsage(); removeKnowledge(); removeTelegram();
+    removeVoiceHistory(); removeUsage(); removeKnowledge(); removeTelegram();removeSpeech();removeModels();
     container.replaceChildren();
     container.removeAttribute("data-hub-settings-controls");
     removeStyles();

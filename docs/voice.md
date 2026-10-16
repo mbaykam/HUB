@@ -2,7 +2,9 @@
 
 [Documentation](README.md) · [Setup](setup.md) · [Telegram](telegram.md)
 
-HUB uses a local speech pipeline around the configured Conversation character.
+HUB uses a local speech pipeline around the configured voice character. Set shared
+engines and languages in **Settings → HUB → Speech**; choose each character’s
+voice in **Characters → Voice**. See [Settings](settings.md) for migration and model options.
 Speech recognition produces text for a normal native conversation. Public reply
 text reaches TTS incrementally; tool arguments and hidden reasoning are not
 spoken. A stronger HUB character can handle delegated tasks and return their
