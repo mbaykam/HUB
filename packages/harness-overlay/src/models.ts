@@ -98,6 +98,9 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
         || Object.keys(command).some(k => !["action", "provider", "model", "reasoningEffort", "sessionId","temperature","maxTokens"].includes(k))) { send(res, 400, { error: "bad-request" }); return; }
       const model = (await snapshot()).models.find(m => m.provider === command.provider && m.id === command.model);
       if (!model) { send(res, 404, { error: "model-unavailable" }); return; }
+      // Native session/default selection persists identity and effort only.
+      // Character editors use enable, then save the complete route themselves.
+      if(command.action!=="enable"&&(command.temperature!==undefined||command.maxTokens!==undefined)){send(res,400,{error:"character-options-required"});return;}
       await enable(model);
       const selection = voiceRouteSchema.parse({ provider: model.provider, model: model.id, ...(command.reasoningEffort ? { reasoningEffort: command.reasoningEffort } : {}),...(command.temperature!==undefined?{temperature:command.temperature}:{}),...(command.maxTokens!==undefined?{maxTokens:command.maxTokens}:{}) });
       if(selection.temperature!==undefined&&!model.editableParameters?.includes("temperature"))throw Error("Temperature unavailable");

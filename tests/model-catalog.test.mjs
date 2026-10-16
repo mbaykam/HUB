@@ -55,8 +55,9 @@ test('model API rejects untrusted writes, validates identities and preserves unr
     assert.equal((await fetch(url,{method:'POST',headers,body:'{"action":"default","provider":"openai","model":"gpt-5.6-luna"}'})).status,404);
     assert.equal(defaults,0);
     const catalogue=await(await fetch(url,{headers})).json();assert.deepEqual(catalogue.models[0].efforts,[{id:'low',name:'Low'},{id:'high',name:'High'}]);assert.ok(catalogue.models[0].editableParameters.includes('max_tokens'));
-    assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'select',provider:'openai-codex',model:'gpt-5.6-luna',sessionId:'session-test',temperature:.5})})).status,409,'unknown Codex temperature support must not be offered or silently applied');
-    assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'select',provider:'openai-codex',model:'gpt-5.6-luna',sessionId:'session-test',maxTokens:12000})})).status,200);assert.equal(selection.maxTokens,12000);selection=undefined;
+    assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'enable',provider:'openai-codex',model:'gpt-5.6-luna',temperature:.5})})).status,409,'unknown Codex temperature support must not be offered or silently applied');
+    assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'select',provider:'openai-codex',model:'gpt-5.6-luna',sessionId:'session-test',maxTokens:12000})})).status,400,'native identity-only selection must not claim sampling parameters were persisted');assert.equal(selection,undefined);
+    assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'enable',provider:'openai-codex',model:'gpt-5.6-luna',maxTokens:12000})})).status,200,'character editor validates the full route before saving it');
     assert.equal((await fetch(url,{method:"POST",headers,body:JSON.stringify({action:"enable",provider:"openai-codex",model:"gpt-5.6-luna"})})).status,200);assert.equal(defaults,0);assert.equal(selection,undefined);
     const reply=await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'select',provider:'openai-codex',model:'gpt-5.6-luna',sessionId:'session-test'})});
     assert.equal(reply.status,200);assert.deepEqual(selection,{sessionId:'session-test',provider:'openai-codex',model:'gpt-5.6-luna'});assert.equal(defaults,0);
