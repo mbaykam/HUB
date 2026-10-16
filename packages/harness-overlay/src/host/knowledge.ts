@@ -8,7 +8,7 @@ import { KnowledgeStore, digest, atomicJson } from "./knowledge-store.ts";
 import { KnowledgeCurator, validateSettings, redactKnowledgeSecrets } from "./knowledge-curator.ts";
 import { createMemoryGenerator } from "./memory-worker.ts";
 import { knowledgeTurnSources } from "./knowledge-episodes.ts";
-import { archiveTexts,archiveMedia, previewKnowledgeImport,importedConversationSources } from "./knowledge-import.ts";
+import {KnowledgeImportBatches} from "./knowledge-import-batches.ts";
 import { KnowledgeEmbeddings } from "./knowledge-embeddings.ts";
 import { boundedKnowledgeRecall,visibleKnowledgeReflections } from "./knowledge-recall.ts";
 import { knowledgeRecallContext,isKnowledgeEvaluation } from "./knowledge-evidence.ts";
@@ -45,13 +45,8 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   },gate,ctx.hubCharacters?.background?()=>ctx.hubCharacters.background.acquire("knowledge"):undefined);
   const embeddings=config.embeddingPython?new KnowledgeEmbeddings(config.embeddingPython,config.embeddingRoot??join(store.root,"runtime")):undefined;
   if(embeddings){store.rank=(query,notes,limit)=>embeddings.rank(query,notes,limit);store.similarities=notes=>embeddings.layout(notes);void embeddings.start().then(()=>{curator.embedding=embeddings.status;}).catch(()=>{curator.embedding="Local embeddings unavailable · keyword search active";});}
-  const ready=curator.initialize();void ready.catch(()=>{curator.status="unavailable";});
-  async function importOriginals(preview:ReturnType<typeof previewKnowledgeImport>&{media?:ReturnType<typeof archiveMedia>}){
-    const saved=[];for(const media of preview.media??[])saved.push({name:media.name,asset:await store.assets.save(media.data,media.name)});
-    let archived=0,queued=0,duplicates=0;for(const record of preview.records){const refs=JSON.stringify(record.raw??{});for(const m of record.messages)m.assets=saved.filter(s=>refs.includes(s.name)||refs.includes(s.name.split("/").at(-1)!)).map(s=>s.asset);
-      if(await store.archive.put(record))archived++;for(const source of importedConversationSources(record))if(await curator.enqueue(source))queued++;else duplicates++;
-    }return {archived,queued,media:saved.length,duplicates,organization:"Queued for the existing Knowledge AI policy; original content retained."};
-  }
+  const imports=new KnowledgeImportBatches(store,source=>curator.enqueue(source),()=>curator.settings);
+  const ready=curator.initialize().then(async()=>{await imports.recover();});void ready.catch(()=>{curator.status="unavailable";});
   async function enrich(source:any,snapshot:readonly any[],event:any,sessionId:string){
     let start=-1;for(let i=snapshot.length-1;i>=0;i--)if(snapshot[i].type==="turn/start"&&snapshot[i].data?.turn===event.data?.turn){start=i;break;}
     const assets:import("../knowledge-contract.ts").KnowledgeAsset[]=[];const turn=[];for(const e of snapshot.slice(start+1)){if(e.type==="turn/end"||e.type==="turn/start")break;turn.push(e);}
@@ -105,11 +100,13 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   const goalImportMounts=new Map<string,()=>void>();
   const attachGoalImport=(agent:any)=>{
     const authority=agent.ctx.get?.("hubGoalAuthority");if(!authority||goalImportMounts.has(agent.id))return;
-    const off=agent.ctx.tools.register({name:"hub_goal_import_archive",description:"Preview a specifically selected ChatGPT/Gemini JSON or ZIP archive (under the current 80 MB upload ceiling) and report original conversation/message/media counts. Import preserves original conversations and branch metadata, adds original media and queues organization under the existing Knowledge AI settings. Preview is read-only; import requires this goal's explicit Knowledge output permission plus approval of the exact operation through hub_goal_tool. Include the preview SHA-256 when importing; changed files are refused.",parameters:{type:"object",properties:{action:{type:"string",enum:["preview","import"]},path:{type:"string"},sha256:{type:"string"}},required:["action","path"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any)=>{
+    const off=agent.ctx.tools.register({name:"hub_goal_import_archive",description:"Inspect an explicitly selected ChatGPT/Gemini archive under 80 MB. Preview stores exact bytes in a private quarantine, outside Knowledge search, with no model call. Archive keeps it private; it does not admit conversations. To admit a selected pilot, use action admit with batchId, unchanged sha256, previewHash and 1–50 recordIds. Admission queues only those originals under the current Knowledge AI budget/policy. Mutations require exact goal-operation approval through hub_goal_tool. Existing conflicting originals are never overwritten.",parameters:{type:"object",properties:{action:{type:"string",enum:["preview","archive","admit","import"]},path:{type:"string"},sha256:{type:"string"},batchId:{type:"string"},previewHash:{type:"string"},recordIds:{type:"array",items:{type:"string"},minItems:1,maxItems:50}},required:["action","path"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any)=>{
       await ready;const characters=ctx.hubCharacters??ctx.get?.("hubCharacters"),goal=characters?.goals?.get(authority.goalId);if(!goal||goal.state!=="active"||!goal.resources.knowledgeOutput||!goal.resources.files.includes(args.path))throw Error("Select this original archive explicitly in the active goal's input files and Knowledge output permission.");
-      const path=await goalPath(goal,args.path,false,dirname(characters.store.root)),info=await lstat(path);if(!info.isFile()||info.isSymbolicLink()||info.size>80000000||! /\.(zip|json)$/i.test(path))throw Error("Select a JSON/ZIP archive under the current 80 MB import ceiling.");const bytes=await readFile(path),sha256=createHash("sha256").update(bytes).digest("hex"),files=/\.zip$/i.test(path)?archiveTexts(bytes):[{name:path.split(/[\\/]/).at(-1)!,body:bytes.toString("utf8")}],preview=previewKnowledgeImport(files);
-      if(args.action==="preview")return JSON.stringify({sha256,conversations:preview.conversations,messages:preview.messages,episodes:preview.sources.length,skipped:preview.skipped,warnings:preview.warnings});
-      if(args.action!=="import"||args.sha256!==sha256)throw Error("Preview this exact archive and include its unchanged SHA-256 before import.");return JSON.stringify({...await importOriginals({...preview,media:/\.zip$/i.test(path)?archiveMedia(bytes):[]}),sha256});
+      const path=await goalPath(goal,args.path,false,dirname(characters.store.root)),info=await lstat(path);if(!info.isFile()||info.isSymbolicLink()||info.size>80000000||! /\.(zip|json|html)$/i.test(path))throw Error("Select a JSON/HTML/ZIP archive under the current 80 MB import ceiling.");const bytes=await readFile(path),sha256=createHash("sha256").update(bytes).digest("hex");
+      if(args.action==="preview")return JSON.stringify(await imports.stage(bytes,path.split(/[\\/]/).at(-1)!));
+      const preview=await imports.preview(args.batchId);if(args.sha256!==sha256||preview.sha256!==sha256)throw Error("Preview this exact archive and include its unchanged SHA-256 and batchId.");
+      if(args.action==="admit")return JSON.stringify(await imports.admit(args.batchId,args.recordIds,args.previewHash));
+      if(!["archive","import"].includes(args.action))throw Error("Choose archive or selected admission");return JSON.stringify({...await imports.archive(args.batchId),admitted:0,note:"Kept privately; no conversations admitted. Select 1–50 records explicitly with action admit."});
     }});goalImportMounts.set(agent.id,off);
   };
   const offGoalImports=ctx.on("agent/created",({agent}:any)=>attachGoalImport(agent),{global:true}),offGoalImportDispose=ctx.on("agent/disposed",({agent}:any)=>{goalImportMounts.get(agent.id)?.();goalImportMounts.delete(agent.id);},{global:true});
@@ -176,7 +173,6 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
     }
     await atomicJson(join(store.root,"original-archive-v1.json"),{version:1,at:Date.now(),archived});
   }));
-  const previews=new Map<string,ReturnType<typeof previewKnowledgeImport>&{media?:ReturnType<typeof archiveMedia>}>();
   const send=(res:ServerResponse,code:number,value:unknown)=>{res.writeHead(code,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};
   const offRoute=ctx.webServer.register({kind:"exact",path:"/api/hub/memory",async handler(req:IncomingMessage,res:ServerResponse){
     const reject=ctx.connection.requestRejection(req);if(reject||req.headers["sec-fetch-site"]==="cross-site"){send(res,reject??403,{error:"unauthorized"});return;}
@@ -187,10 +183,17 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
         if(view==="client"){res.writeHead(200,{"content-type":"text/javascript; charset=utf-8","cache-control":"no-store"});res.end(await readFile(new URL("./memory-graph-browser.js",import.meta.url)));return;}
         if(view!=="asset"&&req.headers["x-hub-memory"]!=="1"){send(res,403,{error:"header-required"});return;}
         if(view==="organization"){send(res,200,await store.organization.snapshot());return;}
+        if(view==="import-batches"){send(res,200,await imports.list(Number(query.get("offset")??0)));return;}
+        if(view==="import-batch"){send(res,200,await imports.preview(query.get("id")??"",Number(query.get("offset")??0)));return;}
+        if(view==="import-record"){send(res,200,await imports.record(query.get("id")??"",query.get("record")??"",Number(query.get("offset")??0)));return;}
         if(view==="domains"){send(res,200,{...await store.organization.domains(),nodes:(await store.scan()).map(({id,title})=>({id,title}))});return;}
+        if(view==="communities"||view==="community"){
+          const offset=Number(query.get("offset")??0);if(!Number.isSafeInteger(offset)||offset<0)throw Error("Invalid group page");
+          send(res,200,view==="communities"?await store.communities(offset):await store.community(query.get("id")??"",query.get("version")??"",offset));return;
+        }
         if(view==="backups"){send(res,200,{...await backups.list(Number(query.get("offset")??0)),...(curator.restoredWork?.state==="needs-review"?{restoreHold:{...curator.restoredWork,queued:[...curator.jobs.values()].filter(j=>j.status==="queued").length,mode:curator.settings.mode,provider:curator.settings.provider,model:curator.settings.model}}:{})});return;}
         if(view==="domain-preview"){send(res,200,await store.organization.domainPreview(query.get("id")??""));return;}
-        if(view==="conversation"){send(res,200,await store.archive.read(query.get("id")??""));return;}
+        if(view==="conversation"){const id=query.get("id")??"";await store.admission.assert({conversationId:id});send(res,200,await store.archive.read(id));return;}
         if(view==="instructions"){send(res,200,{provider:curator.settings.provider,model:curator.settings.model,reasoningEffort:curator.settings.reasoningEffort,path:join(store.root,"settings.json"),instructions:curator.settings.instructions,hash:digest(JSON.stringify(curator.settings)),builtIn:organizationPrompt({id:"preview",completedAt:Date.now(),channel:"pwa",content:"<Original conversation>"},[],curator.settings,await store.organization.domains())});return;}
         if(view==="graph"){send(res,200,await store.graph());return;}
         if(view==="neighbors"){send(res,200,await store.neighbors(query.get("id")??"",query.get("cursor")??"",Number(query.get("limit")??30)));return;}
@@ -223,9 +226,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       }
       if(query.get("action")==="preview-import"){
         const filename=decodeURIComponent(String(req.headers["x-hub-filename"]??"history.json"));
-        const files=/\.zip$/i.test(filename)?archiveTexts(data):[{name:filename,body:data.toString("utf8")}];
-        const preview=previewKnowledgeImport(files),media=/\.zip$/i.test(filename)?archiveMedia(data):[];if(previews.size>=2)previews.delete(previews.keys().next().value!);const id=randomUUID();previews.set(id,{...preview,media});
-        send(res,200,{id,media:media.length,conversations:preview.conversations,messages:preview.messages,episodes:preview.sources.length,skipped:preview.skipped,warnings:preview.warnings,sample:preview.sources.slice(0,3),estimatedCost:(preview.estimatedInputTokens+preview.sources.length*35000)*curator.settings.inputPrice/1e6+preview.sources.length*6000*curator.settings.outputPrice/1e6});return;
+        send(res,200,await imports.stage(data,filename));return;
       }
       if(!String(req.headers["content-type"]).startsWith("application/json")){send(res,415,{error:"json-required"});return;}
       if(data.length>200000){send(res,413,{error:"too-large"});return;}const command=JSON.parse(data.toString("utf8"));
@@ -258,8 +259,9 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
           const c=characters.store.snapshot().characters.find((c:any)=>"character:"+c.id===target);if(!c)throw Error("Character no longer exists");return {content:c.instructions,hash:digest(c.instructions)};
         },save:async(target,hash,content)=>{if(target==="USER.md")await characters.instructions.save(target,hash,content);else{const state=characters.store.snapshot(),c=state.characters.find((c:any)=>"character:"+c.id===target);if(!c||digest(c.instructions)!==hash)throw Error("Character instructions changed");await characters.store.change({action:"save",revision:state.revision,character:{...c,instructions:content}},(c:any)=>characters.validate(c));}}}));return;
       }else if(command.action==="start-import"){
-        const preview=previews.get(command.id);if(!preview)throw new Error("Import preview expired; preview again");
-        const result=await importOriginals(preview);previews.delete(command.id);send(res,200,result);return;
+        send(res,200,await imports.admit(command.id,command.recordIds,command.previewHash));return;
+      }else if(command.action==="archive-import"){send(res,200,await imports.archive(command.id));return;
+      }else if(command.action==="withdraw-import"){send(res,200,await imports.withdraw(command.id));return;
       }else if(command.action==="import-hub"){
         let queued=0,duplicates=0,skipped=0;const signal=AbortSignal.any([curator.lifetime.signal,AbortSignal.timeout(120000)]);
         for(const record of await ctx.sessionQuery.listSessions(signal)){

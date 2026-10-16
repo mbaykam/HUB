@@ -5,6 +5,7 @@ import {conversationSources} from "./knowledge-archive.ts";
 export interface KnowledgeImportPreview { sources: KnowledgeSource[]; records:KnowledgeConversation[]; conversations: number; messages: number; skipped: number; warnings: string[]; estimatedInputTokens: number }
 const text=(value:unknown):string=>typeof value==="string"?value:"";
 function assetPointers(value:any):string[]{return Array.isArray(value?.parts)?value.parts.filter((p:any)=>p&&typeof p==="object").flatMap((p:any)=>[p.asset_pointer,p.image_asset_pointer,p.file_id,p.file_name].filter((x:any)=>typeof x==="string")):[];}
+function messageAssetPointers(message:any):string[]{return [...new Set([...assetPointers(message?.content),...(Array.isArray(message?.metadata?.attachments)?message.metadata.attachments.flatMap((a:any)=>[a?.id,a?.file_id,a?.name,a?.file_name].filter((x:any)=>typeof x==="string")):[])])];}
 function content(value:any) { return Array.isArray(value?.parts) ? value.parts.flatMap((x:any)=>typeof x==="string"?[x]:x&&typeof x==="object"&&(x.asset_pointer||x.image_asset_pointer||x.file_id)?["Attached media: "+(x.file_name??"image or file")]:[]).join("\n") : text(value?.text); }
 /** Return bounded archive bytes, never extract archive paths into the host filesystem. */
 export function archiveMedia(buffer:Buffer):{name:string;data:Buffer}[]{
@@ -120,12 +121,12 @@ export function originalImportRecords(files:{name:string;body:string}[]):Knowled
       }continue;
     }
     const data=JSON.parse(file.body);for(const entry of data){
-      if(entry?.mapping){const messages:ConversationMessage[]=[];for(const [key,node]of Object.entries(entry.mapping) as [string,any][]){const m=node.message,role=m?.author?.role;if(!["user","assistant"].includes(role))continue;messages.push({id:String(m.id??key),role,text:content(m.content),at:time(m.create_time??entry.create_time),parent:node.parent??undefined,branch:key});}
+      if(entry?.mapping){const messages:ConversationMessage[]=[];for(const [key,node]of Object.entries(entry.mapping) as [string,any][]){const m=node.message,role=m?.author?.role;if(!["user","assistant"].includes(role))continue;const refs=messageAssetPointers(m);messages.push({id:String(m.id??key),role,text:content(m.content),at:time(m.create_time??entry.create_time),parent:node.parent??undefined,branch:key,...(refs.length?{importRefs:refs}:{})});}
         const id=String(entry.id??entry.conversation_id??digest(JSON.stringify(entry)));add("chatgpt",id,text(entry.title)||"ChatGPT conversation",messages,entry);
       }else if(entry?.title&&(entry.time||entry.timestamp)&&(!entry.products||entry.products.some((p:unknown)=>/Gemini|Bard/i.test(text(p))))){const prompt=text(entry.title).replace(/^(?:Prompted|Asked|Sordunuz)\s+/i,""),answer=typeof entry.response==="string"?entry.response:typeof entry.answer==="string"?entry.answer:"",at=time(entry.time??entry.timestamp),id=text(entry.id)||digest(JSON.stringify(entry));
         add("gemini",id,prompt,[{id:"user",role:"user",text:prompt,at},...(answer?[{id:"assistant",role:"assistant" as const,text:htmlText(answer),at}]:[])],entry);
       }
     }
-  }return [...new Map(records.map(r=>[r.id,r])).values()];
+  }const unique=new Map<string,KnowledgeConversation>();for(const record of records){const old=unique.get(record.id);if(old&&JSON.stringify({...old,raw:undefined})!==JSON.stringify({...record,raw:undefined}))throw Error("This archive contains conflicting versions of the same conversation; exact upload retained for review");unique.set(record.id,record);}return [...unique.values()];
 }
 export {conversationSources as importedConversationSources};

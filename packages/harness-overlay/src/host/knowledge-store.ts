@@ -7,6 +7,8 @@ import {boundedKnowledgeRecall} from "./knowledge-recall.ts";
 import {fuseKnowledgeRanks,knowledgeExcerptSpans} from "./knowledge-retrieval.ts";
 import {KnowledgeLexicalIndex} from "./knowledge-lexical-index.ts";
 import {KnowledgeLinkIndex,KnowledgeTopology} from "./knowledge-topology.ts";
+import {KnowledgeCommunities} from "./knowledge-communities.ts";
+import {KnowledgeAdmission} from "./knowledge-admission.ts";
 import {conversationTextRanges,conversationMarkdown} from "./knowledge-archive.ts";
 import type {KnowledgeEvidence} from "../knowledge-relation-contract.ts";
 import {KnowledgeArchive} from "./knowledge-archive.ts";
@@ -46,13 +48,15 @@ export class KnowledgeStore {
   readonly assets:KnowledgeAssets;
   readonly archive:KnowledgeArchive;
   readonly organization:KnowledgeOrganization;
+  readonly admission:KnowledgeAdmission;
   readonly mutations=new KnowledgeMutationGate();
   rank?: (query:string,notes:Stored[],limit:number)=>Promise<KnowledgeSemanticHit[]>;
   similarities?:(notes:Stored[])=>Promise<NonNullable<KnowledgeGraph["similarities"]>|SemanticLayout>;
   private topicCache?:{key:string;at:number;retryable:boolean;value:Promise<SemanticLayout>};
   private readonly lexicalIndex=new KnowledgeLexicalIndex();
+  private communityIndex?:KnowledgeCommunities;
   private tail: Promise<unknown> = Promise.resolve();
-  constructor(vault: string, root: string) { this.vault = resolve(vault); this.root = resolve(root);this.assets=new KnowledgeAssets(this.vault,this.root,this.mutations);this.archive=new KnowledgeArchive(this.vault,this.root,this.mutations);this.organization=new KnowledgeOrganization(this); }
+  constructor(vault: string, root: string) { this.vault = resolve(vault); this.root = resolve(root);this.assets=new KnowledgeAssets(this.vault,this.root,this.mutations);this.archive=new KnowledgeArchive(this.vault,this.root,this.mutations);this.organization=new KnowledgeOrganization(this);this.admission=new KnowledgeAdmission(this.root); }
   private async file(path: string) {
     if (!path || /[\u0000-\u001f:*?"<>|\\]/.test(path) || !path.endsWith(".md") || path.split("/").some(p => !p || p === "." || p === ".." || p.startsWith("."))) throw new Error("Invalid note path");
     const result = resolve(this.vault, path);
@@ -89,8 +93,9 @@ export class KnowledgeStore {
     await this.refreshInventory();
     await this.organization.repairPending();
   }
-  async scan(coverage?:ScanCoverage): Promise<Stored[]> {
+  async scan(coverage?:ScanCoverage,includeHeld=false): Promise<Stored[]> {
     const notes: Stored[] = [];
+    const held=includeHeld?new Set<string>():await this.admission.blocked();
     if(coverage){coverage.files=0;coverage.noteSize=0;coverage.recordSize=0;}
     const visit = async (dir: string) => {
       for (const entry of await readdir(join(this.vault, dir), { withFileTypes: true })) {
@@ -107,6 +112,7 @@ export class KnowledgeStore {
         const body = raw.slice(front.length);
         const scalar = (key: string) => { const value = front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1]?.trim(); if (!value) return ""; try { return JSON.parse(value); } catch { return value.replace(/^['"]|['"]$/g, ""); } };
         const id = scalar("hub_id") || scalar("external_uuid") || scalar("uuid") || `legacy-${digest(path).slice(0,32)}`;
+        if(held.has(String(id))){if(coverage)coverage.files--;continue;}
         const title = scalar("title") || body.match(/^#\s+(.+)$/m)?.[1] || basename(path, ".md");
         const kind=scalar("hub_kind")==="conversation"?"conversation":"note";
         notes.push({ id: String(id), title: String(title), permalink: path.slice(0,-3), hash: digest(raw), modifiedAt: kind==="conversation"?Number(scalar("source_updated_at"))||info.mtimeMs:info.mtimeMs,kind,protected:kind==="conversation", raw, front, body, path });
@@ -137,10 +143,13 @@ export class KnowledgeStore {
     const registry=await this.organization.domains(),roots=relationRoots(registry),relationships=[...documentRelations,...await this.organization.canonicalRelations()].filter(r=>present.has(r.sourceId)&&present.has(r.targetId)).map(r=>({...r,scope:relationScope(r.sourceId,r.targetId,roots)}));
     if(similarities)similarities=similarities.filter(e=>relationScope(e.source,e.target,roots)!=="long"||e.score>=.72);
     const omitted=coverage.noteSize+coverage.recordSize;
-    return { secondBrain: true, nodes: notes.map(({id,title,permalink,hash,modifiedAt,kind,protected:readonly}) => ({id,title,permalink,hash,modifiedAt,kind,protected:readonly})), edges,relationships,...(similarities?{similarities,similarityCoverage}:{}),sourceCoverage:{...coverage,indexed:notes.length,omitted},domains:registry.domains,memberships:registry.memberships.filter(m=>present.has(m.nodeId)).map(({nodeId,domainId})=>({nodeId,domainId})),registryRevision:registry.revision,maxActiveDomains:registry.maxActiveDomains,page: 1, hasMore: false, partial: omitted>0, omittedRelations: unresolved, hiddenNodes: omitted };
+    const graph:KnowledgeGraph={ secondBrain: true, nodes: notes.map(({id,title,permalink,hash,modifiedAt,kind,protected:readonly}) => ({id,title,permalink,hash,modifiedAt,kind,protected:readonly})), edges,relationships,...(similarities?{similarities,similarityCoverage}:{}),sourceCoverage:{...coverage,indexed:notes.length,omitted},domains:registry.domains,memberships:registry.memberships.filter(m=>present.has(m.nodeId)).map(({nodeId,domainId})=>({nodeId,domainId})),registryRevision:registry.revision,maxActiveDomains:registry.maxActiveDomains,page: 1, hasMore: false, partial: omitted>0, omittedRelations: unresolved, hiddenNodes: omitted };
+    this.communityIndex??=new KnowledgeCommunities(this.root);try{graph.communityCandidates=await this.communityIndex.update(graph);}catch{/* A rebuildable suggestion cache must never make original knowledge unavailable. */}return graph;
   }
   async neighbors(id:string,cursor="",limit=30){if(!Number.isInteger(limit)||limit<1||limit>100)throw Error("Choose a neighborhood page size between 1 and 100");const graph=await this.graph(),topology=new KnowledgeTopology(graph);if(!topology.nodes.has(id))throw Error("Knowledge record missing");const all=topology.neighbors(id),offset=cursor?all.findIndex(r=>r.id===cursor)+1:0;if(cursor&&offset===0)throw Error("Neighborhood changed; refresh before continuing");const page=all.slice(offset,offset+limit);return {recordId:id,total:all.length,items:page.map(r=>({...r,node:topology.nodes.get(r.sourceId===id?r.targetId:r.sourceId)!})),nextCursor:offset+page.length<all.length?page.at(-1)!.id:null};}
   async connectionPath(sourceId:string,targetId:string){return new KnowledgeTopology(await this.graph()).path(sourceId,targetId);}
+  async communities(offset=0){if(!Number.isSafeInteger(offset)||offset<0)throw Error("Invalid group page");const snapshot=(await this.graph()).communityCandidates;if(!snapshot)throw Error("Group suggestions are unavailable; original knowledge remains available");return {inputHash:snapshot.inputHash,coverage:snapshot.coverage,algorithm:snapshot.algorithm,total:snapshot.groups.length,groups:snapshot.groups.slice(offset,offset+30).map(({memberIds,...group})=>({...group,count:memberIds.length})),nextOffset:offset+30<snapshot.groups.length?offset+30:null};}
+  async community(id:string,version:string,offset=0){if(!Number.isSafeInteger(offset)||offset<0)throw Error("Invalid group page");const graph=await this.graph(),snapshot=graph.communityCandidates;if(!snapshot||version!==snapshot.inputHash)throw Error("The source graph changed; refresh group suggestions");const group=snapshot.groups.find(g=>g.id===id);if(!group)throw Error("Suggested group changed; refresh");const nodes=new Map(graph.nodes.map(n=>[n.id,n]));return {id:group.id,label:group.label,total:group.memberIds.length,nodes:group.memberIds.slice(offset,offset+50).map(id=>nodes.get(id)!),nextOffset:offset+50<group.memberIds.length?offset+50:null,inputHash:snapshot.inputHash};}
   async inspectEvidence(relationId:string,index:number){
     const graph=await this.graph(),relation=graph.relationships?.find(r=>r.id===relationId);if(!relation||!Number.isInteger(index)||index<0||!relation.evidence[index])throw Error("This relationship or its evidence was retired or changed; refresh");const citation=relation.evidence[index]!,note=(await this.scan()).find(n=>n.id===citation.sourceId);let text:string|undefined,version:"current"|"archived"|"captured-episode"|"quoted-only"="quoted-only";
     if(citation.messageId&&note?.kind==="conversation"){
@@ -201,11 +210,11 @@ export class KnowledgeStore {
   exclusive<T>(task: () => Promise<T>): Promise<T> { return this.mutations.run(()=>{const next=this.tail.then(task,task); this.tail=next.catch(()=>{}); return next;}); }
   async noteDates(){return Object.fromEntries(Object.entries(await this.metadata()).map(([id,n])=>[id,n.completedAt]));}
   async refreshInventory(){return this.exclusive(async()=>{
-    const coverage={files:0,noteSize:0,recordSize:0},notes=await this.scan(coverage),meta=await this.metadata(),present=new Set(notes.map(n=>n.id));let changed=false,deleted=false;
+    const coverage={files:0,noteSize:0,recordSize:0},notes=await this.scan(coverage),meta=await this.metadata(),present=new Set(notes.map(n=>n.id)),held=await this.admission.blocked();let changed=false,deleted=false;
     // An incomplete inventory cannot prove that an identity disappeared: a
     // source may have grown or been renamed beyond the existing scan limits.
     // Do not turn an indexing omission into a durable global forget cutoff.
-    if(!coverage.noteSize&&!coverage.recordSize)for(const id of Object.keys(meta))if(!present.has(id)&&!meta[id]?.deleted){meta[id]!.deleted=true;changed=true;deleted=true;}
+    if(!coverage.noteSize&&!coverage.recordSize)for(const id of Object.keys(meta))if(!present.has(id)&&!held.has(id)&&!meta[id]?.deleted){meta[id]!.deleted=true;changed=true;deleted=true;}
     if(deleted)await this.saveForgetPolicy(Date.now());
     for(const n of notes){const prior=meta[n.id];if(!prior){meta[n.id]={completedAt:Math.round(n.modifiedAt),sources:[],title:n.title,path:n.path,lastHash:n.hash};changed=true;}
       else if(!prior.lastHash || prior.lastHash!==n.hash){prior.completedAt=Math.max(prior.completedAt,Math.round(n.modifiedAt));prior.lastHash=n.hash;prior.title=n.title;prior.path=n.path;changed=true;}}
@@ -214,6 +223,7 @@ export class KnowledgeStore {
   async apply(plan: KnowledgePlan, source: KnowledgeSource): Promise<string | null> {
     return this.exclusive(async () => {
       validatePlan(plan);
+      await this.admission.assert(source);
       if (plan.decision !== "update-knowledge") return null;
       if (source.completedAt <= await this.cutoff()) throw new Error("Historical source precedes forget policy");
       for(const file of await readdir(join(this.root,"journal"))){if(!file.endsWith(".json"))continue;const j=JSON.parse(await readFile(join(this.root,"journal",file),"utf8")) as Journal;if(j.source.id===source.id && (j.state==="committed" || j.state==="undone"))return j.state==="committed"?j.id:null;}

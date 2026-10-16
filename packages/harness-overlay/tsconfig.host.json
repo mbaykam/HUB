@@ -27,6 +27,7 @@
     "src/knowledge-contract.ts",
     "src/knowledge-domain-contract.ts",
     "src/knowledge-relation-contract.ts",
+    "src/knowledge-community-contract.ts",
     "src/automation-contract.ts",
     "src/goal-contract.ts",
     "src/agent-browser-contract.ts",

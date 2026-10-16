@@ -34,10 +34,11 @@ export class KnowledgeArchive {
       // A partial old snapshot must not erase a continuation already stored.
       const messages=new Map((old?.messages??[]).filter(m=>!record.forgetBefore||m.at>record.forgetBefore).map(m=>[m.id,m]));for(const m of record.messages)if(!messages.has(m.id)||!old||record.updatedAt>=old.updatedAt)messages.set(m.id,m);
       const next={...record,createdAt:old?.createdAt??record.createdAt,updatedAt:Math.max(old?.updatedAt??0,record.updatedAt),messages:[...messages.values()]};
-      if(old&&JSON.stringify(old)===JSON.stringify(next))return false;
+      const unchanged=!!old&&JSON.stringify(old)===JSON.stringify(next);
       const md=await this.projectionPath(record.id,!!old);let existing:string|undefined;try{if((await lstat(md)).isSymbolicLink())throw Error("Linked archive file");existing=await readFile(md,"utf8");}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
       if(!old&&existing!==undefined)throw Error("Original source ledger is missing; preserve the existing Markdown before reimporting");
       if(old&&existing!==undefined&&existing.slice(existing.indexOf("\n---\n")+5)!==conversationMarkdown(old).slice(conversationMarkdown(old).indexOf("\n---\n")+5))throw Error("Original conversation was edited externally; preserve that edit and review the archive");
+      if(unchanged&&existing!==undefined)return false;
       // Appending a message does not duplicate the full day-long chat. Only
       // genuine source edits/import revisions need exact old-value history.
       if(old){const edits=old.messages.filter(m=>JSON.stringify(messages.get(m.id))!==JSON.stringify(m)),rawChanged=JSON.stringify(old.raw)!==JSON.stringify(record.raw);if(edits.length||rawChanged)await atomicJson(join(this.root,"archive-history",record.id,digest(JSON.stringify(old))+".json"),{id:old.id,at:old.updatedAt,messages:edits,...(rawChanged?{raw:old.raw}:{})});}

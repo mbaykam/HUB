@@ -14,8 +14,9 @@ The Weixin transport includes adaptations from the MIT-licensed
 Optional downloaded models and third-party dependencies retain their own licenses.
 HUB is independently maintained; upstream attribution does not imply endorsement.
 
-Knowledge lexical candidate filtering includes a TypeScript adaptation of
-Graphify's trigram index, by Safi Shamsi and the Graphify contributors,
+Knowledge lexical candidate filtering and community identity reconciliation
+include TypeScript adaptations of Graphify's trigram index and overlap matcher,
+by Safi Shamsi and the Graphify contributors,
 licensed under Apache License 2.0. Upstream commit and adaptations are recorded
 in resources/licenses/graphify-NOTICE; license texts are preserved there.
 https://github.com/Graphify-Labs/graphify

@@ -17,3 +17,7 @@ and title scoring with English/Turkish normalization; incremental source-edit
 and deletion invalidation; bounded index allocation and full-scan fallback.
 The source renderer, CLI, extractors, model backends and HTML viewer are not bundled.
 The adapted candidate index runs locally and has no model/provider dependency.
+Community identity reconciliation also adapts graphify/cluster.py's
+remap_communities_to_previous at the same pinned commit. HUB changes: string
+identities, sparse overlap counts and membership signatures. The grouping
+algorithm itself is HUB's bounded weighted label propagation, not Leiden.
