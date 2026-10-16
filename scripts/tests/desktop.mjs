@@ -120,6 +120,7 @@ const taskFiles = Object.freeze({
     "knowledge-backups.test.mjs",
     "knowledge-data-neighbors-ui.test.mjs",
     "knowledge-brain-view.test.mjs",
+    "knowledge-scan-coverage.test.mjs",
     "knowledge-snapshot-gate.test.mjs",
     "mobile-session-identity.test.mjs",
     "knowledge-recall-instructions.test.mjs",

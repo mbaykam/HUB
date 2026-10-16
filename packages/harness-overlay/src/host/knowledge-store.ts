@@ -35,6 +35,7 @@ export function memoryExcerpt(body:string,query:string,max=6000,chunk?:Knowledge
   return starts.map(p=>body.slice(p,p+size)).join("\n\n[... original conversation continues ...]\n\n");
 }
 interface Stored extends KnowledgeNode { raw: string; body: string; front: string; path: string;retrieval?:{kind:"lexical"|"semantic"|"domain-navigation";score:number;chunk?:KnowledgeSemanticHit["chunk"]} }
+interface ScanCoverage {files:number;noteSize:number;recordSize:number}
 type SemanticLayout={edges:NonNullable<KnowledgeGraph["similarities"]>;coverage:KnowledgeSimilarityCoverage};
 interface RetiredEvidence {id:string;recordId:string;at:number;sourceHash:string;quoteHash:string}
 interface Journal { id: string; state: "prepared" | "committed" | "undone" | "conflict";forget?:RetiredEvidence; source: KnowledgeSource; changes: { path: string; before: string | null; after: string; id: string;category?:string;beforeCategory?:string }[] }
@@ -88,17 +89,19 @@ export class KnowledgeStore {
     await this.refreshInventory();
     await this.organization.repairPending();
   }
-  async scan(): Promise<Stored[]> {
+  async scan(coverage?:ScanCoverage): Promise<Stored[]> {
     const notes: Stored[] = [];
+    if(coverage){coverage.files=0;coverage.noteSize=0;coverage.recordSize=0;}
     const visit = async (dir: string) => {
       for (const entry of await readdir(join(this.vault, dir), { withFileTypes: true })) {
         if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
         const path = dir ? `${dir}/${entry.name}` : entry.name;
         if (entry.isDirectory()) { if (!/^(sessions|sources|control|Attachments)$/i.test(entry.name)) await visit(path); continue; }
         if (!entry.isFile() || !/\.md$/i.test(entry.name)) continue;
+        if(coverage)coverage.files++;
         const full = await this.file(path), info = await lstat(full);
-        if(info.size>80_000_000)continue;
-        if(info.size>512_000){const handle=await open(full,"r");try{const head=Buffer.alloc(5000),{bytesRead}=await handle.read(head,0,head.length,0);if(!/^hub_kind:\s*conversation\s*$/m.test(head.subarray(0,bytesRead).toString("utf8")))continue;}finally{await handle.close();}}
+        if(info.size>80_000_000){if(coverage)coverage.recordSize++;continue;}
+        if(info.size>512_000){const handle=await open(full,"r");try{const head=Buffer.alloc(5000),{bytesRead}=await handle.read(head,0,head.length,0);if(!/^hub_kind:\s*conversation\s*$/m.test(head.subarray(0,bytesRead).toString("utf8"))){if(coverage)coverage.noteSize++;continue;}}finally{await handle.close();}}
         const raw = await readFile(full, "utf8");
         const front = raw.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)?.[0] ?? "";
         const body = raw.slice(front.length);
@@ -117,7 +120,7 @@ export class KnowledgeStore {
     return new KnowledgeLinkIndex(notes).resolve(target,from);
   }
   async graph(): Promise<KnowledgeGraph> {
-    const notes = (await this.scan()).filter(n=>n.body.trim()), edges: KnowledgeGraph["edges"] = [],documentRelations:NonNullable<KnowledgeGraph["relationships"]>=[],present=new Set(notes.map(n=>n.id)),links=new KnowledgeLinkIndex(notes),edgeKeys=new Set<string>(); let unresolved = 0;
+    const coverage={files:0,noteSize:0,recordSize:0},notes = (await this.scan(coverage)).filter(n=>n.body.trim()), edges: KnowledgeGraph["edges"] = [],documentRelations:NonNullable<KnowledgeGraph["relationships"]>=[],present=new Set(notes.map(n=>n.id)),links=new KnowledgeLinkIndex(notes),edgeKeys=new Set<string>(); let unresolved = 0;
     const addEdge=(edge:KnowledgeGraph["edges"][number])=>{const key=edge.source+"\0"+edge.target;if(edgeKeys.has(key))return false;edgeKeys.add(key);edges.push(edge);return true;};
     for (const note of notes) for (const link of note.body.matchAll(wiki)) {
       const target = links.resolve(link[1]!,note);
@@ -133,7 +136,8 @@ export class KnowledgeStore {
     }
     const registry=await this.organization.domains(),roots=relationRoots(registry),relationships=[...documentRelations,...await this.organization.canonicalRelations()].filter(r=>present.has(r.sourceId)&&present.has(r.targetId)).map(r=>({...r,scope:relationScope(r.sourceId,r.targetId,roots)}));
     if(similarities)similarities=similarities.filter(e=>relationScope(e.source,e.target,roots)!=="long"||e.score>=.72);
-    return { secondBrain: true, nodes: notes.map(({id,title,permalink,hash,modifiedAt,kind,protected:readonly}) => ({id,title,permalink,hash,modifiedAt,kind,protected:readonly})), edges,relationships,...(similarities?{similarities,similarityCoverage}:{}),domains:registry.domains,memberships:registry.memberships.filter(m=>present.has(m.nodeId)).map(({nodeId,domainId})=>({nodeId,domainId})),registryRevision:registry.revision,maxActiveDomains:registry.maxActiveDomains,page: 1, hasMore: false, partial: false, omittedRelations: unresolved, hiddenNodes: 0 };
+    const omitted=coverage.noteSize+coverage.recordSize;
+    return { secondBrain: true, nodes: notes.map(({id,title,permalink,hash,modifiedAt,kind,protected:readonly}) => ({id,title,permalink,hash,modifiedAt,kind,protected:readonly})), edges,relationships,...(similarities?{similarities,similarityCoverage}:{}),sourceCoverage:{...coverage,indexed:notes.length,omitted},domains:registry.domains,memberships:registry.memberships.filter(m=>present.has(m.nodeId)).map(({nodeId,domainId})=>({nodeId,domainId})),registryRevision:registry.revision,maxActiveDomains:registry.maxActiveDomains,page: 1, hasMore: false, partial: omitted>0, omittedRelations: unresolved, hiddenNodes: omitted };
   }
   async neighbors(id:string,cursor="",limit=30){if(!Number.isInteger(limit)||limit<1||limit>100)throw Error("Choose a neighborhood page size between 1 and 100");const graph=await this.graph(),topology=new KnowledgeTopology(graph);if(!topology.nodes.has(id))throw Error("Knowledge record missing");const all=topology.neighbors(id),offset=cursor?all.findIndex(r=>r.id===cursor)+1:0;if(cursor&&offset===0)throw Error("Neighborhood changed; refresh before continuing");const page=all.slice(offset,offset+limit);return {recordId:id,total:all.length,items:page.map(r=>({...r,node:topology.nodes.get(r.sourceId===id?r.targetId:r.sourceId)!})),nextCursor:offset+page.length<all.length?page.at(-1)!.id:null};}
   async connectionPath(sourceId:string,targetId:string){return new KnowledgeTopology(await this.graph()).path(sourceId,targetId);}
@@ -197,8 +201,11 @@ export class KnowledgeStore {
   exclusive<T>(task: () => Promise<T>): Promise<T> { return this.mutations.run(()=>{const next=this.tail.then(task,task); this.tail=next.catch(()=>{}); return next;}); }
   async noteDates(){return Object.fromEntries(Object.entries(await this.metadata()).map(([id,n])=>[id,n.completedAt]));}
   async refreshInventory(){return this.exclusive(async()=>{
-    const notes=await this.scan(),meta=await this.metadata(),present=new Set(notes.map(n=>n.id));let changed=false,deleted=false;
-    for(const id of Object.keys(meta))if(!present.has(id)&&!meta[id]?.deleted){meta[id]!.deleted=true;changed=true;deleted=true;}
+    const coverage={files:0,noteSize:0,recordSize:0},notes=await this.scan(coverage),meta=await this.metadata(),present=new Set(notes.map(n=>n.id));let changed=false,deleted=false;
+    // An incomplete inventory cannot prove that an identity disappeared: a
+    // source may have grown or been renamed beyond the existing scan limits.
+    // Do not turn an indexing omission into a durable global forget cutoff.
+    if(!coverage.noteSize&&!coverage.recordSize)for(const id of Object.keys(meta))if(!present.has(id)&&!meta[id]?.deleted){meta[id]!.deleted=true;changed=true;deleted=true;}
     if(deleted)await this.saveForgetPolicy(Date.now());
     for(const n of notes){const prior=meta[n.id];if(!prior){meta[n.id]={completedAt:Math.round(n.modifiedAt),sources:[],title:n.title,path:n.path,lastHash:n.hash};changed=true;}
       else if(!prior.lastHash || prior.lastHash!==n.hash){prior.completedAt=Math.max(prior.completedAt,Math.round(n.modifiedAt));prior.lastHash=n.hash;prior.title=n.title;prior.path=n.path;changed=true;}}

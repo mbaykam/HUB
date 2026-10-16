@@ -28,7 +28,7 @@ type Relation=NonNullable<KnowledgeGraph["relationships"]>[number];
 export interface KnowledgeConnectionPath {
   sourceId:string;targetId:string;found:boolean;complete:boolean;
   nodes:KnowledgeNode[];relations:Relation[];visited:number;inspectedRelations:number;
-  limitedBy?:"depth"|"records"|"relations";
+  limitedBy?:"depth"|"records"|"relations"|"source-coverage";
   meaning:"A chain of recorded relationships, not proof of causation or a new fact";
 }
 
@@ -38,7 +38,9 @@ export interface KnowledgeConnectionPath {
 export class KnowledgeTopology {
   readonly nodes:Map<string,KnowledgeNode>;
   private readonly incidence=new Map<string,Relation[]>();
-  constructor(graph:Pick<KnowledgeGraph,"nodes"|"relationships">){
+  private readonly partial:boolean;
+  constructor(graph:Pick<KnowledgeGraph,"nodes"|"relationships">&{partial?:boolean}){
+    this.partial=!!graph.partial;
     this.nodes=new Map(graph.nodes.map(node=>[node.id,node]));
     for(const relation of graph.relationships??[]){
       if(!this.nodes.has(relation.sourceId)||!this.nodes.has(relation.targetId)||relation.status!=="active")continue;
@@ -76,6 +78,7 @@ export class KnowledgeTopology {
     }
     const ids=found?[targetId]:[],relations:Relation[]=[];
     if(found){let id=targetId;while(id!==sourceId){const parent=parents.get(id)!;relations.unshift(parent.relation);ids.unshift(parent.id);id=parent.id;}}
+    if(!found&&this.partial)limitedBy??="source-coverage";
     return {sourceId,targetId,found,complete:found||!limitedBy,nodes:ids.map(id=>this.nodes.get(id)!),relations,visited:depths.size,inspectedRelations:inspected,...(!found&&limitedBy?{limitedBy}:{}),meaning:"A chain of recorded relationships, not proof of causation or a new fact"};
   }
 }
