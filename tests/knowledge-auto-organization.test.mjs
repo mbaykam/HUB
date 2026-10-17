@@ -57,6 +57,14 @@ test('a focused retry uses only domain IDs, preserves notes, and cannot write li
  unsafe=false;await c.retry(pass.jobIds[0]);await c.tick(true);assert.equal(c.jobs.get(pass.jobIds[0]).outcome,'organized');assert.equal((await store.organization.domains()).memberships[0].nodeId,'brain-one');assert.equal(await readFile(original.path,'utf8'),original.raw);await c.dispose();
 });
 
+test('model-declared local slugs resolve a new hierarchy, while note IDs and dangling targets remain invalid',async t=>{
+ const {store,note}=await fixture(t),original=await note('brain-one','I am building HUB.');let variant='local';
+ const c=new KnowledgeCurator(store,async()=>JSON.stringify({version:2,expectedRegistryRevision:0,decision:'organize',reason:'Source classification',tags:[],domainOps:variant==='local'?[{type:'create',ref:'personal-knowledge-system',title:'Projects',evidence:'building HUB.'},{type:'create',ref:'agent-file-settings',title:'HUB',parentId:'personal-knowledge-system',evidence:'building HUB.'},{type:'assign',domainId:'agent-file-settings',evidence:'building HUB.'}]:[{type:'create',ref:variant==='note'?'brain-one':'new-valid',title:'Do not commit',evidence:'building HUB.'},{type:'assign',domainId:variant==='note'?'brain-one':'undeclared-domain',evidence:'building HUB.'}],relations:[],reflections:[],profileSuggestions:[]}));
+ await c.initialize();await c.configure({...c.settings,mode:'manual'});
+ for(const mode of ['note','missing']){variant=mode;const failed=await c.reorganize(['brain-one'],[],'domains');await c.tick(true);assert.equal(c.jobs.get(failed.jobIds[0]).status,'failed');assert.equal((await store.organization.domains()).domains.length,0);}
+ variant='local';const pass=await c.reorganize(['brain-one'],[],'domains');await c.tick(true);assert.equal(c.jobs.get(pass.jobIds[0]).outcome,'organized');const registry=await store.organization.domains(),parent=registry.domains.find(d=>d.title==='Projects'),child=registry.domains.find(d=>d.title==='HUB');assert.equal(child.parentId,parent.id);assert.equal(registry.memberships[0].domainId,child.id);assert.equal(registry.memberships[0].nodeId,'brain-one');assert.equal(await readFile(original.path,'utf8'),original.raw);await c.dispose();
+});
+
 test('review mode waits for approval; manual, disabled and excluded channels never enqueue automatic note work',async t=>{
   const {store,note}=await fixture(t);await note('brain-one','I am building HUB.');let calls=0;
   const c=new KnowledgeCurator(store,async()=>{calls++;return JSON.stringify({version:1,decision:'organize',reason:'Review the topic',tags:['project'],relations:[],reflections:[],profileSuggestions:[]});});await c.initialize();

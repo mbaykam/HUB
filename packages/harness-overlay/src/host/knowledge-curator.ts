@@ -5,7 +5,7 @@ import { KnowledgeStore, atomicJson, digest, validatePlan, memoryExcerpt } from 
 import type { KnowledgeJob, KnowledgePlan, KnowledgeSettings, KnowledgeSource, KnowledgeStatus, KnowledgeRecall, KnowledgeCuration } from "../knowledge-contract.ts";
 import { defaultKnowledgeSettings } from "../knowledge-contract.ts";
 import {cleanKnowledgeSource} from "./knowledge-evidence.ts";
-import {organizationPrompt,validateCuration} from "./knowledge-organization.ts";
+import {organizationPrompt,validateCuration,normalizeCurationReferences} from "./knowledge-organization.ts";
 import {changeKnowledgeDomains} from "./knowledge-domains.ts";
 import {isQuotaFailure} from "./operation-failure.ts";
 import type {ProviderGate} from "./provider-gate.ts";
@@ -143,7 +143,7 @@ export class KnowledgeCurator {
     if(job.source.completedAt<=await this.store.cutoff()){job.status="done";job.outcome="skipped";job.reason="Skipped: source is older than the saved forget policy.";await atomicJson(this.jobFile(job.id),job);return;}
     if(sourceChannel(job.source)==="workers"&&settings.assistantEvidence==="confirmed-only"){job.status="done";job.outcome="archive-only";job.reason="Görev sonucu arşivlendi. Seçili kurala göre kalıcı bilgi için kullanıcı doğrulaması gerekiyor.";await atomicJson(this.jobFile(job.id),job);return;}
     const candidates=(await this.store.search(job.source.content,12)).map(n=>({...n,contentHash:digest(n.body),body:memoryExcerpt(n.body,job.source.content,6000,n.retrieval?.chunk)}));
-    const graph=await this.store.graph(),focus=job.pass?.focus??(job.pass&&job.id.startsWith("brain-organize-")?"domains":undefined),prompt=redactKnowledgeSecrets(organizationPrompt(job.source,candidates,settings,await this.store.organization.domains(),graph.communityCandidates,graph.nodes.find(n=>n.id===job.source.conversationId)?.kind??"conversation",focus));
+    const graph=await this.store.graph(),registry=await this.store.organization.domains(),focus=job.pass?.focus??(job.pass&&job.id.startsWith("brain-organize-")?"domains":undefined),prompt=redactKnowledgeSecrets(organizationPrompt(job.source,candidates,settings,registry,graph.communityCandidates,graph.nodes.find(n=>n.id===job.source.conversationId)?.kind??"conversation",focus));
     const reserve=((Buffer.byteLength(prompt)+12000)*settings.inputPrice+6000*settings.outputPrice)/1e6;
     if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget){this.status="budget-paused";return;}
     this.costs[day()]=(this.costs[day()]??0)+reserve;await atomicJson(join(this.store.root,"costs.json"),this.costs);
@@ -155,6 +155,7 @@ export class KnowledgeCurator {
       let raw=JSON.parse(result.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"") );
       // A legacy no-op is harmless; legacy note-authoring proposals are refused.
       if(!raw.version&&["skip","archive-only"].includes(raw.decision)&&!raw.changes?.length)raw={...raw,version:1,tags:[],relations:[],reflections:[],profileSuggestions:[]};
+      raw=normalizeCurationReferences(raw,[...graph.nodes.map(n=>n.id),...registry.domains.map(d=>d.id)]);
       validateCuration(raw,job.source,graph.nodes.map(n=>n.id));
       if(raw.version===2)for(const relation of raw.relations){const target=candidates.find(n=>n.id===relation.targetId);if(!target||!target.body.includes(relation.targetEvidence!))throw Error("Relation target was not read or its quote was invented");relation.targetHash=target.contentHash;}
       const plan=proposed=raw as KnowledgeCuration;

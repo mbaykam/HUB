@@ -99,6 +99,19 @@ function userText(source:KnowledgeSource){
   if(at>=0)try{return JSON.parse(source.content.slice(at+KNOWLEDGE_MESSAGE_LABEL.length)).filter((m:any)=>m.role==="user").map((m:any)=>m.text).join("\n");}catch{return "";}
   return source.authorRole==="user"?source.content:"";
 }
+/** Model-local slugs are temporary references, not persistent identities.
+ * Only explicitly declared, unambiguous slugs may acquire the host namespace. */
+export function normalizeCurationReferences(value:any,knownIds:string[]){
+  if(value?.version!==2||!Array.isArray(value.domainOps))return value;
+  const declared=new Set<string>(value.domainOps.filter((op:any)=>op?.type==="create"&&typeof op.ref==="string").map((op:any)=>op.ref)),known=new Set(knownIds),replacements=new Map<string,string>();
+  for(const ref of declared){
+    if(/^new-[a-zA-Z0-9_-]{1,60}$/.test(ref)||known.has(ref)||!/^[a-zA-Z][a-zA-Z0-9_-]{0,99}$/.test(ref)||/^[a-f0-9-]{36}$/i.test(ref))continue;
+    const canonical="new-"+digest(ref).slice(0,24);if(declared.has(canonical))throw Error("Ambiguous temporary domain references");replacements.set(ref,canonical);
+  }
+  if(!replacements.size)return value;
+  const remap=(operation:any):any=>{if(!operation||typeof operation!=="object"||Array.isArray(operation))return operation;const op={...operation};for(const key of ["ref","parentId","domainId","id","targetId"])if(typeof op[key]==="string"&&replacements.has(op[key]))op[key]=replacements.get(op[key]);if(op.type==="propose")op.operation=remap(op.operation);return op;};
+  return {...value,domainOps:value.domainOps.map(remap)};
+}
 export function validateCuration(value:any,source:KnowledgeSource,known:string[]):asserts value is KnowledgeCuration {
   if(![1,2].includes(value?.version)||!["skip","archive-only","organize"].includes(value.decision)||typeof value.reason!=="string"||value.reason.length>600||!Array.isArray(value.tags)||value.tags.length>12||value.tags.some((t:any)=>typeof t!=="string"||!t.trim()||t.length>60))throw Error("Invalid organization plan");
   if(value.version===1&&(value.domainOps!==undefined||value.expectedRegistryRevision!==undefined))throw Error("Domain changes require curation version 2");
