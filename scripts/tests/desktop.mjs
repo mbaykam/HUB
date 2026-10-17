@@ -106,6 +106,7 @@ const taskFiles = Object.freeze({
     "automations-ui.test.mjs",
     "automations-host.test.mjs",
     "knowledge-originals.test.mjs",
+    "knowledge-archive-scope.test.mjs",
     "knowledge-assets.test.mjs",
     "knowledge.test.mjs",
     "knowledge-workspace-ui.test.mjs",

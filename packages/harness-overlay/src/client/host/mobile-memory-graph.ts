@@ -3,6 +3,7 @@ import { pwaUiAsset } from "./mobile-ui-update.ts";
 import type { MemoryGraphPage } from "../../memory-graph-contract.ts";
 import type { openMemoryGraph } from "../memory/graph-browser.ts";
 import {projectKnowledgePreview} from "../memory/knowledge-layout.ts";
+import {knowledgeRecordCounts} from "../../knowledge-record-scope.ts";
 import styles from "./mobile-memory-graph.css";
 const installStyles = defineOverlayStyle("hub-memory-graph-tile", styles);
 
@@ -41,7 +42,7 @@ export function installMobileMemoryGraph(container: HTMLElement, root: Document)
         preview.append(line);
       }
       for (const p of positions.values()) { const dot = root.createElementNS("http://www.w3.org/2000/svg", "circle"); dot.setAttribute("cx", String(p.x)); dot.setAttribute("cy", String(p.y)); dot.setAttribute("r",String(Math.max(1.8,Math.min(3.6,3.1-p.depth/1500))));dot.style.fill=p.color;preview.append(dot); }
-      hint.textContent = data.nodes.length ? `${positions.size} shown / ${data.nodes.length}${data.hasMore ? "+" : ""} records · explore` : "No knowledge records yet · open to explore";
+      const counts=knowledgeRecordCounts(data.nodes as {kind?:string}[]);hint.textContent = data.nodes.length ? `${counts.brain} brain notes · ${counts.chats} chats · explore` : "No knowledge records yet · open to explore";
     } catch { data = undefined; preview.replaceChildren(); hint.textContent = "Memory unavailable · tap to retry"; }
   }
   tile.addEventListener("click", async () => {

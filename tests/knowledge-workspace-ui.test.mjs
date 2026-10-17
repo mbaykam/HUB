@@ -38,7 +38,7 @@ async function fixture(t,options={}){
       return {ok:true,json:async()=>structuredClone(note)};
     }
     const query=new URL(url,'https://hub.test').searchParams;
-    const value=query.get('view')==='note'?note:query.get('view')==='search'?{nodes:displayedGraph.nodes}:query.get('view')==='assets'?{assets:[]}:query.get('view')==='graph'?displayedGraph:{vault:'C:/fixture/vault'};
+    const value=query.get('view')==='note'?(options.noteDetails?.[query.get('id')]??note):query.get('view')==='search'?{nodes:displayedGraph.nodes}:query.get('view')==='assets'?{assets:[]}:query.get('view')==='graph'?displayedGraph:{vault:'C:/fixture/vault'};
     return {ok:true,json:async()=>structuredClone(value)};
   };
   const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,displayedGraph,()=>{});
@@ -76,7 +76,7 @@ test('unsaved Knowledge edits survive navigation and closing until explicitly di
   button(root,'Edit').click();
   const editor=root.querySelector('[aria-label="Note Markdown"]');
   editor.value=note.content+'\nUnsaved fixture addition.';editor.dispatchEvent(new view.Event('input'));
-  for(const label of ['Graph','Notes','Attachments','Home','‹ Knowledge']){
+  for(const label of ['Graph','Notes','Chat archive','Attachments','Home','‹ Knowledge']){
     button(root,label).click();await setImmediate();
     assert.equal(dialog.open,true,label+' must not close a dirty note');
     assert.equal(dialog.dataset.mobilePane,'note',label+' must not hide a dirty note');
@@ -170,4 +170,31 @@ test('2D source positions survive manual dragging, note navigation and reopening
   const reset=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'));
   assert.equal(reset['fixture-source-5'],undefined);assert.deepEqual(reset['other-dataset-source'],{x:12,y:34});
   assert.equal(reopened.fixtureCy.nodes().length,98);assert.ok(requests.every(r=>r.method==='GET'));
+});
+
+const sourceChat={id:'conversation-source',title:'Original bilingual chat',kind:'conversation',protected:true,permalink:'Conversations/Source'};
+const brainRecord={...graph.nodes[0],kind:'note'};
+const mixedGraph={nodes:[brainRecord,sourceChat],edges:[{source:noteId,target:sourceChat.id}]};
+test('Notes and Chat archive expose separate searchable lists in the same Knowledge window',async t=>{
+ const {root,view,requests}=await fixture(t,{graph:mixedGraph,openNote:false});
+ assert.match(root.querySelector('[role=status]').textContent,/1 brain notes · 1 chats/);
+ button(root,'Notes').click();assert.equal(root.querySelector('[aria-label="Record collection"]').value,'brain');assert.ok(button(root,'Reading list'));assert.equal(button(root,sourceChat.title),undefined);
+ button(root,'Chat archive').click();assert.equal(root.querySelector('[aria-label="Record collection"]').value,'archive');assert.ok(button(root,sourceChat.title));assert.equal(button(root,'Reading list'),undefined);
+ const search=root.querySelector('[aria-label="Search knowledge"]');search.value='bilingual';search.dispatchEvent(new view.Event('input'));await new Promise(resolve=>view.setTimeout(resolve,280));
+ assert.ok(requests.some(r=>r.url.includes('scope=archive')));assert.equal(button(root,'Reading list'),undefined);assert.ok(requests.every(r=>r.method==='GET'));
+});
+
+test('the full-screen reader is outside its launcher so responsive hidden drawers cannot hide an open modal',async t=>{
+ const {root}=await fixture(t,{graph:mixedGraph,openNote:false}),launcher=root.querySelector('main'),reader=root.querySelector('[data-knowledge-workspace]');
+ assert.equal(reader.parentElement,root.body);launcher.hidden=true;launcher.inert=true;assert.equal(reader.closest('[hidden],[inert]'),null);assert.equal(reader.open,true);
+ button(root,'Chat archive').click();assert.ok(button(root,sourceChat.title));button(root,'Home').click();assert.equal(root.querySelector('[data-knowledge-workspace]'),null);
+});
+
+test('a visible source trail opens the original chat and returns to linked brain information',async t=>{
+ const note={...brainRecord,content:'Original reading plan.',hash:'a'.repeat(64),links:[sourceChat],backlinks:[],sources:[{id:'save-source',conversationId:sourceChat.id,channel:'pwa',completedAt:1}]};
+ const chat={...sourceChat,content:'My original words. Türkçe and English.',hash:'b'.repeat(64),links:[],backlinks:[brainRecord],sources:[]};
+ const {root,requests}=await fixture(t,{graph:mixedGraph,noteDetails:{[noteId]:note,[sourceChat.id]:chat}});
+ let trail=root.querySelector('[data-knowledge-source-trail]');assert.match(trail.textContent,/Source conversations/);assert.equal(trail.querySelectorAll('[data-source-link]').length,1);
+ trail.querySelector('[data-source-link]').click();await setImmediate();assert.equal(root.querySelector('[data-graph-note]>h3').textContent,sourceChat.title);assert.equal(button(root,'Edit').disabled,true);assert.match(root.querySelector('[data-knowledge-source-trail]').textContent,/Linked brain notes/);
+ root.querySelector('[data-knowledge-source-trail] [data-source-link]').click();await setImmediate();assert.equal(root.querySelector('[data-graph-note]>h3').textContent,'Reading list');assert.equal(button(root,'Edit').disabled,false);assert.ok(requests.every(r=>r.method==='GET'));
 });

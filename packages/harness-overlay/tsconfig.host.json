@@ -25,6 +25,7 @@
   },
   "include": [
     "src/knowledge-contract.ts",
+    "src/knowledge-record-scope.ts",
     "src/knowledge-domain-contract.ts",
     "src/knowledge-relation-contract.ts",
     "src/knowledge-community-contract.ts",

@@ -5,12 +5,17 @@ import type {KnowledgeGraph} from "../knowledge-contract.ts";
 import type {KnowledgeCommunitySnapshot} from "../knowledge-community-contract.ts";
 import {atomicJson} from "./knowledge-store.ts";
 const hash=(value:unknown)=>createHash("sha256").update(JSON.stringify(value)).digest("hex");
-function inputFingerprint(graph:KnowledgeGraph){return hash({algorithm:"weighted-label-propagation-v1",nodes:graph.nodes.map(n=>[n.id,n.title]).sort((a,b)=>a[0]!.localeCompare(b[0]!)),edges:graph.relationships?graph.relationships.map(r=>[r.sourceId,r.targetId,r.status,r.interpretation]).sort():graph.edges.map(e=>[e.source,e.target]).sort(),similarities:graph.similarities?.map(e=>[e.source,e.target,e.score]).sort(),memberships:graph.memberships?.map(m=>[m.nodeId,m.domainId]).sort(),source:graph.sourceCoverage,partial:graph.partial,semantic:graph.similarityCoverage});}
+function brainGraph(graph:KnowledgeGraph):KnowledgeGraph{
+  const nodes=graph.nodes.filter(n=>n.kind!=="conversation"),ids=new Set(nodes.map(n=>n.id));
+  return {...graph,nodes,edges:graph.edges.filter(e=>ids.has(e.source)&&ids.has(e.target)),relationships:graph.relationships?.filter(e=>ids.has(e.sourceId)&&ids.has(e.targetId)),similarities:graph.similarities?.filter(e=>ids.has(e.source)&&ids.has(e.target)),memberships:graph.memberships?.filter(m=>ids.has(m.nodeId))};
+}
+function inputFingerprint(graph:KnowledgeGraph){return hash({algorithm:"weighted-label-propagation-v1",scope:"brain-only-v1",nodes:graph.nodes.map(n=>[n.id,n.title]).sort((a,b)=>a[0]!.localeCompare(b[0]!)),edges:graph.relationships?graph.relationships.map(r=>[r.sourceId,r.targetId,r.status,r.interpretation]).sort():graph.edges.map(e=>[e.source,e.target]).sort(),similarities:graph.similarities?.map(e=>[e.source,e.target,e.score]).sort(),memberships:graph.memberships?.map(m=>[m.nodeId,m.domainId]).sort(),source:graph.sourceCoverage,partial:graph.partial,semantic:graph.similarityCoverage});}
 
 /** Derived suggestions only. Confidence weights and a degree normalization
  * prevent tentative links and generic hubs from dominating dense local groups.
  * This bounded deterministic label propagation is NOT a Leiden implementation. */
 export function discoverKnowledgeCommunities(graph:KnowledgeGraph,previous?:KnowledgeCommunitySnapshot,at=Date.now()):KnowledgeCommunitySnapshot{
+  graph=brainGraph(graph);
   const nodes=[...graph.nodes].sort((a,b)=>a.id.localeCompare(b.id)).slice(0,5000),known=new Set(nodes.map(n=>n.id)),pairs=new Map<string,{a:string;b:string;weight:number}>();
   const link=(source:string,target:string,weight:number)=>{
     if(source===target||!known.has(source)||!known.has(target)||!Number.isFinite(weight)||weight<=0)return;
@@ -61,7 +66,7 @@ function validCommunityCache(value:any):value is KnowledgeCommunitySnapshot{
 export class KnowledgeCommunities {
   private saved?:KnowledgeCommunitySnapshot;private loaded=false;private tail:Promise<unknown>=Promise.resolve();
   constructor(readonly root:string){}
-  update(graph:KnowledgeGraph){const next=this.tail.then(async()=>{
+  update(graph:KnowledgeGraph){graph=brainGraph(graph);const next=this.tail.then(async()=>{
     const path=join(this.root,"indexes","community-candidates.json");
     if(!this.loaded){this.loaded=true;try{const value=JSON.parse(await readFile(path,"utf8"));if(validCommunityCache(value))this.saved=value;}catch{/* Derived cache can be rebuilt; original records are unaffected. */}}
     if(this.saved?.inputHash===inputFingerprint(graph))return this.saved;

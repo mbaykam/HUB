@@ -33,7 +33,7 @@ export function openMemoryGraph(container: HTMLElement, root: Document, initial:
   const noteButtons = new Map<string, HTMLButtonElement>(); let activeNote: string | undefined;
   const back = button("‹ Graph", () => { noteRequest?.abort(); article.hidden = true; canvas.hidden = searching; list.hidden = false; toolbar.hidden = false; searchForm.hidden = false; cy.resize(); (noteButtons.get(activeNote ?? "") ?? search).focus(); });
   article.append(back, noteTitle, noteBody, memoryActions);
-  dialog.append(header, status, searchForm, toolbar, canvas, list, article); container.append(dialog); dialog.showModal();
+  dialog.append(header, status, searchForm, toolbar, canvas, list, article); root.body.append(dialog); dialog.showModal();
   const cy = cytoscape({ container: canvas, elements: [], minZoom: 0.25, maxZoom: 4, pixelRatio: Math.min(root.defaultView!.devicePixelRatio || 1, 2),
     style: [
       { selector: "node", style: { label: "data(label)", "background-color": "#91d0c2", width: 23, height: 23, color: "#e4e8f2", "font-size": 12, "min-zoomed-font-size": 10, "text-valign": "bottom", "text-margin-y": 9, "text-wrap": "ellipsis", "text-max-width": "110px", "border-color": "#cbf7e6", "border-width": 1 } },

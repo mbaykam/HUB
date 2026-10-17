@@ -22,6 +22,27 @@ Set captureSince once to your activation time in Unix milliseconds; it limits ol
 
 One conversation has one stable archive identity and one graph entry. Public messages, dates, speaker roles, interruptions and failures survive without model credits. Private JSON preserves originals; Conversations/ contains readable Markdown projections. Native history remains authoritative for the full runtime/tool transcript. Captured original files live under Attachments/; URLs remain in their original messages. Normal continuations do not duplicate a full day-long chat for every message. Source edits have separate history; a human edit to a projected body stops automatic replacement.
 
+## Chat archive and brain notes
+
+The same Knowledge graph shows two separate collections. **Chat archive** is a
+dedicated cloud for original conversations, with its own list and search. It is
+not a domain, consumes no domain slots and does not influence suggested brain
+groups. **Notes** lists the brain information you explicitly chose to save.
+Capturing a chat does not automatically turn it into topic notes.
+
+When a saved note records its originating chat, **Source conversations** opens
+that original directly. The conversation lists its **Linked brain notes** in
+return. Existing document links and evidence-backed AI relationships also work
+across the boundary. Cyan dashed connections distinguish archive links from
+within-domain and cross-domain links. An origin reference records where a note
+came from; it does not claim that every statement in the source is verified.
+Both collections remain available to assistants' historical recall.
+
+This separation preserves existing original files and organization history.
+Legacy conversation memberships no longer participate in effective brain-domain
+organization. Import admission and quarantine rules still apply; importing a
+history never admits unselected conversations automatically.
+
 ## What Curator may do
 
 Open **Settings → HUB → Assistants → Knowledge AI**. Select an explicit model, sources, timing, automatic/review/manual behavior, relation limits, reflection preferences and estimated budgets. Annotation language never translates the original conversation. Turkish and English can coexist.
@@ -32,17 +53,18 @@ Relationships and reflection live in private metadata. Valid relationships also 
 
 ## Domains and the brain view
 
-Open **Knowledge → Domains** to organize your records. Start with a few broad life
+Open **Knowledge → Domains** to organize your brain notes. Start with a few broad life
 domains, then put specific projects or subjects in subdomains. The default limit
 is seven active main domains; **Domain limit** lets you choose between one and
 twenty. Subdomains do not consume main-domain slots. Deactivating a topic keeps
-its sources searchable. A conversation can belong to several domains.
+its sources searchable. A brain note can belong to several domains; original
+conversations stay in Chat archive.
 
 Knowledge AI can propose organization from source evidence. Renaming, merging,
 moving or deactivating domains requires review. You can also manage memberships
 yourself and undo the latest compatible change; a newer independent edit is
-preserved. **Organize records** queues only the records you select. For a long
-conversation, preview and choose an excerpt first. This uses your existing model,
+preserved. **Organize records** queues only the brain notes you select. For a long
+note, preview and choose an excerpt first. This uses your existing model,
 mode and budget, and never rewrites the original.
 
 **Suggested groups** finds clusters locally from existing relationships and

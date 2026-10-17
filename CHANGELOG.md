@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.50
+
+- Separate original chats into a Chat archive cloud and searchable list on the same Knowledge screen, outside brain domains and suggested groups.
+- Connect saved information to its original conversation using visible source links, including retained legacy receipts; preserve original text, archive history and recall.
+- Distinguish archive connections in 2D and 3D and keep the full-screen reader visible when its launching panel changes at a responsive breakpoint.
+
 ## 0.4.49
 
 - Centralize speech engines, language detection and quality in Settings; keep character voice choices and cached auditions separate while preserving existing selections and active calls.

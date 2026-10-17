@@ -1,3 +1,3 @@
 export interface KnowledgeEvidence {sourceId:string;contentHash:string;quote:string;start?:number;end?:number;messageId?:string;assetId?:string;locator?:string;role?:"user"|"assistant"|"task"|"mixed";occurredAt?:number}
 export interface KnowledgeRelation {id:string;sourceId:string;targetId:string;predicate:string;direction:"directed"|"undirected";origin:"human"|"document"|"curator";interpretation:boolean;evidence:KnowledgeEvidence[];createdAt:number;updatedAt:number;status:"active"|"retired";domainScope?:{sourceDomainId:string;targetDomainId:string}}
-export type KnowledgeRelationScope="short"|"long"|"unclassified";
+export type KnowledgeRelationScope="short"|"long"|"unclassified"|"archive";
