@@ -187,7 +187,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
         if(view==="import-batches"){send(res,200,await imports.list(Number(query.get("offset")??0)));return;}
         if(view==="import-batch"){send(res,200,await imports.preview(query.get("id")??"",Number(query.get("offset")??0)));return;}
         if(view==="import-record"){send(res,200,await imports.record(query.get("id")??"",query.get("record")??"",Number(query.get("offset")??0)));return;}
-        if(view==="domains"){send(res,200,{...await store.organization.domains(),nodes:(await store.scan()).filter(n=>n.kind!=="conversation").map(({id,title,body})=>({id,title,chars:body.length}))});return;}
+        if(view==="domains"){send(res,200,{...await store.organization.domains(),nodes:(await store.scan()).filter(n=>n.kind!=="conversation"&&n.body.trim()).map(({id,title,body})=>({id,title,chars:body.length}))});return;}
         if(view==="organization-source"){send(res,200,await store.organizationSource(query.get("id")??"",Number(query.get("offset")??0)));return;}
         if(view==="communities"||view==="community"){
           const offset=Number(query.get("offset")??0);if(!Number.isSafeInteger(offset)||offset<0)throw Error("Invalid group page");
@@ -238,7 +238,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       }else if(command.action==="backup-restore-copy"){send(res,200,await backups.restoreCopy(command.id));return;
       }else if(command.action==="domain-undo"){send(res,200,await store.organization.undoDomains(command.revision,command.id));return;
       }else if(command.action==="domain-review"){if(typeof command.approve!=="boolean")throw Error("Choose approve or reject");send(res,200,await store.organization.reviewDomain(command.revision,command.id,command.approve,command.previewHash));return;
-      }else if(command.action==="reorganize"){send(res,200,await curator.reorganize(command.nodeIds,command.windows));return;
+      }else if(command.action==="reorganize"){send(res,200,await curator.reorganize(command.nodeIds,command.windows,command.focus));return;
       }else if(command.action==="resume-restored-work"){send(res,200,await curator.resumeRestoredWork());return;
       }else if(command.action==="repair-projections"){await curator.repairProjections();send(res,200,{ok:true});return;
       }else if(command.action==="settings"){

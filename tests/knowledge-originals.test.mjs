@@ -44,6 +44,19 @@ test('continuations preserve original identities, prior messages and relation me
  const extended={...c,updatedAt:at+10,messages:[...c.messages,{id:'10',role:'user',at:at+10,text:'A continuation\n---\nwith a divider.'}]};await store.archive.put(extended);await store.archive.put(c);assert.equal((await store.archive.read(c.id)).messages.length,3);assert.equal((await store.scan()).length,1);
  const path=join(store.vault,'Conversations',c.id+'.md');assert.equal((await store.scan()).find(n=>n.id===c.id).front.includes('hub_related:'),true);await writeFile(path,(await readFile(path,'utf8'))+'Human change.');await assert.rejects(store.archive.put({...extended,updatedAt:at+11}),/edited externally/);assert.equal((await store.note(c.id)).content.endsWith('Human change.'),true);
 });
+
+test('Windows line endings preserve original body bytes during link projection and survive continuation',async t=>{
+ const {store}=await fixture(t),c=original('windows-chat');await store.archive.put(c);
+ const path=join(store.vault,'Conversations',c.id+'.md'),canonical=await readFile(join(store.root,'conversations',c.id+'.json'),'utf8');
+ const windows=(await readFile(path,'utf8')).replace(/\r?\n/g,'\r\n');await writeFile(path,windows);
+ const body=windows.slice(windows.match(/^---\r\n[\s\S]*?\r\n---\r\n/)[0].length);
+ await store.archive.projectRelations(c.id,['Notes/Related source']);
+ const linked=await readFile(path,'utf8');assert.equal(linked.slice(linked.match(/^---\r\n[\s\S]*?\r\n---\r\n/)[0].length),body);assert.match(linked,/hub_related: \["\[\[Notes\/Related source\]\]"\]\r\n/);
+ await store.archive.projectRelations(c.id,['Notes/Related source']);assert.equal(await readFile(path,'utf8'),linked);assert.equal(await readFile(join(store.root,'conversations',c.id+'.json'),'utf8'),canonical);
+ await store.archive.put({...c,updatedAt:at+12,messages:[...c.messages,{id:'12',role:'user',text:'A later original message.',at:at+12}]});
+ const continued=await readFile(path,'utf8');assert.ok(continued.includes(body.trimEnd()));assert.equal((continued.match(/^hub_related:/gm)??[]).length,1);assert.match(continued,/A later original message/);
+ await writeFile(path,continued+'Actual human edit.');await assert.rejects(store.archive.projectRelations(c.id,['Notes/Other']),/edited externally/);assert.equal(await readFile(path,'utf8'),continued+'Actual human edit.');
+});
 test('long imported chats with regeneration branches stay a single source; full export and late text survive',async t=>{
  const {store}=await fixture(t),long='Start. '+('x'.repeat(600000))+' LATE_UNIQUE_FACT';const raw={id:'one-export',title:'Bilingual project',create_time:1700000000,mapping:{u:{parent:null,children:['a','b'],message:{id:'u',author:{role:'user'},content:{parts:[long]}}},a:{parent:'u',children:[],message:{id:'a',author:{role:'assistant'},content:{parts:['Türkçe yanıt']}}},b:{parent:'u',children:[],message:{id:'b',author:{role:'assistant'},content:{parts:['English response']}}}}};
  const preview=previewKnowledgeImport([{name:'conversations.json',body:JSON.stringify([raw])}]);assert.equal(preview.records.length,1);await store.archive.put(preview.records[0]);assert.equal((await store.scan()).length,1);assert.equal((await store.archive.read(preview.records[0].id)).raw.mapping.u.message.content.parts[0],long);assert.equal(preview.records[0].messages.length,3);assert.ok(conversationSources(preview.records[0]).every(s=>s.content.length<16000));assert.match(memoryExcerpt(long,'LATE_UNIQUE_FACT'),/LATE_UNIQUE_FACT/);

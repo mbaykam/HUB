@@ -43,6 +43,20 @@ test('a considered version is not charged every scan or restart; changing its or
   await writeFile(original.path,original.raw+'\nA human correction.');await c.tick();assert.equal(c.jobs.size,2);await drain(c);assert.equal(calls,2);await c.dispose();
 });
 
+test('empty legacy memory files are not unassigned brain records or automatic model work',async t=>{
+ const {store,note}=await fixture(t);await note('empty-memory',' \r\n\t');await note('real-note','A useful original note.');
+ const c=new KnowledgeCurator(store,async()=>skip);await c.initialize();await c.tick();assert.equal(c.jobs.size,1);assert.equal((await c.snapshot()).organization.unassigned,1);await c.dispose();
+});
+
+test('a focused retry uses only domain IDs, preserves notes, and cannot write links or profile suggestions',async t=>{
+ const {store,note}=await fixture(t),original=await note('brain-one','I am building HUB.');let unsafe=true;
+ const c=new KnowledgeCurator(store,async prompt=>{
+  assert.match(prompt,/DOMAIN ASSIGNMENT pass only/);assert.match(prompt,/current record ID and related note IDs are NEVER domain IDs/);assert.match(prompt,/create BEFORE assign/);
+  return JSON.stringify({version:2,expectedRegistryRevision:0,decision:'organize',reason:'Project classification',tags:[],domainOps:[{type:'create',ref:'new-projects',title:'Projects',evidence:'building HUB.'},{type:'assign',domainId:'new-projects',evidence:'building HUB.'}],relations:[],reflections:unsafe?[{scope:'user',observation:'Unrequested profile inference',evidence:'building HUB.'}]:[],profileSuggestions:[]});
+ });await c.initialize();const pass=await c.reorganize(['brain-one'],[],'domains');await c.tick(true);assert.equal(c.jobs.get(pass.jobIds[0]).status,'failed');assert.equal((await store.organization.domains()).domains.length,0);
+ unsafe=false;await c.retry(pass.jobIds[0]);await c.tick(true);assert.equal(c.jobs.get(pass.jobIds[0]).outcome,'organized');assert.equal((await store.organization.domains()).memberships[0].nodeId,'brain-one');assert.equal(await readFile(original.path,'utf8'),original.raw);await c.dispose();
+});
+
 test('review mode waits for approval; manual, disabled and excluded channels never enqueue automatic note work',async t=>{
   const {store,note}=await fixture(t);await note('brain-one','I am building HUB.');let calls=0;
   const c=new KnowledgeCurator(store,async()=>{calls++;return JSON.stringify({version:1,decision:'organize',reason:'Review the topic',tags:['project'],relations:[],reflections:[],profileSuggestions:[]});});await c.initialize();

@@ -7,6 +7,17 @@ import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
 import {operationFailure} from "./operation-failure.ts";
 import {KnowledgeMutationGate} from "./knowledge-mutation-gate.ts";
 
+function archiveParts(markdown:string){
+  const front=markdown.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)?.[0];
+  if(!front)throw Error("Original archive frontmatter is missing; preserve and review the file");
+  return {front,body:markdown.slice(front.length)};
+}
+const sameArchiveBody=(current:string,record:KnowledgeConversation)=>archiveParts(current).body.replace(/\r\n/g,"\n")===archiveParts(conversationMarkdown(record)).body.replace(/\r\n/g,"\n");
+function withArchiveLinks(markdown:string,line:string){
+  const {front,body}=archiveParts(markdown);
+  return front.replace(/^hub_related: [^\r\n]*\r?\n/gm,"").replace(/(\r?\n)---(\r?\n)$/,(_match,before,after)=>before+line+before+"---"+after)+body;
+}
+
 /** Original messages are canonical private JSON; readable Markdown is a
  * lossless projection. Curator never owns either write path. */
 export class KnowledgeArchive {
@@ -37,24 +48,24 @@ export class KnowledgeArchive {
       const unchanged=!!old&&JSON.stringify(old)===JSON.stringify(next);
       const md=await this.projectionPath(record.id,!!old);let existing:string|undefined;try{if((await lstat(md)).isSymbolicLink())throw Error("Linked archive file");existing=await readFile(md,"utf8");}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
       if(!old&&existing!==undefined)throw Error("Original source ledger is missing; preserve the existing Markdown before reimporting");
-      if(old&&existing!==undefined&&existing.slice(existing.indexOf("\n---\n")+5)!==conversationMarkdown(old).slice(conversationMarkdown(old).indexOf("\n---\n")+5))throw Error("Original conversation was edited externally; preserve that edit and review the archive");
+      if(old&&existing!==undefined&&!sameArchiveBody(existing,old))throw Error("Original conversation was edited externally; preserve that edit and review the archive");
       if(unchanged&&existing!==undefined)return false;
       // Appending a message does not duplicate the full day-long chat. Only
       // genuine source edits/import revisions need exact old-value history.
       if(old){const edits=old.messages.filter(m=>JSON.stringify(messages.get(m.id))!==JSON.stringify(m)),rawChanged=JSON.stringify(old.raw)!==JSON.stringify(record.raw);if(edits.length||rawChanged)await atomicJson(join(this.root,"archive-history",record.id,digest(JSON.stringify(old))+".json"),{id:old.id,at:old.updatedAt,messages:edits,...(rawChanged?{raw:old.raw}:{})});}
       await atomicJson(path,next);
-      const links=existing?.match(/^hub_related: .+$/m)?.[0],projection=conversationMarkdown(next);
-      const temp=md+"."+randomUUID()+".tmp";await writeFile(temp,links?projection.replace("\n---\n","\n"+links+"\n---\n"):projection,{mode:0o600});await rename(temp,md);
+      const links=existing?.match(/^hub_related: [^\r\n]+/m)?.[0],projection=existing?.startsWith("---\r\n")?conversationMarkdown(next).replace(/\r?\n/g,"\r\n"):conversationMarkdown(next);
+      const temp=md+"."+randomUUID()+".tmp";await writeFile(temp,links?withArchiveLinks(projection,links):projection,{mode:0o600});await rename(temp,md);
       return true;
     });this.writes=task.catch(()=>{});return task;
   }
   async drain(){await this.writes;}
   projectRelations(id:string,links:string[]){return this.mutations.run(()=>this.projectRecordRelations(id,links));}
   private projectRecordRelations(id:string,links:string[]){const task=this.writes.then(async()=>{
-    const original=await this.read(id),path=await this.projectionPath(id);if((await lstat(path)).isSymbolicLink())throw Error("Linked archive file");const current=await readFile(path,"utf8"),boundary=current.indexOf("\n---\n")+5;
-    if(current.slice(boundary)!==conversationMarkdown(original).slice(conversationMarkdown(original).indexOf("\n---\n")+5))throw Error("Original body edited externally; relation projection deferred");
+    const original=await this.read(id),path=await this.projectionPath(id);if((await lstat(path)).isSymbolicLink())throw Error("Linked archive file");const current=await readFile(path,"utf8");
+    if(!sameArchiveBody(current,original))throw Error("Original body edited externally; relation projection deferred");
     if(links.some(l=>/[\[\]|\r\n]/.test(l)))throw Error("Invalid Obsidian target");
-    const front=current.slice(0,boundary).replace(/^hub_related: .+\n/gm,""),next=front.replace("\n---\n","\nhub_related: "+JSON.stringify(links.map(l=>"[["+l+"]]"))+"\n---\n")+current.slice(boundary);if(next===current)return;
+    const next=withArchiveLinks(current,"hub_related: "+JSON.stringify(links.map(l=>"[["+l+"]]")));if(next===current)return;
     const temp=path+"."+randomUUID()+".tmp";await writeFile(temp,next,{mode:0o600});if(await readFile(path,"utf8")!==current)throw Error("Conversation metadata changed during projection");await rename(temp,path);
   });this.writes=task.catch(()=>{});return task;}
 }
