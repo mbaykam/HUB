@@ -12,7 +12,10 @@ function archiveParts(markdown:string){
   if(!front)throw Error("Original archive frontmatter is missing; preserve and review the file");
   return {front,body:markdown.slice(front.length)};
 }
-const sameArchiveBody=(current:string,record:KnowledgeConversation)=>archiveParts(current).body.replace(/\r\n/g,"\n")===archiveParts(conversationMarkdown(record)).body.replace(/\r\n/g,"\n");
+// Obsidian/Windows editors may adjust boundary blank lines or line endings.
+// Accept only those formatting differences; write the existing body verbatim.
+const comparableBody=(body:string)=>body.replace(/\r\n/g,"\n").replace(/^\n+|\n+$/g,"");
+const sameArchiveBody=(current:string,record:KnowledgeConversation)=>comparableBody(archiveParts(current).body)===comparableBody(archiveParts(conversationMarkdown(record)).body);
 function withArchiveLinks(markdown:string,line:string){
   const {front,body}=archiveParts(markdown);
   return front.replace(/^hub_related: [^\r\n]*\r?\n/gm,"").replace(/(\r?\n)---(\r?\n)$/,(_match,before,after)=>before+line+before+"---"+after)+body;

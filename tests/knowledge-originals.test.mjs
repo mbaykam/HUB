@@ -48,13 +48,13 @@ test('continuations preserve original identities, prior messages and relation me
 test('Windows line endings preserve original body bytes during link projection and survive continuation',async t=>{
  const {store}=await fixture(t),c=original('windows-chat');await store.archive.put(c);
  const path=join(store.vault,'Conversations',c.id+'.md'),canonical=await readFile(join(store.root,'conversations',c.id+'.json'),'utf8');
- const windows=(await readFile(path,'utf8')).replace(/\r?\n/g,'\r\n');await writeFile(path,windows);
+ const windows=(await readFile(path,'utf8')).replace(/\r?\n/g,'\r\n').replace('\r\n---\r\n','\r\n---\r\n\r\n').replace(/\r\n$/,'');await writeFile(path,windows);
  const body=windows.slice(windows.match(/^---\r\n[\s\S]*?\r\n---\r\n/)[0].length);
  await store.archive.projectRelations(c.id,['Notes/Related source']);
  const linked=await readFile(path,'utf8');assert.equal(linked.slice(linked.match(/^---\r\n[\s\S]*?\r\n---\r\n/)[0].length),body);assert.deepEqual(JSON.parse(linked.split('hub_related: ')[1].split('\r\n')[0]),['[[Notes/Related source]]']);
  await store.archive.projectRelations(c.id,['Notes/Related source']);assert.equal(await readFile(path,'utf8'),linked);assert.equal(await readFile(join(store.root,'conversations',c.id+'.json'),'utf8'),canonical);
  await store.archive.put({...c,updatedAt:at+12,messages:[...c.messages,{id:'12',role:'user',text:'A later original message.',at:at+12}]});
- const continued=await readFile(path,'utf8');assert.ok(continued.includes(body.trimEnd()));assert.equal((continued.match(/^hub_related:/gm)??[]).length,1);assert.ok((await store.note(c.id)).content.includes('A later original message.'));
+ const continued=await readFile(path,'utf8');assert.ok(continued.includes(body.replace(/^\r\n/,'')));assert.equal((continued.match(/^hub_related:/gm)??[]).length,1);assert.ok((await store.note(c.id)).content.includes('A later original message.'));
  await writeFile(path,continued+'Actual human edit.');await assert.rejects(store.archive.projectRelations(c.id,['Notes/Other']),/edited externally/);assert.equal(await readFile(path,'utf8'),continued+'Actual human edit.');
 });
 test('long imported chats with regeneration branches stay a single source; full export and late text survive',async t=>{
