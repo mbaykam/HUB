@@ -53,6 +53,14 @@ session, transcripts, AI context, or the authoritative session-list source.
 The product consumes this additive hook structurally; no upstream source or
 declarations are changed. Removing the PWA contribution restores native rows.
 
+`mobile-unified-recents.patch` combines the conventional HUB/Minke workspace
+and loose chats into one newest-first mobile Recents projection with one
+native overflow control. Named project workspaces remain separate. Native
+visibility filters, row actions and session metadata are reused; no membership,
+archive or session log is changed. Reordering this combined account is disabled
+because its order follows activity. A media-query subscription restores the
+native groups on wide screens without changing saved grouping preferences.
+
 Harness owns adaptive conversation width, the native top-level `details` slot,
 and Harness's whole-session turn rail with deep-history load-and-jump; Minke
 Tabs uses only `ILayout.openDetails/closeDetails`. The former subagent route

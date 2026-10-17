@@ -37,11 +37,11 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   const archiveImages=originalSaveImages?async function(inputs:any[]){const refs=await originalSaveImages.call(attachmentStore,inputs);try{for(let i=0;i<inputs.length;i++){const item=inputs[i],name=item.name??`Image.${item.mediaType.split("/")[1]}`,asset=await store.assets.save(item.data,name);await store.assets.bindImage(refs[i].attachmentId,asset);}}catch{curator.status="capture-needs-attention";}return refs;}:undefined;
   if(archiveImages)attachmentStore.saveImages=archiveImages;
   const message=(text:string)=>createUserMessage({source:{kind:"plugin",plugin:"hub-memory"},content:[{type:"text",text}]});
-  const curator=new KnowledgeCurator(store,async(prompt,settings,signal)=>{
+  const curator=new KnowledgeCurator(store,async(prompt,settings,signal,limits)=>{
     const route={provider:settings.provider,model:settings.model,...(settings.reasoningEffort?{reasoningEffort:settings.reasoningEffort}:{})};
     const resolved=await ctx.llm.resolveCallConfig(route);
     if(resolved.provider!==settings.provider||resolved.model!==settings.model)throw new Error("Curator route changed unexpectedly");
-    return createMemoryGenerator({create:options=>ctx.agents.create(options),message},{...route,maxTokens:6000})(prompt,signal);
+    return createMemoryGenerator({create:options=>ctx.agents.create(options),message},{...route,maxTokens:limits?.maxTokens??6000})(prompt,signal);
   },gate,ctx.hubCharacters?.background?()=>ctx.hubCharacters.background.acquire("knowledge"):undefined);
   const embeddings=config.embeddingPython?new KnowledgeEmbeddings(config.embeddingPython,config.embeddingRoot??join(store.root,"runtime")):undefined;
   if(embeddings){store.rank=(query,notes,limit)=>embeddings.rank(query,notes,limit);store.similarities=notes=>embeddings.layout(notes);void embeddings.start().then(()=>{curator.embedding=embeddings.status;}).catch(()=>{curator.embedding="Local embeddings unavailable · keyword search active";});}

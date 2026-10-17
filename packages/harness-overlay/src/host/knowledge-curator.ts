@@ -12,16 +12,17 @@ import type {ProviderGate} from "./provider-gate.ts";
 import {knowledgeRestoreHold,resumeRestoredKnowledgeWork,type KnowledgeRestoreHold} from "./knowledge-portable.ts";
 import {conversationMarkdown,conversationTextRanges} from "./knowledge-archive.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
-type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal)=>Promise<string>;
+type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limits?:{maxTokens:number})=>Promise<string>;
 const defaults=defaultKnowledgeSettings;
 const day=()=>new Date().toISOString().slice(0,10);
+const quotaRetryDelay=15*60*1000;
 export class KnowledgeCurator {
   readonly store: KnowledgeStore; private generate:Generate; readonly lifetime=new AbortController();
   settings:KnowledgeSettings={...defaults};jobs=new Map<string,KnowledgeJob>(); status="starting"; embedding="Keyword search · local embeddings not installed";
   recalls:KnowledgeRecall[]=[];
   private costs:Record<string,number>={}; private running?:Promise<void>; private writing:Promise<unknown>=Promise.resolve();
   private checked?:{key:string;at:number};
-  private blockedRoute?:{key:string;message:string;quota?:boolean};
+  private blockedRoute?:{key:string;message:string;quota?:boolean;retryAt?:number;failures?:number};
   restoredWork?:KnowledgeRestoreHold;
   constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate,readonly admit?:()=>undefined|(()=>void)){this.store=store;this.generate=generate;}
   async initialize(){
@@ -63,18 +64,57 @@ export class KnowledgeCurator {
     return {passId,queued:ids.length,jobIds:ids,automatic:this.settings.enabled&&this.settings.mode!=="manual"};
   }
   async repairProjections(){await this.store.organization.repairPending();for(const job of this.jobs.values())if(job.error?.code==="KNOWLEDGE_PROJECTION_PENDING"){job.error=undefined;job.reason="Saved organization and Obsidian projection repaired; no model call needed.";await atomicJson(this.jobFile(job.id),job);}this.status="ready";}
+  /** Read-only passes for admitted brain notes missing a domain. The source
+   * version is the durable identity, so a skipped/reviewed/failed version is
+   * not charged again on each scan or restart. Chat originals stay separate. */
+  private async enqueueUnassigned(){
+    if(!this.settings.channels.includes("pwa"))return;
+    const registry=await this.store.organization.domains(),assigned=new Set(registry.memberships.map(m=>m.nodeId)),admission=await this.store.admission.read(),cutoff=await this.store.cutoff();
+    const covered=new Set([...this.jobs.values()].filter(j=>j.pass).map(j=>`${j.source.conversationId}:${j.pass!.sourceHash}`));
+    let queued=0;for(const note of await this.store.scan()){
+      if(note.kind==="conversation"||assigned.has(note.id)||!note.body.trim()||note.body.length>23500||note.modifiedAt<=cutoff)continue;
+      const hash=digest(note.body),version=`${note.id}:${hash}`;if(covered.has(version))continue;
+      const id="brain-organize-"+digest(version),entry=admission.records[note.id];
+      if(await this.enqueue({id,conversationId:note.id,completedAt:Math.max(1,Math.floor(note.modifiedAt)),channel:"pwa",authorRole:"mixed",content:note.body,originalWindow:{contentHash:hash,start:0,end:note.body.length},evidenceVersion:2,...(entry?{importBatchId:entry.batchId,importAdmissionId:entry.receiptId}:{})},{id,sourceHash:hash,policyHash:digest(JSON.stringify(this.settings)),registryRevision:registry.revision}))queued++;
+      covered.add(version);
+      if(queued>=10)break;
+    }
+  }
+  private async recoverQuota(){
+    const blocked=this.blockedRoute;if(!blocked?.quota||blocked.key!==this.routeKey())return false;
+    if(blocked.retryAt!==undefined&&blocked.retryAt>Date.now()){this.status="waiting-credit";return false;}
+    // Save the next check before attempting it; restarts cannot bypass backoff.
+    const failures=(blocked.failures??0)+1;
+    this.blockedRoute={...blocked,failures,retryAt:Date.now()+Math.min(60*60*1000,quotaRetryDelay*2**Math.min(failures-1,2))};
+    await atomicJson(join(this.store.root,"model-health.json"),this.blockedRoute);
+    try{
+      await this.checkModel();
+      for(const job of this.jobs.values())if(job.status==="waiting-credit")await this.retry(job.id);
+      return true;
+    }catch(error){
+      const message=redactKnowledgeSecrets(String((error as Error).message??error)).slice(0,600);
+      if((error as {code?:string}).code==="KNOWLEDGE_BUDGET_PAUSED"){this.status="budget-paused";return false;}
+      if(this.blockedRoute?.key===blocked.key){this.blockedRoute={...this.blockedRoute,message,quota:isQuotaFailure(error)};await atomicJson(join(this.store.root,"model-health.json"),this.blockedRoute);}
+      this.status=this.blockedRoute?.quota?"waiting-credit":"model-unavailable";return false;
+    }
+  }
   async configure(settings:KnowledgeSettings){const before=this.routeKey();this.settings=validateSettings(settings);await atomicJson(join(this.store.root,"settings.json"),this.settings);if(before!==this.routeKey()){this.checked=undefined;this.blockedRoute=undefined;await atomicJson(join(this.store.root,"model-health.json"),null);}}
   private routeKey(){return JSON.stringify([this.settings.provider,this.settings.model,this.settings.reasoningEffort]);}
   async retry(id:string){const j=this.jobs.get(id);if(!j||!["failed","waiting-credit"].includes(j.status))throw new Error("Only failed or credit-waiting jobs may be retried");j.source=cleanKnowledgeSource(j.source);j.status="queued";j.updatedAt=Date.now();j.reason=undefined;j.error=undefined;await atomicJson(this.jobFile(id),j);}
-  async retryFailed(){await this.checkModel();let queued=0;for(const j of this.jobs.values())if(["failed","waiting-credit"].includes(j.status)){await this.retry(j.id);queued++;}return queued;}
+  async retryFailed(){const ids=[...this.jobs.values()].filter(j=>["failed","waiting-credit"].includes(j.status)).map(j=>j.id);await this.checkModel();for(const id of ids)if(["failed","waiting-credit"].includes(this.jobs.get(id)!.status))await this.retry(id);return ids.length;}
   async checkModel(){
     const settings={...this.settings},key=JSON.stringify([settings.provider,settings.model,settings.reasoningEffort]);
     if(this.checked?.key!==key||Date.now()-this.checked.at>300000||this.blockedRoute||await this.gate?.reason(settings.provider)){
-      const text=await this.generate('Connection check for Knowledge AI. Return ONLY {"decision":"skip","reason":"Connection verified","changes":[]}. Do not create notes or call tools.',settings,this.lifetime.signal);
+      const reserve=(12000*settings.inputPrice+512*settings.outputPrice)/1e6;
+      if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget)throw Object.assign(Error("Knowledge budget is paused; connection check deferred."),{code:"KNOWLEDGE_BUDGET_PAUSED"});
+      this.costs[day()]=(this.costs[day()]??0)+reserve;await atomicJson(join(this.store.root,"costs.json"),this.costs);
+      const text=await this.generate('Connection check for Knowledge AI. Return ONLY {"decision":"skip","reason":"Connection verified","changes":[]}. Do not create notes or call tools.',settings,this.lifetime.signal,{maxTokens:512});
       const value=JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"") );if(value.decision!=="skip"||!Array.isArray(value.changes)||value.changes.length)throw new Error("The model did not return the required structured response");
+      if(key!==this.routeKey())throw Error("Knowledge model changed during the connection check; retry with the selected model.");
       this.checked={key,at:Date.now()};
       this.blockedRoute=undefined;await atomicJson(join(this.store.root,"model-health.json"),null);
       await this.gate?.clear(settings.provider);
+      for(const job of this.jobs.values())if(job.status==="waiting-credit")await this.retry(job.id);
     }
     return {ok:true,provider:settings.provider,model:settings.model,reasoningEffort:settings.reasoningEffort};
   }
@@ -83,6 +123,12 @@ export class KnowledgeCurator {
   tick(force=false){if(this.restoredWork?.state==="needs-review"){this.status="restored-work-paused";return;}if(this.running||!this.settings.enabled||this.settings.mode==="manual"&&!force||this.lifetime.signal.aborted)return;const release=this.admit?.();if(this.admit&&!release)return;this.running=this.run(force).catch(()=>{this.status="needs-attention";}).finally(()=>{release?.();this.running=undefined;});return this.running;}
   private async run(force:boolean){
     await this.store.refreshInventory();
+    if(!force&&this.settings.mode!=="manual")await this.enqueueUnassigned();
+    if([...this.jobs.values()].some(j=>j.status==="queued"||j.status==="waiting-credit")){
+      if(this.blockedRoute?.quota&&this.blockedRoute.key===this.routeKey()){
+        if(!await this.recoverQuota())return;
+      }
+    }
     const family=(j:KnowledgeJob)=>j.source.id.split("-turn-")[0]!;
     const latest=new Map<string,number>();for(const j of this.jobs.values())latest.set(family(j),Math.max(latest.get(family(j))??0,j.queuedAt??j.updatedAt));
     const job=[...this.jobs.values()].filter(j=>j.status==="queued" && (force||Date.now()-(latest.get(family(j))??j.updatedAt)>=this.settings.idleSeconds*1000)).sort((a,b)=>a.source.completedAt-b.source.completedAt)[0];
@@ -124,7 +170,7 @@ export class KnowledgeCurator {
       if(e.code==="DOMAIN_REVISION_CONFLICT"&&proposed){await atomicJson(join(this.store.root,"reviews",`${digest(job.id)}.json`),proposed);job.status="review";job.reason="Domains changed during processing. Preview and approve a validated rebase; another model call is not needed.";this.status="awaiting-review";}
       if(quota)await this.gate?.block(settings.provider,job.error.message);
       if(quota||phase==="model response"&&/not supported|unknown model|does not exist|authentication|unauthorized|invalid.*(?:key|token)|expired.*token/i.test(job.error.message)){
-        this.blockedRoute={key:JSON.stringify([settings.provider,settings.model,settings.reasoningEffort]),message:job.error.message,quota};await atomicJson(join(this.store.root,"model-health.json"),this.blockedRoute);
+        this.blockedRoute={key:JSON.stringify([settings.provider,settings.model,settings.reasoningEffort]),message:job.error.message,quota,...(quota?{retryAt:Date.now()+quotaRetryDelay,failures:0}:{})};await atomicJson(join(this.store.root,"model-health.json"),this.blockedRoute);
       }
       if(e.code==="KNOWLEDGE_SOURCE_NOT_ADMITTED"){job.status="done";job.outcome="skipped";job.error=undefined;job.reason="Source admission was withdrawn during processing; the response was not saved.";this.status="ready";}
     }
@@ -144,7 +190,13 @@ export class KnowledgeCurator {
     }else{job.outcome="rejected";job.reason="Rejected; original records unchanged.";}
     job.status="done";job.updatedAt=Date.now();await atomicJson(this.jobFile(id),job);this.status=job.error?"projection-pending":"ready";
   }
-  async snapshot():Promise<KnowledgeStatus>{const counts={queued:0,working:0,review:0,done:0,failed:0,"waiting-credit":0},outcomes:Record<string,number>={};for(const j of this.jobs.values()){counts[j.status]++;if(j.status==="done"){const outcome=j.outcome??(j.revision?"written":"processed");outcomes[outcome]=(outcomes[outcome]??0)+1;}}return {secondBrain:true,enabled:this.settings.enabled,status:this.status==="ready"&&counts.failed?"needs-attention":this.status,vault:this.store.vault,settings:{...this.settings},todayEstimatedCost:this.costs[day()]??0,monthEstimatedCost:this.monthCost(),counts,jobs:[...this.jobs.values()].sort((a,b)=>Number(b.status==="failed"||b.status==="review")-Number(a.status==="failed"||a.status==="review")||b.updatedAt-a.updatedAt).slice(0,60).map(({source,...rest})=>rest),notes:(await this.store.scan()).filter(n=>n.body.trim()).length,embedding:this.embedding,historyArchivesReady:true,recalls:this.recalls,outcomes};}
+  async snapshot():Promise<KnowledgeStatus>{
+    const counts={queued:0,working:0,review:0,done:0,failed:0,"waiting-credit":0},outcomes:Record<string,number>={},jobs=[...this.jobs.values()];
+    for(const j of jobs){counts[j.status]++;if(j.status==="done"){const outcome=j.outcome??(j.revision?"written":"processed");outcomes[outcome]=(outcomes[outcome]??0)+1;}}
+    const notes=await this.store.scan(),registry=await this.store.organization.domains(),assigned=new Set(registry.memberships.map(m=>m.nodeId)),unassigned=notes.filter(n=>n.kind!=="conversation"&&!assigned.has(n.id));
+    let pending=0,considered=0;for(const note of unassigned){const hash=digest(note.body),passes=jobs.filter(j=>j.source.conversationId===note.id&&j.pass?.sourceHash===hash);if(passes.some(j=>["queued","working","waiting-credit","review"].includes(j.status)))pending++;else if(passes.some(j=>j.status==="done"))considered++;}
+    return {secondBrain:true,enabled:this.settings.enabled,status:this.status==="ready"&&counts.failed?"needs-attention":this.status,vault:this.store.vault,settings:{...this.settings},todayEstimatedCost:this.costs[day()]??0,monthEstimatedCost:this.monthCost(),counts,jobs:jobs.sort((a,b)=>Number(b.status==="failed"||b.status==="review")-Number(a.status==="failed"||a.status==="review")||b.updatedAt-a.updatedAt).slice(0,60).map(({source,...rest})=>rest),notes:notes.filter(n=>n.body.trim()).length,embedding:this.embedding,historyArchivesReady:true,recalls:this.recalls,outcomes,organization:{unassigned:unassigned.length,pending,considered,needsExcerpt:unassigned.filter(n=>n.body.length>23500).length,...(this.blockedRoute?.quota&&this.blockedRoute.key===this.routeKey()?{retryAt:this.blockedRoute.retryAt}:{})}};
+  }
   async dispose(){this.lifetime.abort();await this.running;await this.writing;await this.store.archive.drain();}
 }
 /** The host owns IDs and CAS hashes. Missing model bookkeeping for a NEW note

@@ -1,0 +1,80 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
+--- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
+@@ -1428,11 +1428,35 @@
+ 			const rect = e.currentTarget.getBoundingClientRect();
+ 			return e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+ 		}
++		/** Mobile-only view: one newest-first Recents account; native ownership stays intact. */
++		function hubRecentGroups(groups, list, workspaces, archivedSessionIds, pendingInteractions, mobile) {
++			if (!mobile) return groups;
++			const main = groups.find(g => /^(hub|minke)$/i.test(g.label.trim()));
++			const loose = groups.find(g => g.key === "");
++			const base = main ?? loose;
++			if (!base) return groups;
++			const recentKeys = new Set(["", ...(main ? [main.key] : [])]);
++			const projectIds = new Set(workspaces.filter(w => !recentKeys.has(w.workspaceId)).flatMap(w => w.sessionIds));
++			const sessions = deriveFlat(list, archivedSessionIds, pendingInteractions).filter(s => !projectIds.has(s.id));
++			return [{ ...base, hubRecents: true, expanded: true, containsCurrent: sessions.some(s => s.id === list.current), sessionCount: sessions.length, sessions }, ...groups.filter(g => !recentKeys.has(g.key))];
++		}
++		function useHubMobileRecents() {
++			const [mobile, setMobile] = (0, react.useState)(() => window.matchMedia("(max-width: 1024px)").matches);
++			(0, react.useEffect)(() => {
++				const media = window.matchMedia("(max-width: 1024px)");
++				const update = () => setMobile(media.matches);
++				update();
++				media.addEventListener("change", update);
++				return () => media.removeEventListener("change", update);
++			}, []);
++			return mobile;
++		}
+ 		/** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
+ 		function SessionTree({ useSessions, useSessionPendingInteraction, startSession, open, forkSession, workspaces, archivedSessionIds, onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, insertWorkspaceBefore, insertSessionBefore, orderBy, groupExpansion, setGroupExpanded, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t }) {
+ 			const list = useSessions((s) => s);
+ 			const pendingInteractions = useSessionPendingInteraction((s) => s);
+ 			const current = list.current;
++			const mobileRecents = useHubMobileRecents();
+ 			const [expandedSessionGroups, setExpandedSessionGroups] = (0, react.useState)([]);
+ 			const [drag, setDrag] = (0, react.useState)(null);
+ 			const sessionDropCommitted = (0, react.useRef)(false);
+@@ -1498,10 +1522,11 @@
+ 				});
+ 			}, [sessionOrderByAccount, workspaces]);
+ 			const orderedUngroupedSessionIds = (0, react.useMemo)(() => reconciledSessionOrder(ungroupedSessionIds, sessionOrderByAccount[""]), [sessionOrderByAccount, ungroupedSessionIds]);
+-			const groups = (0, react.useMemo)(() => deriveGroups(list, orderedWorkspaces, archivedSessionIds, pendingInteractions, {
++			const groups = (0, react.useMemo)(() => hubRecentGroups(deriveGroups(list, orderedWorkspaces, archivedSessionIds, pendingInteractions, {
+ 				expandedGroups,
+ 				...sessionOrderByAccount[""] === void 0 ? {} : { ungroupedOrder: sessionOrderByAccount[""] }
+-			}), [
++			}), list, orderedWorkspaces, archivedSessionIds, pendingInteractions, mobileRecents), [
++				mobileRecents,
+ 				list,
+ 				orderedWorkspaces,
+ 				archivedSessionIds,
+@@ -1515,7 +1540,7 @@
+ 				sessionDropCommitted.current = true;
+ 				setDrag(null);
+ 				const group = groups.find((candidate) => candidate.key === activeDrag.accountKey);
+-				if (group === void 0) return;
++				if (group === void 0 || group.hubRecents) return;
+ 				const sessionsExpanded = expandedSessionGroups.includes(group.key);
+ 				const renderedSessions = sessionsExpanded ? group.sessions : collapsedSessionRows(group.sessions).rows;
+ 				const targetIndex = renderedSessions.findIndex((session) => session.id === over.id);
+@@ -1591,7 +1616,7 @@
+ 							const collapsed = collapsedSessionRows(group.sessions);
+ 							const sessionsExpanded = expandedSessionGroups.includes(group.key);
+ 							const workspaceMarker = workspaceId !== void 0 && workspaceDrag?.over?.id === workspaceId ? workspaceDrag.over.half : null;
+-							const workspaceDragProps = workspaceId === void 0 ? void 0 : {
++							const workspaceDragProps = workspaceId === void 0 || group.hubRecents ? void 0 : {
+ 								start: () => {
+ 									workspaceDropCommitted.current = false;
+ 									setWorkspaceDrag({
+@@ -1669,7 +1694,7 @@
+ 											onRename: onSessionRename,
+ 											onFork: forkSession,
+ 											onArchive: onSessionArchive,
+-											drag: {
++											drag: group.hubRecents ? void 0 : {
+ 												start: () => {
+ 													sessionDropCommitted.current = false;
+ 													setDrag({

@@ -621,10 +621,10 @@ export class MobileSidebarDrawerRuntime {
         namedSections.find((section) => {
           const label = this.#groupLabel(section)?.toLocaleLowerCase();
           return label === "minke" || label === "hub";
-        }) ?? namedSections[0];
-      this.#mainWorkspaceLabel = this.#groupLabel(
-        this.#mainWorkspaceSection,
-      );
+        });
+      this.#mainWorkspaceLabel = this.#mainWorkspaceSection === undefined
+        ? undefined
+        : this.#groupLabel(this.#mainWorkspaceSection);
       this.#mainWorkspaceResolved = true;
     } else if (
       !this.#mainWorkspaceResolved &&

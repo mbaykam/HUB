@@ -1,4 +1,5 @@
 import type {DomainOperation,KnowledgeDomain,KnowledgeDomainState} from "../../knowledge-domain-contract.ts";
+import type {KnowledgeStatus} from "../../knowledge-contract.ts";
 
 type Registry=KnowledgeDomainState&{nodes:{id:string;title:string;chars?:number}[]};
 type Request=<T>(query:string,command?:unknown)=>Promise<T>;
@@ -10,7 +11,7 @@ export function createKnowledgeDomainsPanel(root:Document,request:Request,onChan
   const button=(text:string,run:()=>void)=>{const n=el("button",text);n.type="button";n.addEventListener("click",run);return n;};
   const option=(label:string,value:string)=>{const n=el("option",label);n.value=value;return n;};
   const pane=el("section"),message=el("p"),content=el("div");pane.className="knowledge-domains-panel";pane.setAttribute("data-knowledge-domains","");pane.hidden=true;message.setAttribute("role","status");pane.append(message,content);
-  let registry:Registry|undefined,dirty=false,busy=false,disposed=false;
+  let registry:Registry|undefined,knowledge:KnowledgeStatus|undefined,dirty=false,busy=false,disposed=false;
   const title=(id?:string)=>registry?.domains.find(d=>d.id===id)?.title??"Main level";
   function domainPath(id:string){const parts:string[]=[],seen=new Set<string>();let d=registry?.domains.find(d=>d.id===id);while(d&&!seen.has(d.id)){seen.add(d.id);parts.unshift(d.title);d=registry?.domains.find(parent=>parent.id===d!.parentId);}return parts.join(" / ");}
   const alive=()=>registry!.domains.filter(d=>d.status!=="merged");
@@ -19,7 +20,7 @@ export function createKnowledgeDomainsPanel(root:Document,request:Request,onChan
   function text(label:string,value:string,parent:HTMLElement){const n=el("input");n.value=value;n.maxLength=100;field(label,n,parent);return n;}
   function domainSelect(label:string,value:string|undefined,parent:HTMLElement,exclude?:string){const s=el("select");s.append(option("Main level",""));for(const d of alive())if(d.id!==exclude)s.append(option(`${domainPath(d.id)}${d.status==="inactive"?" · inactive":""}`,d.id));s.value=value??"";field(label,s,parent);return s;}
   function guard(form:HTMLElement,ignore?:HTMLElement|Set<HTMLElement>){dirty=false;const changed=(event:Event)=>{if(ignore instanceof Set?!ignore.has(event.target as HTMLElement):event.target!==ignore)dirty=true;};form.addEventListener("input",changed);form.addEventListener("change",changed);form.append(button("Discard domain changes",()=>{dirty=false;render();message.textContent="Domain draft discarded.";}));}
-  async function refresh(){registry=await request<Registry>("view=domains");if(!disposed)render();}
+  async function refresh(){registry=await request<Registry>("view=domains");try{const state=await request<KnowledgeStatus>("");knowledge=state.secondBrain?state:undefined;}catch{knowledge=undefined;}if(!disposed)render();}
   async function action(command:unknown,success:string){if(busy)return;busy=true;message.textContent="Saving…";try{await request("",command);dirty=false;await refresh();await onChange();message.textContent=success;}catch(error){message.textContent=(error as Error).message||"Couldn’t save. Your draft is preserved.";}finally{busy=false;}}
   function commit(operations:DomainOperation[],maxActiveDomains?:number){return action({action:"domains",revision:registry!.revision,operations,maxActiveDomains},"Domain organization saved. Original records are unchanged.");}
   function editor(domain?:KnowledgeDomain,suggestedTitle=""){
@@ -73,7 +74,18 @@ export function createKnowledgeDomainsPanel(root:Document,request:Request,onChan
     if(!registry||disposed)return;content.replaceChildren();dirty=false;const roots=alive().filter(d=>!d.parentId),active=roots.filter(d=>d.status==="active").length;content.append(el("h3","Knowledge domains"),el("p",`${active} / ${registry.maxActiveDomains} active main domains · ${registry.nodes.length} records`),el("p","Brain notes can belong to several domains; inactive topics remain searchable. Original conversations live separately in Chat archive, use no domain slots and remain linked as sources."));
     const actions=el("nav");actions.append(button("New domain",()=>editor()),button("Domain limit",capEditor),button("Brain note memberships",memberships),button("Organize records",organizeSelection),button("Suggested groups",()=>void suggestedGroups()));content.append(actions);
     const tree=el("div");function branch(domain:KnowledgeDomain,depth=0){const card=el("section");card.className="knowledge-domain-card";card.style.marginInlineStart=`${depth*12}px`;const ids=new Set(registry!.memberships.filter(m=>m.domainId===domain.id).map(m=>m.nodeId));card.append(el("h4",domain.title),el("p",`${domain.status} · ${ids.size} direct records${domain.aliases.length?` · ${domain.aliases.join(", ")}`:""}`),button(`Focus ${domain.title}`,()=>{if(canLeave())onFocus(domain.id);}),button(`Edit ${domain.title}`,()=>editor(domain)));tree.append(card);for(const child of alive().filter(d=>d.parentId===domain.id))branch(child,depth+1);}for(const d of roots)branch(d);content.append(tree);if(!roots.length)content.append(el("p","No domains yet. Create a broad domain or organize a few selected records with Knowledge AI."));
-    const unassigned=registry.nodes.filter(n=>!registry!.memberships.some(m=>m.nodeId===n.id));content.append(el("p",`${unassigned.length} unassigned records · these stay available in Notes and search.`));
+    const unassigned=registry.nodes.filter(n=>!registry!.memberships.some(m=>m.nodeId===n.id));
+    if(unassigned.length){
+      const status=el("section");status.dataset.knowledgeAssignmentStatus="";status.setAttribute("role","status");
+      status.append(el("h4",`${unassigned.length} notes awaiting domain assignment`),el("p","Unassigned is a holding area, not a domain. Knowledge AI groups useful brain notes without changing their text. Notes with no clear fit stay searchable here."));
+      if(knowledge){
+        const reason=!knowledge.enabled?"Knowledge AI is disabled. Enable it in Settings to organize notes automatically.":knowledge.settings.mode==="manual"?"Manual mode: use Organize records to choose notes for a pass.":!knowledge.settings.channels.includes("pwa")?"PWA notes are excluded by your Knowledge AI channel settings.":knowledge.status==="waiting-credit"?`Organization is waiting for the provider’s usage limit or credit to recover.${knowledge.organization?.retryAt?` Next connection check: ${new Date(knowledge.organization.retryAt).toLocaleTimeString()}.`:""}`:knowledge.status==="budget-paused"?"Organization is paused at your Knowledge AI budget limit.":knowledge.status==="model-unavailable"?"The selected model needs attention in Knowledge AI settings.":knowledge.status==="needs-attention"?"Organization needs attention. Review the failed jobs in Knowledge AI settings before retrying.":knowledge.status==="restored-work-paused"?"Review restored background work in Settings before resuming organization.":knowledge.counts.review?"Knowledge AI proposals are awaiting your review in Settings.":`${knowledge.organization?.pending??0} notes queued or in progress. New unassigned notes are picked up automatically after the idle delay.`;
+        status.append(el("p",reason));
+        if(knowledge.organization?.needsExcerpt)status.append(el("p",`${knowledge.organization.needsExcerpt} long notes need a source excerpt selected in Organize records.`));
+        if(knowledge.organization?.considered)status.append(el("p",`${knowledge.organization.considered} notes already assessed. Use Organize records if you want Knowledge AI to reconsider them.`));
+      }else status.append(el("p","Knowledge AI status is unavailable. Check Settings before queuing another pass."));
+      content.append(status);
+    }
     const pending=registry.proposals.filter(p=>p.status==="pending");if(pending.length){content.append(el("h3","Knowledge AI proposals"));for(const p of pending)content.append(button(`Review ${p.operation.type} proposal`,()=>void previewProposal(p.id)));}
     const latest=registry.history.filter(h=>!h.undone).at(-1);if(latest){const history=el("details");history.append(el("summary","Recent changes & undo"));for(const h of registry.history.slice(-12).reverse())history.append(el("p",`${new Date(h.at).toLocaleString()} · ${h.actor} · ${h.operations.map(o=>o.type).join(", ")||"review"}${h.undone?" · undone":""}`));history.append(button("Undo latest domain change",()=>void action({action:"domain-undo",revision:registry!.revision,id:latest.id},"Latest domain change undone.")));content.append(history);}
   }
