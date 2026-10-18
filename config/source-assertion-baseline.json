@@ -1,5 +1,5 @@
 {
-  "tests/appimage-packaging.test.mjs": 8,
+  "tests/appimage-packaging.test.mjs": 6,
   "tests/bootstrap-theme.test.mjs": 3,
   "tests/cross-platform-packaging.test.mjs": 7,
   "tests/data-home-settings.test.mjs": 3,

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import test from "node:test";
+import { RELEASE_PROFILES } from "../scripts/forge/github-release.mjs";
+const yaml = createRequire(new URL('../vendor/deepseek-harness/node_modules/.pnpm/native-test.cjs',import.meta.url))('yaml');
 
 const workflowUrl = new URL(
   "../.github/workflows/package.yml",
@@ -35,19 +38,10 @@ test("Linux job builds the AppImage after the distributables", async () => {
   assert.ok(uploadIndex > appImageIndex, "AppImage step must run before upload");
 });
 
-test("release job stages and checksums the AppImage", async () => {
-  let source = await readFile(workflowUrl, "utf8");
-  // The project contract must survive CRLF conversions (see the
-  // "release workflow contract supports Windows line endings" test).
-  source = source.replaceAll("\r\n", "\n");
-  const releaseJobIndex = source.indexOf("\n  release:\n");
-  assert.notEqual(releaseJobIndex, -1);
-  const releaseJob = source.slice(releaseJobIndex);
-
-  assert.ok(
-    releaseJob.includes(`stage_asset ${appImageAssetName}`),
-    "release job must stage the AppImage asset",
-  );
-  assert.match(releaseJob, /'HUB-\*\.AppImage'/u);
-  assert.match(releaseJob, /sha256sum HUB-\* > SHA256SUMS/u);
+test("public releases use the Windows profile while full packaging retains AppImage support", async () => {
+  const workflow = yaml.parse(await readFile(workflowUrl, "utf8"));
+  const publisher = workflow.jobs.release.steps.find(step => step.name === "Publish GitHub Release");
+  assert.equal(publisher.env.HUB_RELEASE_PROFILE, "windows-x64");
+  assert.deepEqual(RELEASE_PROFILES[publisher.env.HUB_RELEASE_PROFILE], ["HUB-windows-x64.exe", "SHA256SUMS"]);
+  assert.ok(RELEASE_PROFILES.all.includes(appImageAssetName));
 });
