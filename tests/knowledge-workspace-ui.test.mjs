@@ -67,8 +67,8 @@ test('returning from a searched Knowledge note restores the note list, query and
   assert.equal(root.querySelector('[data-graph-note]').hidden,true);
 });
 
-test('a source exposes its connections directly from the note toolbar without changing its text',async t=>{
- const {root,requests,note}=await fixture(t);const details=root.querySelector('[data-graph-note] details');assert.equal(details.open,false);button(root,'Connections').click();assert.equal(details.open,true);assert.equal(requests.filter(request=>request.method==='POST').length,0);assert.equal(note.content,'Original reading plan.');
+test('a source exposes connections through More actions without changing its text',async t=>{
+ const {root,requests,note}=await fixture(t);const details=[...root.querySelectorAll('[data-graph-note] details')].find(d=>d.querySelector('summary')?.textContent==='Links, sources & history'),more=root.querySelector('[data-graph-note] [data-hub-action-menu]');assert.equal(details.open,false);assert.equal(more.open,false);more.querySelector('summary').click();assert.equal(more.open,true);button(root,'Connections').click();assert.equal(more.open,false);assert.equal(details.open,true);assert.equal(requests.filter(request=>request.method==='POST').length,0);assert.equal(note.content,'Original reading plan.');
 });
 
 test('unsaved Knowledge edits survive navigation and closing until explicitly discarded',async t=>{

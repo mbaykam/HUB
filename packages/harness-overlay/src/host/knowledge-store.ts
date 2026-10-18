@@ -72,6 +72,11 @@ export class KnowledgeStore {
     try { if ((await lstat(result)).isSymbolicLink()) throw new Error("Linked note"); } catch (error: any) { if (error.code !== "ENOENT") throw error; }
     return result;
   }
+  async skillPath(name?:string){
+    if(name!==undefined&&(name.length>80||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)))throw Error("Invalid skill name");
+    const checked=await this.file(name?`Skills/${name}/SKILL.md`:"Skills/catalog.md");
+    return name?checked:join(checked,"..");
+  }
   initialize(){return this.mutations.run(()=>this.initializeStore());}
   private async initializeStore() {
     await mkdir(this.vault, { recursive: true }); await mkdir(join(this.root, "journal"), { recursive: true });

@@ -12,7 +12,7 @@ function fixture() {
   dom.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute("open"); this.dispatchEvent(new dom.window.Event("close")); };
   dom.window.fetch = async (url, options) => {
     requests.push({ url, ...options });
-    return { ok: true, json: async () => url.includes("telegram") ? { state: "connected" } : { enabled: true, status: "ready", content: "Existing memory." } };
+    return { ok: true, json: async () => url.includes("telegram") ? { state: "connected" } : url.includes("view=organization")?{suggestions:[],reflections:[]}:{secondBrain:true,settings:{enabled:false},notes:3,todayEstimatedCost:0,jobs:[],vault:"fixture-vault",embedding:"fixture"} };
   };
   root.querySelector("[data-hub-settings-native-close]").addEventListener("click", () => changes.push("settings-closed"));
   root.querySelector("[data-minke-mobile-right-drawer-close]").addEventListener("click", () => changes.push("drawer-closed"));
@@ -33,11 +33,9 @@ test("Settings opens existing characters and Telegram controls without changing 
     [...f.container.querySelectorAll("button")].find(b=>b.textContent==="Telegram").click();
     await setImmediate();
     assert.equal(f.root.querySelector('[aria-label="Telegram connection"]').open, true);
-    const memory = f.container.querySelector("[data-hub-memory]");
-    memory.open = true;
-    memory.dispatchEvent(new f.dom.window.Event("toggle"));
+    f.container.querySelector("[data-hub-knowledge-launcher]").click();
     await setImmediate();
-    assert.match(memory.textContent, /Existing memory/);
+    assert.equal(f.root.querySelector('[aria-label="Knowledge AI ayarları"]').open,true,"Knowledge AI opens directly from its Settings tile");
     assert.ok(f.requests.some(r => r.url === "/api/hub/telegram"));
     assert.ok(f.requests.some(r => r.url === "/api/hub/memory"));
     assert.ok(f.requests.every(r => r.method !== "POST"), "Browsing management must preserve user choices");

@@ -29,6 +29,10 @@ import {
   installMobileRightDrawer,
 } from "../host/mobile-right-drawer.ts";
 import { installMobileHubs } from "../host/mobile-hubs.ts";
+import {installPanelDisclosure} from "../host/panel-disclosure.ts";
+import {installPanelNavigation} from "../host/panel-navigation.ts";
+import {ToolsSettings} from "../preferences/ToolsSettings.tsx";
+import {installChatActivityGroups} from "../host/chat-activity-groups.ts";
 import { installConversationPresentation } from "../host/mobile-presentation.ts";
 import { installMobileSettings } from "../host/mobile-settings.ts";
 import { installMobileConversationVisibility, type NavigationVisibilityPort } from "../host/mobile-conversation-visibility.ts";
@@ -217,11 +221,15 @@ export function installTabs(
       "minke-overlay: mobile right drawer",
     );
     ctx.effect(() => installMobileHubs(ctx), "hub: PWA voice and text hubs");
+    ctx.effect(() => installPanelDisclosure(), "hub: explicit panel disclosure controls");
+    ctx.effect(()=>installPanelNavigation(),"hub: compact section navigation");
+    ctx.effect(()=>installChatActivityGroups(),"hub: compact live tool activity");
     ctx.effect(() => installMobileSettings(), "hub: phone-first native Settings navigation");
     ctx.effect(() => settings.register({
       id: "hub-controls", order: -1, label: () => "Assistants", icon: "preferences",
       render: () => <HubControlsSettings sessions={ctx.sessions} history={conversationHistory} />,
     }), "hub: assistants and integrations in Settings");
+    ctx.effect(()=>settings.register({id:"hub-tools",order:0,label:()=>"Tools",icon:"preferences",render:()=> <ToolsSettings/>}),"hub: tool inventory in Settings");
     ctx.inject?.(["uiWorkspace"], scope => {
       scope.effect(() => installMobileConversationVisibility(ctx, scope.get("uiWorkspace") as NavigationVisibilityPort, document, conversationHistory), "hub: PWA conversation visibility");
     });

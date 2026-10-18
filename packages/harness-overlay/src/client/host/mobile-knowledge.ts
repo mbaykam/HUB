@@ -2,12 +2,13 @@ import { defaultKnowledgeSettings, type KnowledgeSettings, type KnowledgeStatus 
 import { installMobileModels } from "./mobile-models.ts";
 import { installMobileWidgetBack } from "./mobile-widget-back.ts";
 import {createKnowledgeImportsPanel,uploadKnowledgeArchive} from "../memory/knowledge-imports-panel.ts";
-export function installKnowledgeControls(container:HTMLElement,root:Document,initial:KnowledgeStatus){
+export function installKnowledgeControls(container:HTMLElement,root:Document,initial:KnowledgeStatus,options:{hideLauncher?:boolean}={}){
   const view=root.defaultView!,lifetime=new AbortController();let state=initial,dirty=false;
   let importPanel:ReturnType<typeof createKnowledgeImportsPanel>|undefined;
   const el=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const n=root.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
   const btn=(label:string,run:()=>void)=>{const b=el("button",label);b.type="button";b.addEventListener("click",run);return b;};
-  const summary=el("p"),open=btn("Knowledge AI ayarları",()=>{dialog.showModal();void loadReflection();});container.append(summary,open);
+  const openMenu=()=>{if(!dialog.open)dialog.showModal();void loadReflection();};
+  const summary=el("p"),open=btn("Knowledge AI ayarları",openMenu);if(!options.hideLauncher)container.append(summary,open);
   const dialog=el("dialog");dialog.setAttribute("data-knowledge-menu","");dialog.setAttribute("aria-label","Knowledge AI ayarları");dialog.dataset.theme=root.body.hasAttribute("data-ds-dark-theme")||root.documentElement.classList.contains("dark")?"dark":"light";
   const closeDialog=()=>{if(importPanel?.canLeave()!==false)dialog.close();};
   const header=el("header"),title=el("h2","Knowledge AI"),close=btn("Kapat",closeDialog);header.append(title,close);
@@ -68,5 +69,5 @@ export function installKnowledgeControls(container:HTMLElement,root:Document,ini
   async function showReview(id:string,row:HTMLElement){try{const review=await request(undefined,"view=review&id="+encodeURIComponent(id));const preview=el("div");preview.append(el("p",review.plan.reason));if(review.stale)preview.append(el("p","Domainler işlem sırasında değişmiş. Bu önizleme güncel yapıya göre yeniden doğrulandı; yeni model çağrısı yapılmadı."));for(const op of review.plan.domainOps??[])preview.append(el("p","Domain: "+op.type+(op.title?" · "+op.title:"")));for(const r of review.plan.relations??[])preview.append(el("p",r.label+" → "+r.targetId));for(const r of review.plan.reflections??[])preview.append(el("pre",r.observation));for(const p of review.plan.profileSuggestions??[])preview.append(el("p",p.target+" önerisi: "+p.text));preview.append(btn("Onayla ve ilişkileri kaydet",()=>void command({action:"review",id,approve:true,reviewHash:review.reviewHash})),btn("Reddet",()=>void command({action:"review",id,approve:false})));row.append(preview);}catch{status.textContent="Öneri güncel yapıya uygulanamıyor; veriler korundu. Yenile veya yeni bir düzenleme turu seç.";}}
   dialog.addEventListener("cancel",event=>{if(importPanel?.canLeave()===false)event.preventDefault();});
   const offBack=installMobileWidgetBack(dialog,header,closeDialog);selectTab("Genel");render();const timer=view.setInterval(()=>{if(!root.hidden)void load();},10000);
-  return ()=>{lifetime.abort();importPanel?.dispose();view.clearInterval(timer);offBrowser();offBack();dialog.remove();container.replaceChildren();};
+  return Object.assign(()=>{lifetime.abort();importPanel?.dispose();view.clearInterval(timer);offBrowser();offBack();dialog.remove();container.replaceChildren();},{open:openMenu});
 }

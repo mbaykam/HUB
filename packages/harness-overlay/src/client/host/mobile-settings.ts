@@ -26,7 +26,7 @@ export function installMobileSettings(root: Document = document): () => void {
         if(pwa&&/^(Models|Plugins|Agent presets|模型|插件|智能体预设)$/i.test(b.textContent?.trim()??"")){if(!b.hasAttribute("data-hub-legacy-setting")){b.setAttribute("data-hub-legacy-setting","");legacy.add(b);}}
         else if(legacy.has(b)){b.removeAttribute("data-hub-legacy-setting");legacy.delete(b);}
       }
-      const config=nav.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Open configuration file"]');if(pwa&&config&&!config.hasAttribute("data-hub-legacy-setting")){config.setAttribute("data-hub-legacy-setting","");legacy.add(config);}
+      for(const config of nav.parentElement?.querySelectorAll<HTMLButtonElement>('button')??[]){if(pwa&&(/^(Open configuration file|打开配置文件)$/.test(config.textContent?.trim()??"")||config.getAttribute("aria-label")==="Open configuration file")&&!config.hasAttribute("data-hub-legacy-setting")){config.setAttribute("data-hub-legacy-setting","");legacy.add(config);}}
     }
   }
   function mount(dialog: HTMLElement) {
@@ -52,7 +52,7 @@ export function installMobileSettings(root: Document = document): () => void {
     const close = root.createElement("button"); close.type = "button"; close.textContent = "×"; close.setAttribute("aria-label", "Close settings");
     header.append(back, heading, close); dialog.prepend(header);
     const oldLabel = dialog.getAttribute("aria-labelledby"); dialog.setAttribute("aria-labelledby", heading.id);
-    const intro = root.createElement("section"); intro.setAttribute("data-hub-settings-intro", ""); intro.textContent = "Your HUB, your way.";
+    const intro = root.createElement("section"); intro.setAttribute("data-hub-settings-intro", "");
     nav.prepend(intro);
     const removeUpdate = installMobileUiUpdate(intro, root);
     let section = false;

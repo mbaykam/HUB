@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.54
+
+- Add a refreshed, context-injected `memory.md` domain map and a portable Skills library with character discovery, versioned edits and interrupted-save recovery.
+- Combine Home writing and speaking in a bottom bar; group chat activity, fit narrow-screen statistics and simplify Knowledge, task, model and Settings controls.
+- Show registered tools, character policy and browser readiness in Settings → Tools. Add grounded browser clicks, form filling, keys and native screenshot evidence.
+- Inspect bounded video attachments and supported public media links using actual frames and local audio; report blocked acquisition and unsupported model inputs honestly.
+- Improve personal-assistant compaction checkpoints and prevent cancelled automatic compaction from committing late summaries.
+- Refresh the project page with current PWA screenshots, multilingual wording and clear maintainer credit.
+
 ## 0.4.50
 
 - Separate original chats into a Chat archive cloud and searchable list on the same Knowledge screen, outside brain domains and suggested groups.

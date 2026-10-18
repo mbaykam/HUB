@@ -23,8 +23,8 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
   let onlyFavorites = false;
   const favorites = button("Favorites", () => { onlyFavorites = !onlyFavorites; favorites.setAttribute("aria-pressed", String(onlyFavorites)); render(); }); favorites.setAttribute("aria-pressed", "false");
   const connections=element("details");connections.append(element("summary","Provider connections"));
-  const manage = button("Connections", () => {connections.open=!connections.open;connections.scrollIntoView?.({block:"nearest"});});
-  toolbar.append(search, provider, sort, refresh, favorites, manage);
+  toolbar.append(search, provider);
+  const filters=element("details"),filterBody=element("div");filters.className="hub-model-filters";filters.append(element("summary","Filters & catalogue"),filterBody);filterBody.append(sort,favorites,refresh);
   const status = element("p"); status.setAttribute("role", "status");
   const explanation = element("p", options?.browseOnly?"Browse live capabilities and add available models here. Choose a character’s model and its options in Settings → Characters.":options?.reasoningOnly?"Choose the Knowledge AI model and reasoning level. Its processing policy manages output and sampling limits; other model capabilities are shown for reference.":"Options follow the selected model and installed adapter. Refreshing the catalogue keeps your choices. OpenRouter uses API credits; Codex uses your existing subscription."); explanation.className = "hub-model-note";
   const scope = element("select"); scope.setAttribute("aria-label", "Apply model to");
@@ -32,7 +32,7 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
   const next = element("option", "New chats only"); next.value = "default"; scope.append(current, next);
   scope.hidden = !!options;
   const list = element("div"); list.className = "hub-model-list";
-  dialog.append(header, toolbar, explanation,connections, scope, status, list); root.body.append(dialog);
+  filters.append(explanation);dialog.append(header, toolbar, filters,connections, scope, status, list); root.body.append(dialog);
   const removeBack = installMobileWidgetBack(dialog, header, () => dismiss());
   let catalog: HubModelCatalog | undefined, busy = false, ticket = 0, timer: number | undefined;
   const drafts=new Map<string,{effort:string;temperature:string;maxTokens:string;expanded:boolean}>();
@@ -58,7 +58,7 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
   function card(m: HubCatalogModel) {
     const row = element("article"); row.setAttribute("data-model-id", m.id);
     row.append(element("h3", m.name), element("p", `${m.provider} · ${m.id}`));
-    row.append(button(m.favorite ? "★ Saved" : "☆ Favorite", () => void favorite(m)));
+    const star=button(m.favorite?"★":"☆",()=>void favorite(m));star.className="hub-model-favorite";star.setAttribute("aria-label",(m.favorite?"Remove favorite ":"Favorite ")+m.name);star.setAttribute("aria-pressed",String(!!m.favorite));row.append(star);
     const facts = [m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k context` : "", m.tools ? "Tools" : "", m.input.includes("image") ? "Images" : "", m.reasoning ? "Reasoning" : ""].filter(Boolean);
     row.append(element("p", facts.join(" · ")));
     if (m.pricing) row.append(element("p", `$${m.pricing.input.toFixed(3)} input / $${m.pricing.output.toFixed(3)} output per 1M tokens`));
@@ -78,7 +78,7 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
     row.append(settings);
     const select = button(options?.browseOnly?m.enabled?"Available":"Add to available models":m.enabled ? "Use model" : m.provider === "openrouter" ? "Add & use model" : "Adapter update needed", () => void choose(m,d));
     const connected=catalog?.providers.some(p=>p.id===m.provider);if(!connected)select.textContent="Provider adapter unavailable";
-    select.disabled = busy || !connected || (!m.enabled && m.provider !== "openrouter"); row.append(select);
+    select.disabled = busy || !connected || (!m.enabled && m.provider !== "openrouter");if(options?.browseOnly&&m.enabled&&connected)row.append(element("small","Available for characters"));else row.append(select);
     return row;
   }
   async function choose(m: HubCatalogModel, d:{effort:string;temperature:string;maxTokens:string}) {

@@ -9,6 +9,7 @@ Windows-first; optional voice/knowledge/calling require additional configuration
 | Manage shared speech, character voices, model options and the Tasks screen | [Settings](settings.md) |
 | Configure local speech, voices and live transcription | [Voice](voice.md) |
 | Preserve conversations, connect memory and review reflections | [Knowledge](knowledge.md) |
+| Find memory, share skills, inspect tools and understand compaction | [Memory, skills and context](MEMORY_SKILLS_AND_CONTEXT.md) |
 | Manage scheduled, repeated or conditional tasks | [Automations](automations.md) |
 | Run background outcomes with characters, checkpoints and evidenced results | [Goals](goals.md) |
 | Pair a text bot or understand incoming user-account calls | [Telegram](telegram.md) |

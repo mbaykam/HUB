@@ -5,7 +5,8 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   const view = root.defaultView!, lifetime = new AbortController();
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => { const n = root.createElement(tag); if (text) n.textContent = text; return n; };
   const button = (text: string, run: () => void) => { const n = el("button", text); n.type = "button"; n.addEventListener("click", run); return n; };
-  const panel = el("details"); panel.setAttribute("data-hub-speech-editor", ""); panel.open = !!seed; panel.append(el("summary", options.voiceOnly?"Voice":"Speech & languages"));
+  const panel = el(options.voiceOnly?"section":"details"); panel.setAttribute("data-hub-speech-editor", "");
+  if(panel instanceof view.HTMLDetailsElement){panel.open=!!seed;panel.append(el("summary","Speech & languages"));}
   const status = el("p"); status.setAttribute("role", "status");
   const field = (text: string, input: HTMLElement) => { const label = el("label"); label.append(el("span", text), input); panel.append(label); input.setAttribute("aria-label", text); };
   const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = !!seed; field("Enable local speech", enabled);

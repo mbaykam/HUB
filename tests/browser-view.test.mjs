@@ -5,12 +5,25 @@ import { createServer } from "node:http";
 import { BROWSER_VIEW_CHANNEL, parseBrowserViewQuery, parseBrowserViewResult } from "@minke/harness-overlay/browser-view-contract.ts";
 import { BrowserViewClient, createBrowserViewHandler } from "@minke/harness-overlay/host/browser-view.ts";
 import { bindBrowserViewChannel } from "@minke/desktop/main/agent-browser/view-channel.ts";
+import {JSDOM} from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
+import {createMobileBrowserView} from "@minke/harness-overlay/client/host/mobile-browser-view.ts";
 
 const tab = { sessionId: "browser-one", ownerSessionId: "task-one", title: "Example", url: "https://example.com", status: "ready", owner: "agent" };
 const frame = { tab, capturedAt: 1000, width: 500, height: 600, mimeType: "image/jpeg", data: "/9j/" };
 const query = { type: "frame", ownerSessionId: tab.ownerSessionId, sessionId: tab.sessionId };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 class Port extends EventEmitter { connected = true; sent = []; send(value, callback) { this.sent.push(value); callback?.(null); return true; } }
+
+test("Home shows browser failures only for an observed task, not for every voice call",async t=>{
+ const dom=new JSDOM('<body></body>',{url:'https://hub.test',pretendToBeVisual:true});let available=false;
+ dom.window.ResizeObserver=class{observe(){}disconnect(){}};dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
+ dom.window.fetch=async(_url,init)=>available?Response.json(JSON.parse(init.body).type==='list'?[tab]:frame):new Response('',{status:503});
+ const viewer=createMobileBrowserView(dom.window.document);dom.window.document.body.append(viewer.panel);t.after(()=>{viewer.dispose();dom.window.close();});
+ const refresh=async()=>{viewer.update(false,new Map());viewer.update(true,new Map(),'voice-fixture');await new Promise(r=>setTimeout(r,40));};
+ await refresh();assert.equal(viewer.panel.hidden,true,'No observed browser means no empty warning widget on Home');
+ available=true;await refresh();assert.equal(viewer.panel.hidden,false);assert.equal(viewer.panel.querySelector('img').hidden,false);
+ available=false;await refresh();assert.equal(viewer.panel.hidden,false,'An observed task keeps its reconnect status');assert.equal(viewer.panel.querySelector('img').hidden,true,'A failed refresh must not show stale pixels');assert.match(viewer.panel.textContent,/Reconnecting/);
+});
 
 test("viewer contract rejects mutation operations, foreign frames and oversized content", () => {
   assert.throws(() => parseBrowserViewQuery({ type: "navigate", url: "https://example.com" }));

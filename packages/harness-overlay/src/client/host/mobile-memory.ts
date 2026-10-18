@@ -3,7 +3,7 @@ import styles from "./mobile-memory.css";
 import { installKnowledgeControls } from "./mobile-knowledge.ts";
 const installStyles = defineOverlayStyle("hub-mobile-memory", styles);
 /** Compact memory controls; note content is always rendered as text, never HTML. */
-export function installMobileMemory(container: HTMLElement, root: Document): () => void {
+export function installMobileMemory(container: HTMLElement, root: Document, options:{launcherOnly?:boolean}={}): () => void {
   const view = root.defaultView;
   if (!view) return () => {};
   const panel = root.createElement("details");
@@ -20,9 +20,11 @@ export function installMobileMemory(container: HTMLElement, root: Document): () 
   panel.append(heading, status, explanation, refresh, notes);
   const removeStyles = installStyles(root);
   container.append(panel);
+  const launch=root.createElement("button");launch.type="button";launch.textContent="Knowledge AI";launch.setAttribute("data-hub-knowledge-launcher","");
+  if(options.launcherOnly){panel.hidden=true;container.prepend(launch);}
   const lifetime = new AbortController();
   let busy = false;
-  let removeKnowledge: (() => void) | undefined;
+  let removeKnowledge: ReturnType<typeof installKnowledgeControls> | undefined;
   async function load(): Promise<void> {
     if (busy || lifetime.signal.aborted) return;
     busy = true;
@@ -34,7 +36,7 @@ export function installMobileMemory(container: HTMLElement, root: Document): () 
       if (data.secondBrain) {
         if (!removeKnowledge) {
           status.remove(); explanation.remove(); refresh.remove();
-          removeKnowledge = installKnowledgeControls(notes, root, data);
+          removeKnowledge = installKnowledgeControls(notes, root, data, {hideLauncher:options.launcherOnly});
         }
         return;
       }
@@ -66,6 +68,7 @@ export function installMobileMemory(container: HTMLElement, root: Document): () 
     finally { busy = false; refresh.disabled = false; }
   }
   panel.addEventListener("toggle", () => { if (panel.open) void load(); });
+  launch.addEventListener("click",()=>{if(busy)return;launch.disabled=true;void load().then(()=>{if(lifetime.signal.aborted)return;if(removeKnowledge)removeKnowledge.open();else{panel.hidden=false;panel.open=true;}}).finally(()=>{launch.disabled=false;});});
   refresh.addEventListener("click", () => { void load(); });
-  return () => { lifetime.abort(); removeKnowledge?.(); panel.remove(); removeStyles(); };
+  return () => { lifetime.abort(); removeKnowledge?.();launch.remove(); panel.remove(); removeStyles(); };
 }

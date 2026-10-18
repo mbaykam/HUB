@@ -11,7 +11,7 @@ export const preferencesZh = {
     "管理作用于整个桌面应用的默认行为。",
   "preferences.code.title": "代码外观",
   "preferences.code.description":
-    "文件视图与终端共享代码配色。为浅色和深色模式分别选择主题。",
+    "选择文件视图和终端使用的代码配色。",
   "preferences.codeTheme.light.label": "浅色模式",
   "preferences.codeTheme.light.help":
     "HUB 使用浅色外观时应用，可选择任意明暗配色。",
@@ -100,7 +100,7 @@ export const preferencesEn: Record<
     "Manage defaults that apply across the desktop app.",
   "preferences.code.title": "Code appearance",
   "preferences.code.description":
-    "Files and Terminal share code colors. Choose a theme for light and dark mode.",
+    "Choose the colors used for code and Terminal content.",
   "preferences.codeTheme.light.label": "Light mode",
   "preferences.codeTheme.light.help":
     "Used when HUB has a light appearance. Any light or dark palette can be selected.",

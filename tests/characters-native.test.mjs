@@ -2,37 +2,17 @@
 // model response is scripted; no paid requests, user chats or live app state.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire, registerHooks } from "node:module";
-import { pathToFileURL, fileURLToPath } from "node:url";
-import { mkdtemp, rm, readdir, readFile } from "node:fs/promises";
+import {native} from "../scripts/tests/native-harness-resolver.mjs";
+import { fileURLToPath } from "node:url";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 
 
-// Resolve the pinned monorepo packages just as the native test runner does.
-const entries = new Map();
-const packages = new URL("../vendor/deepseek-harness/packages/", import.meta.url);
-for (const group of await readdir(packages, { withFileTypes: true })) {
-  if (!group.isDirectory()) continue;
-  for (const pkg of await readdir(new URL(group.name + "/", packages), { withFileTypes: true })) {
-    if (!pkg.isDirectory()) continue;
-    const directory = new URL(`${group.name}/${pkg.name}/`, packages);
-    let manifest; try { manifest = JSON.parse(await readFile(new URL("package.json", directory), "utf8")); } catch (error) { if (error.code === "ENOENT") continue; throw error; }
-    const packageEntry = manifest.exports?.["."]?.default ?? manifest.main;
-    if (packageEntry?.endsWith(".js")) entries.set(manifest.name, new URL(packageEntry, directory).href);
-    for (const [key, value] of Object.entries(manifest.exports ?? {})) {
-      const target = typeof value === "string" ? value : value?.default;
-      if (key.startsWith("./") && target?.endsWith(".js")) entries.set(manifest.name + key.slice(1), new URL(target, directory).href);
-    }
-  }
-}
-registerHooks({ resolve(specifier, context, next) { return next(entries.get(specifier) ?? specifier, context); } });
 const { mountAgentLoopTestDependencies } = await import("../vendor/deepseek-harness/packages/test-support/agent-loop-testkit/src/index.ts");
 const { MockAdapter, textResponse, toolCallResponse } = await import("../vendor/deepseek-harness/packages/core/agent-loop/tests/mock-adapter.ts");
 const { TestSessionQuery } = await import("../vendor/deepseek-harness/packages/subagent/subagent/tests/test-session-query.ts");
 
-const requireNative = createRequire(new URL("../vendor/deepseek-harness/package.json", import.meta.url));
-const native = name => import(entries.get(name) ?? pathToFileURL(requireNative.resolve(name)).href);
 async function composedWebProfile() {
   const { loadOverlayPatches, composeEntries } = await native('@deepseek-ai/dsh-app-boot');
   const layers = [
@@ -98,7 +78,7 @@ test('Goals uses native goal rounds, selected character, scoped files and durabl
   const {default:Goals}=await native('@deepseek-ai/dsh-goal');await ctx.plugin(Goals);
   backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
   const main=new MockAdapter([toolCallResponse('verify-output','hub_goal_files',{action:'read',path:'result.md'}),toolCallResponse('final-checkpoint','hub_goal_checkpoint',{summary:'Existing output checked on the new owner.',nextAction:'',complete:true,result:'Fixture result saved.',criteria:[{index:0,evidence:['tool:output','tool:verify-output']}]})]),fast=new MockAdapter([toolCallResponse('output','hub_goal_files',{action:'write',path:'result.md',content:'# Checked native fixture'}),toolCallResponse('checkpoint','hub_goal_checkpoint',{summary:'Output saved and checked.',nextAction:'Have the next owner read and verify it.',complete:false,result:'Fixture result saved.',criteria:[{index:0,evidence:['tool:output']}]})]);ctx.llm.registerAdapter(['main'],main);ctx.llm.registerAdapter(['fast'],fast);
-  const routes=new Map();class FixturePort extends Service{constructor(name,port){super(ctx,name);Object.assign(this,port);}}for(const [name,port]of Object.entries({agentPresets:{standingKeyFor:async()=>undefined,composedPreset:()=>undefined,composeFrom:async()=>undefined},agentDefaultModel:{currentSelection:()=>({provider:'main',model:'mock'}),saveSelection:async()=>{}},storageDomain:{open:spec=>facility.open(spec)},connection:{requestRejection:()=>undefined},webServer:{register:r=>{routes.set(r.path,r);return ()=>routes.delete(r.path);}},sessionController:{resolveAgent:async id=>({agent:ctx.agents.get(id)}),selectModel:async()=>{}},subprocess:{}}))new FixturePort(name,port);
+  const routes=new Map();class FixturePort extends Service{constructor(name,port){super(ctx,name);Object.assign(this,port);}}for(const [name,port]of Object.entries({agentPresets:{standingKeyFor:async()=>undefined,composedPreset:()=>undefined,composeFrom:async()=>undefined},agentDefaultModel:{currentSelection:()=>({provider:'main',model:'mock'}),saveSelection:async()=>{}},storageDomain:{open:spec=>facility.open(spec)},connection:{requestRejection:()=>undefined},webServer:{register:r=>{routes.set(r.path,r);return ()=>routes.delete(r.path);}},sessionController:{resolveAgent:async id=>({agent:ctx.agents.get(id)}),selectModel:async()=>{}},subprocess:{},attachments:{}}))new FixturePort(name,port);
   const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'})));let characters;const module=await import('../packages/harness-overlay/src/characters.ts');await ctx.plugin({name:'hub-goal-injected-fixture',inject:module.inject,apply:async scoped=>{characters=new HubCharacters(scoped,join(root,'characters'),camo);await characters.ready;}});assert.ok(routes.has('/api/hub/goals'),'Real injected context must mount Goals');
   const catalog=await new Promise((resolve,reject)=>{let status;Promise.resolve(routes.get('/api/hub/characters').handler({method:'GET',url:'/api/hub/characters',headers:{'x-hub-characters':'1'}},{writeHead:code=>status=code,end:text=>status===200?resolve(JSON.parse(text)):reject(Error('Character catalog failed'))})).catch(reject);});
   assert.equal(catalog.tools.filter(tool=>tool.name==='hub_present').length,1,'Per-conversation visuals must be selectable in the character tool catalog');
@@ -225,7 +205,7 @@ test('native character delegation uses the target model/persona while the coordi
  }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-characters-native-'));await rm(root,{recursive:true,force:true});}
 });
 
-test('model identity and natural conversation handoffs stay consistent without a greeting worker',{timeout:25000},async()=>{
+test('model identity and natural conversation handoffs stay consistent without a greeting worker',{timeout:25000},async t=>{
  const root=await mkdtemp(join(tmpdir(),'hub-characters-native-'));
  const ctx=new Context();let facility,backend;
  try{
@@ -247,16 +227,21 @@ test('model identity and natural conversation handoffs stay consistent without a
   await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Mira',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
   const parent=ctx.agentLoop.create('handoff-parent',{provider:'legacy',model:'old-qwen'});
   const instructionFiles=new InstructionFiles(join(root,'characters','instructions'));await instructionFiles.load();const soul=instructionFiles.files().find(f=>f.id==='SOUL.md');await instructionFiles.save('SOUL.md',soul.hash,'Shared instruction proof for native requests.');
+  let navigation='Memory index revision one: retrieve sources by stable identity.';
+  const offMemory=characters.instructions.registerManaged('memory.md',async()=>navigation);t.after(offMemory);
   async function say(agent,text){const before=agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length;agent.followup(createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}));const end=Date.now()+8000;while(agent.status!=='idle'||agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length<=before){assert.ok(Date.now()<end,'Turn did not settle');await new Promise(r=>setTimeout(r,10));}}
   await say(parent,'Biraz Mira’yla sohbet etmek istiyorum; konuşmayı ona devretir misin?');
   assert.equal(main.requests.length,1);assert.equal(fast.requests.length,1);
   assert.match(JSON.stringify(main.requests[0]),/powered by main\/mock/);assert.doesNotMatch(JSON.stringify(main.requests[0]),/powered by legacy\/old-qwen/);
   assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Character: Mira/);
   assert.match(main.requests[0].system,/Shared instruction proof/);assert.match(fast.requests[0].system,/Shared instruction proof/);
+  assert.match(main.requests[0].system,/Memory index revision one/);assert.match(fast.requests[0].system,/Memory index revision one/);
   const memory=ctx.agentLoop.create('hub-memory-instruction-test',{provider:'main',model:'mock'});const assembled=await ctx.systemPrompt.assemble({scope:memory});assert.ok(!assembled.sections.some(s=>s.text.includes('Shared instruction proof')));
   assert.equal(ctx.agents.list().filter(a=>a.session.header.origin==='subagent').length,0);
   assert.equal(characters.store.selected(parent.id).name,'Mira');assert.equal(deployment.provider,'main');
+  navigation='Memory index revision two: changed domains are current.';
   await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);
+  assert.match(fast.requests[1].system,/Memory index revision two/);assert.doesNotMatch(fast.requests[1].system,/Memory index revision one/);
   await say(parent,'Let your main assistant take over our conversation again.');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
   const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');
   await say(newChat,'Show the fixture plan as a visual.');

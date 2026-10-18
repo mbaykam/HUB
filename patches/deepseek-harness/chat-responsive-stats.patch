@@ -1,0 +1,11 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
+--- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
+@@ -3859,6 +3859,7 @@
+ 				children: (0, react_jsx_runtime.jsx)("div", {
+ 					ref: rootRef,
+ 					className: StatsLine_module_css_default.root,
++					"data-hub-chat-stats": "",
+ 					children: groups.map((group, i) => (0, react_jsx_runtime.jsxs)(react.Fragment, { children: [i > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("span", {
+ 						className: StatsLine_module_css_default.sep,
+ 						"aria-hidden": true,

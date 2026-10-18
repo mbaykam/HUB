@@ -1,0 +1,18 @@
+import {mkdir,writeFile,rename,lstat} from 'node:fs/promises';
+import {join} from 'node:path';
+import {homedir} from 'node:os';
+import {createHash} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const run=promisify(execFile),version='2026.8.19',expected='1d57897e94c6665a0a6f9bc54b34e584284e32c034ffab3a7df25d8f7b24eedf';
+const root=join(homedir(),'.dsh','hub-media'),python=join(homedir(),'.dsh','runtimes','pipecat',process.platform==='win32'?'Scripts/python.exe':'bin/python');
+await run(python,['-c','import av, PIL, faster_whisper'],{windowsHide:true,timeout:15000});
+await mkdir(root,{recursive:true});if((await lstat(root)).isSymbolicLink())throw Error('Media runtime directory must not be a link');
+const metadata=await fetch(`https://pypi.org/pypi/yt-dlp/${version}/json`,{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw Error('PyPI metadata unavailable');return r.json();});
+const wheel=metadata.urls.find(f=>f.packagetype==='bdist_wheel'&&f.digests.sha256===expected);if(!wheel||new URL(wheel.url).hostname!=='files.pythonhosted.org')throw Error('Pinned downloader checksum/source mismatch');
+const response=await fetch(wheel.url,{signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error('Downloader wheel unavailable');const bytes=Buffer.from(await response.arrayBuffer());
+if(bytes.length>5000000||createHash('sha256').update(bytes).digest('hex')!==expected)throw Error('Downloader checksum mismatch');
+const path=join(root,wheel.filename);await writeFile(path+'.tmp',bytes,{mode:0o600});await rename(path+'.tmp',path);
+await run(python,['-m','pip','install','--disable-pip-version-check','--no-index','--no-deps','--upgrade','--target',join(root,'python'),path],{windowsHide:true,timeout:90000,maxBuffer:32000});
+await writeFile(join(root,'runtime.json'),JSON.stringify({version,sha256:expected,source:'https://pypi.org/project/yt-dlp/'+version+'/',installedAt:new Date().toISOString()},null,2));
+console.log('Pinned yt-dlp installed separately from the speech environment. Local PyAV, Pillow and Whisper dependencies are available.');

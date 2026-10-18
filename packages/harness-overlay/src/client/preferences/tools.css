@@ -1,0 +1,15 @@
+[data-hub-tools]{min-width:0}
+[data-hub-tools]>header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+[data-hub-tools] h2{font-size:20px;margin:0}
+[data-hub-tools] p{font-size:13px;line-height:1.55;opacity:.8}
+[data-hub-tools]>div:not(.hub-tool-list){display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+[data-hub-tools] select,[data-hub-tools] input,[data-hub-tools] button{min-width:0;min-height:44px;box-sizing:border-box;padding:9px 12px;border:1px solid #adbdde33;border-radius:12px;color:inherit;background:#151d2b;font:inherit}
+.hub-tool-list{display:grid;gap:6px}
+.hub-tool-list>details{border-bottom:1px solid #b4c5e31c;padding:4px 0}
+.hub-tool-list summary{min-height:44px;cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;justify-content:space-between}
+.hub-tool-list summary:after{content:'⌄';flex:none;color:#a6b7d6}
+.hub-tool-list details[open]>summary:after{content:'⌃'}
+.hub-tool-list strong{font-size:13px;overflow-wrap:anywhere;min-width:0}
+.hub-tool-list small{font-size:11px;line-height:1.5;opacity:.65;overflow-wrap:anywhere}
+.hub-tool-list pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:320px;overflow:auto}
+@media(min-width:720px){[data-hub-tools]>div:not(.hub-tool-list){grid-template-columns:1fr 1.4fr 1fr}}

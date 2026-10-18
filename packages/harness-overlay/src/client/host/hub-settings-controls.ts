@@ -42,7 +42,7 @@ export function installHubSettingsControls(
   const voiceHistory = root.createElement("div");
   container.append(heading, intro, connections, knowledge, usage, voiceHistory);
   const removeTelegram = installMobileTelegram(connections, root);
-  const removeKnowledge = installMobileMemory(knowledge, root);
+  const removeKnowledge = installMobileMemory(knowledge, root, {launcherOnly:true});
   const removeUsage = installMobileUsageMeter(usage, root);
   const removeVoiceHistory = installMobileVoiceHistory(voiceHistory, root, sessions, () => {
     // Opening a transcript must dismiss the Settings modal above the chat.

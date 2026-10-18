@@ -22,6 +22,8 @@ import {goalPath} from "./goal-files.ts";
 import {effectiveKnowledgeCharacter,assertKnowledgeTool} from "./knowledge-identity.ts";
 import {boundKnowledgePayload} from "./knowledge-retrieval.ts";
 import {KnowledgeBackups} from "./knowledge-backups.ts";
+import {installKnowledgeSkills} from "./knowledge-skill-tools.ts";
+import {installMediaInspection} from "./media-inspection.ts";
 
 // Native hooks/tool registries remain the permission boundary. Curator itself
 // has no tools; ordinary recall goes through the conversation-owned registry.
@@ -47,6 +49,8 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   if(embeddings){store.rank=(query,notes,limit)=>embeddings.rank(query,notes,limit);store.similarities=notes=>embeddings.layout(notes);void embeddings.start().then(()=>{curator.embedding=embeddings.status;}).catch(()=>{curator.embedding="Local embeddings unavailable · keyword search active";});}
   const imports=new KnowledgeImportBatches(store,source=>curator.enqueue(source),()=>curator.settings);
   const ready=curator.initialize().then(async()=>{await imports.recover();});void ready.catch(()=>{curator.status="unavailable";});
+  ctx.effect(()=>installKnowledgeSkills(ctx,store,ready),"HUB memory index and portable skills");
+  ctx.effect(()=>installMediaInspection(ctx,store,ready),"HUB local media evidence");
   async function enrich(source:any,snapshot:readonly any[],event:any,sessionId:string){
     let start=-1;for(let i=snapshot.length-1;i>=0;i--)if(snapshot[i].type==="turn/start"&&snapshot[i].data?.turn===event.data?.turn){start=i;break;}
     const assets:import("../knowledge-contract.ts").KnowledgeAsset[]=[];const turn=[];for(const e of snapshot.slice(start+1)){if(e.type==="turn/end"||e.type==="turn/start")break;turn.push(e);}

@@ -11,7 +11,9 @@ import {redactKnowledgeSecrets} from "./knowledge-curator.ts";
 export class InstructionFiles {
   readonly root:string;
   private texts:Record<string,string>={};
+  private managed=new Map<string,{generate:()=>Promise<string>;visible?:(context:any)=>boolean}>();
   private writes:Promise<unknown>=Promise.resolve();
+  private refreshes:Promise<unknown>=Promise.resolve();
   constructor(root:string){this.root=root;}
   async load(){
     await mkdir(this.root,{recursive:true});
@@ -22,9 +24,28 @@ export class InstructionFiles {
     }
     await this.refresh();
   }
-  async refresh(){for(const name of ["SOUL.md","USER.md"]){const path=join(this.root,name),info=await lstat(path);if(info.isSymbolicLink()||info.size>32000)throw new Error("Instruction file must be plain text under 32 KB");this.texts[name]=await readFile(path,"utf8");}}
+  registerManaged(name:"memory.md",generate:()=>Promise<string>,visible?:(context:any)=>boolean){
+    const registration={generate,visible};this.managed.set(name,registration);
+    return ()=>{if(this.managed.get(name)===registration){this.managed.delete(name);delete this.texts[name];}};
+  }
+  async refresh(){const next=this.refreshes.then(()=>this.refreshNow());this.refreshes=next.catch(()=>{});await next;}
+  private async refreshNow(){
+    for(const name of ["SOUL.md","USER.md"]){const path=join(this.root,name),info=await lstat(path);if(info.isSymbolicLink()||info.size>32000)throw new Error("Instruction file must be plain text under 32 KB");this.texts[name]=await readFile(path,"utf8");}
+    for(const [name,source]of this.managed){
+      // Never continue with yesterday's routing index if its authoritative
+      // registry is unavailable. A failed refresh must not block normal chat.
+      try{
+        const content=await source.generate();if(Buffer.byteLength(content)>16000)throw Error("Managed index exceeds its context budget");
+        const path=join(this.root,name),info=await lstat(path).catch(e=>{if(e.code!=="ENOENT")throw e;return undefined;});
+        if(info&&(info.isSymbolicLink()||!info.isFile()))throw Error("Managed index must be a regular file");
+        if(!info||await readFile(path,"utf8")!==content){const temp=path+`.${randomUUID()}.tmp`;await writeFile(temp,content,{flag:"wx",mode:0o600});await rename(temp,path);}
+        this.texts[name]=content;
+      }catch{this.texts[name]="Memory navigation is temporarily unavailable. Do not assume saved information is absent; retry the permitted Knowledge tools.";}
+    }
+  }
+  visible(name:string,context:any){return this.managed.get(name)?.visible?.(context)??true;}
   text(name:string){return this.texts[name]??"";}
-  files(){return ["SOUL.md","USER.md"].map(name=>({id:name,name,path:join(this.root,name),content:this.text(name),hash:digest(this.text(name)),editable:true,scope:"Conversation characters and their delegated workers"}));}
+  files(){return [...["SOUL.md","USER.md"],...this.managed.keys()].map(name=>({id:name,name,path:join(this.root,name),content:this.text(name),hash:digest(this.text(name)),editable:!this.managed.has(name),generated:this.managed.has(name),scope:"Conversation characters and their delegated workers"}));}
   async save(name:string,hash:string,content:string){
     if(!["SOUL.md","USER.md"].includes(name)||typeof hash!=="string"||typeof content!=="string"||Buffer.byteLength(content)>32000)throw new Error("Invalid instruction edit");
     const task=this.writes.then(async()=>{await this.refresh();const before=this.text(name);if(digest(before)!==hash)throw new Error("Instructions changed; reload before saving");
@@ -38,9 +59,9 @@ export class InstructionFiles {
 /** Exposes only known instruction sources; never arbitrary paths or credentials. */
 export function installInstructionFiles(ctx:any,characters:HubCharacters,files=new InstructionFiles(join(characters.store.root,"instructions"))){
   const ready=files.load();void ready.catch(()=>{});
-  const sharedText=(name:string,context:any)=>context.scope?.id?.startsWith("hub-memory-")?"":files.text(name)?`Operator ${name} instructions (current version):\n${files.text(name)}`:"";
-  const offRefresh=ctx.on("system-prompt/assemble",async(_assembly:any,context:any,next:()=>Promise<any>)=>{await ready;await files.refresh();const assembled=await next();return {...assembled,sections:assembled.sections.map((section:any)=>section.name==="hub:instructions:SOUL.md"||section.name==="hub:instructions:USER.md"?{...section,text:sharedText(section.name.slice("hub:instructions:".length),context)}:section)};},{global:true,prepend:true});
-  const offs=["SOUL.md","USER.md"].map((name,i)=>ctx.systemPrompt.section({name:"hub:instructions:"+name,order:994+i,text:(context:any)=>sharedText(name,context)}));
+  const sharedText=(name:string,context:any)=>context.scope?.id?.startsWith("hub-memory-")||!files.visible(name,context)?"":files.text(name)?`${name==="memory.md"?"Generated Knowledge navigation":"Operator "+name+" instructions"} (current version):\n${files.text(name)}`:"";
+  const offRefresh=ctx.on("system-prompt/assemble",async(_assembly:any,context:any,next:()=>Promise<any>)=>{await ready;await files.refresh();const assembled=await next();return {...assembled,sections:assembled.sections.map((section:any)=>section.name.startsWith("hub:instructions:")?{...section,text:sharedText(section.name.slice("hub:instructions:".length),context)}:section)};},{global:true,prepend:true});
+  const offs=["SOUL.md","USER.md","memory.md"].map((name,i)=>ctx.systemPrompt.section({name:"hub:instructions:"+name,order:993+i,text:(context:any)=>sharedText(name,context)}));
   const send=(res:ServerResponse,code:number,value:unknown)=>{res.writeHead(code,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});res.end(JSON.stringify(value));};
   const offRoute=ctx.webServer.register({kind:"exact",path:"/api/hub/instructions",async handler(req:IncomingMessage,res:ServerResponse){
     const rejection=ctx.connection.requestRejection(req);if(rejection||req.headers["sec-fetch-site"]==="cross-site"){send(res,rejection??403,{error:"unauthorized"});return;}

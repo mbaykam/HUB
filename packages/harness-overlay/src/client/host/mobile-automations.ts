@@ -50,7 +50,7 @@ export function installMobileAutomations(container:HTMLElement,root:Document,opt
     text(advanced,"tools","İzinli araçlar",(job?.tools??defaultAutomation.tools).join(", "),"Karakterin kendi izinleriyle birlikte uygulanır. Virgülle ayır.");check(advanced,"allowWrites","Salt okuma dışındaki bu araçlara açıkça izin veriyorum",job?.allowWrites??false);
     const notification=choose(advanced,"notification","Sonuç bildirimi",[["pwa","PWA’da çalışma geçmişi"],...(job?.sourceSessionId?[["telegram","Oluşturulduğu Telegram sohbeti"] as [string,string]]:[])]);notification.value=job?.notification??"pwa";
     form.append(el("p","Bu bilgisayar ve HUB açıkken çalışır. Kota dolduğunda görev korunur ve bekler. Kesintiye uğramış dış işlemler kendiliğinden tekrar edilmez."));
-    const actions=el("nav"),save=el("button","Kaydet");save.type="submit";actions.append(btn("Geri",showList),save,btn("Değişikliklerden vazgeç",()=>{edit(state?.automations.find(j=>j.id===editingId));status.textContent="Kaydedilmemiş değişikliklerden vazgeçildi.";}));form.append(actions);baseline=formSnapshot();
+    const actions=el("nav"),save=el("button","Kaydet");save.type="submit";if(!options)actions.append(btn("Geri",showList));actions.append(save,btn("Değişikliklerden vazgeç",()=>{edit(state?.automations.find(j=>j.id===editingId));status.textContent="Kaydedilmemiş değişikliklerden vazgeçildi.";}));form.append(actions);baseline=formSnapshot();
   }
   function draft(){const kind=value("kind");let trigger:AutomationTrigger;
     if(kind==="once")trigger={kind,at:new Date(value("at")).getTime()};

@@ -32,13 +32,15 @@ export function createMobileBrowserView(root: Document) {
   root.body.append(dialog);
   const removeBack = installMobileWidgetBack(dialog, toolbar, () => dialog.close());
   let labels = new Map<string, string>(), tabs: BrowserViewTab[] = [], selected = "", visible = false, disposed = false, busy = false;
-  let voiceSession: string | undefined, failed = false;
+  let voiceSession: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined, request: AbortController | undefined;
   let epoch = 0, listedAt = 0;
   function clearFrame() { image.hidden = true; fullImage.hidden = true; image.removeAttribute("src"); fullImage.removeAttribute("src"); }
   function message(text: string) { if (status.textContent !== text) status.textContent = text; if (fullStatus.textContent !== text) fullStatus.textContent = text; }
   function display() {
-    panel.hidden = !visible || (!tabs.length && !(failed && voiceSession));
+    // An active voice call is not evidence that a browser task exists.
+    // Keep Home clear until a tab has actually been observed.
+    panel.hidden = !visible || !tabs.length;
     expand.disabled = !tabs.length;
     expand.hidden = !tabs.length;
     picker.hidden = tabs.length < 2;
@@ -58,7 +60,7 @@ export function createMobileBrowserView(root: Document) {
         const result = await query({ type: "list" }, request.signal) as BrowserViewTab[];
         if (version !== epoch) return;
         const priorTab = tabs.find(tab => tab.sessionId === selected);
-        tabs = result; listedAt = Date.now(); failed = false;
+        tabs = result; listedAt = Date.now();
         const prior = selected;
         if (!tabs.some(tab => tab.sessionId === selected)) selected = tabs[0]?.sessionId ?? "";
         if (prior !== selected || priorTab?.url !== tabs.find(tab => tab.sessionId === selected)?.url) clearFrame();
@@ -80,7 +82,7 @@ export function createMobileBrowserView(root: Document) {
       if (dialog.open) { fullImage.src = source; fullImage.hidden = false; }
       message(`${frame.tab.owner === "human" ? "Under desktop control" : "Watching assistant"} · Live view · Read-only`);
     } catch {
-      if (version === epoch && !disposed) { failed = true; clearFrame(); message("Browser view unavailable. Reconnecting…"); listedAt = 0; display(); }
+      if (version === epoch && !disposed) { clearFrame(); message("Browser view unavailable. Reconnecting…"); listedAt = 0; display(); }
     } finally { busy = false; request = undefined; schedule(tabs.length ? 1000 : 4000); }
   }
   function invalidate() { epoch++; request?.abort(); listedAt = 0; clearFrame(); schedule(); }

@@ -1,0 +1,4 @@
+[data-hub-activity-folded]{display:none!important}
+[data-hub-chat-activity]{display:flex;align-items:center;min-height:44px;max-width:100%;padding:7px 12px;margin:5px 0;border:1px solid #adbdde24;border-radius:13px;background:#a0b3dc08;color:#acbdd7;font:inherit;font-size:12px;line-height:1.5;white-space:normal;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+[data-hub-chat-activity]:hover{background:#a0b3dc14}
+[data-hub-chat-activity]:focus-visible{outline:2px solid #a6b2ff;outline-offset:2px}

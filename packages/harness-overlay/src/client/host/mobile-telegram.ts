@@ -16,14 +16,14 @@ export function installMobileTelegram(container: HTMLElement, root: Document) {
   const pair = element("div"), controls = element("div"); controls.className = "hub-model-toolbar";
   const connect = button("Connect bot", () => void update({ action: "connect", token: token.value.trim() }));
   const refresh = button("Check connection", () => void update());
-  const reconnect = button("Reconnect", () => void update({ action: "reconnect" })); controls.append(connect, refresh, reconnect);
-  dialog.append(header, intro, token, controls, status, pair); root.body.append(dialog);
+  const reconnect = button("Reconnect", () => void update({ action: "reconnect" })),setup=element("details"),setupTitle=element("summary","Connect or change bot");setup.append(setupTitle,token,connect);controls.append(refresh,reconnect);
+  dialog.append(header, intro, status, controls, pair,setup); root.body.append(dialog);
   const removeBack = installMobileWidgetBack(dialog, header, () => dismiss());
   let busy = false, timer: number | undefined;
   function dismiss() { view.clearTimeout(timer); token.value = ""; dialog.close(); }
   async function update(command?: unknown) {
     if (busy || lifetime.signal.aborted) return;
-    busy = true; controls.querySelectorAll("button").forEach(b => b.disabled = true); view.clearTimeout(timer);
+    busy = true; connect.disabled=true;controls.querySelectorAll("button").forEach(b => b.disabled = true); view.clearTimeout(timer);
     try {
       const response = await view.fetch("/api/hub/telegram", { method: command ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
         headers: { "x-hub-telegram": "1", ...(command ? { "content-type": "application/json" } : {}) }, body: command ? JSON.stringify(command) : undefined,
@@ -31,6 +31,8 @@ export function installMobileTelegram(container: HTMLElement, root: Document) {
       if (!response.ok) throw new Error("Telegram connection unavailable. Check the connection before repeating an action.");
       const value = await response.json();
       status.textContent = `${value.accountLabel ? value.accountLabel + " · " : ""}${value.state}`;
+      if(command&&(command as any).action==="connect")token.value="";
+      if(!command&&["unconfigured","disconnected","disabled"].includes(value.state))setup.open=true;
       pair.replaceChildren();
       if (value.state === "pairing") {
         pair.append(element("p", "Open your bot in Telegram and send /start. Approve only the request whose code matches your Telegram message."));
@@ -41,7 +43,7 @@ export function installMobileTelegram(container: HTMLElement, root: Document) {
       }
       if (dialog.open && value.state === "pairing") timer = view.setTimeout(() => void update(), 3000);
     } catch (error) { if (!lifetime.signal.aborted) status.textContent = (error as Error).message; }
-    finally { token.value = ""; busy = false; controls.querySelectorAll("button").forEach(b => b.disabled = false); }
+    finally { busy = false; controls.querySelectorAll("button").forEach(b => b.disabled = false);connect.disabled=false; }
   }
   dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(); });
   return () => { lifetime.abort(); dismiss(); removeBack(); dialog.remove(); launcher.remove(); removeStyles(); };

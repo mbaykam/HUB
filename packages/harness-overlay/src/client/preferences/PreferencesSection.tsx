@@ -361,7 +361,7 @@ function CodeThemePreferences({
         )}
       </div>
       <div className="minke-preferences__theme-options">
-        {CODE_THEME_MODES.map((colorScheme) => (
+        {CODE_THEME_MODES.filter(mode=>mode!=="light"||typeof document==="undefined"||!document.documentElement.hasAttribute("data-minke-mobile-web")).map((colorScheme) => (
           <div
             key={colorScheme}
             className="minke-preferences__theme-option"

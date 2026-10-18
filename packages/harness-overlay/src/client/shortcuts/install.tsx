@@ -525,7 +525,7 @@ export function installShortcuts(
 
   const source: Observable<ShortcutSectionState> =
     createShortcutSectionSource(runtime, ctx.locale);
-  ctx.effect(
+  if(shortcutStore.available)ctx.effect(
     () =>
       settings.register({
         id: "shortcuts",

@@ -68,14 +68,16 @@ export function installInstructionEditor(container: HTMLElement, root: Document,
   panel.append(heading, description, characterPicker, label, hint, editor, timing, actions, status, otherDrafts);
 
   const advanced = el("details"), path = el("code"), matrix = el("div"), matrixDetails = el("details"), native = el("details"), nativeText = el("pre");
-  const builtIn = el("details"), builtText = el("pre"), last = el("details"), lastText = el("pre");
+  const builtIn = el("details"), builtText = el("pre"), last = el("details"), lastText = el("pre"), memory = el("details"), memoryText = el("pre");
   advanced.className = "instruction-advanced";
   advanced.append(el("summary", "Gelişmiş: dosyalar ve modele gönderilen talimatlar"), el("p", "Bu bölüm teknik ayrıntıları gösterir. Yukarıdaki alanı kullanmak için bunları düzenlemen gerekmez."), el("small", "Seçili alanın kayıt yeri"), path);
   matrixDetails.append(el("summary", "Hangi karakter hangi modeli ve talimatları kullanıyor?"), matrix);
   native.append(el("summary", "AGENTS.md · çalışma alanı kuralları (salt okunur)"), el("p", "Araç ve çalışma alanı kurallarıdır. Tüm sohbet ve Knowledge AI modelleri kullanabilir; projeler ek kurallar sağlayabilir. Bu dosyayı kendi dosya editöründen düzenleyebilirsin."), nativeText);
   builtIn.append(el("summary", "Knowledge AI’ın sabit not işleme kuralları"), builtText);
   last.append(el("summary", "Bu sohbette son gönderilen talimatlar"), lastText);
-  advanced.append(matrixDetails, native, builtIn, last);
+  memory.setAttribute("data-instruction-memory", "");
+  memory.append(el("summary", "memory.md · Knowledge navigation (automatic)"), el("p", "A small map of domains, source retrieval and skills. HUB updates it automatically before model requests and while idle. Edit your Knowledge domains or saved skills to change this index."), memoryText);
+  advanced.append(matrixDetails, memory, native, builtIn, last);
   container.append(el("h2", "AI talimatları"), el("p", "Neyi değiştirmek istediğini seç. Her bölüm, yazdıklarının hangi asistanı etkilediğini açıklar."), navigation, panel, advanced);
 
   let section: Section = "shared", sources: Source[] = [], characters: Character[] = [], selected: Source | undefined, characterId = "", curator: Curator | undefined;
@@ -182,7 +184,7 @@ export function installInstructionEditor(container: HTMLElement, root: Document,
       matrix.replaceChildren();
       for (const character of characters) {
         const card = el("article"), role = character.role === "Main" ? "Ana asistan" : character.role === "Voice" ? "Sesli asistan" : "Uzman";
-        card.append(el("strong", character.name + " · " + role), el("p", character.route ? character.route.provider + " / " + character.route.model + (character.route.reasoningEffort ? " · " + character.route.reasoningEffort : "") : "Model seçilmedi"), el("small", "Ortak: SOUL.md, USER.md ve AGENTS.md · Özel: " + character.name + " talimatları"));
+        card.append(el("strong", character.name + " · " + role), el("p", character.route ? character.route.provider + " / " + character.route.model + (character.route.reasoningEffort ? " · " + character.route.reasoningEffort : "") : "Model seçilmedi"), el("small", "Ortak: SOUL.md, USER.md ve AGENTS.md · memory.md: Knowledge erişimi olan karakterler · Özel: " + character.name + " talimatları"));
         matrix.append(card);
       }
       if (curator) {
@@ -191,6 +193,9 @@ export function installInstructionEditor(container: HTMLElement, root: Document,
         matrix.append(card);
       }
       const nativeSource = sources.find(source => source.id === "native-agents");
+      const memorySource = sources.find(source => source.id === "memory.md");
+      memory.hidden = !memorySource;
+      memoryText.textContent = memorySource ? memorySource.path + "\n\n" + memorySource.content : "";
       native.hidden = !nativeSource;
       nativeText.textContent = nativeSource ? nativeSource.path + "\n\n" + (nativeSource.content || "Bu dosyada ek kural yok.") : "";
       builtText.textContent = curator?.builtIn ?? "";

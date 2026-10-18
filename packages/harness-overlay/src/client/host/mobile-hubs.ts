@@ -34,7 +34,9 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const identityName = root.createElement("strong"), identityModel = root.createElement("small"); identity.append(identityName, identityModel); nav.append(identity);
   let identitySession: string | undefined, identityCheckedAt = 0, identityFlight = false;
   const hub = root.createElement("section"); hub.setAttribute("data-hub-voice-hub", ""); hub.setAttribute("aria-label", "Voice hub");
+  const surface = root.createElement("section"); surface.setAttribute("data-hub-home-surface", ""); surface.setAttribute("aria-label", "Live conversation and tasks");
   const start = root.createElement("button"); start.type = "button"; start.setAttribute("data-voice-start", "");
+  start.setAttribute("aria-label", "Start voice conversation"); start.title = "Speak";
   const voiceGlyph = root.createElement("span"); voiceGlyph.setAttribute("data-voice-glyph", ""); voiceGlyph.setAttribute("aria-hidden", "true");
   for (let index = 0; index < 5; index++) voiceGlyph.append(root.createElement("i"));
   const title = root.createElement("strong"); title.textContent = "Speak";
@@ -119,6 +121,14 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     hub.setAttribute("data-voice-state", loading ? "starting" : state);
     hub.toggleAttribute("data-external-call", !!external);
     hub.toggleAttribute("data-home", inHome);
+    hub.toggleAttribute("data-idle-bar", inHome && !busy);
+    surface.hidden = !inHome;
+    if (inHome) {
+      for (const node of [liveVoice, transcript.panel, activity.panel, browser.panel]) if (node.parentElement !== surface) surface.append(node);
+    } else {
+      if (liveVoice.parentElement !== hub) hub.insertBefore(liveVoice, play);
+      if (transcript.panel.parentElement !== hub) hub.insertBefore(transcript.panel, play);
+    }
     hub.removeAttribute("data-shared");
     hub.hidden = !inHome && !busy;
     nav.hidden = inHome;
@@ -139,31 +149,34 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   }
   function reconcile() {
     frame = undefined;
-    const mobile = root.querySelector("[data-minke-mobile-web]") !== null && view!.innerWidth <= 1024;
+    const mobile = root.querySelector("[data-minke-mobile-web]") !== null;
     // A running PWA call must retain End/Mute controls through a resize.
     const next = mobile || active() ? root.querySelector<HTMLElement>('[data-slot="conversation"] [data-phase]') : null;
     const seat = next?.querySelector<HTMLElement>("[data-composer-seat]");
-    if (!next || !seat) { hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.panel.remove(); browser.update(false, new Map()); clearConversation(); conversation = undefined; return; }
+    if (!next || !seat) { hub.remove(); surface.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.panel.remove(); browser.update(false, new Map()); clearConversation(); conversation = undefined; return; }
     if (conversation !== next) { clearConversation(); conversation = next; }
     if (nav.parentElement !== next) next.prepend(nav);
     const stack = seat.querySelector('[data-slot="conversation.composer.bar"]')?.parentElement ?? seat;
     stack.setAttribute("data-hub-composer-stack", "");
     if (hub.parentElement !== stack) stack.prepend(hub);
     const nativeBar = seat.querySelector('[data-slot="conversation.composer.bar"]');
+    const scroll = next.querySelector<HTMLElement>("[data-conversation-scroll]");
+    if (scroll && surface.parentElement !== scroll) scroll.prepend(surface);
     if (nativeBar && textHeading.parentElement !== stack) stack.insertBefore(textHeading, nativeBar);
     const nativeOptions = stack.querySelector('[data-slot="conversation.hero.agentPreset"]')?.parentElement;
     if (nativeOptions && nativeOptions !== stack) nativeOptions.setAttribute("data-hub-chat-options", "");
-    if (activity.panel.parentElement !== stack) stack.append(activity.panel);
-    if (browser.panel.parentElement !== stack) stack.append(browser.panel);
+    if (activity.panel.parentElement !== surface) surface.append(activity.panel);
+    if (browser.panel.parentElement !== surface) surface.append(browser.panel);
     render();
   }
   function clearConversation() {
+    surface.remove();
     for (const name of ["data-hub-shared-input", "data-hub-voice-chat", "data-hub-voice-active", "data-hub-home", "data-hub-options-open"]) conversation?.removeAttribute(name);
     for (const node of conversation?.querySelectorAll('[data-hub-composer-stack],[data-hub-chat-options]') ?? []) { node.removeAttribute("data-hub-composer-stack"); node.removeAttribute("data-hub-chat-options"); }
   }
   function schedule() { if (!lifetime.signal.aborted && frame === undefined) frame = view!.requestAnimationFrame(reconcile); }
   const observer = new view.MutationObserver(records => {
-    if (records.some(record => !hub.contains(record.target) && !textHeading.contains(record.target) && !nav.contains(record.target) && !activity.panel.contains(record.target) && !browser.panel.contains(record.target) && !browser.dialog.contains(record.target) && !(record.target instanceof Element && record.target.closest('[data-hub-characters],[data-hub-visual-dialog],[data-hub-chat-visual]')))) schedule();
+    if (records.some(record => !hub.contains(record.target) && !surface.contains(record.target) && !textHeading.contains(record.target) && !nav.contains(record.target) && !activity.panel.contains(record.target) && !browser.panel.contains(record.target) && !browser.dialog.contains(record.target) && !(record.target instanceof Element && record.target.closest('[data-hub-characters],[data-hub-visual-dialog],[data-hub-chat-visual]')))) schedule();
   });
   // Avoid observing our own changing text/controls; only seat replacement and
   // native phase/viewport changes schedule a reconciliation.

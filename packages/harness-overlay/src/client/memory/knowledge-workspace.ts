@@ -7,6 +7,7 @@ import {isArchivedConversation,matchesKnowledgeScope,knowledgeRecordCounts,type 
 import {knowledgeLayout} from "./knowledge-layout.ts";
 import {createKnowledgeDomainsPanel} from "./knowledge-domains-panel.ts";
 import {createKnowledgeDataPanel} from "./knowledge-data-panel.ts";
+import {createKnowledgeSkillsPanel} from "./knowledge-skills-panel.ts";
 import {createKnowledgeNeighbors} from "./knowledge-neighbors.ts";
 import type {KnowledgeEvidence} from "../../knowledge-relation-contract.ts";
 import type {KnowledgeAsset} from "../../knowledge-contract.ts";
@@ -44,8 +45,9 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
   const cloud=createKnowledgeCloud(root,id=>void open(id));graphPane.prepend(cloud.canvas,cloud.controls);graphPane.append(colorKey);let use3D=true;canvas.hidden=true;
   const domainPanel=createKnowledgeDomainsPanel(root,request,load,id=>{showGraph();cloud.focusDomain(id);},id=>void open(id));layout.append(domainPanel.pane);
   const dataPanel=createKnowledgeDataPanel(root,async<T>(query:string,command?:unknown)=>{const result=await request<T>(query,command);if(["start-import","withdraw-import"].includes((command as {action?:string})?.action??""))await load();return result;});layout.append(dataPanel.pane);
+  const skillsPanel=createKnowledgeSkillsPanel(root,()=>void load());layout.append(skillsPanel.pane);
   const neighbors=createKnowledgeNeighbors(root,request,id=>void open(id),(relationId,index,evidence)=>void inspectEvidence(relationId,index,evidence));
-  actions.append(btn("Connections",()=>{meta.open=true;neighbors.pane.tabIndex=-1;neighbors.pane.focus({preventScroll:true});neighbors.pane.scrollIntoView?.({block:"start"});}));
+  const connectionsAction=btn("Connections",()=>{noteActions.open=false;meta.open=true;neighbors.pane.tabIndex=-1;neighbors.pane.focus({preventScroll:true});neighbors.pane.scrollIntoView?.({block:"start"});});
   notePane.insertBefore(citationPreview,body);
   let graph=initial,active:KnowledgeNote|undefined,noteRequest:AbortController|undefined,disposed=false,filterLocal=false,editing=false;
   let fit2DNeeded=true,layout2DFrame=0;
@@ -89,13 +91,25 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
   const save=btn("Save",()=>void saveNote());save.hidden=true;
   const upload=el("input");upload.type="file";upload.multiple=true;upload.hidden=true;upload.setAttribute("aria-label","Add knowledge files");dialog.append(upload);
   let attachToCurrent=false;
-  const attach=btn("Attach file",()=>{if(editing){status.textContent="Save your note changes before attaching a file.";return;}attachToCurrent=true;upload.click();});actions.append(attach);
+  const attach=btn("Attach file",()=>{noteActions.open=false;if(editing){status.textContent="Save your note changes before attaching a file.";return;}attachToCurrent=true;upload.click();});
   const showAssets=async()=>{if(!canLeaveNote())return;dialog.dataset.mobilePane="assets";domainPanel.pane.hidden=true;dataPanel.pane.hidden=true;assetsPane.hidden=false;sidebar.hidden=true;graphPane.hidden=true;notePane.hidden=true;const result=await request<{assets:KnowledgeAsset[]}>("view=assets");media.renderAssets(assetCards,result.assets);};
   nav.append(btn("Attachments",()=>void showAssets().catch(()=>{status.textContent="Couldn’t load attachments.";})),btn("Add files",()=>{if(!canLeaveNote())return;attachToCurrent=false;upload.click();}));
-  const obsidian=el("a","Open in Obsidian");obsidian.className="knowledge-obsidian";actions.append(back,edit,save,obsidian);
-  const forgetSelection=btn("Forget selected passage",()=>void forget());actions.append(forgetSelection);
+  nav.append(btn("Skills",()=>{if(!canLeaveNote())return;dialog.dataset.mobilePane="skills";domainPanel.pane.hidden=true;dataPanel.pane.hidden=true;sidebar.hidden=true;graphPane.hidden=true;notePane.hidden=true;assetsPane.hidden=true;void skillsPanel.show();}));
+  nav.setAttribute("aria-label","Knowledge navigation");
+  const views=el("select");views.setAttribute("aria-label","Knowledge view");views.setAttribute("data-knowledge-view-select","");
+  const routes=new Map<string,HTMLButtonElement>();
+  for(const [value,label]of [["graph","Graph"],["files","Notes"],["archive","Chat archive"],["domains","Domains"],["data","Data"],["assets","Attachments"],["skills","Skills"]]){
+    const target=[...nav.querySelectorAll("button")].find(b=>b.textContent===label)!;target.setAttribute("data-knowledge-view-route","");routes.set(value!,target);
+    const option=el("option",label);option.value=value!;views.append(option);
+  }
+  nav.prepend(views);let selectedView="graph";
+  const syncView=()=>{const pane=dialog.dataset.mobilePane;if(pane&&pane!=="note"){selectedView=pane==="files"&&scope.value==="archive"?"archive":pane;views.value=selectedView;}skillsPanel.pane.hidden=pane!=="skills";};
+  views.addEventListener("change",()=>{const previous=selectedView;routes.get(views.value)?.click();syncView();if(dialog.dataset.mobilePane==="note")views.value=previous;});
+  const navigationObserver=new view.MutationObserver(syncView);navigationObserver.observe(dialog,{attributes:true,attributeFilter:["data-mobile-pane"]});
+  const obsidian=el("a","Open in Obsidian");obsidian.className="knowledge-obsidian";
+  const forgetSelection=btn("Forget selected passage",()=>{noteActions.open=false;void forget();}),noteActions=el("details"),noteActionsBody=el("div");noteActions.setAttribute("data-hub-action-menu","More actions");noteActions.append(el("summary","More actions"),noteActionsBody);noteActionsBody.append(connectionsAction,attach,obsidian,forgetSelection);actions.append(back,edit,save,noteActions);
   function discardEdit(){editing=false;editor.value=active?.content??"";editor.hidden=true;body.hidden=false;save.hidden=true;edit.textContent="Edit";}
-  function canLeaveNote(){if(!domainPanel.pane.hidden&&!domainPanel.canLeave()||!dataPanel.pane.hidden&&!dataPanel.canLeave())return false;if(editing&&editor.value!==active?.content){status.textContent="Save or discard your note changes before leaving.";editor.focus();return false;}if(editing)discardEdit();return true;}
+  function canLeaveNote(){if(!domainPanel.pane.hidden&&!domainPanel.canLeave()||!dataPanel.pane.hidden&&!dataPanel.canLeave()||!skillsPanel.pane.hidden&&!skillsPanel.canLeave())return false;if(editing&&editor.value!==active?.content){status.textContent="Save or discard your note changes before leaving.";editor.focus();return false;}if(editing)discardEdit();return true;}
   function requestClose(){if(canLeaveNote())dialog.close();}
   function showGraph(){if(!canLeaveNote())return;dialog.dataset.mobilePane="graph";domainPanel.pane.hidden=true;dataPanel.pane.hidden=true;assetsPane.hidden=true;graphPane.hidden=false;notePane.hidden=true;sidebar.hidden=false;view.requestAnimationFrame(()=>{if(disposed)return;if(use3D)cloud.resize();else scheduleGraph2D();});}
   function showFiles(focusSearch=true,collection:KnowledgeRecordScope="brain"){if(!canLeaveNote())return;dialog.dataset.mobilePane="files";domainPanel.pane.hidden=true;dataPanel.pane.hidden=true;assetsPane.hidden=true;graphPane.hidden=false;notePane.hidden=true;sidebar.hidden=false;scope.value=collection;updateSearchHint();void refreshList();if(focusSearch)search.focus();}
@@ -141,7 +155,7 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
   let lastSize="";const resize=new view.ResizeObserver(entries=>{const rect=entries[0]?.contentRect,key=`${rect?.width}:${rect?.height}`;if(key===lastSize)return;lastSize=key;if(!use3D)fitGraph2D();});resize.observe(canvas);
   const removeBack=installMobileWidgetBack(dialog,header,()=>{if(!notePane.hidden)returnFromNote();else requestClose();});
   const timer=view.setInterval(()=>void load(),5000);
-  function dispose(){if(disposed)return;disposed=true;lifetime.abort();noteRequest?.abort();view.clearTimeout(searchTimer);view.clearInterval(timer);view.cancelAnimationFrame(layout2DFrame);resize.disconnect();removeBack();neighbors.dispose();dataPanel.dispose();domainPanel.dispose();cloud.dispose();cy.destroy();dialog.remove();onClose();}
-  dialog.addEventListener("close",dispose);dialog.addEventListener("cancel",event=>{if(!domainPanel.pane.hidden&&!domainPanel.canLeave()||!dataPanel.pane.hidden&&!dataPanel.canLeave())event.preventDefault();else if(!notePane.hidden){event.preventDefault();returnFromNote();}});
+  function dispose(){if(disposed)return;disposed=true;lifetime.abort();noteRequest?.abort();view.clearTimeout(searchTimer);view.clearInterval(timer);view.cancelAnimationFrame(layout2DFrame);resize.disconnect();navigationObserver.disconnect();removeBack();neighbors.dispose();skillsPanel.dispose();dataPanel.dispose();domainPanel.dispose();cloud.dispose();cy.destroy();dialog.remove();onClose();}
+  dialog.addEventListener("close",dispose);dialog.addEventListener("cancel",event=>{if(!canLeaveNote())event.preventDefault();else if(!notePane.hidden){event.preventDefault();returnFromNote();}});
   render(initial);showGraph();return dispose;
 }
