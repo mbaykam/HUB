@@ -25,7 +25,9 @@ test("tagged releases publish only verified Windows assets after package checks"
  const workflow=yaml.parse(await readFile(workflowUrl,"utf8"));
  assert.ok(workflow.jobs.package.strategy.matrix.includes("startsWith(github.ref, 'refs/tags/v')"));
  assert.equal(workflow.jobs.release.needs,"package");
- const steps=workflow.jobs.release.steps,publish=steps.find(step=>step.name==="Publish GitHub Release"),stage=steps.find(step=>step.name==="Stage stable installer names");
+ const steps=workflow.jobs.release.steps,publish=steps.find(step=>step.name==="Publish GitHub Release"),stage=steps.find(step=>step.name==="Stage stable installer names"),download=steps.find(step=>step.name==="Download distributables");
+ assert.equal(download.with.name,"hub-win32-x64");
+ assert.equal(download.with.path,"release-artifacts/hub-win32-x64");
  assert.equal(publish.env.HUB_RELEASE_PROFILE,"windows-x64");
  assert.ok(stage.run.includes("stage_asset HUB-windows-x64.exe"));
  assert.ok(!stage.run.includes("stage_asset HUB-macos"));assert.ok(!stage.run.includes("stage_asset HUB-linux"));
@@ -221,8 +223,6 @@ test("GitHub Actions packages each supported desktop platform", async () => {
     releaseJob,
     /uses:\s*actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c\s+# v8\.0\.1/u,
   );
-  assert.match(releaseJob, /pattern:\s*hub-\*/u);
-  assert.match(releaseJob, /merge-multiple:\s*false/u);
   for (const assetName of releaseAssetNames) {
     assert.ok(releaseJob.includes(`stage_asset ${assetName}`));
   }

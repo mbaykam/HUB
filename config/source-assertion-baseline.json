@@ -6,7 +6,7 @@
   "tests/embedded-node-permissions.test.mjs": 10,
   "tests/agent-browser-tabs.test.mjs": 17,
   "tests/ambient-theme.test.mjs": 9,
-  "tests/github-actions-package.test.mjs": 48,
+    "tests/github-actions-package.test.mjs": 46,
   "tests/harness-overlay.test.mjs": 152,
   "tests/harness-runtime-prune.test.mjs": 1,
   "tests/im-gateway.test.mjs": 1,
