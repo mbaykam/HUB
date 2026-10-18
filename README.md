@@ -1,72 +1,91 @@
 <p align="center">
-  <img src="docs/assets/hub-banner.svg" alt="HUB — Your AI. Your voice. Your second brain." width="900">
+  <img src="docs/assets/hub-banner.svg" alt="HUB — A personal assistant. A connected memory." width="1000">
 </p>
 
+<p align="center"><strong>A self-hosted personal assistant for voice, Telegram and a connected second brain.</strong></p>
+
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-a5b4fc?style=flat-square" alt="Apache 2.0 license"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/status-experimental-8b9cf4?style=flat-square" alt="Experimental"></a>
-  <a href="docs/setup.md"><img src="https://img.shields.io/badge/Node.js-24%2B-79cbb5?style=flat-square" alt="Node.js 24 or newer"></a>
   <a href="https://github.com/mbaykam/HUB/actions/workflows/check.yml"><img src="https://github.com/mbaykam/HUB/actions/workflows/check.yml/badge.svg" alt="Source checks"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-a5b4fc?style=flat-square" alt="Apache 2.0"></a>
+  <a href="#get-started"><img src="https://img.shields.io/badge/status-experimental-8499dc?style=flat-square" alt="Experimental"></a>
+  <a href="https://github.com/mbaykam"><img src="https://img.shields.io/badge/maintainer-%40mbaykam-79bdaa?style=flat-square" alt="Maintained by mbaykam"></a>
 </p>
 
 <p align="center">
-  <a href="docs/setup.md">Get started</a> ·
-  <a href="docs/README.md">Documentation</a> ·
-  <a href="README.tr.md">Türkçe</a> ·
-  <a href="https://github.com/mbaykam/HUB/issues">Issues</a>
+  <a href="#get-started">Get started</a> &nbsp;·&nbsp;
+  <a href="docs/README.md">Documentation</a> &nbsp;·&nbsp;
+  <a href="README.tr.md">Türkçe</a> &nbsp;·&nbsp;
+  <a href="https://github.com/mbaykam/HUB/issues">Report an issue</a>
 </p>
 
-**HUB is a self-hosted AI workspace for conversation, delegated work and connected knowledge.**
-Talk to a fast voice companion, give your main assistant a task through Telegram,
-and use the mobile PWA to follow the work, review conversations and explore your
-second brain. Choose the models, voices and tools behind each character.
+Talk to your voice companion. Give HUB a task in Telegram. Open the PWA to follow
+the work, inspect a source or explore how your knowledge connects. The same host
+holds the conversations, character settings and tools behind each interaction.
 
-Built on [Minke](https://github.com/lencx/Minke) and
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
-HUB is an independent project, maintained separately from both upstream teams.
+Created and maintained by **[Mete Baykam (@mbaykam)](https://github.com/mbaykam)**.
+HUB builds on [Minke](https://github.com/lencx/Minke) and
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), with its own
+personal-assistant interface and extensions.
 
-## What you can do
+## A workspace for your second brain
 
-| | In HUB |
+<p align="center">
+  <img src="docs/assets/knowledge-preview.png" alt="Current HUB PWA: colored Knowledge domain clouds with a separate conversation archive" width="1000">
+</p>
+
+Knowledge stays in an **Obsidian-compatible Markdown vault**. Original chats live
+in their own archive, outside your life domains. Notes can link back to the
+conversation or file they came from. Knowledge AI organizes relationships and
+separate reflections without rewriting your original conversations.
+
+A generated **`memory.md`** gives characters a compact, current map of the vault.
+They retrieve the relevant sources when needed. Reusable workflows live in the
+**Skills** domain as portable `SKILL.md` files that you and your characters can
+find, inspect and update.
+
+## Speak, write, follow the work
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <strong>One place to begin</strong><br>
+      <sub>Write and Speak share a bottom bar. Home stays clear until there is work to show.</sub><br><br>
+      <img src="docs/assets/home-preview.png" alt="HUB Home with a single bottom write-and-speak bar" width="320">
+    </td>
+    <td align="center" valign="top" width="50%">
+      <strong>Stay in the conversation</strong><br>
+      <sub>See the live transcript and open the related chat while a call continues.</sub><br><br>
+      <img src="docs/assets/voice-preview.png" alt="HUB live-conversation screen with transcript and compact bottom call controls" width="320">
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>Current PWA screenshots with demonstration data. The voice screen uses simulated call state; no personal conversations or vault data are shown.</sub></p>
+
+| Capability | How it works |
 | --- | --- |
-| **Talk naturally** | Local speech recognition and synthesis, English/Turkish profiles, listenable voice previews and a live transcript. |
-| **Delegate real work** | A quick conversation model hands demanding tasks to the configured HUB character. Native tasks retain their history and tool policy; completed results can return to the active voice session. |
-| **Stay in Telegram** | A paired bot handles text and updates replies in place. An optional, separate Telegram user account supports incoming voice calls. |
-| **Build a second brain** | Original conversations stay intact in an Obsidian-compatible vault. Explore 3D domains, cited connections and local group suggestions; review AI reflections and admit history in selected pilots. |
-| **Manage automations** | Schedule, repeat or watch conditions from the PWA right panel, with task permissions, limits and durable run history. |
-| **Work toward a goal** | Choose a character, acceptance criteria, resources and allowance. Follow milestones and evidence across background rounds, with editable settings, approvals and separate recurring results. |
-| **Choose your stack** | Browse OpenRouter metadata and installed provider catalogs; configure character routes, voices, tools and delegation. Native provider plugins and local LM Studio/Ollama routes remain available. |
-| **Follow the work** | Review native tasks, open the related conversation, inspect browser work and view supported visual artifacts in the PWA. |
-| **Explore live visuals** | Ask your assistant for diagrams or interactive charts in a conversation canvas. Follow updates as the agent publishes them, pause updates to explore a version, or reopen a dismissed visual. |
+| **Multilingual voice** | Local speech recognition and synthesis, language detection, prepared voice samples and a live transcript. Available languages depend on the selected engines. |
+| **Telegram** | Paired text conversations with replies updated in place. An optional, separate Telegram user account provides incoming voice calls. |
+| **Characters and delegation** | Choose a model, voice and tool policy for each character. A fast voice companion can hand deeper work to HUB while preserving the native task history. |
+| **Goals and routines** | One Tasks panel for ongoing outcomes, schedules, recurring work and conditions. Choose a character, resources, limits and completion criteria; follow the evidence and run history. |
+| **Practical tools** | Inspect effective tool access in Settings. Browser tools read pages, use observed controls, fill fields and return screenshots. Supported video attachments can provide timestamped frames and local transcription. |
+| **Live visuals** | Agents can publish diagrams, passive HTML/SVG and self-contained Vega charts into a conversation canvas. Local sliders and selectors work without another model request. |
+| **Long conversations** | Native context compaction reduces older working context while retaining original session history. Domain-aware retrieval and the memory index complement the checkpoint. |
 
-The conversation canvas supports passive HTML/SVG and self-contained Vega charts
-with local sliders and selectors. It shares the active conversation with voice;
-interactive controls do not require a model call. Visuals are scoped to their
-conversation and stay available while that session is loaded. They run in a
-sandbox without external network access or model-generated JavaScript.
+<details>
+<summary><strong>Inside Settings: see what your characters can use</strong></summary>
+<br>
+<img src="docs/assets/tools-preview.png" alt="HUB Settings tool inventory with character access, search, permissions and browser readiness" width="800">
 
-### A quieter interface
-
-Dark glass surfaces, a soft gradient mesh and a reactive voice orb. One state
-message, a live transcript and controls that stay available while you move
-between Home and a conversation. The PWA is the companion workspace for voice
-and Telegram, with character and Knowledge AI settings kept out of the chat.
-
-<table><tr>
-  <td align="center" valign="top"><strong>Voice</strong><br><br><img src="docs/assets/voice-preview.png" alt="Dark HUB voice interface with live transcript" width="280"></td>
-  <td align="center" valign="top"><strong>Knowledge</strong><br><br><img src="docs/assets/knowledge-preview.png" alt="HUB knowledge graph with linked topic clouds" width="280"></td>
-</tr></table>
-
-<p align="center"><sub>Real interface captures with synthetic demonstration content; no personal conversations or vault data.</sub></p>
+The inventory comes from registered tools and character policy. Registration,
+permission and runtime readiness are shown separately; execution still respects
+task restrictions and approval rules. See [memory, skills and context](docs/MEMORY_SKILLS_AND_CONTEXT.md).
+</details>
 
 ## Get started
 
-HUB is an **experimental, Windows-first source project**. Windows is the current
-development and voice baseline. The desktop shell also has macOS/Linux packaging
-paths; this snapshot does not provide verified voice support or prebuilt
-downloads for those platforms.
-
-Install [Node.js 24+](https://nodejs.org/), Git and pnpm **11.7.0**, then:
+HUB is an **experimental, Windows-first source project**. Install
+[Node.js 24+](https://nodejs.org/), Git and pnpm **11.7.0**:
 
 ```sh
 git clone --recurse-submodules https://github.com/mbaykam/HUB.git
@@ -76,71 +95,56 @@ pnpm run harness:stage
 pnpm start
 ```
 
-Connect your model provider in Settings and configure the main HUB and
-voice characters. Voice, knowledge curation and Telegram calls are
-**optional extensions requiring their own local runtime/profile setup**; they
-are not provisioned by the source command above.
+Connect a provider, then configure your characters in **Settings → HUB**. Use
+the authenticated mobile PWA and Telegram for everyday interaction; the host
+computer runs the background work.
 
-In the mobile PWA, open **Settings → HUB → Assistants** for characters,
-Knowledge AI, Telegram, provider usage and voice history. The right panel keeps
-the Knowledge graph, Automations and [Goals](docs/goals.md) available for browsing
-records, managing timed work and following longer outcomes.
+Local voice, Knowledge AI and Telegram calls are optional extensions with their
+own runtime/profile setup. The commands above do not install model weights or
+provision accounts. Follow the [setup guide](docs/setup.md) and the
+[voice](docs/voice.md), [Telegram](docs/telegram.md) and
+[Knowledge](docs/knowledge.md) guides.
 
-Follow the [setup guide](docs/setup.md) for model configuration, authenticated
-mobile access and optional capabilities. This repository includes code and
-application assets; it does not bundle accounts, provider credentials, personal
-profiles, conversations, vaults or speech-model weights.
-
-## One host, several ways in
+## How the pieces connect
 
 ```mermaid
 flowchart LR
-    Telegram[Telegram text] --> HUB[Main HUB character]
-    Speech[Local STT] --> Conversation[Conversation character]
-    Conversation --> TTS[Local TTS]
-    Conversation -->|Delegated task| HUB
-    HUB --> Tools[Configured tools and specialists]
-    Tools -->|Result| Conversation
-    PWA[Mobile PWA] <--> History[Native conversations and work]
-    HUB --> History
-    Conversation --> History
-    History -->|Original public conversations| Vault[Markdown vault and graph]
-    Vault -->|Read-only sources| Curator[Knowledge AI]
-    Curator --> Relations[Relationships and separate reflections]
-    Relations --> Vault
+    PWA[Mobile PWA] <--> Sessions[Conversations and tasks]
+    Telegram[Telegram] <--> HUB[HUB · main assistant]
+    Voice[Local speech] <--> Companion[Voice companion]
+    Companion -->|Delegate| HUB
+    HUB <--> Sessions
+    Companion <--> Sessions
+    HUB --> Tools[Tools and specialists]
+    Sessions --> Archive[Original chat archive]
+    Archive --> Curator[Knowledge AI]
+    Curator --> Links[Domains, links and reflections]
+    Links --> Vault[Markdown vault]
+    Vault --> Retrieval[Memory index and source retrieval]
+    Retrieval --> HUB
+    Retrieval --> Companion
     PWA <--> Vault
 ```
 
-The host must be running. Remote microphone access needs HTTPS; Telegram calls
-need an opted-in user account, separate from the bot. Voice and PWA can observe
-the same call without opening a second microphone session.
+Your conversations, vault and local speech stay on the host. Prompts and tool
+results reach the language-model provider you select; Telegram and web browsing
+use their respective services. Local storage does not make a cloud model offline.
+Accounts, credentials, personal records and model weights are excluded from this
+repository. See [SECURITY.md](SECURITY.md).
 
-## Models and data
+<details>
+<summary><strong>Current boundaries</strong></summary>
 
-History search finds words inside your messages as well as conversation titles.
-Its local index is built on the first search and kept under the desktop's data
-folder; the original chat logs stay unchanged. The first search may take longer.
+- The host must stay on for calls and background tasks. Remote microphone access needs authenticated HTTPS.
+- Speech speed and recognition depend on the selected models and hardware. The playback guard pauses recognition during replies; it is not full acoustic echo cancellation.
+- Browser tools control websites, not arbitrary Windows applications. A platform can block access to a reel; attach the clip when that happens. Sampled frames do not establish every moment of a video.
+- Compaction is lossy and can require an extra model request. Original history and cited sources remain the recovery path; a simulated test is not a full-day physical call test.
+- macOS/Linux packaging paths exist, but this snapshot does not claim verified voice support or prebuilt downloads for those platforms.
+- Conversation visuals are scoped to the loaded session and sandboxed without external network access or model-generated JavaScript.
 
-Speech can run locally while the conversation model uses your selected provider.
-Prompts and tool results go to that provider; Telegram messages go through
-Telegram, and browsing reaches the selected websites. Local operation of speech
-and storage does not make a hosted language model offline.
+</details>
 
-Knowledge AI has configurable source selection, timing, annotation language,
-relationships, reflection, review mode and budgets. Original conversations are
-archived even when a model fails; Curator cannot rewrite them. ChatGPT/Gemini
-archives can be imported explicitly. See [Knowledge](docs/knowledge.md),
-[Automations](docs/automations.md) and [Voice](docs/voice.md).
-
-In Knowledge, returning from a note keeps your filtered list and reading position.
-Save or explicitly discard a note edit before navigating away inside the workspace.
-
-HUB uses the native Harness permission model. Tools and trusted plugins can
-operate on the host with the permissions you grant. Keep credentials and runtime
-data outside the checkout, approve Telegram pairing deliberately, and use
-authenticated remote access. Read [SECURITY.md](SECURITY.md).
-
-## Development
+## Development and contributing
 
 ```sh
 pnpm typecheck
@@ -148,38 +152,27 @@ pnpm test:desktop
 pnpm run package
 ```
 
-`test:desktop` includes core, Harness, UI, host and native-service checks.
-Provider/microphone integration checks are separate opt-ins; ordinary source
-tests use fixtures. On Windows without file-symlink privileges, the specific
-filesystem-link cases report a skip; Unix CI covers those cases.
+The suite covers core, Harness, UI, host and native-service behavior. Ordinary
+tests use fixtures; provider, microphone and device checks are separate. Some
+platform-dependent tests may report a skip.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), the
-[UI design guide](UI_DESIGN_GUIDE.md) and
-[compatible PWA update guide](HUB_UI_UPDATES.md).
+[Contributing](CONTRIBUTING.md) · [UI design guide](UI_DESIGN_GUIDE.md) ·
+[PWA updates](HUB_UI_UPDATES.md) · [Changelog](CHANGELOG.md) ·
+[All contributors](https://github.com/mbaykam/HUB/graphs/contributors)
 
-## Status and next work
+## Credits
 
-Voice latency and recognition depend on the selected models, host and network.
-The current playback guard pauses recognition during replies rather than
-providing full acoustic echo cancellation. Interrupt remains explicit.
-Long-session compaction, direct character handover and broader platform
-acceptance remain ongoing work; they are not promised by this snapshot.
+- **[Mete Baykam](https://github.com/mbaykam)** — HUB creator and maintainer.
+- **[lencx / Minke](https://github.com/lencx/Minke)** — the original desktop shell and product foundation.
+- **[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)** — native agents, sessions, plugin composition and tool infrastructure.
+- [Pi](https://github.com/earendil-works/pi), [Pipecat](https://github.com/pipecat-ai/pipecat) and [Cytoscape.js](https://js.cytoscape.org/) — provider, voice and graph foundations.
 
-The [changelog](CHANGELOG.md) records the current source baseline.
-
-## Credits and references
-
-- [Minke](https://github.com/lencx/Minke) — the original desktop shell and product foundation, by lencx.
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — plugin composition, native agents, sessions and tools; the submodule is pinned in [runtime configuration](config/harness-runtime.json).
-- [Pi](https://github.com/earendil-works/pi) — the provider/agent ecosystem used through the underlying Harness.
-- [Pipecat](https://github.com/pipecat-ai/pipecat) — the local voice pipeline; [Cytoscape.js](https://js.cytoscape.org/) — graph infrastructure.
-
-README presentation references: [OpenClaw](https://github.com/openclaw/openclaw/blob/main/README.md),
+Presentation references: [OpenClaw](https://github.com/openclaw/openclaw/blob/main/README.md),
 [OpenCode](https://github.com/anomalyco/opencode/blob/dev/README.md) and
-[Pi](https://github.com/earendil-works/pi/blob/main/README.md). These inspired the
-product overview, quick start and documentation layout; their branding and copy
-are not reused. See [sources](docs/sources.md) for links and component credits.
+[Pi](https://github.com/earendil-works/pi/blob/main/README.md). Their branding and
+copy are not reused. Component and research links are collected in
+[sources](docs/sources.md).
 
-HUB code is licensed under [Apache-2.0](LICENSE). Upstream components and optional
-model weights retain their own licenses; see [NOTICE](NOTICE) and bundled
+HUB code uses [Apache-2.0](LICENSE). Upstream components and optional model weights
+retain their own licenses; see [NOTICE](NOTICE) and
 [license notices](resources/licenses/).

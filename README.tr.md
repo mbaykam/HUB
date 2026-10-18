@@ -15,7 +15,7 @@ seslerini ve araçlarını kendin seç.
 
 ## Neler var?
 
-- Yerel STT/TTS, İngilizce/Türkçe ses ayarları, hazırlanmış ses örnekleri ve
+- Yerel STT/TTS, çok dilli ses desteği, hazırlanmış ses örnekleri ve
   canlı transkript.
 - Ses karakterinden ana HUB'a görev devri; native iş geçmişi ve sesli sonuç
   dönüşü.
@@ -64,11 +64,15 @@ edilmez. [Güvenlik ve özel veri](SECURITY.md).
 
 Ses gecikmesi/kalitesi cihaz ve modele bağlıdır. Mevcut yankı koruması yanıt
 sırasında dinlemeyi durdurur; Interrupt ile kesebilirsin. Tam akustik yankı
-iptali, doğrudan karakter devri ve uzun seans compaction geliştirmeleri henüz
-tamamlanmış olarak sunulmaz. macOS/Linux paketleme yolları bulunur; bu sürüm
+iptali henüz tamamlanmış olarak sunulmaz. Uzun seanslar native compaction,
+özgün geçmiş ve kaynaklardan hatırlama ile desteklenir; compaction kayıplı bir
+özetleme işlemidir. macOS/Linux paketleme yolları bulunur; bu sürüm
 o platformlar için doğrulanmış ses desteği veya hazır indirme sunmaz.
 
 ## Kaynaklar
+
+HUB'ın geliştiricisi ve bakımını yapan kişi **[Mete Baykam (@mbaykam)](https://github.com/mbaykam)**.
+[Tüm katkıda bulunanlar](https://github.com/mbaykam/HUB/graphs/contributors).
 
 HUB, lencx'in [Minke](https://github.com/lencx/Minke) projesinden türetilmiş,
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) üzerine
