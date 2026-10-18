@@ -52,3 +52,9 @@ intended user workflows are verified and the release profile is expanded deliber
 
 Tagged builds publish `HUB-windows-x64.exe` and `SHA256SUMS`. The release workflow
 retains typechecks, tests and packaged-runtime smoke checks; failures stop publication.
+
+If publication stops before the release is public, preserve its original tag and
+checked build. Recover an existing draft only after checking the exact tag/commit,
+successful packaging job, downloaded artifact digest, reviewed notes and every
+uploaded asset's size and SHA-256. Publish that verified draft and recheck immutability;
+do not replace a public release or rebuild a different binary under its version.

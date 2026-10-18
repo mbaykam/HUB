@@ -109,7 +109,7 @@ test("release publication creates a draft and accepts only an immutable publishe
   const fake = runner([
     result(1, "", "release not found"),
     result(0),
-    result(0, JSON.stringify(await draftDocument(assets))),
+    result(0, JSON.stringify([[await draftDocument(assets)]])),
     result(0),
     result(0, JSON.stringify({ immutable: true })),
   ]);
@@ -130,6 +130,10 @@ test("release publication creates a draft and accepts only an immutable publishe
   );
   assert.ok(fake.calls[1].includes("--draft"));
   assert.ok(fake.calls[1].includes("--verify-tag"));
+  assert.deepEqual(fake.calls[2], [
+    "api", "-H", `X-GitHub-Api-Version: ${GITHUB_RELEASE_API_VERSION}`,
+    "repos/mbaykam/HUB/releases?per_page=100", "--paginate", "--slurp",
+  ]);
   assert.deepEqual(fake.calls[3], [
     "release",
     "edit",
@@ -174,7 +178,7 @@ test("mutable or unverifiable releases are returned to draft", async () => {
   const mutable = runner([
     result(1),
     result(0),
-    result(0, JSON.stringify(await draftDocument(assets))),
+    result(0, JSON.stringify([[await draftDocument(assets)]])),
     result(0),
     result(0, JSON.stringify({ immutable: false })),
     result(0),
@@ -196,7 +200,7 @@ test("mutable or unverifiable releases are returned to draft", async () => {
   const unreadable = runner([
     result(1),
     result(0),
-    result(0, JSON.stringify(await draftDocument(assets))),
+    result(0, JSON.stringify([[await draftDocument(assets)]])),
     result(0),
     result(1, "", "API unavailable"),
     result(0),
@@ -221,7 +225,7 @@ test("Windows publication requires its exact profile and uses reviewed release n
  assert.deepEqual(assets.map(path=>basename(path)),["HUB-windows-x64.exe","SHA256SUMS"]);
  await assert.rejects(discoverReleaseAssets(root),/exact required set/u);
  await assert.rejects(discoverReleaseAssets(root,"unknown"),/Unknown release profile/u);
- const fake=runner([result(1),result(0),result(0,JSON.stringify(await draftDocument(assets))),result(0),result(0,JSON.stringify({immutable:true}))]);
+ const fake=runner([result(1),result(0),result(0,JSON.stringify([[await draftDocument(assets)]])),result(0),result(0,JSON.stringify({immutable:true}))]);
  await publishGithubRelease({...publishOptions(assets,fake.run),profile:"windows-x64",notesFile:"reviewed-notes.md"});
  assert.ok(fake.calls[1].includes("--notes-file"));assert.ok(fake.calls[1].includes("reviewed-notes.md"));assert.ok(!fake.calls[1].includes("--generate-notes"));
  assert.ok(fake.calls.filter(call=>call[0]==="release").every(call=>call.at(-1)==="mbaykam/HUB"&&call.at(-2)==="--repo"));
@@ -231,8 +235,20 @@ test("a missing or corrupted draft upload stays unpublished",async()=>{
  const root=await releaseAssetFixture("windows-x64"),assets=await discoverReleaseAssets(root,"windows-x64");
  for(const corrupt of [document=>{document.assets.pop();},document=>{document.assets[0].digest="sha256:incorrect";},document=>{document.assets[0].size++;}]){
   const document=await draftDocument(assets);corrupt(document);
-  const fake=runner([result(1),result(0),result(0,JSON.stringify(document))]);
+  const fake=runner([result(1),result(0),result(0,JSON.stringify([[document]]))]);
   await assert.rejects(publishGithubRelease({...publishOptions(assets,fake.run),profile:"windows-x64"}),/does not match/u);
+  assert.equal(fake.calls.length,3);assert.ok(!fake.calls.some(call=>call.includes("--draft=false")));
+ }
+});
+
+test("draft lookup checks all authenticated pages and rejects ambiguous or missing drafts",async()=>{
+ const root=await releaseAssetFixture("windows-x64"),assets=await discoverReleaseAssets(root,"windows-x64"),draft=await draftDocument(assets);
+ const pages=[[{...draft,tag_name:"v0.2.0"}],[draft]];
+ const found=runner([result(1),result(0),result(0,JSON.stringify(pages)),result(0),result(0,JSON.stringify({immutable:true}))]);
+ await publishGithubRelease({...publishOptions(assets,found.run),profile:"windows-x64"});
+ for(const invalid of [[],[[{...draft,draft:false}]],[[draft],[draft]],[draft]]){
+  const fake=runner([result(1),result(0),result(0,JSON.stringify(invalid))]);
+  await assert.rejects(publishGithubRelease({...publishOptions(assets,fake.run),profile:"windows-x64"}),/Expected .*before publication/u);
   assert.equal(fake.calls.length,3);assert.ok(!fake.calls.some(call=>call.includes("--draft=false")));
  }
 });

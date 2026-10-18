@@ -240,10 +240,20 @@ export async function publishGithubRelease({
     ]),
     "creating the draft release",
   );
-  const draft = JSON.parse(assertSuccessful(await run([
+  // The tag endpoint returns published releases only. Discover the exact draft
+  // through authenticated release pages while its uploads are still editable.
+  const pages = JSON.parse(assertSuccessful(await run([
     "api", "-H", `X-GitHub-Api-Version: ${GITHUB_RELEASE_API_VERSION}`,
-    `repos/${repository}/releases/tags/${releaseTag}`,
+    `repos/${repository}/releases?per_page=100`, "--paginate", "--slurp",
   ]), "reading the uploaded draft"));
+  if (!Array.isArray(pages) || pages.some(page => !Array.isArray(page))) {
+    throw new Error("Expected authenticated release pages before publication");
+  }
+  const drafts = pages.flat().filter(release => release?.draft === true && release.tag_name === releaseTag);
+  if (drafts.length !== 1) {
+    throw new Error("Expected exactly one matching draft before publication");
+  }
+  const draft = drafts[0];
   await verifyDraftReleaseAssets(draft, assets, releaseTag);
   assertSuccessful(
     await run([
