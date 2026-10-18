@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/mbaykam/HUB/actions/workflows/check.yml"><img src="https://github.com/mbaykam/HUB/actions/workflows/check.yml/badge.svg" alt="Source checks"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-a5b4fc?style=flat-square" alt="Apache 2.0"></a>
-  <a href="#get-started"><img src="https://img.shields.io/badge/status-experimental-8499dc?style=flat-square" alt="Experimental"></a>
+  <a href="https://github.com/mbaykam/HUB/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-v1.0.0-8499dc?style=flat-square" alt="HUB v1.0.0"></a>
   <a href="https://github.com/mbaykam"><img src="https://img.shields.io/badge/maintainer-%40mbaykam-79bdaa?style=flat-square" alt="Maintained by mbaykam"></a>
 </p>
 
@@ -84,7 +84,10 @@ task restrictions and approval rules. See [memory, skills and context](docs/MEMO
 
 ## Get started
 
-HUB is an **experimental, Windows-first source project**. Install
+Download the **[v1.0.0 Windows installer](https://github.com/mbaykam/HUB/releases/tag/v1.0.0)**,
+or build from source. HUB is Windows-first; the host serves the PWA and Telegram.
+
+For a source build, install
 [Node.js 24+](https://nodejs.org/), Git and pnpm **11.7.0**:
 
 ```sh
@@ -158,6 +161,7 @@ platform-dependent tests may report a skip.
 
 [Contributing](CONTRIBUTING.md) · [UI design guide](UI_DESIGN_GUIDE.md) ·
 [PWA updates](HUB_UI_UPDATES.md) · [Changelog](CHANGELOG.md) ·
+[Release standard](RELEASING.md) ·
 [All contributors](https://github.com/mbaykam/HUB/graphs/contributors)
 
 ## Credits

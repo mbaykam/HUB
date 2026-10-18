@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   lstat,
   readFile,
   readdir,
+  stat,
 } from "node:fs/promises";
 import {
   dirname,
@@ -23,6 +25,17 @@ export const RELEASE_ASSET_NAMES = Object.freeze([
   "HUB-windows-x64.exe",
   "SHA256SUMS",
 ]);
+export const RELEASE_PROFILES = Object.freeze({
+  all: RELEASE_ASSET_NAMES,
+  "windows-x64": Object.freeze(["HUB-windows-x64.exe", "SHA256SUMS"]),
+});
+
+function profileAssets(profile) {
+  if (!Object.hasOwn(RELEASE_PROFILES, profile)) {
+    throw new Error(`Unknown release profile: ${String(profile)}`);
+  }
+  return RELEASE_PROFILES[profile];
+}
 
 const projectRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -101,17 +114,18 @@ function assertReleaseIdentity({
   }
 }
 
-function assertAssetList(assets) {
+function assertAssetList(assets, profile) {
   if (!Array.isArray(assets)) {
     throw new TypeError("release assets must be an array");
   }
   const names = assets
     .map((path) => path.split(/[\\/]/u).at(-1))
     .sort();
+  const expected = profileAssets(profile);
   if (
-    names.length !== RELEASE_ASSET_NAMES.length ||
+    names.length !== expected.length ||
     names.some(
-      (name, index) => name !== RELEASE_ASSET_NAMES[index],
+      (name, index) => name !== expected[index],
     )
   ) {
     throw new Error(
@@ -133,14 +147,15 @@ async function restoreDraft(runGh, releaseTag) {
   );
 }
 
-export async function discoverReleaseAssets(directory) {
+export async function discoverReleaseAssets(directory, profile = "all") {
   const root = resolve(directory);
+  const expected = profileAssets(profile);
   const entries = await readdir(root, { withFileTypes: true });
   const names = entries.map((entry) => entry.name).sort();
   if (
-    names.length !== RELEASE_ASSET_NAMES.length ||
+    names.length !== expected.length ||
     names.some(
-      (name, index) => name !== RELEASE_ASSET_NAMES[index],
+      (name, index) => name !== expected[index],
     )
   ) {
     throw new Error(
@@ -163,11 +178,33 @@ export async function discoverReleaseAssets(directory) {
   return assets;
 }
 
+/** Verify uploads while the release is still editable, before immutability. */
+export async function verifyDraftReleaseAssets(document, assets, releaseTag) {
+  if (document?.draft !== true || document.tag_name !== releaseTag) {
+    throw new Error("Expected the requested draft release before publication");
+  }
+  if (!Array.isArray(document.assets) || document.assets.length !== assets.length) {
+    throw new Error("Draft release asset inventory does not match the reviewed files");
+  }
+  for (const path of assets) {
+    const name = path.split(/[\\/]/u).at(-1);
+    const remote = document.assets.filter(asset => asset.name === name);
+    const details = await stat(path);
+    const digest = createHash("sha256").update(await readFile(path)).digest("hex");
+    if (remote.length !== 1 || remote[0].state !== "uploaded" ||
+        remote[0].size !== details.size || remote[0].digest !== `sha256:${digest}`) {
+      throw new Error(`Draft upload does not match the reviewed bytes: ${name}`);
+    }
+  }
+}
+
 export async function publishGithubRelease({
   assets,
   packageVersion,
   releaseTag,
   repository,
+  profile = "all",
+  notesFile,
   runGh = runGhProcess,
 }) {
   assertReleaseIdentity({
@@ -175,9 +212,10 @@ export async function publishGithubRelease({
     releaseTag,
     repository,
   });
-  assertAssetList(assets);
+  assertAssetList(assets, profile);
+  const run = args => runGh(args[0] === "release" ? [...args, "--repo", repository] : args);
 
-  const existing = await runGh([
+  const existing = await run([
     "release",
     "view",
     releaseTag,
@@ -189,21 +227,26 @@ export async function publishGithubRelease({
   }
 
   assertSuccessful(
-    await runGh([
+    await run([
       "release",
       "create",
       releaseTag,
       ...assets,
       "--draft",
       "--verify-tag",
-      "--generate-notes",
+      ...(notesFile ? ["--notes-file", notesFile] : ["--generate-notes"]),
       "--title",
       `HUB ${releaseTag}`,
     ]),
     "creating the draft release",
   );
+  const draft = JSON.parse(assertSuccessful(await run([
+    "api", "-H", `X-GitHub-Api-Version: ${GITHUB_RELEASE_API_VERSION}`,
+    `repos/${repository}/releases/tags/${releaseTag}`,
+  ]), "reading the uploaded draft"));
+  await verifyDraftReleaseAssets(draft, assets, releaseTag);
   assertSuccessful(
-    await runGh([
+    await run([
       "release",
       "edit",
       releaseTag,
@@ -215,7 +258,7 @@ export async function publishGithubRelease({
   let releaseDocument;
   try {
     const source = assertSuccessful(
-      await runGh([
+      await run([
         "api",
         "-H",
         `X-GitHub-Api-Version: ${GITHUB_RELEASE_API_VERSION}`,
@@ -226,7 +269,7 @@ export async function publishGithubRelease({
     releaseDocument = JSON.parse(source);
   } catch (error) {
     try {
-      await restoreDraft(runGh, releaseTag);
+      await restoreDraft(run, releaseTag);
     } catch (restoreError) {
       throw new AggregateError(
         [error, restoreError],
@@ -244,7 +287,7 @@ export async function publishGithubRelease({
     releaseDocument === null ||
     releaseDocument.immutable !== true
   ) {
-    await restoreDraft(runGh, releaseTag);
+    await restoreDraft(run, releaseTag);
     throw new Error(
       "release immutability must be enabled in repository settings; release restored to draft",
     );
@@ -262,12 +305,20 @@ async function main() {
     projectRoot,
     process.argv[2] ?? "release-assets",
   );
-  const assets = await discoverReleaseAssets(directory);
+  const profile = process.env.HUB_RELEASE_PROFILE ?? "all";
+  const assets = await discoverReleaseAssets(directory, profile);
+  const notesFile = resolve(projectRoot, "docs/releases", `${process.env.GITHUB_REF_NAME}.md`);
+  const notesInfo = await lstat(notesFile);
+  if (!notesInfo.isFile() || notesInfo.isSymbolicLink() || notesInfo.size <= 0) {
+    throw new Error("Reviewed release notes are required");
+  }
   await publishGithubRelease({
     assets,
     packageVersion: packageDocument.version,
     releaseTag: process.env.GITHUB_REF_NAME,
     repository: process.env.GH_REPO,
+    profile,
+    notesFile,
   });
 }
 

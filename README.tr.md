@@ -30,8 +30,9 @@ seslerini ve araçlarını kendin seç.
 
 ## Başla
 
-Proje **deneysel ve Windows öncelikli** bir kaynak kodu sürümüdür. Node.js 24+,
-Git ve pnpm 11.7.0 gerekir:
+**[v1.0.0 Windows kurulumunu indir](https://github.com/mbaykam/HUB/releases/tag/v1.0.0)**
+veya kaynak kodundan çalıştır. HUB Windows önceliklidir; bilgisayar PWA ve Telegram'a hizmet verir.
+Kaynak kodundan kurulum için Node.js 24+, Git ve pnpm 11.7.0 gerekir:
 
 ```sh
 git clone --recurse-submodules https://github.com/mbaykam/HUB.git

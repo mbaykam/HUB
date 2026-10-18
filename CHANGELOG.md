@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0
+
+HUB's first numbered product release establishes the current Windows host,
+mobile PWA and Telegram assistant as the 1.0 baseline. Existing profiles,
+conversations, Knowledge sources, characters and settings are retained.
+
+- Publish a Windows x64 installer and SHA-256 checksums with reviewed release notes.
+- Align all first-party packages and the installed runtime/PWA to 1.0.0.
+- Retain the connected Knowledge vault, separate original-chat archive, managed
+  `memory.md`, portable Skills, character delegation, unified Tasks and tool inventory.
+- Keep the compact Home/chat interface, multilingual local speech options,
+  browser/media tools, live visuals and native context compaction from 0.4.54.
+- Establish a release standard centered on complete user workflows, clear controls,
+  failure recovery, data preservation and evidence from the supported interfaces.
+
+See [v1.0.0 release notes](docs/releases/v1.0.0.md) for setup, upgrade instructions
+and known boundaries. A version milestone does not imply untested platform or
+physical-device support.
+
 ## 0.4.54
 
 - Add a refreshed, context-injected `memory.md` domain map and a portable Skills library with character discovery, versioned edits and interrupted-save recovery.

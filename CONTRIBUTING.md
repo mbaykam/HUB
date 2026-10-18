@@ -1,6 +1,6 @@
 # Contributing to HUB
 
-HUB is an experimental fork of Minke, built on a pinned DeepSeek Harness runtime.
+HUB is a Windows-first personal assistant, built on Minke and a pinned DeepSeek Harness runtime.
 Start with [setup](docs/setup.md), configure an isolated development profile and
 keep personal chats, vaults, models and credentials outside the checkout.
 
@@ -50,6 +50,12 @@ release strings. Package/release workflows are separate from the source-check
 workflow; do not advertise unverified platform downloads.
 
 ## Submit a change
+
+Starting with v1.0.0, releases focus on complete, polished features. Finish the
+user workflow, including useful feedback and failure recovery, before calling a
+feature done. Verify affected PWA and Telegram paths, preserve existing data and
+settings, and ship matching tested runtime/PWA builds. Keep unfinished work out
+of published feature claims. Follow the [release standard](RELEASING.md).
 
 Describe the concrete problem, resulting behavior and relevant validation.
 Include sanitized screenshots with synthetic data for visual changes. Preserve

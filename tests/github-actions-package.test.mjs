@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import test from "node:test";
 
 const workflowUrl = new URL(
@@ -16,13 +17,20 @@ const harnessRuntimeContractUrl = new URL(
   import.meta.url,
 );
 const releaseAssetNames = [
-  "HUB-macos-arm64.dmg",
-  "HUB-macos-x64.dmg",
   "HUB-windows-x64.exe",
-  "HUB-linux-x64.deb",
-  "HUB-linux-x64.rpm",
-  "HUB-linux-x64.AppImage",
 ];
+const yaml = createRequire(new URL('../vendor/deepseek-harness/node_modules/.pnpm/native-test.cjs',import.meta.url))('yaml');
+
+test("tagged releases publish only verified Windows assets after package checks",async()=>{
+ const workflow=yaml.parse(await readFile(workflowUrl,"utf8"));
+ assert.ok(workflow.jobs.package.strategy.matrix.includes("startsWith(github.ref, 'refs/tags/v')"));
+ assert.equal(workflow.jobs.release.needs,"package");
+ const steps=workflow.jobs.release.steps,publish=steps.find(step=>step.name==="Publish GitHub Release"),stage=steps.find(step=>step.name==="Stage stable installer names");
+ assert.equal(publish.env.HUB_RELEASE_PROFILE,"windows-x64");
+ assert.ok(stage.run.includes("stage_asset HUB-windows-x64.exe"));
+ assert.ok(!stage.run.includes("stage_asset HUB-macos"));assert.ok(!stage.run.includes("stage_asset HUB-linux"));
+ assert.ok(workflow.jobs.package.steps.some(step=>step.name==="Prepare Windows media test runtime"));
+});
 
 function assertMatrixEntry(source, runner, platform, arch) {
   const field = (name, value) =>
