@@ -7,11 +7,14 @@ const inside=(root:string,path:string)=>{const r=relative(root,path);return r===
 /** Resolve symlinks before checking the scope. Even an approved project write
  * cannot change HUB's private settings or original Knowledge files. */
 export async function goalPath(g:HubGoal,raw:string,write:boolean,privateRoot:string|string[]){
-  const workspace=resolve(g.workspace!);await mkdir(workspace,{recursive:true});
+  const configuredWorkspace=resolve(g.workspace!);await mkdir(configuredWorkspace,{recursive:true});
+  // Windows short names and junctions can spell the same workspace differently.
+  // Compare every scope boundary using the same canonical filesystem path.
+  const workspace=await realpath(configuredWorkspace);
   const path=resolve(workspace,raw),roots=[workspace,...g.resources.writeFolders,...(write?[]:g.resources.folders)];
-  if(write&&inside(join(workspace,".goal-artifacts"),path))throw Error("Recorded artifact versions are read-only.");
   let cursor=path;while(true){try{await lstat(cursor);break;}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;const parent=dirname(cursor);if(parent===cursor)throw e;cursor=parent;}}
   const actual=resolve(await realpath(cursor),relative(cursor,path));
+  if(write&&inside(join(workspace,".goal-artifacts"),actual))throw Error("Recorded artifact versions are read-only.");
   const approved=await Promise.all(roots.map(async r=>{try{return await realpath(r);}catch{return resolve(r);}}));
   const fileRead=!write&&await Promise.all(g.resources.files.map(async p=>{try{return await realpath(p);}catch{return resolve(p);}}));
   if(!approved.some(r=>inside(r,actual))&&!(fileRead&&fileRead.includes(actual)))throw Error("This file is outside the goal's saved resource scope.");

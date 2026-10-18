@@ -12,6 +12,8 @@ conversations, Knowledge sources, characters and settings are retained.
   `memory.md`, portable Skills, character delegation, unified Tasks and tool inventory.
 - Keep the compact Home/chat interface, multilingual local speech options,
   browser/media tools, live visuals and native context compaction from 0.4.54.
+- Preserve Goal output evidence when Windows uses a short-name or junction path,
+  while keeping private files and recorded artifact versions protected.
 - Establish a release standard centered on complete user workflows, clear controls,
   failure recovery, data preservation and evidence from the supported interfaces.
 
