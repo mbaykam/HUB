@@ -207,3 +207,25 @@ test("a result waits while a human turn owns speech; mixed human/child turns are
   f.emit('turn/end',{turn:2,reason:{kind:'completed'}});await done;
   assert.deepEqual(f.voice.notifications(0),{events:[{id:1,text:'A task finished.'}]});await f.voice.close();
 });
+
+test('a relayed agent result survives a later settled notice in the same native turn',async()=>{
+ const f=fixture();f.emit('turn/start',{turn:6});
+ f.emit('user/message',{source:{kind:'agent-message',form:'relay',senderSessionId:'owned-hub'}});
+ f.emit('assistant/message',{turn:6,message:{content:[{type:'reasoning',text:'private'},{type:'text',text:'HUB found the fixture quote: 100 USD, checked at the stated time.'}]}});
+ f.emit('user/message',{source:{kind:'subagent-settled',form:'notice',senderSessionId:'owned-hub'}});
+ f.emit('assistant/message',{turn:6,message:{content:[{type:'text',text:'The task is complete.'}]}});
+ assert.deepEqual(f.voice.notifications(0),{events:[]});
+ f.emit('turn/end',{turn:6,reason:{kind:'completed'}});
+ assert.deepEqual(f.voice.notifications(0),{events:[{id:1,text:'HUB found the fixture quote: 100 USD, checked at the stated time.\nThe task is complete.'}]});
+ assert.deepEqual(f.voice.notifications(1),{events:[]});await f.voice.close();
+});
+
+test('an agent relay can announce a result before its worker settles, but a mixed human turn cannot replay it',async()=>{
+ const f=fixture();f.emit('turn/start',{turn:1});f.emit('user/message',{source:{kind:'agent-message',senderSessionId:'owned-hub'}});
+ f.emit('assistant/message',{turn:1,message:{content:[{type:'text',text:'The requested result is ready.'}]}});f.emit('turn/end',{turn:1,reason:{kind:'completed'}});
+ assert.equal(f.voice.notifications(0).events[0]?.text,'The requested result is ready.');
+ const spoken=f.voice.speak(1,'Tell me something else',f.sink);f.claim(2);
+ f.emit('user/message',{source:{kind:'agent-message',senderSessionId:'owned-hub'}});
+ f.emit('assistant/message',{turn:2,message:{content:[{type:'text',text:'This is part of your answer.'}]}});f.emit('turn/end',{turn:2,reason:{kind:'completed'}});await spoken;
+ assert.deepEqual(f.voice.notifications(1),{events:[]});await f.voice.close();
+});

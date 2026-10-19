@@ -86,8 +86,11 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       openTurnHasUser = true;
       notice = !closed && shares.has(data.source.rpcId) && openTurn !== undefined ? { turn: openTurn, text: "" } : undefined;
     }
-    if (!closed && !openTurnHasUser && event.type === "user/message" && data.source?.kind === "subagent-settled" && openTurn !== undefined) {
-      notice = { turn: openTurn, text: "" };
+    if (!closed && !openTurnHasUser && event.type === "user/message" && ["agent-message", "subagent-settled"].includes(data.source?.kind) && openTurn !== undefined) {
+      // A native child can relay its result before its lifecycle notice, both
+      // within the same parent turn. Keep the answer already collected when
+      // that later notice arrives, rather than speaking only a closing remark.
+      notice ??= { turn: openTurn, text: "" };
     }
     if (notice && data.turn === notice.turn) {
       if (event.type === "assistant/message") {

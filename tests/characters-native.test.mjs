@@ -126,6 +126,35 @@ test('a real native voice delegation gives the HUB worker the shared image, pres
   offProfile();offTasks();lease.release();off();
  }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-eval-voice-photo-'));await rm(root,{recursive:true,force:true});}
 });
+test('native relayed worker results reach voice playback before and alongside the settled notice',{timeout:20000},async()=>{
+ const {createVoiceConversation}=await import('../packages/harness-overlay/src/host/voice-conversation.ts');
+ const root=await mkdtemp(join(tmpdir(),'hub-eval-spoken-result-')),ctx=new Context();let facility,backend,voice,offTasks,offProfile,lease,releaseWorker,releaseClosing;
+ const workerGate=new Promise(resolve=>releaseWorker=resolve),closingGate=new Promise(resolve=>releaseClosing=resolve),parentId='hub-eval-spoken-result';
+ try{
+  await mountAgentLoopTestDependencies(ctx);await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'hub-character-spawn'});await ctx.plugin(Storage);
+  backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
+  const result='HUB found the fixture price: 100 USD at the stated time.';
+  const SubagentControl=await native('@deepseek-ai/dsh-tool-subagent-control');await ctx.plugin(SubagentControl);
+  const worker=new MockAdapter([toolCallResponse('relay-result','send_message',{agent_id:parentId,message:'Fixture price: 100 USD, checked at the stated time.'}),textResponse('The requested fixture result is complete.')]);
+  const mira=new MockAdapter([toolCallResponse('start-work','hub_task',{description:'Check the fixture price',prompt:'Return the isolated fixture quote.'},'I’ll ask HUB.'),textResponse(result),textResponse('The task is complete.')]);
+  ctx.llm.registerAdapter(['main'],worker);ctx.llm.registerAdapter(['fast'],mira);
+  for(const [name,value]of Object.entries({agentDefaultModel:{currentSelection:()=>({provider:'main',model:'mock'})},storageDomain:facility,connection:{requestRejection:()=>undefined},webServer:{register:()=>()=>{}}}))Object.defineProperty(ctx,name,{value,configurable:true});
+  let workerRequests=0;
+  ctx.on('agent/request',async({agent},next)=>{if(agent.session.header.parentSession===parentId)await (++workerRequests===1?workerGate:closingGate);return next();},{global:true});
+  ctx.on('session/event',(session,event)=>{if(session.header.id===parentId&&event.type==='assistant/message'&&event.data.message.content.some(block=>block.type==='text'&&block.text===result))releaseClosing();},{global:true});
+  const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'}))),characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
+  let state=characters.store.snapshot();const spoken=state.characters.find(c=>c.id===state.voiceId);await characters.store.change({action:'save',revision:state.revision,character:{...spoken,route:{provider:'fast',model:'mock'},tools:{mode:'allow',names:['hub_task','hub_delegate','send_message','list_agents','interrupt_agent','hub_present']}}},c=>characters.validate(c));
+  const parent=ctx.agentLoop.create(parentId,{provider:'fast',model:'mock'}),profile=await characters.voiceProfile();lease=await characters.beginVoice(parent,profile);offTasks=await attachNativeVoiceTasks(parent,undefined,lease);
+  const {attachVoiceProfilePolicy}=await import('../packages/harness-overlay/src/host/voice-profile-policy.ts');offProfile=attachVoiceProfilePolicy(parent,profile,exec=>offTasks.allowNested(exec));
+  voice=createVoiceConversation({sessionId:parentId,running:()=>parent.status!=='idle',prompt:async request=>{parent.followup(createUserMessage({source:{kind:'user',rpcId:request.requestId},content:request.content}));},subscribe:fn=>ctx.on('session/event',(session,event)=>{if(session.header.id===parentId)fn(event);},{global:true}),cancel:()=>{},whenIdle:()=>parent.whenIdle()});
+  const foreground=[];await voice.speak(1,'Ask HUB for the isolated price.',event=>foreground.push(event));assert.equal(worker.requests.length,0,'Mira remains available while work runs');
+  releaseWorker();const deadline=Date.now()+10000;while(mira.requests.length<3||parent.status!=='idle'||ctx.agents.list().some(agent=>agent.status!=='idle')){assert.ok(Date.now()<deadline,'Native result relay did not settle: '+JSON.stringify({mira:mira.requests.length,worker:worker.requests.length,sources:parent.session.snapshotEvents().filter(e=>e.type==='user/message').map(e=>e.data.source.kind),tools:ctx.agents.list().flatMap(agent=>agent.session.snapshotEvents().filter(e=>e.type==='tool/result').map(e=>e.data.message.content))}));await new Promise(resolve=>setTimeout(resolve,10));}
+  const events=parent.session.snapshotEvents(),sources=events.filter(e=>e.type==='user/message').map(e=>e.data.source.kind);assert.ok(sources.includes('agent-message'));assert.ok(sources.includes('subagent-settled'));
+  const notices=voice.notifications(0).events;assert.equal(notices.flatMap(event=>event.text.split(result)).length-notices.length,1,'The actual result is spoken exactly once');assert.ok(!foreground.some(event=>event.text?.includes(result)),'Never mix a late task result into the foreground RPC');
+  assert.equal(worker.requests.length,2,'Notifications must not start duplicate work');await voice.close();
+ }finally{releaseWorker();releaseClosing();await voice?.close();offProfile?.();await offTasks?.();lease?.release();await ctx.fiber.dispose();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-eval-spoken-result-'));await rm(root,{recursive:true,force:true});}
+});
+
 test('Goals uses native goal rounds, selected character, scoped files and durable completion without a forged human turn',{timeout:25000},async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-goals-native-')),ctx=new Context();let facility,backend;
  try{

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2
+
+- Speak Mira's reply to a native agent's relayed result, including results sent
+  before the worker finishes. A later completion notice in the same turn keeps
+  the answer already collected instead of replacing it with a closing remark.
+- Preserve the separate foreground voice response and cursor-based result
+  channel, without repeating work or speaking over a human turn.
+
 ## 1.2.1
 
 - Fix the voice character allow-list blocking the internal native dispatch of an
