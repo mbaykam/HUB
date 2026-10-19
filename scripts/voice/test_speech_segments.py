@@ -42,6 +42,27 @@ async def _buffer(aggregator, text):
     return [part async for part in aggregator.aggregate(text)]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [PermissionError, LookupError])
+async def test_unavailable_sentence_tokenizer_preserves_every_streamed_word(monkeypatch, failure):
+    import pipecat.utils.text.simple_text_aggregator as parent
+    calls=[]
+    def unavailable(text):
+        calls.append(text)
+        raise failure('Unavailable tokenizer fixture')
+    monkeypatch.setattr(parent, 'match_endofsentence', unavailable)
+    text='Yes. The price is 29.95 dollars today. Türkçe konuşmaya devam edebiliriz. Read https://example.com/quote for the source.'
+    aggregator=SpeechSegmentAggregator(first_words=6,later_words=10)
+    parts=[]
+    for offset in range(0,len(text),3):
+        parts.extend([p.text async for p in aggregator.aggregate(text[offset:offset+3])])
+    tail=await aggregator.flush()
+    if tail:parts.append(tail.text)
+    assert ''.join(''.join(parts).split()) == ''.join(text.split())
+    assert len(calls)==1, 'Do not keep retrying a failed filesystem read during speech'
+    assert '29.95' in ' '.join(parts) and 'https://example.com/quote' in ' '.join(parts)
+
+
 def test_turn_timing_contains_only_relative_durations_and_resets():
     health = SpeechHealth()
     health.last_input_sound = 1.0

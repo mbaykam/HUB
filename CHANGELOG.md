@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.1
+
+- Keep local speech at the native 48 kHz call output rate. Avoid a second
+  streaming conversion that could discard word endings between generated clauses.
+- Preserve streamed text when the sentence tokenizer's data is unavailable or
+  denied by Windows path redirection; use bounded word cuts without weakening
+  the tokenizer's filesystem protection.
+- Preserve existing speech models, voices, quality settings and 16 kHz recognition.
+  Synthetic audio/transport checks do not replace physical phone acceptance.
+
 ## 1.3.0
 
 - Add Background / Resume for open voice calls, configurable automatic idle and

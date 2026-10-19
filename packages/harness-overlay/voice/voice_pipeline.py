@@ -70,13 +70,21 @@ def voice_user_turn_params():
     )
 
 
+# Both Telegram PCM and WebRTC/Opus use a 48 kHz playback clock. Convert each
+# complete local utterance directly to that rate in BilingualTTSService. A second
+# streaming 16->48 kHz converter retains speech tails and clears them during the
+# CPU synthesis gap before the next clause (even while queued speech is playing).
+CALL_OUTPUT_SAMPLE_RATE = 48000
+
+
 def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, transport=None) -> PipelineWorker:
     """Build one call; the sidecar owns its runner and releases models on exit."""
     stt_model, tts_voice, model_path, voices_path = resolve_speech(speech or DEFAULT_SPEECH)
     speech = speech or DEFAULT_SPEECH
     transport = transport or SmallWebRTCTransport(
         webrtc_connection=connection,
-        params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+        params=TransportParams(audio_in_enabled=True, audio_out_enabled=True,
+                               audio_out_sample_rate=CALL_OUTPUT_SAMPLE_RATE),
     )
     health = SpeechHealth()
     attention = VoiceAttention(speech.get('attention'))
@@ -94,17 +102,17 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
         )
     if speech["tts"]["engine"] in ("bilingual", "supertonic"):
         from bilingual_tts import BilingualTTSService
-        tts = BilingualTTSService(speech["tts"], sample_rate=16000, health=health)
+        tts = BilingualTTSService(speech["tts"], sample_rate=CALL_OUTPUT_SAMPLE_RATE, health=health)
     elif speech["tts"]["engine"] == "piper":
         # Optional, separately installed GPL runtime; not part of HUB's binary.
         # resolve_speech has already verified both local files, so the stock
         # service cannot enter its missing-model automatic download path.
         from pipecat.services.piper.tts import PiperTTSService
-        tts = PiperTTSService(download_dir=Path(model_path).parent, sample_rate=16000,
+        tts = PiperTTSService(download_dir=Path(model_path).parent, sample_rate=CALL_OUTPUT_SAMPLE_RATE,
             settings=PiperTTSService.Settings(voice=tts_voice))
     else:
         tts = KokoroTTSService(
-            sample_rate=16000,
+            sample_rate=CALL_OUTPUT_SAMPLE_RATE,
             model_path=model_path, voices_path=voices_path,
             settings=KokoroTTSService.Settings(voice=tts_voice, language=Language.EN_GB if tts_voice.startswith("b") else Language.EN_US),
         )
@@ -119,7 +127,7 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
                   post_stt_guard, AttentionInputGate(attention, health), TranscriptionHealthProbe(health), user, llm,
                   SpokenReplyProbe(gate), tts,
                   transport.output(), PlaybackOutputProbe(gate), assistant]),
-        params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=16000,
+        params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=CALL_OUTPUT_SAMPLE_RATE,
                               enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=None,
         cancel_on_idle_timeout=False,

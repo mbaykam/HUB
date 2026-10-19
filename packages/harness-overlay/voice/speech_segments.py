@@ -10,12 +10,24 @@ class SpeechSegmentAggregator(SimpleTextAggregator):
         self.first_words = first_words
         self.later_words = later_words
         self.emitted = False
+        self._sentence_tokenizer_available = True
 
     async def aggregate(self, text):
         for char in text:
-            async for sentence in super().aggregate(char):
-                self.emitted = True
-                yield sentence
+            if self._sentence_tokenizer_available:
+                try:
+                    async for sentence in super().aggregate(char):
+                        self.emitted = True
+                        yield sentence
+                except (LookupError, OSError):
+                    # The parent already buffered this character. Windows data
+                    # redirection, missing Punkt data or a denied cache read must
+                    # never discard a streamed word or abort a spoken clause.
+                    # Keep that buffer, then use our bounded word cuts for this
+                    # service's lifetime; do not disable NLTK's path protection.
+                    self._sentence_tokenizer_available = False
+            else:
+                self._text += char
             # Wait for a word boundary; never split a streamed number or URL.
             pending = self._text
             limit = self.later_words if self.emitted else self.first_words
