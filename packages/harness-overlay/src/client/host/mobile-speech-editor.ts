@@ -146,6 +146,7 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
     if (!enabled.checked) return null;
     const selectedStt = catalog?.stt.find(item => key(item) === stt.value);
     if (!selectedStt) throw new Error("Choose an installed recognition model.");
+    if(options.global&&!localSpeechSchema.shape.attention.safeParse({idleSeconds:Number(idle.value),wakePhrases:phrases.value.split(",").map(s=>s.trim()).filter(Boolean),contextSeconds:Number(recent.value)}).success)throw Error("Enter one to three wake phrases using letters, with at most four words each.");
     const value = localSpeechSchema.parse({ stt: { engine: selectedStt.engine, model: selectedStt.model, language: language.value }, tts: ttsValue(),...(options.global?{attention:{idleSeconds:Number(idle.value),wakePhrases:phrases.value.split(",").map(s=>s.trim()).filter(Boolean),contextSeconds:Number(recent.value)}}:seed?.attention?{attention:seed.attention}:{}) });
     if (value.stt.model.endsWith(".en") && language.value !== "en") throw new Error("Choose a multilingual Whisper model for automatic or Turkish recognition.");
     if (!catalog?.stt.some(item => key(item) === key(value.stt) && item.available) || !catalog.tts.some(item => key(item) === key(value.tts) && item.available)) throw new Error("Install the selected speech models before saving.");

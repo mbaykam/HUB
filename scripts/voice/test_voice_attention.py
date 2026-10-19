@@ -128,7 +128,7 @@ async def test_wake_context_is_metadata_once_and_never_an_extra_model_turn():
     assert calls==[('Mira, what was that about?',{'background_context':'Someone nearby discussed a project.'}),('Thank you.',{})]
 
 
-@pytest.mark.parametrize('value', [{'idleSeconds':True,'wakePhrases':['Mira'],'contextSeconds':0},{'idleSeconds':180,'wakePhrases':['*'],'contextSeconds':0},{'idleSeconds':180,'wakePhrases':['Mira'],'contextSeconds':999999}])
+@pytest.mark.parametrize('value', [{'idleSeconds':True,'wakePhrases':['Mira'],'contextSeconds':0},{'idleSeconds':180,'wakePhrases':['*'],'contextSeconds':0},{'idleSeconds':180,'wakePhrases':['---'],'contextSeconds':0},{'idleSeconds':180,'wakePhrases':['Mira'],'contextSeconds':999999}])
 def test_invalid_settings_cannot_enable_unbounded_listening(value):
     with pytest.raises(ValueError):attention_settings(value)
 

@@ -22,7 +22,7 @@ def attention_settings(value=None):
         or type(value['idleSeconds']) is not int or value['idleSeconds'] not in (0, 60, 120, 180, 300, 600)
         or type(value['contextSeconds']) is not int or value['contextSeconds'] not in (0, 30, 60, 120)
         or not isinstance(value['wakePhrases'], list) or not 1 <= len(value['wakePhrases']) <= 3
-        or any(not isinstance(p, str) or not 1 <= len(p.strip()) <= 40 or len(p.split()) > 4
+        or any(not isinstance(p, str) or not 1 <= len(p.strip()) <= 40 or len(p.split()) > 4 or not any(c.isalpha() for c in p)
                or not all(c.isalpha() or c in " -'" for c in p) for p in value['wakePhrases'])):
         raise ValueError('Invalid background listening settings')
     return {**value, 'wakePhrases': [p.strip() for p in value['wakePhrases']]}

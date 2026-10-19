@@ -17,7 +17,7 @@ const whisperModelSchema = z.enum(whisperModels);
 const nemotronModelSchema = z.literal("3.5-560ms");
 export const voiceAttentionSchema=z.object({
   idleSeconds:z.union([z.literal(0),z.literal(60),z.literal(120),z.literal(180),z.literal(300),z.literal(600)]),
-  wakePhrases:z.array(z.string().trim().min(1).max(40).regex(/^[\p{L} '-]+$/u).refine(v=>v.split(/\s+/).length<=4)).min(1).max(3),
+  wakePhrases:z.array(z.string().trim().min(1).max(40).regex(/^[\p{L} '-]+$/u).refine(v=>/\p{L}/u.test(v)&&v.split(/\s+/).length<=4)).min(1).max(3),
   contextSeconds:z.union([z.literal(0),z.literal(30),z.literal(60),z.literal(120)]),
 }).strict();
 export const defaultVoiceAttention={idleSeconds:180 as const,wakePhrases:["Mira"],contextSeconds:60 as const};
