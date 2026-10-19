@@ -6,6 +6,8 @@ import { installMobileWidgetBack } from "./mobile-widget-back.ts";
 import { createSpeechEditor } from "./mobile-speech-editor.ts";
 import {speechSettingsSchema,characterSpeech,type SpeechSettings} from "../../speech-settings-contract.ts";
 import styles from "./mobile-characters.css";
+import {memoryToolGroup} from "../../memory-tool-groups.ts";
+import {characterRequestPanel} from "./character-request-panel.ts";
 const installStyles=defineOverlayStyle("hub-characters",styles);
 
 /** Local vector portraits stay readable offline and never fetch avatar trackers. */
@@ -49,12 +51,14 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
   function edit(character?:HubCharacter){
     if(!state)return;editorCleanup?.();const editingRevision=state.revision;const seed=structuredClone(character??{id:"",name:"",avatar:"mint",description:"",instructions:"",route:null,speech:null,tools:{mode:"inherit"},delegateTo:state.mainId}) as HubCharacter;
     heading.textContent=character?.name??"New character";content.replaceChildren();status.textContent="Changes apply to the next turn or call; current work keeps its existing configuration.";dialog.scrollTop=0;
-    content.append(button("‹ All characters",grid));const form=el("form");form.className="hub-character-form";form.noValidate=true;
+    content.append(button("‹ All characters",grid));const form=el("form");form.className="hub-character-form";form.noValidate=true;const save=el("button","Save character");save.type="submit";
     const tabbar=el("nav");tabbar.setAttribute("role","tablist");tabbar.className="hub-character-tabs";
     const panes=new Map<string,HTMLElement>(),tabs=new Map<string,HTMLButtonElement>();
     const tab=(name:string)=>{const pane=el("section");pane.setAttribute("role","tabpanel");pane.dataset.characterPane=name;panes.set(name,pane);const b=button(name,()=>selectTab(name));b.setAttribute("role","tab");tabs.set(name,b);tabbar.append(b);return pane;};
-    const basics=tab("Profile"),modelPane=tab("Model"),voicePane=tab("Voice"),advanced=tab("Capabilities");
-    function selectTab(name:string){for(const [key,pane]of panes)pane.hidden=key!==name;for(const [key,b]of tabs)b.setAttribute("aria-selected",String(key===name));}
+    const basics=tab("Profile"),modelPane=tab("Model"),voicePane=tab("Voice"),advanced=tab("Capabilities"),promptPane=tab("Full prompt");
+    const inspector=characterRequestPanel(root,seed.id);promptPane.append(inspector.panel);
+    if(!seed.id)promptPane.textContent="Save this character and send it a message to inspect its actual request.";
+    function selectTab(name:string){for(const [key,pane]of panes)pane.hidden=key!==name;for(const [key,b]of tabs)b.setAttribute("aria-selected",String(key===name));save.hidden=name==="Full prompt";if(name==="Full prompt"&&seed.id)inspector.open();}
     form.append(tabbar,...panes.values());selectTab("Profile");
     basics.append(el("p",seed.id===state.mainId?`${seed.name} · your assistant for writing and Telegram messages.`:seed.id===state.voiceId?`${seed.name} · your voice assistant. Complex requests go to HUB.`:"A specialist you can request by name in text or voice."));
 
@@ -71,15 +75,17 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     clearModel.disabled=seed.id===state.mainId||seed.id===state.voiceId;
     const delegate=el("select");const none=el("option","No default delegation target");none.value="";delegate.append(none);
     for(const c of state.characters.filter(c=>c.id!==seed.id)){const o=el("option",c.name+(c.route?"":" · not configured"));o.value=c.id;delegate.append(o);}delegate.value=seed.delegateTo??"";field("Delegate complex work to",delegate,advanced);
-    const tools=el("details");tools.append(el("summary","Tools & capabilities"));const inherit=el("input");inherit.type="checkbox";inherit.checked=seed.tools.mode==="inherit";field("Use existing permitted tools",inherit,tools);
-    const choices=el("div");const selected=new Set(seed.tools.mode==="allow"?seed.tools.names:[]);const checkboxes=new Map<string,HTMLInputElement>();
+    const tools=el("section");tools.append(el("h3","Tool access"));const inherit=el("input");inherit.type="checkbox";inherit.checked=seed.tools.mode==="inherit";field("Use existing permitted tools",inherit,tools);
+    const choices=el("div");choices.className="hub-character-tool-groups";const selected=new Set(seed.tools.mode==="allow"?seed.tools.names:[]);const checkboxes=new Map<string,HTMLInputElement>();
     const names=new Map(toolCatalog.map(t=>[t.name,t.description]));for(const n of selected)if(!names.has(n))names.set(n,"Not currently available");
-    for(const [n,d]of names){const checkbox=el("input");checkbox.type="checkbox";checkbox.checked=selected.has(n);checkboxes.set(n,checkbox);field(n,checkbox,choices);checkbox.parentElement!.title=d;}
-    const showPolicy=()=>{for(const [n,checkbox]of checkboxes){checkbox.disabled=inherit.checked;checkbox.checked=inherit.checked||selected.has(n);}};showPolicy();inherit.addEventListener("change",showPolicy);tools.append(choices,el("p","Tools remain subject to HUB’s existing permissions. Delegated work uses the target character’s configured tools."));advanced.append(tools);
+    const groups=new Map<string,{panel:HTMLElement;master:HTMLInputElement;names:string[]}>();
+    for(const [n,d]of names){const groupName=memoryToolGroup(n);let group=groups.get(groupName);if(!group){const panel=el("details"),summary=el("summary",groupName),master=el("input");master.type="checkbox";master.setAttribute("aria-label",groupName);panel.append(summary);field("Allow "+groupName.toLowerCase(),master,panel);group={panel,master,names:[]};groups.set(groupName,group);choices.append(panel);const own=group;master.addEventListener("change",()=>{for(const name of own.names){if(master.checked)selected.add(name);else selected.delete(name);}showPolicy();});}group.names.push(n);const checkbox=el("input");checkbox.type="checkbox";checkbox.checked=selected.has(n);checkboxes.set(n,checkbox);field(n,checkbox,group.panel);checkbox.parentElement!.title=d;checkbox.addEventListener("change",()=>{if(checkbox.checked)selected.add(n);else selected.delete(n);showPolicy();});}
+    for(const label of ["Read memory","Save notes","Skills","Other tools","Legacy memory (unused)"]){const group=groups.get(label);if(group)choices.append(group.panel);}
+    const showPolicy=()=>{for(const [n,checkbox]of checkboxes){checkbox.disabled=inherit.checked;checkbox.checked=inherit.checked||selected.has(n);}for(const group of groups.values()){const enabled=group.names.filter(n=>checkboxes.get(n)!.checked).length;group.master.disabled=inherit.checked;group.master.checked=enabled===group.names.length;group.master.indeterminate=enabled>0&&enabled<group.names.length;}};showPolicy();inherit.addEventListener("change",showPolicy);tools.append(choices,el("p","Read memory, saving notes and reusable skills have separate permissions. Expand a group for individual tools. Existing selections are preserved. Legacy memory tools belong to the retired store and are unavailable in the Knowledge profile."));advanced.append(tools);
     const speechEditor=createSpeechEditor(root,speechSettings?characterSpeech(speechSettings.speech,seed.speech):seed.speech,{voiceOnly:true});voicePane.append(speechEditor.panel);
     if(speechSettings&&seed.speech&&seed.speech.tts.engine!==speechSettings.speech.tts.engine)voicePane.prepend(el("p","This character’s previous voice belongs to a different engine. Calls use the shared default voice until you choose a voice below."));
-    const modelCleanup=editorCleanup;editorCleanup=()=>{modelCleanup?.();speechEditor.dispose();};
-    const save=el("button","Save character");save.type="submit";form.append(save);content.append(form);
+    const modelCleanup=editorCleanup;editorCleanup=()=>{modelCleanup?.();speechEditor.dispose();inspector.dispose();};
+    form.append(save);content.append(form);
     form.addEventListener("submit",event=>{event.preventDefault();if(!name.value.trim()){selectTab("Profile");name.focus();status.textContent="Give this character a name.";return;}seed.name=name.value;seed.description=description.value;seed.instructions=instructions.value;seed.delegateTo=delegate.value||null;seed.tools=inherit.checked?{mode:"inherit"}:{mode:"allow",names:[...checkboxes].filter(([,c])=>c.checked).map(([n])=>n)};
       try{seed.speech=speechEditor.value();}catch(error){status.textContent=(error as Error).message;return;}
       if(character)void change({action:"save",revision:editingRevision,character:seed});else{const {id:_id,...value}=seed;void change({action:"create",revision:editingRevision,character:value});}});

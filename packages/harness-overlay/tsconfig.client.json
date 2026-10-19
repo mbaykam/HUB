@@ -9,6 +9,7 @@
     "src/client",
     "src/*-contract.ts",
     "src/knowledge-record-scope.ts",
+    "src/memory-tool-groups.ts",
     "src/tabs"
   ]
 }

@@ -180,7 +180,7 @@ test("missing, invalid, mismatched and busy attachments never manufacture a new 
 test("new voice-origin chat is classified before any conversation hooks activate", async () => {
   const f = fixture(); let createdHook = false;
   const voice = await openNativeVoiceSession(f.ctx, route, { created: async agent => { assert.equal(agent, f.agent); assert.equal(f.count.hooks, 0); createdHook = true; } });
-  assert.equal(createdHook, true); assert.equal(f.count.created, 1); assert.equal(f.count.resumed, 0); assert.equal(f.count.renamed, 1);
+  assert.equal(createdHook, true); assert.equal(f.count.created, 1); assert.equal(f.count.resumed, 0); assert.equal(f.count.renamed, 0);
   await voice.close();
 });
 

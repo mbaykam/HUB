@@ -25,6 +25,8 @@ import type {GoalsStore} from "./host/goals-store.ts";
 import { PresentationRuntime } from "./host/presentation.ts";
 import { createPresentationHandler } from "./host/presentation-web.ts";
 import {characterAuthorityPersona} from "./host/knowledge-identity.ts";
+import {installCharacterRequests} from "./host/character-requests.ts";
+import {isLegacyMemoryTool,knowledgeToolChoices} from "./memory-tool-groups.ts";
 
 export const name="hub-characters";
 export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments"];
@@ -61,6 +63,7 @@ export class HubCharacters extends Service {
   readonly presentations=new PresentationRuntime();
   constructor(ctx:CharacterHost,root=join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-characters"),camoRuntime?:CamofoxRuntime){
     super(ctx,"hubCharacters");this.host=ctx;this.store=new CharacterStore(root);this.speechSettings=new SharedSpeechSettings(root);this.instructions=new InstructionFiles(join(root,"instructions"));this.quota=providerGate(join(root,"..","hub-provider-health"));
+    ctx.effect(()=>installCharacterRequests(ctx,this),"HUB full request inspector");
     this.background=new BackgroundAdmission(()=>ctx.agents.list().some((a:any)=>a.status!=="idle"&&!/^hub-(goal|automation|memory)-/.test(a.id)&&!/^hub-(goal|automation|memory)-/.test(a.session.header.parentSession??"")));
     ctx.effect(()=>installCharacterActivity(ctx,root),"HUB observed specialist activity");
     const lifetime=new AbortController();const camofox=camoRuntime??new CamofoxRuntime(ctx.subprocess,lifetime.signal);
@@ -225,7 +228,8 @@ export class HubCharacters extends Service {
             send(200,{revision:s.revision,character:{id:c.id,name:c.name,route:c.route}});return;
           }
           const scope=await this.host.agentPresets.standingKeyFor();
-          const tools=this.host.tools.schemas(scope).map(t=>({name:t.name,description:t.description})).filter(t=>!t.name.startsWith("hub_character_"));
+          const tools=this.host.tools.schemas(scope).map(t=>({name:t.name,description:t.description})).filter(t=>!t.name.startsWith("hub_character_")&&!(this.host.get?.("hubKnowledgeAssets")&&isLegacyMemoryTool(t.name)));
+          if(this.host.get?.("hubKnowledgeAssets"))for(const tool of knowledgeToolChoices)if(!tools.some(t=>t.name===tool.name))tools.push(tool);
           if(!tools.some(t=>t.name==="hub_delegate"))tools.push({name:"hub_delegate",description:"Delegate to a configured character from a text or voice conversation."});
           if(!tools.some(t=>t.name==="hub_switch_character"))tools.push({name:"hub_switch_character",description:"Switch the active speaker after an explicit request to speak to that character."});
           if(!tools.some(t=>t.name==="hub_task"))tools.push({name:"hub_task",description:"Start background work with the voice character’s default specialist. Available during a voice call."});

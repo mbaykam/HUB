@@ -24,6 +24,7 @@ import {boundKnowledgePayload} from "./knowledge-retrieval.ts";
 import {KnowledgeBackups} from "./knowledge-backups.ts";
 import {installKnowledgeSkills} from "./knowledge-skill-tools.ts";
 import {installMediaInspection} from "./media-inspection.ts";
+import {installKnowledgeToolPolicy} from "./knowledge-tool-policy.ts";
 
 // Native hooks/tool registries remain the permission boundary. Curator itself
 // has no tools; ordinary recall goes through the conversation-owned registry.
@@ -34,6 +35,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   const gate=ctx.hubCharacters?.quota??ctx.get?.("hubCharacters")?.quota??providerGate(join(dirname(store.root),"hub-provider-health"));
   store.assets.subprocess=ctx.subprocess??ctx.get?.("subprocess");
   new KnowledgeAssetService(ctx,store.assets);
+  ctx.effect(()=>installKnowledgeToolPolicy(ctx),"HUB single Knowledge tool surface");
   const attachmentStore=ctx.attachments??ctx.get?.("attachments");
   const originalSaveImages=attachmentStore?.saveImages;
   const archiveImages=originalSaveImages?async function(inputs:any[]){const refs=await originalSaveImages.call(attachmentStore,inputs);try{for(let i=0;i<inputs.length;i++){const item=inputs[i],name=item.name??`Image.${item.mediaType.split("/")[1]}`,asset=await store.assets.save(item.data,name);await store.assets.bindImage(refs[i].attachmentId,asset);}}catch{curator.status="capture-needs-attention";}return refs;}:undefined;

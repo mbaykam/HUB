@@ -22,7 +22,6 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
   const dark=root.documentElement.classList.contains("dark")||root.documentElement.hasAttribute("data-ds-dark-theme")||root.body.hasAttribute("data-ds-dark-theme");dialog.dataset.knowledgeTheme=dark?"dark":"light";
   const header=el("header"),heading=el("h2","Knowledge"),close=btn("Home",()=>requestClose());header.append(heading,close);
   const status=el("p");status.setAttribute("role","status");
-  const colorKey=el("details");colorKey.className="knowledge-color-key";colorKey.append(el("summary","Colors & memory scope"));const colorLegend=el("div");colorKey.append(colorLegend,el("p","Chat archive is a separate source collection, not a domain and uses no domain slots. Its original conversations stay searchable. Cyan dashed links connect sources to brain notes. Domain colors organize brain notes; suggested groups and individual unassigned tints are display hints."),el("p","Knowledge is shared across HUB workspaces and characters, subject to each character’s access. A workspace is the working folder for files and tools; changing it does not create a separate memory vault."));
   const nav=el("nav"),layout=el("section");layout.className="knowledge-layout";
   const sidebar=el("aside"),search=el("input");search.type="search";search.placeholder="Search notes…";search.setAttribute("aria-label","Search knowledge");
   const scope=el("select");scope.setAttribute("aria-label","Record collection");for(const [value,label]of [["all","All records"],["brain","Brain notes"],["archive","Chat archive"]]){const option=el("option",label);option.value=value!;scope.append(option);}
@@ -42,18 +41,18 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
     {selector:'edge[layer = "archive"]',style:{"line-color":"#83c8dc","line-style":"dashed"}},
     {selector:".dim",style:{opacity:.15}},{selector:":selected",style:{"background-color":"#a28cdd"}}
   ]});
-  const cloud=createKnowledgeCloud(root,id=>void open(id));graphPane.prepend(cloud.canvas,cloud.controls);graphPane.append(colorKey);let use3D=true;canvas.hidden=true;
-  const domainPanel=createKnowledgeDomainsPanel(root,request,load,id=>{showGraph();cloud.focusDomain(id);},id=>void open(id));layout.append(domainPanel.pane);
+  const cloud=createKnowledgeCloud(root,id=>void open(id));graphPane.prepend(cloud.canvas,cloud.controls);let use3D=false;cloud.canvas.hidden=true;cloud.controls.hidden=true;
+  const domainPanel=createKnowledgeDomainsPanel(root,request,load,id=>{showGraph();if(use3D)cloud.focusDomain(id);else{focus2DDomain=id;scheduleGraph2D();}},id=>void open(id));layout.append(domainPanel.pane);
   const dataPanel=createKnowledgeDataPanel(root,async<T>(query:string,command?:unknown)=>{const result=await request<T>(query,command);if(["start-import","withdraw-import"].includes((command as {action?:string})?.action??""))await load();return result;});layout.append(dataPanel.pane);
   const skillsPanel=createKnowledgeSkillsPanel(root,()=>void load());layout.append(skillsPanel.pane);
   const neighbors=createKnowledgeNeighbors(root,request,id=>void open(id),(relationId,index,evidence)=>void inspectEvidence(relationId,index,evidence));
   const connectionsAction=btn("Connections",()=>{noteActions.open=false;meta.open=true;neighbors.pane.tabIndex=-1;neighbors.pane.focus({preventScroll:true});neighbors.pane.scrollIntoView?.({block:"start"});});
   notePane.insertBefore(citationPreview,body);
   let graph=initial,active:KnowledgeNote|undefined,noteRequest:AbortController|undefined,disposed=false,filterLocal=false,editing=false;
-  let fit2DNeeded=true,layout2DFrame=0;
+  let fit2DNeeded=true,layout2DFrame=0,focus2DDomain:string|undefined;
   let returnPane:"graph"|"files"="graph",returnNoteId:string|undefined,listScroll=0;
   const storageKey="hub-knowledge-positions-v1";let positions:Record<string,{x:number;y:number}>={};try{positions=JSON.parse(view.localStorage.getItem(storageKey)??"{}");}catch{}
-  const controls2D=el("div"),count2D=el("span");controls2D.className="knowledge-brain-controls";controls2D.setAttribute("aria-label","2D graph controls");controls2D.hidden=true;
+  const controls2D=el("div"),count2D=el("span");controls2D.className="knowledge-brain-controls";controls2D.setAttribute("aria-label","2D graph controls");controls2D.hidden=false;
   const archiveLabel=btn("Chat archive",()=>{const records=cy.nodes().filter(n=>n.data("layer")==="archive");if(records.length)cy.fit(records,60);});archiveLabel.dataset.chatArchiveLabel="";archiveLabel.hidden=true;graphPane.append(archiveLabel);
   const zoom2D=(factor:number)=>cy.zoom({level:cy.zoom()*factor,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
   const zoomOut2D=btn("−",()=>zoom2D(1/1.25)),zoomIn2D=btn("+",()=>zoom2D(1.25));zoomOut2D.setAttribute("aria-label","Zoom out");zoomIn2D.setAttribute("aria-label","Zoom in");
@@ -76,15 +75,16 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
       // Fit only after the 2D canvas is visible. Positions share the brain's
       // stable domain layout, so sparse/disconnected records cannot pack into
       // a hidden canvas's zero-width strip.
-      if(fit2DNeeded){cy.fit(cy.elements().not(".dim"),40);fit2DNeeded=false;}
+      if(focus2DDomain){const members=new Set(knowledgeLayout(graph).groups.find(g=>g.id===focus2DDomain)?.members??[]),nodes=cy.nodes().filter(n=>members.has(n.id()));if(nodes.length)cy.fit(nodes,60);focus2DDomain=undefined;fit2DNeeded=false;}
+      else if(fit2DNeeded){cy.fit(cy.elements().not(".dim"),40);fit2DNeeded=false;}
       labelsGraph2D();
     });
   }
   const reset2D=btn("Reset 2D layout",()=>{
     cy.batch(()=>{for(const p of knowledgeLayout(graph).points){delete positions[p.domainId==="hub:chat-archive"?"archive:"+p.id:p.id];cy.getElementById(p.id).position({x:(p.x*.94-p.z*.3)*2.4,y:(p.y*.94+p.z*.12)*2.4});}});
     try{view.localStorage.setItem(storageKey,JSON.stringify(positions));}catch{}fitGraph2D();
-  });reset2D.hidden=true;reset2D.title="Restore the default positions for these records. Notes and connections stay unchanged.";
-  const graphButton=btn("Graph",()=>showGraph()),filesButton=btn("Notes",()=>showFiles()),localButton=btn("Local graph",()=>{if(!canLeaveNote())return;filterLocal=!filterLocal;localButton.setAttribute("aria-pressed",String(filterLocal));filter();showGraph();if(!use3D)fitGraph2D();}),fit=btn("Fit",()=>{if(use3D)cloud.fit();else fitGraph2D();}),refresh=btn("Refresh",()=>void load());const dimension=btn("3D",()=>{use3D=!use3D;dimension.textContent=use3D?"3D":"2D";cloud.canvas.hidden=!use3D;cloud.controls.hidden=!use3D;controls2D.hidden=use3D;reset2D.hidden=use3D;canvas.hidden=use3D;archiveLabel.hidden=use3D;if(use3D)cloud.resize();else fitGraph2D();});nav.append(graphButton,filesButton,btn("Chat archive",()=>showFiles(true,"archive")));const graphOptions=el("details");graphOptions.className="knowledge-graph-options";graphOptions.append(el("summary","Graph options"),dimension,localButton,fit,reset2D,refresh);graphPane.append(graphOptions);
+  });reset2D.hidden=false;reset2D.title="Restore the default positions for these records. Notes and connections stay unchanged.";
+  const graphButton=btn("Graph",()=>showGraph()),filesButton=btn("Notes",()=>showFiles()),localButton=btn("Local graph",()=>{if(!canLeaveNote())return;filterLocal=!filterLocal;localButton.setAttribute("aria-pressed",String(filterLocal));filter();showGraph();if(!use3D)fitGraph2D();}),fit=btn("Fit",()=>{if(use3D)cloud.fit();else fitGraph2D();}),refresh=btn("Refresh",()=>void load());const dimension=btn("2D",()=>{use3D=!use3D;dimension.textContent=use3D?"3D":"2D";cloud.canvas.hidden=!use3D;cloud.controls.hidden=!use3D;controls2D.hidden=use3D;reset2D.hidden=use3D;canvas.hidden=use3D;archiveLabel.hidden=use3D;if(use3D)cloud.resize();else fitGraph2D();});nav.append(graphButton,filesButton,btn("Chat archive",()=>showFiles(true,"archive")));const graphOptions=el("details");graphOptions.className="knowledge-graph-options";graphOptions.append(el("summary","Graph options"),dimension,localButton,fit,reset2D,refresh);graphPane.append(graphOptions);
   nav.append(btn("Domains",()=>{if(!canLeaveNote())return;dialog.dataset.mobilePane="domains";dataPanel.pane.hidden=true;sidebar.hidden=true;graphPane.hidden=true;notePane.hidden=true;assetsPane.hidden=true;void domainPanel.show();}),btn("Data",()=>{if(!canLeaveNote())return;dialog.dataset.mobilePane="data";domainPanel.pane.hidden=true;sidebar.hidden=true;graphPane.hidden=true;notePane.hidden=true;assetsPane.hidden=true;void dataPanel.show();}));
   const back=btn("‹ Knowledge",()=>returnFromNote());
   const edit=btn("Edit",()=>{if(!active)return;if(editing){discardEdit();return;}editing=true;editor.value=active.content;editor.hidden=false;body.hidden=true;save.hidden=false;edit.textContent="Discard changes";editor.focus();});
@@ -118,7 +118,7 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
   function list(nodes:KnowledgeNode[]){nodes=nodes.filter(n=>matchesKnowledgeScope(n,scope.value as KnowledgeRecordScope));tree.replaceChildren();if(!nodes.length){tree.append(el("p",scope.value==="archive"?"No conversations here yet.":scope.value==="brain"?"No brain notes yet. Ask HUB to save information when you want it here.":"No matching records."));return;}const folders=new Map<string,HTMLDetailsElement>();for(const n of nodes){const folder=isArchivedConversation(n)?"Chat archive":n.permalink.includes("/")?n.permalink.slice(0,n.permalink.lastIndexOf("/")):"Brain notes";let group=folders.get(folder);if(!group){group=el("details");group.open=true;group.append(el("summary",folder));tree.append(group);folders.set(folder,group);}const b=btn(n.title,()=>void open(n.id));b.setAttribute("data-note-id",n.id);group.append(b);}}
   function filter(){cloud.select(active?.id,filterLocal);cy.elements().removeClass("dim");if(filterLocal&&active){const selected=cy.getElementById(active.id);cy.elements().not(selected.closedNeighborhood()).addClass("dim");}}
   function render(next:KnowledgeGraph){
-    graph=next;cloud.update(next);const spatial=knowledgeLayout(next);colorLegend.replaceChildren();for(const group of spatial.groups.filter(g=>!g.parentId&&g.members.length)){const key=btn(`${group.name} · ${group.members.length}`,()=>{if(use3D)cloud.focusDomain(group.id);else{const ids=new Set(group.members);cy.fit(cy.nodes().filter(n=>ids.has(n.id())),60);}});key.style.borderLeft=`8px solid ${group.color}`;key.style.padding="4px 10px";key.style.display="inline-block";colorLegend.append(key);}const points=new Map(spatial.points.map(p=>[p.id,p]));cy.batch(()=>{
+    graph=next;cloud.update(next);const spatial=knowledgeLayout(next);const points=new Map(spatial.points.map(p=>[p.id,p]));cy.batch(()=>{
       const nodeIds=new Set(next.nodes.map(n=>n.id));cy.nodes().filter(n=>!nodeIds.has(n.id())).remove();
       for(const n of next.nodes){const point=points.get(n.id)!,old=cy.getElementById(n.id),color=point.color.replaceAll(" ",",");if(old.length)old.data({label:n.title,color,layer:isArchivedConversation(n)?"archive":"brain"});else{const saved=positions[isArchivedConversation(n)?"archive:"+n.id:n.id],position=Number.isFinite(saved?.x)&&Number.isFinite(saved?.y)?saved:{x:(point.x*.94-point.z*.3)*2.4,y:(point.y*.94+point.z*.12)*2.4};cy.add({data:{id:n.id,label:n.title,displayLabel:"",color,layer:isArchivedConversation(n)?"archive":"brain"},position});}}
       const edges=new Set(next.edges.map(e=>`link:${e.source}:${e.target}`));cy.edges().filter(e=>!edges.has(e.id())).remove();

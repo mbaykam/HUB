@@ -163,13 +163,8 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
     },
     whenIdle: () => agent.whenIdle(),
   });
-  try {
-    if (options.sessionId === undefined) await ctx.sessionController.rename({ sessionId, title: "Voice conversation" });
-  } catch {
-    offHistory?.(); await voice.close(); offTaskPolicy?.(); offProfile?.(); offPresentation?.(); offRoute(); offPrompt();
-    offTaskPrompt?.(); await offTasks?.();
-    throw new Error("Could not prepare the voice conversation");
-  }
+  // A synthetic user rename would pin a generic title forever. Native title
+  // events now describe voice topics while leaving user-chosen names intact.
   let closing: Promise<void> | undefined;
   return {
     ...voice,

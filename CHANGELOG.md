@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Group character tool permissions into memory reading, note saving, skills and
+  other tools. Retire redundant legacy MCP memory tools in the second-brain profile.
+- Open Knowledge in 2D and remove the floating color and memory-scope legend.
+- Add a read-only Full prompt tab with the complete last conversational model
+  request, including shared instructions, history, tools and model options.
+- Name new voice logs from their conversation topics while preserving manual names.
+
 ## 1.0.0
 
 HUB's first numbered product release establishes the current Windows host,

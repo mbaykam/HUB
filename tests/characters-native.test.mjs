@@ -71,6 +71,7 @@ const { CamofoxRuntime } = await import('../packages/harness-overlay/src/host/ca
 const { attachNativeVoiceTasks } = await import('../packages/harness-overlay/src/host/voice-tasks.ts');
 const { installModelSelection } = await import('../vendor/deepseek-harness/packages/core/agent/src/model-selection.ts');
 const {Readable}=await import('node:stream');
+const {installKnowledgeToolPolicy}=await import('../packages/harness-overlay/src/host/knowledge-tool-policy.ts');
 test('Goals uses native goal rounds, selected character, scoped files and durable completion without a forged human turn',{timeout:25000},async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-goals-native-')),ctx=new Context();let facility,backend;
  try{
@@ -212,6 +213,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   await mountAgentLoopTestDependencies(ctx,{systemPrompt:{persona:'You are powered by {{provider}}/{{model}}.'}});
   await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});
   await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'spawn'});await ctx.plugin(Storage);
+  let legacyRan=false;ctx.tools.register({name:'mcp__hub_memory__search_notes',description:'Retired fixture store',parameters:{type:'object',properties:{}},output:{schema:{type:'string'},render:()=>[]},execute:async()=>{legacyRan=true;return 'Must not run';}});ctx.effect(()=>installKnowledgeToolPolicy(ctx));
   backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
   const main=new MockAdapter([toolCallResponse('natural-handoff','hub_switch_character',{character:'Mira'}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.'),toolCallResponse('text-canvas','hub_present',{title:'Native conversation canvas',kind:'html',html:'<p>Fixture plan</p>'}),textResponse('The visual is available.')]);
   const fast=new MockAdapter([textResponse('Hi, I am Mira.'),textResponse('I run fast/mock.'),toolCallResponse('return-hub','hub_switch_character',{character:'HUB'})]);
@@ -222,6 +224,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   Object.defineProperty(ctx,'sessionController',{value:{selectModel:async({sessionId,...route})=>{selections.get(sessionId).current=route;ctx.agents.get(sessionId).session.append('model/selection',route);}},configurable:true});
   Object.defineProperty(ctx,'storageDomain',{value:facility,configurable:true});Object.defineProperty(ctx,'connection',{value:{requestRejection:()=>undefined},configurable:true});Object.defineProperty(ctx,'webServer',{value:{register:()=>()=>{}},configurable:true});
   const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'})));
+  let inspectorRoute;ctx.webServer.register=route=>{if(route.path==='/api/hub/character-request')inspectorRoute=route;return()=>{};};
   const characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
   const state=characters.store.snapshot(),voice=state.characters.find(c=>c.id===state.voiceId);
   await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Mira',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
@@ -233,6 +236,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   await say(parent,'Biraz Mira’yla sohbet etmek istiyorum; konuşmayı ona devretir misin?');
   assert.equal(main.requests.length,1);assert.equal(fast.requests.length,1);
   assert.match(JSON.stringify(main.requests[0]),/powered by main\/mock/);assert.doesNotMatch(JSON.stringify(main.requests[0]),/powered by legacy\/old-qwen/);
+  assert.ok(main.requests[0].tools.every(tool=>!tool.name.startsWith('mcp__hub_memory__')));const blockedLegacy=await parent.ctx.tools.execute({agent:parent,name:'mcp__hub_memory__search_notes',arguments:{},callId:'legacy-denied',signal:AbortSignal.timeout(1000)});assert.equal(blockedLegacy.isError,true);assert.equal(legacyRan,false);
   assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Character: Mira/);
   assert.match(main.requests[0].system,/Shared instruction proof/);assert.match(fast.requests[0].system,/Shared instruction proof/);
   assert.match(main.requests[0].system,/Memory index revision one/);assert.match(fast.requests[0].system,/Memory index revision one/);
@@ -241,6 +245,8 @@ test('model identity and natural conversation handoffs stay consistent without a
   assert.equal(characters.store.selected(parent.id).name,'Mira');assert.equal(deployment.provider,'main');
   navigation='Memory index revision two: changed domains are current.';
   await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);
+  const inspected=await new Promise(resolve=>inspectorRoute.handler({method:'GET',url:'/api/hub/character-request?characterId='+voice.id,headers:{'x-hub-characters':'1'}},{writeHead:code=>assert.equal(code,200),end:body=>resolve(JSON.parse(body))}));
+  assert.deepEqual(JSON.parse(inspected.record.json),JSON.parse(JSON.stringify(fast.requests[1],(k,v)=>k==='signal'?undefined:v)),'Inspector must match the native adapter request, including shared instructions, tool schemas and conversation history');
   assert.match(fast.requests[1].system,/Memory index revision two/);assert.doesNotMatch(fast.requests[1].system,/Memory index revision one/);
   await say(parent,'Let your main assistant take over our conversation again.');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
   const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');

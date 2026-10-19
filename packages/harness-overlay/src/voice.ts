@@ -23,6 +23,7 @@ import { createVoiceTaskPolicies, type TaskPolicyContext, type TaskPolicyStorage
 import { createSpeechPreviewHandler } from "./host/speech-preview.ts";
 import { voiceTranscript } from "./host/voice-transcript.ts";
 import { createPreparedVoiceRuntime } from "./host/voice-runtime.ts";
+import {installVoiceTitles} from "./host/voice-titles.ts";
 
 export const name = "hub-voice";
 export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess"];
@@ -53,6 +54,7 @@ export function apply(ctx: Context, config: Config): void {
   const iceServers = parseVoiceIceServers(config.iceServers ?? []);
   const lifetime = new AbortController();
   let history: Awaited<ReturnType<typeof openConversationHistory>> | undefined;
+  let offTitles:(()=>void)|undefined;
   let web: ReturnType<typeof createVoiceWeb> | undefined;
   let bridge: Awaited<ReturnType<typeof createVoiceBridgeServer<VoiceProfile>>> | undefined;
   let profiles: Awaited<ReturnType<typeof openVoiceProfiles>> | undefined;
@@ -82,6 +84,7 @@ export function apply(ctx: Context, config: Config): void {
   const startup = (async () => {
     history = await openConversationHistory(ctx.storageDomain);
     if (lifetime.signal.aborted) return;
+    offTitles=installVoiceTitles(ctx,history);
     const localProfiles = await openVoiceProfiles(ctx.storageDomain, {
       name: "HUB", instructions: "Be warm, concise and practical. Ask one question at a time.",
       route: { provider: config.provider, model: config.model, ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}) },
@@ -269,7 +272,7 @@ export function apply(ctx: Context, config: Config): void {
     } catch { response.writeHead(503); response.end(); }
   } }));
   ctx.effect(() => async () => {
-    off.forEach(remove => remove()); lifetime.abort();
+    off.forEach(remove => remove()); offTitles?.(); lifetime.abort();
     await startup.catch(() => {});
     try { await web?.dispose(); }
     finally { try { await preparedRuntime?.close(); } finally { try { await telegramListener?.stop(); } finally { try { await bridge?.dispose(); } finally { await downloads.close(); await speechFlight?.catch(() => {}); try { await taskPolicies.close(); } finally { await profiles?.close(); await history?.close(); } } } } }

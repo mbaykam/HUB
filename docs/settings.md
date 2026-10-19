@@ -24,6 +24,24 @@ settings are retained. Engine availability is checked before speech starts.
 
 ## Models and their options
 
+In **Characters → a character → Capabilities**, memory reading, saving notes and
+Skills have separate collapsed permission groups. Expand a group to choose
+individual tools. Existing partial selections are preserved; enabling a whole
+group explicitly allows its tools. Legacy memory tools are unavailable when the
+second-brain profile is active. Existing legacy data is retained.
+
+**Full prompt** shows the latest actual conversational request captured for that
+character since HUB started. It includes the entire system text, messages, tool
+schemas and model options, and can be downloaded as JSON. Refresh after sending
+a message to that character. Inspection makes no model call and does not save
+unsaved character edits. Requests stay in host memory only, with a 32 MB limit
+per request; an oversized request is marked unavailable rather than truncated.
+This is the HUB dispatch request before adapter translation. Provider-added
+hidden instructions, transport framing and exact server token IDs are not exposed.
+Auxiliary title-generation and compaction calls do not replace this display.
+
+[Full prompt on a phone, using an isolated example](assets/full-prompt-preview.png).
+
 The browser shows provider-advertised input types, context, output capacity,
 prices, parameter names and disclosed defaults. Catalogue refreshes retain the
 full supported-parameter list and do not change your selected model. Existing

@@ -10,6 +10,11 @@ text reaches TTS incrementally; tool arguments and hidden reasoning are not
 spoken. A stronger HUB character can handle delegated tasks and return their
 results to the active call.
 
+New voice conversations receive topic titles from their first substantive user
+utterances, skipping greetings and microphone checks. This needs no additional
+model call and preserves the conversation's language. Titles you set yourself
+take precedence. Existing saved conversations are not renamed in bulk.
+
 ## Install the optional Python runtime
 
 Use a separate Python 3.12 environment outside the repository. For Windows:

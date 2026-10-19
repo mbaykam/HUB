@@ -139,12 +139,13 @@ function measurableCanvas(root){const canvas=root.querySelector('[data-graph-can
 
 test('98 sparse records have a two-dimensional layout and their own working zoom controls',async t=>{
   const {view,root}=await fixture(t,{graph:sparseGraph,openNote:false}),canvas=measurableCanvas(root),cy=canvas.fixtureCy;
-  assert.equal(canvas.hidden,true);
+  assert.equal(canvas.hidden,false);
+  assert.equal(root.querySelector(".knowledge-color-key"),null);
   const points=cy.nodes().map(n=>n.position()),xs=points.map(p=>p.x),ys=points.map(p=>p.y),ratio=(Math.max(...xs)-Math.min(...xs))/(Math.max(...ys)-Math.min(...ys));
   assert.equal(points.length,98);assert.equal(cy.edges().length,1);
   assert.ok(points.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));
   assert.ok(ratio>.4&&ratio<2.5,'sparse sources must occupy an area, not a four-column vertical strip');
-  button(root,'3D').click();await frames(view);
+  await frames(view);
   assert.equal(canvas.hidden,false);assert.equal(root.querySelector('[data-knowledge-cloud]').hidden,true);
   assert.equal(root.querySelector('.knowledge-brain-controls').hidden,true);
   const controls=root.querySelector('[aria-label="2D graph controls"]');assert.equal(controls.hidden,false);
@@ -156,14 +157,14 @@ test('98 sparse records have a two-dimensional layout and their own working zoom
 
 test('2D source positions survive manual dragging, note navigation and reopening',async t=>{
   const {view,root,requests}=await fixture(t,{graph:sparseGraph,openNote:false}),canvas=measurableCanvas(root),cy=canvas.fixtureCy;
-  button(root,'3D').click();await frames(view);
+  await frames(view);
   const node=cy.getElementById('fixture-source-5');node.position({x:777,y:888});node.emit('dragfree');
   const saved=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'));saved['other-dataset-source']={x:12,y:34};view.localStorage.setItem('hub-knowledge-positions-v1',JSON.stringify(saved));
   button(root,'Notes').click();button(root,'Graph').click();await frames(view);
   assert.deepEqual(node.position(),{x:777,y:888});
   assert.deepEqual(JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'))['fixture-source-5'],{x:777,y:888});
   button(root,'Home').click();const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,sparseGraph,()=>{});t.after(dispose);
-  const reopened=measurableCanvas(root);button(root,'3D').click();await frames(view);
+  const reopened=measurableCanvas(root);await frames(view);
   assert.deepEqual(reopened.fixtureCy.getElementById('fixture-source-5').position(),{x:777,y:888});
   button(root,'Reset 2D layout').click();await frames(view);
   assert.notDeepEqual(reopened.fixtureCy.getElementById('fixture-source-5').position(),{x:777,y:888});

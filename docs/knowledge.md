@@ -24,6 +24,10 @@ One conversation has one stable archive identity and one graph entry. Public mes
 
 ## Chat archive and brain notes
 
+The graph opens in **2D**. Use **Graph options → 2D** to switch to 3D, or the
+displayed **3D** button to switch back. Colors still distinguish domains; the
+floating color and memory-scope legend is removed so it cannot cover controls.
+
 The same Knowledge graph shows two separate collections. **Chat archive** is a
 dedicated cloud for original conversations, with its own list and search. It is
 not a domain, consumes no domain slots and does not influence suggested brain
@@ -141,7 +145,9 @@ archives are a separate extension. Keep your original export.
 
 Images and files can be preserved without being fully understood by AI. Selected document formats support local text extraction; general image OCR or audio/video interpretation is not promised. Optional dependencies are listed in scripts/tests/requirements-media.txt. Voice conversations retain public transcripts, not raw call recordings.
 
-The older Basic Memory MCP bridge remains available for legacy configurations; it is not the second-brain path above.
+The older Basic Memory MCP bridge remains available for legacy configurations.
+When the second-brain profile above is active, its redundant tools are hidden
+from model requests and cannot execute. The legacy store is retained.
 
 ## Back up the complete dataset
 
