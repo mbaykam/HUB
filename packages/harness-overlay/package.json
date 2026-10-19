@@ -46,7 +46,7 @@
     "assets",
     "voice/server.py", "voice/media_inspect.py",
     "voice/supertonic_tts.py", "voice/streaming_asr.py", "voice/native_streaming_stt.py",
-    "voice/voice_pipeline.py",
+    "voice/voice_pipeline.py", "voice/voice_attention.py",
     "voice/playback_guard.py",
     "voice/speech_settings.py",
     "voice/speech_download.py",
