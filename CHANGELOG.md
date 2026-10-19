@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+- Attach photos and files from the PWA Home or chat composer. Keep native image
+  previews and removable file chips, retain drafts after failed sends, and save
+  originals with their conversation in the vault.
+- Open a camera preview during a Mira voice conversation, switch cameras and
+  share a still photo with a shutter press and an optional instruction. Queue
+  the request without restarting audio; HUB receives the actual image through
+  native background delegation. The PWA can also accompany a Telegram call.
+- Check model vision support before sharing, keep retries on the same receipt,
+  and release camera video independently of the voice microphone.
+
 ## 1.1.0
 
 - Group character tool permissions into memory reading, note saving, skills and

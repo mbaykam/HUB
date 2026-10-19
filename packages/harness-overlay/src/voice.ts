@@ -24,6 +24,7 @@ import { createSpeechPreviewHandler } from "./host/speech-preview.ts";
 import { voiceTranscript } from "./host/voice-transcript.ts";
 import { createPreparedVoiceRuntime } from "./host/voice-runtime.ts";
 import {installVoiceTitles} from "./host/voice-titles.ts";
+import {prepareVoiceShare} from "./host/voice-media.ts";
 
 export const name = "hub-voice";
 export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess"];
@@ -131,6 +132,10 @@ export function apply(ctx: Context, config: Config): void {
         },
       },
       reject: request => ctx.connection.requestRejection(request),
+      async share(call,requestId,uploads,instruction){
+        const text=await prepareVoiceShare(ctx,call.sessionId,uploads,instruction);
+        await localBridge.share(call.callId,requestId,text);
+      },
       async open(signal, sessionId, transport) {
         if (cleanupUncertain) throw new Error("Voice cleanup requires host recovery");
         // Telegram always keeps its main orchestrator. A spoken companion gets
@@ -214,7 +219,7 @@ export function apply(ctx: Context, config: Config): void {
   })();
   // Keep startup rejection handled even if no browser ever opens voice.
   void startup.catch(() => {});
-  const off = ["open", "close", "offer", "status", "diagnostics", "history", "presentation", "presentation-document", "interrupt"].map(action => ctx.webServer.register({ kind: "exact", path: `/api/hub/voice/${action}`,
+  const off = ["open", "close", "offer", "status", "diagnostics", "history", "presentation", "presentation-document", "interrupt", "share"].map(action => ctx.webServer.register({ kind: "exact", path: `/api/hub/voice/${action}`,
     async handler(request, response) {
       const rejection = ctx.connection.requestRejection(request);
       if (rejection || request.headers["sec-fetch-site"] === "cross-site" || !web || lifetime.signal.aborted || cleanupUncertain) {

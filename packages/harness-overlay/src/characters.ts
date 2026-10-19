@@ -190,6 +190,7 @@ export class HubCharacters extends Service {
   /** Identity admitted for this turn, including a voice override. Unmounted
    * managed/delegated workers fail closed instead of inheriting the main bot. */
   effectiveCharacter(sessionId:string){const mount=this.mounts.get(sessionId);if(!mount)return undefined;return mount.assembled?.character??mount.voiceCharacter??this.store.selected(sessionId,mount.turnSnapshot??this.store.snapshot());}
+  voiceTarget(sessionId:string){const mount=this.mounts.get(sessionId);if(!this.voiceCalls.has(sessionId)||!mount?.voiceCharacter)return;const s=mount.turnSnapshot??mount.snapshot;return s?.characters.find(c=>c.id===(mount.voiceCharacter?.delegateTo??s.mainId));}
   async prepare(agent:CharacterAgent,s=this.store.snapshot()){
     const mount=this.mounts.get(agent.id);if(!mount)return;
     if(mount.loading){await mount.loading;if(mount.revision===s.revision)return;}

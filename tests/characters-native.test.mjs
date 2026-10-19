@@ -72,6 +72,40 @@ const { attachNativeVoiceTasks } = await import('../packages/harness-overlay/src
 const { installModelSelection } = await import('../vendor/deepseek-harness/packages/core/agent/src/model-selection.ts');
 const {Readable}=await import('node:stream');
 const {installKnowledgeToolPolicy}=await import('../packages/harness-overlay/src/host/knowledge-tool-policy.ts');
+
+test('a real native voice delegation gives the HUB worker the shared image, preserves permissions and logs the exact image context',{timeout:20000},async()=>{
+ const {KnowledgeAssets}=await import('../packages/harness-overlay/src/host/knowledge-assets.ts');
+ const {installVoiceMediaContext}=await import('../packages/harness-overlay/src/host/voice-media.ts');
+ const {randomUUID}=await import('node:crypto');
+ const root=await mkdtemp(join(tmpdir(),'hub-eval-voice-photo-')),ctx=new Context();let facility,backend;
+ try{
+  await mountAgentLoopTestDependencies(ctx);await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'hub-character-spawn'});await ctx.plugin(Storage);
+  backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
+  class Vision extends MockAdapter{async resolveModel(provider,model){return {...await super.resolveModel(provider,model),inputModalities:['text','image']};}}
+  const worker=new Vision([textResponse('The fixture image is received.'),textResponse('The next photo is received.')]),mira=new MockAdapter([toolCallResponse('photo-task','hub_task',{description:'Inspect the user photo',prompt:'Analyze the photo the user shared.'},'I’ll ask HUB to look.'),textResponse('HUB received your photo.'),toolCallResponse('photo-task-2','hub_task',{description:'Inspect the next photo',prompt:'Analyze the next shared photo.'},'I’ll pass along the next one.'),textResponse('The next photo reached HUB.')]);
+  ctx.llm.registerAdapter(['main'],worker);ctx.llm.registerAdapter(['fast'],mira);
+  for(const [name,value]of Object.entries({agentDefaultModel:{currentSelection:()=>({provider:'main',model:'mock'})},storageDomain:facility,connection:{requestRejection:()=>undefined},webServer:{register:()=>()=>{}}}))Object.defineProperty(ctx,name,{value,configurable:true});
+  const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'}))),characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
+  let state=characters.store.snapshot();const spoken=state.characters.find(c=>c.id===state.voiceId);await characters.store.change({action:'save',revision:state.revision,character:{...spoken,route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
+  const assets=new KnowledgeAssets(join(root,'vault'),join(root,'state')),receiptId=randomUUID(),image={attachmentId:'b'.repeat(64),mediaType:'image/png',width:1,height:1,bytes:68};
+  await assets.bindUpload({id:receiptId,sessionId:'hub-eval-photo-parent',assetId:'c'.repeat(64),name:'Fixture.png',bytes:68,mediaType:'image/png',image});
+  const children=[];ctx.on('agent/created',({agent})=>{if(agent.session.header.parentSession==='hub-eval-photo-parent')children.push(agent);},{global:true});
+  const off=installVoiceMediaContext(ctx,assets),parent=ctx.agentLoop.create('hub-eval-photo-parent',{provider:'fast',model:'mock'});
+  const lease=await characters.beginVoice(parent,await characters.voiceProfile());const offTasks=await attachNativeVoiceTasks(parent,undefined,lease);
+  parent.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:`Please analyze my shared photo. {HUB_ATTACHMENT:${receiptId}}`}]}));
+  const until=Date.now()+8000;while(!worker.requests.length||mira.requests.length<2||parent.status!=='idle'||ctx.agents.list().some(a=>a.status!=='idle')){assert.ok(Date.now()<until,'Native photo delegation did not settle');await new Promise(r=>setTimeout(r,10));}
+  const request=worker.requests[0],images=request.messages.flatMap(m=>m.content).filter(b=>b.type==='image');assert.deepEqual(images,[{type:'image',attachment:image}]);
+  assert.equal(mira.requests.flatMap(r=>r.messages.flatMap(m=>m.content)).filter(b=>b.type==='image').length,0,'Mira stays text-only');
+  const child=children[0];assert.ok(child);
+  const events=child.session.snapshotEvents(),injected=events.filter(e=>e.type==='user/message'&&e.data.source?.plugin==='hub-upload');assert.equal(injected.length,1);assert.deepEqual(injected[0].data.content.find(b=>b.type==='image').attachment,image);
+  assert.equal(request.provider,'main');assert.equal(request.model,'mock');assert.ok(parent.ctx.tools.get('hub_task',parent));assert.ok(!child.ctx.tools.get('hub_task',child),'Call-only task alias does not leak into workers');
+  const secondId=randomUUID(),secondImage={...image,attachmentId:'e'.repeat(64)};await assets.bindUpload({id:secondId,sessionId:parent.id,assetId:'f'.repeat(64),name:'Second.png',bytes:68,mediaType:'image/png',image:secondImage});
+  parent.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:`Now inspect this different photo. {HUB_ATTACHMENT:${secondId}}`}]}));
+  const secondDeadline=Date.now()+8000;while(worker.requests.length<2||ctx.agents.list().some(a=>a.status!=='idle')){assert.ok(Date.now()<secondDeadline,'Second native photo task did not settle');await new Promise(r=>setTimeout(r,10));}
+  assert.deepEqual(worker.requests[1].messages.flatMap(m=>m.content).filter(b=>b.type==='image'),[{type:'image',attachment:secondImage}],'A later shutter delivers its own photo, never a stale frame');
+  offTasks();lease.release();off();
+ }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-eval-voice-photo-'));await rm(root,{recursive:true,force:true});}
+});
 test('Goals uses native goal rounds, selected character, scoped files and durable completion without a forged human turn',{timeout:25000},async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-goals-native-')),ctx=new Context();let facility,backend;
  try{

@@ -3,6 +3,7 @@ import { pwaUiAsset } from "./mobile-ui-update.ts";
 import styles from "./mobile-hubs.css";
 const installStyles = defineOverlayStyle("hub-mobile-hubs", styles);
 import type { HarnessClientContext } from "../core/context.ts";
+import {createVoiceCamera} from "./voice-camera.ts";
 import type { createVoiceClient, VoiceState } from "../voice/browser-client.ts";
 import { createMobileActivity, createActivitySignals, type ActivityPendingSource } from "./mobile-activity.ts";
 import { returnToMobileHome } from "./mobile-home-navigation.ts";
@@ -75,9 +76,11 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     });
   });
   const browser = createMobileBrowserView(root);
+  const camera=createVoiceCamera(root);actions.append(camera.button);
+  let cameraCall:string|undefined;
   const presentation = {
-    setCall(callId: string | undefined) { root.dispatchEvent(new CustomEvent("hub:presentation-call", { detail: { callId } })); },
-    dispose() { this.setCall(undefined); },
+    setCall(callId: string | undefined) { cameraCall=callId;camera.setCall(callId&&voiceSession?{callId,sessionId:voiceSession}:undefined);root.dispatchEvent(new CustomEvent("hub:presentation-call", { detail: { callId } })); },
+    dispose() { this.setCall(undefined);camera.dispose(); },
   };
   let voice: ReturnType<typeof createVoiceClient> | undefined;
   let voiceSession: string | undefined;
@@ -215,7 +218,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
         if (lifetime.signal.aborted || cancelledLoad) return;
         voice = module.createVoiceClient({ audio,
           onState(value) { state = value; if (value === "idle") { transcript.reset(); root.dispatchEvent(new CustomEvent("hub:voice-history-changed")); voiceSession = undefined; muted = false; play.hidden = true; schedule(); } render(); },
-          onSession(id) { voiceSession = id; void ctx.sessions.refresh?.().catch(() => {}); root.dispatchEvent(new CustomEvent("hub:voice-history-changed")); render(); },
+          onSession(id) { voiceSession = id;camera.setCall(cameraCall&&id?{callId:cameraCall,sessionId:id}:undefined); void ctx.sessions.refresh?.().catch(() => {}); root.dispatchEvent(new CustomEvent("hub:voice-history-changed")); render(); },
           onCall(id) { presentation.setCall(id); },
           onProfile(profile) { if(profile){hub.setAttribute("data-active-character", profile.name);transcript.setAssistant(profile.name);}else{hub.removeAttribute("data-active-character");} render(); },
           onTranscript(role, text, final) { transcript.update(role, text, final);if(role==="user"){liveWords.textContent=text;liveWords.toggleAttribute("data-interim",!final);} },

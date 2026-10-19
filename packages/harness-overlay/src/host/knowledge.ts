@@ -25,6 +25,8 @@ import {KnowledgeBackups} from "./knowledge-backups.ts";
 import {installKnowledgeSkills} from "./knowledge-skill-tools.ts";
 import {installMediaInspection} from "./media-inspection.ts";
 import {installKnowledgeToolPolicy} from "./knowledge-tool-policy.ts";
+import {createUploadsHandler} from "./uploads.ts";
+import {installVoiceMediaContext} from "./voice-media.ts";
 
 // Native hooks/tool registries remain the permission boundary. Curator itself
 // has no tools; ordinary recall goes through the conversation-owned registry.
@@ -35,11 +37,17 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   const gate=ctx.hubCharacters?.quota??ctx.get?.("hubCharacters")?.quota??providerGate(join(dirname(store.root),"hub-provider-health"));
   store.assets.subprocess=ctx.subprocess??ctx.get?.("subprocess");
   new KnowledgeAssetService(ctx,store.assets);
+  ctx.effect(()=>installVoiceMediaContext(ctx,store.assets),"HUB voice photo context");
   ctx.effect(()=>installKnowledgeToolPolicy(ctx),"HUB single Knowledge tool surface");
   const attachmentStore=ctx.attachments??ctx.get?.("attachments");
   const originalSaveImages=attachmentStore?.saveImages;
   const archiveImages=originalSaveImages?async function(inputs:any[]){const refs=await originalSaveImages.call(attachmentStore,inputs);try{for(let i=0;i<inputs.length;i++){const item=inputs[i],name=item.name??`Image.${item.mediaType.split("/")[1]}`,asset=await store.assets.save(item.data,name);await store.assets.bindImage(refs[i].attachmentId,asset);}}catch{curator.status="capture-needs-attention";}return refs;}:undefined;
   if(archiveImages)attachmentStore.saveImages=archiveImages;
+  ctx.effect(()=>{
+    const handler=createUploadsHandler({assets:store.assets,reject:req=>ctx.connection.requestRejection(req),session:async id=>!!(await ctx.hubCharacters.host.sessionController.resolveAgent(id)).agent,saveImages:items=>attachmentStore.saveImages(items)});
+    const off=[ctx.webServer.register({kind:"exact",path:"/api/hub/uploads",handler}),ctx.webServer.register({kind:"prefix",path:"/api/hub/uploads/",handler})];
+    return ()=>off.forEach(remove=>remove());
+  },"HUB PWA attachment ingress");
   const message=(text:string)=>createUserMessage({source:{kind:"plugin",plugin:"hub-memory"},content:[{type:"text",text}]});
   const curator=new KnowledgeCurator(store,async(prompt,settings,signal,limits)=>{
     const route={provider:settings.provider,model:settings.model,...(settings.reasoningEffort?{reasoningEffort:settings.reasoningEffort}:{})};
@@ -74,6 +82,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       const message=record.messages.find(m=>m.id===String(event.seq??index));if(!message)continue;
       const assets=[];for(const block of event.data?.content??[])if(block.type==="image"&&block.attachment){const asset=await store.assets.original(block.attachment.attachmentId);if(asset)assets.push(asset);}
       if(typeof event.data?.source?.rpcId==="string")for(const asset of await store.assets.forRequest(header.id,event.data.source.rpcId))if(!assets.some(a=>a.id===asset.id))assets.push(asset);
+      for(const block of event.data?.content??[])if(block.type==="text")for(const asset of await store.assets.uploadedAssets(header.id,block.text))if(!assets.some(a=>a.id===asset.id))assets.push(asset);
       if(assets.length)message.assets=assets;
     }
     return {record,changed:await store.archive.put(record)};

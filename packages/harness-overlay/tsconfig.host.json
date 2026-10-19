@@ -36,6 +36,7 @@
     "src/bookmarks-contract.ts",
     "src/browser-view-contract.ts",
     "src/presentation-contract.ts",
+    "src/upload-contract.ts",
     "src/memory-graph-contract.ts",
     "src/index.ts",
     "src/memory.ts",

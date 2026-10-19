@@ -14,6 +14,7 @@ async function fixture(overrides = {}, options = {}) {
     history: overrides.history,
     presentations: overrides.presentations,
     runtimeStatus: overrides.runtimeStatus,
+    share:overrides.share,
     async open(signal, sessionId) { opened++; if (overrides.open) await overrides.open(signal, sessionId); return call; },
     async close(value) { assert.equal(value, call); closed++; if (overrides.close) await overrides.close(); },
   }, options);
@@ -24,6 +25,19 @@ async function fixture(overrides = {}, options = {}) {
   return { web, call, process, requests, post, url, get opened() { return opened; }, get closed() { return closed; }, async dispose() { try { await web.dispose(); } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } } };
 }
 const admission = () => ({ requestId: randomUUID(), requestedAt: Date.now() });
+
+test('camera sharing authenticates the active call and accepts both PWA and Telegram without reopening audio',async()=>{
+ const shared=[],f=await fixture({share:async(...args)=>shared.push(args)});const body={callId:f.call.callId,requestId:randomUUID(),uploads:[randomUUID()],instruction:'Read this label'};
+ try{
+  assert.equal((await f.post('share',body,{'x-hub-voice-share':'1'})).status,410);await f.post('open',admission());
+  assert.equal((await f.post('share',body)).status,403);assert.equal((await f.post('share',body,{'x-hub-voice-share':'1',cookie:''})).status,401);
+  assert.equal((await f.post('share',{...body,callId:randomUUID()},{'x-hub-voice-share':'1'})).status,410);
+  assert.equal((await f.post('share',{...body,uploads:[]},{'x-hub-voice-share':'1'})).status,400);
+  for(const transport of [undefined,'telegram']){f.call.transport=transport;assert.equal((await f.post('share',body,{'x-hub-voice-share':'1'})).status,200);}
+  assert.equal(shared.length,2);assert.equal(f.opened,1);assert.equal(f.closed,0);assert.equal(f.requests.length,0);
+  await f.post('close',{callId:f.call.callId});assert.equal((await f.post('share',body,{'x-hub-voice-share':'1'})).status,410);
+ }finally{await f.dispose();}
+});
 
 test("preparation state is authenticated and independent of call occupancy", async () => {
   let state = "warming";

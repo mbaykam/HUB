@@ -1,4 +1,4 @@
-import {mkdir,readFile,writeFile,lstat,realpath} from "node:fs/promises";
+import {mkdir,readFile,writeFile,lstat,realpath,rename} from "node:fs/promises";
 import {join,resolve,relative,basename,extname,dirname} from "node:path";
 import {createHash} from "node:crypto";
 import {execFile} from "node:child_process";
@@ -15,6 +15,7 @@ const mime:Record<string,string>={".png":"image/png",".jpg":"image/jpeg",".jpeg"
 export function knowledgeUrls(text:string){const values=new Set<string>();for(const match of text.matchAll(/https?:\/\/[^\s<>"'\]\)]+/g)){try{const url=new URL(match[0].replace(/[.,;!?]+$/,""));if(!url.username&&!url.password&&url.href.length<=2000)values.add(url.href);}catch{}}return [...values].slice(0,30);}
 /** Originals belong to the real vault; only lookup metadata stays outside it. */
 import {KnowledgeMutationGate} from "./knowledge-mutation-gate.ts";
+import {uploadId,uploadMarkers,type UploadReceipt} from "../upload-contract.ts";
 export class KnowledgeAssets{
   subprocess?:VoiceSubprocess;
   constructor(readonly vault:string,readonly root:string,readonly mutations=new KnowledgeMutationGate()){}
@@ -22,6 +23,9 @@ export class KnowledgeAssets{
   async list(){const {readdir}=await import("node:fs/promises");await this.initialize();const result:KnowledgeAsset[]=[];for(const name of (await readdir(join(this.root,"assets"))).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).slice(0,500)){try{result.push(await this.get(name.slice(0,-5)));}catch{}}return result;}
   bindImage(ref:string,asset:KnowledgeAsset){return this.mutations.run(async()=>{await mkdir(join(this.root,"image-originals"),{recursive:true});if(!/^[a-f0-9]{64}$/.test(ref))return;await writeFile(join(this.root,"image-originals",ref+".json"),JSON.stringify({id:asset.id}));});}
   async original(ref:string){if(!/^[a-f0-9]{64}$/.test(ref))return;try{const value=JSON.parse(await readFile(join(this.root,"image-originals",ref+".json"),"utf8"));return await this.get(value.id);}catch{return;}}
+  bindUpload(receipt:UploadReceipt){return this.mutations.run(async()=>{if(!uploadId.test(receipt.id))throw Error("Invalid upload");const dir=join(this.root,"upload-refs");await mkdir(dir,{recursive:true});const file=join(dir,receipt.id+".json"),temp=file+".tmp";await writeFile(temp,JSON.stringify(receipt),{mode:0o600});await rename(temp,file);});}
+  async upload(id:string):Promise<UploadReceipt|undefined>{if(!uploadId.test(id))return;try{const value=JSON.parse(await readFile(join(this.root,"upload-refs",id+".json"),"utf8"));if(value.id===id&&typeof value.sessionId==="string"&&/^[a-f0-9]{64}$/.test(value.assetId))return value;}catch{}return;}
+  async uploadedAssets(sessionId:string,text:string){const result:KnowledgeAsset[]=[];for(const id of uploadMarkers(text)){const receipt=await this.upload(id);if(receipt?.sessionId===sessionId)result.push(await this.get(receipt.assetId));}return result;}
   rememberRequest(sessionId:string,rpcId:string,assets:KnowledgeAsset[]){return this.mutations.run(async()=>{await mkdir(join(this.root,"asset-requests"),{recursive:true});const key=createHash("sha256").update(sessionId+":"+rpcId).digest("hex");await writeFile(join(this.root,"asset-requests",key+".json"),JSON.stringify(assets.map(a=>a.id)));});}
   async forRequest(sessionId:string,rpcId:string){try{const key=createHash("sha256").update(sessionId+":"+rpcId).digest("hex"),ids=JSON.parse(await readFile(join(this.root,"asset-requests",key+".json"),"utf8"));return await Promise.all(ids.map((id:string)=>this.get(id)));}catch{return [] as KnowledgeAsset[];}}
   async path(path:string){

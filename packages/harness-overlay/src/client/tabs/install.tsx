@@ -34,6 +34,7 @@ import {installPanelNavigation} from "../host/panel-navigation.ts";
 import {ToolsSettings} from "../preferences/ToolsSettings.tsx";
 import {installChatActivityGroups} from "../host/chat-activity-groups.ts";
 import { installConversationPresentation } from "../host/mobile-presentation.ts";
+import { installComposerUploads } from "../host/composer-uploads.tsx";
 import { installMobileSettings } from "../host/mobile-settings.ts";
 import { installMobileConversationVisibility, type NavigationVisibilityPort } from "../host/mobile-conversation-visibility.ts";
 import { VoiceHistoryClient } from "../host/voice-history.ts";
@@ -198,6 +199,9 @@ export function installTabs(
   );
   ctx.effect(() => installConversationPresentation(ctx), "hub: live conversation canvas");
   if (!tabsPort.embeddedWebAvailable) {
+    ctx.inject?.(["conversation","inputTriggers"],scope=>{
+      scope.effect(()=>installComposerUploads(ctx,scope.get("conversation") as Parameters<typeof installComposerUploads>[1],scope.get("inputTriggers") as Parameters<typeof installComposerUploads>[2]),"HUB PWA photos and files");
+    });
     const conversationHistory = new VoiceHistoryClient((input, init) => window.fetch(input, init));
     ctx.effect(() => () => conversationHistory.dispose(), "hub: PWA conversation metadata");
     ctx.effect(

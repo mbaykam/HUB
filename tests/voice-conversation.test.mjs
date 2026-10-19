@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createVoiceConversation } from "@minke/harness-overlay/host/voice-conversation.ts";
+import {randomUUID} from 'node:crypto';
+
+test('a shared photo queues beside an active spoken turn, speaks only its correlated acknowledgement, and retries once',async()=>{
+ const f=fixture(),spoken=f.voice.speak(1,'Keep talking',f.sink);f.claim(1);const id=randomUUID();
+ await Promise.all([f.voice.share(id,'Please analyze my photo'),f.voice.share(id,'Please analyze my photo')]);assert.equal(f.prompts.length,2);assert.equal(f.prompts[1].mode,'queue');assert.equal(f.cancelCount,0);
+ f.emit('assistant/chunk',{turn:1,chunk:{type:'text-delta',text:'We can continue.'}});f.emit('turn/end',{turn:1,reason:{kind:'completed'}});await spoken;
+ f.claim(2,f.prompts[1].requestId);f.emit('assistant/message',{turn:2,message:{content:[{type:'text',text:'I’ll ask HUB to look.'}]}});f.emit('turn/end',{turn:2,reason:{kind:'completed'}});
+ assert.deepEqual(f.voice.notifications(0).events.map(e=>e.text),['I’ll ask HUB to look.']);assert.equal(f.output.filter(e=>e.type==='end').length,1);
+ await assert.rejects(f.voice.share(id,'Different photo request'),{code:'already-admitted'});assert.equal(f.prompts.length,2);await f.voice.close();await assert.rejects(f.voice.share(randomUUID(),'After hangup'),{code:'closed'});
+});
 
 function fixture() {
   let listener, running = false, cancelCount = 0, idle = Promise.resolve();

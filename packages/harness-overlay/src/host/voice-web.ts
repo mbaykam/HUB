@@ -7,6 +7,8 @@ import type { ActiveVoiceProfile } from "./voice-profiles-web.ts";
 import { randomUUID } from "node:crypto";
 import type { LocalSpeechConfig } from "../voice-profile-contract.ts";
 import type { VoiceTranscriptLine } from "./voice-transcript.ts";
+import {uploadId,UPLOAD_MAX_FILES} from "../upload-contract.ts";
+import {UploadError} from "./uploads.ts";
 
 interface Call { callId: string; sessionId: string; sidecar: VoiceSidecar; iceServers?: VoiceIceServer[]; profile?: ActiveVoiceProfile; transport?: "telegram"; speech?: LocalSpeechConfig }
 export interface VoiceWebPorts {
@@ -17,6 +19,7 @@ export interface VoiceWebPorts {
   presentations?: { summary(sessionId: string): PresentationSummary | null; document(sessionId: string, id: string): Promise<string> };
   transcript?(sessionId: string): VoiceTranscriptLine[];
   runtimeStatus?(): "cold" | "warming" | "ready" | "unavailable";
+  share?(call: Call, requestId: string, uploads: string[], instruction: string): Promise<unknown>;
 }
 class RequestError extends Error {
   readonly status: number;
@@ -126,6 +129,19 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
       if (rejection || request.headers["sec-fetch-site"] === "cross-site") { send(response, rejection ?? 403, { error: "unauthorized" }); return; }
       if (disposed) { send(response, 503, { error: "voice-unavailable" }); return; }
       const path = request.url;
+      if (path === "/api/hub/voice/share") {
+        if (request.method !== "POST") { send(response, 405, { error: "method-not-allowed" }); return; }
+        if (request.headers["x-hub-voice-share"] !== "1") { send(response, 403, { error: "unauthorized" }); return; }
+        try {
+          const input = await read(request), call = current;
+          if (!call || closing || input.callId !== call.callId) throw new RequestError(410, "This voice call has ended");
+          if (typeof input.requestId !== "string" || !uploadId.test(input.requestId) || !Array.isArray(input.uploads) || !input.uploads.length || input.uploads.length > UPLOAD_MAX_FILES || input.uploads.some(id => typeof id !== "string" || !uploadId.test(id)) || new Set(input.uploads).size !== input.uploads.length || typeof input.instruction !== "string" || input.instruction.length > 4000 || Object.keys(input).some(key => !["callId","requestId","uploads","instruction"].includes(key))) throw new RequestError(400, "Invalid shared attachment request");
+          if (!ports.share) throw new RequestError(503, "Sharing is unavailable");
+          await ports.share(call, input.requestId, input.uploads, input.instruction);
+          send(response, 200, { accepted: true });
+        } catch (error) { send(response, error instanceof RequestError || error instanceof UploadError ? error.status : 409, { error: error instanceof RequestError || error instanceof UploadError ? error.message : "Sharing could not be confirmed. Retry this photo with the same request." }); }
+        return;
+      }
       if (path === "/api/hub/voice/presentation" || path === "/api/hub/voice/presentation-document") {
         if (request.method !== "GET") { send(response, 405, { error: "method-not-allowed" }); return; }
         const call = current;

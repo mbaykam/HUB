@@ -65,6 +65,7 @@ find, inspect and update.
 | Capability | How it works |
 | --- | --- |
 | **Multilingual voice** | Local speech recognition and synthesis, language detection, prepared voice samples and a live transcript. Available languages depend on the selected engines. |
+| **Photos and files** | Add attachments in the PWA composer. During voice, open Camera and share one still photo with HUB while Mira keeps the conversation open. Originals stay linked to their conversation. See [uploads and camera](docs/UPLOADS_AND_CAMERA.md). |
 | **Telegram** | Paired text conversations with replies updated in place. An optional, separate Telegram user account provides incoming voice calls. |
 | **Characters and delegation** | Choose a model, voice and tool policy for each character. A fast voice companion can hand deeper work to HUB while preserving the native task history. |
 | **Goals and routines** | One Tasks panel for ongoing outcomes, schedules, recurring work and conditions. Choose a character, resources, limits and completion criteria; follow the evidence and run history. |

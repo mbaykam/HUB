@@ -59,6 +59,7 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
   let openTurnHasUser = false;
   let noticeId = 0;
   const notices: { id: number; text: string }[] = [];
+  const shares = new Map<string, { text: string; result: Promise<unknown> }>();
   function publicSpeech(text: string) {
     // Some providers put a thinking delimiter in an ordinary text block.
     const clean = text.includes("</think>") ? text.split("</think>").at(-1)! : text;
@@ -79,7 +80,10 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
     const data = event.data as Record<string, any> | null;
     if (!data) return;
     if (event.type === "turn/start") { openTurn = data.turn; notice = undefined; openTurnHasUser = false; }
-    if (event.type === "user/message" && data.source?.kind === "user") { openTurnHasUser = true; notice = undefined; }
+    if (event.type === "user/message" && data.source?.kind === "user") {
+      openTurnHasUser = true;
+      notice = !closed && shares.has(data.source.rpcId) && openTurn !== undefined ? { turn: openTurn, text: "" } : undefined;
+    }
     if (!closed && !openTurnHasUser && event.type === "user/message" && data.source?.kind === "subagent-settled" && openTurn !== undefined) {
       notice = { turn: openTurn, text: "" };
     }
@@ -140,6 +144,21 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
   }
   return {
     sessionId: ports.sessionId,
+    async share(requestId: string, text: string) {
+      if (closed) throw new VoiceConversationError("closed");
+      if (!/^[0-9a-f-]{36}$/i.test(requestId) || !text.trim() || Buffer.byteLength(text, "utf8") > 100_000) throw new VoiceConversationError("invalid-utterance");
+      const id = `hub-voice-share:${ports.sessionId}:${connectionId}:${requestId}`;
+      const prior = shares.get(id);
+      if (prior) { if (prior.text !== text) throw new VoiceConversationError("already-admitted"); return prior.result; }
+      if (shares.size >= 256) throw new VoiceConversationError("busy");
+      // Register correlation before native admission can synchronously emit.
+      const result = Promise.resolve().then(() => {
+        if (closed) throw new VoiceConversationError("closed");
+        return ports.prompt({ sessionId: ports.sessionId, requestId: id, mode: "queue", content: [{ type: "text", text }] });
+      });
+      shares.set(id, { text, result });
+      return result;
+    },
     notifications(after: number) {
       if (closed || active || stopping || ports.running()) return { events: [] };
       return { events: notices.filter(event => event.id > after).slice(0, 4).map(event => ({ ...event })) };
@@ -184,6 +203,8 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       notices.length = 0; notice = undefined;
       off();
       closing = (async () => {
+        await Promise.allSettled([...shares.values()].map(item => item.result));
+        for (const id of shares.keys()) ports.cancel(id);
         await stopActive("aborted");
         // A native notification can own the loop without a foreground voice
         // utterance. Do not detach call-time policy until that work is idle.

@@ -22,6 +22,16 @@ async function fixture(options) {
   return { bridge, call, post, calls, interrupted, conversation, get closed() { return closed; }, get created() { return created; } };
 }
 
+test('photo sharing is host-only, belongs to the live lease and cannot reopen a closed call',async()=>{
+ const f=await fixture(),shared=[];f.conversation.share=async(id,text)=>shared.push({id,text});
+ try{
+  await f.bridge.share(f.call.callId,'fixture-share','Inspect the photo');assert.equal(shared.length,1);assert.equal(f.created,1);assert.equal(f.interrupted.length,0);
+  assert.equal((await f.post('/share',{requestId:'fixture-share',text:'Injected'})).status,404);
+  await assert.rejects(f.bridge.share('another-call','fixture-share','Wrong owner'),{code:'closed'});assert.equal(shared.length,1);
+  await f.bridge.closeCall(f.call.callId);await assert.rejects(f.bridge.share(f.call.callId,'fixture-share','Late'),{code:'closed'});assert.equal(f.created,1);
+ }finally{await f.bridge.dispose();}
+});
+
 test("private speech capability rejects unauthenticated, browser-origin, foreign-host and unknown-call requests", async () => {
   const f = await fixture();
   try {

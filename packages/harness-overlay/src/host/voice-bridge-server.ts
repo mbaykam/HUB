@@ -9,6 +9,7 @@ export interface VoiceBridgeConversation {
   interrupt(utterance: number): Promise<void>;
   close(): Promise<void>;
   notifications?(after: number): { events: { id: number; text: string }[] };
+  share?(requestId: string, text: string): Promise<unknown>;
 }
 interface Lease { id: string; conversation: VoiceBridgeConversation; touched: number }
 class RequestError extends Error {
@@ -163,6 +164,12 @@ export async function createVoiceBridgeServer<Admission = undefined>(createConve
       } finally { opening = false; }
     },
     closeCall,
+    async share(callId: string, requestId: string, text: string) {
+      const current = lease;
+      if (disposed || closing || !current || current.id !== callId || now() - current.touched >= leaseMs || !current.conversation.share) throw new VoiceConversationError("closed");
+      current.touched = now();
+      return current.conversation.share(requestId, text);
+    },
     async dispose() {
       disposed = true;
       clearInterval(expiry);

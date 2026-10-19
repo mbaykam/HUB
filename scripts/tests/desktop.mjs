@@ -112,6 +112,7 @@ const taskFiles = Object.freeze({
     "knowledge-auto-organization.test.mjs",
     "knowledge-archive-scope.test.mjs",
     "knowledge-assets.test.mjs",
+    "uploads.test.mjs",
     "knowledge.test.mjs",
     "knowledge-workspace-ui.test.mjs",
     "knowledge-layout.test.mjs",
