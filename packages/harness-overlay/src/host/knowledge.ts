@@ -267,7 +267,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       }else if(command.action==="review"){if(typeof command.approve!=="boolean")throw new Error("Choose approve or reject");await curator.decideReview(command.id,command.approve,command.reviewHash);
       }else if(command.action==="save-note"){send(res,200,await store.edit(command.id,command.hash,command.content));return;
       }else if(command.action==="forget"){send(res,200,await store.forget(command.id,command.hash,command.passage));return;
-      }else if(command.action==="undo"){if(command.kind==="organization")await store.organization.undo(command.id);else await store.undo(command.id);
+      }else if(command.action==="undo"){if(command.kind==="organization")await store.organization.undo(command.id);else await curator.undoNote(command.id);
       }else if(command.action==="profile-review"){
         const characters=ctx.hubCharacters??ctx.get?.("hubCharacters");if(!characters)throw Error("Character instructions unavailable");
         if(!["approve","reject","undo"].includes(command.decision))throw Error("Invalid profile decision");

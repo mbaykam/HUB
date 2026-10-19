@@ -34,6 +34,7 @@ class SpeechHealth:
         self.first_pcm_at = None
         self.first_playback_at = None
         self.tts_ms = None
+        self.attention = None
 
     def begin_turn(self):
         self.input_end_at = self.last_input_sound or None
@@ -47,12 +48,15 @@ class SpeechHealth:
         now = time.perf_counter()
         gate = self.playback_gate
         paused = bool(gate and gate.blocked)
+        if self.attention:
+            self.attention.tick(self.model_active or self.bot_speaking or self.synthesizing or self.user_speaking or self.stage=='transcribing' or paused)
         return {"inputFrames": self.frames, "sampleRate": self.sample_rate, "channels": self.channels,
                 "inputLevel": round(self.level if now-self.last_audio < 2 else 0, 4),
                 "receivingAudio": bool(self.frames and now-self.last_audio < 2),
                 "recentSound": bool(self.last_loud_audio and now-self.last_loud_audio < 2),
                 "speechStarts": self.speech_starts, "transcriptions": self.transcriptions,
-                "partialText":self.partial_text if now-self.partial_at<15 else '',"previewReady":self.preview_ready,
+                "partialText":self.partial_text if now-self.partial_at<15 and not (self.attention and self.attention.mode=='background') else '',"previewReady":self.preview_ready,
+                "attention": self.attention.snapshot() if self.attention else None,
                 "stage":('speaking' if gate.speaking else 'thinking' if gate.pending_replies else 'echo-tail') if paused else self.stage,
                 "decodeMs":self.decode_ms,"inputPaused":paused,
                 "recognition":{"source":self.recognition_source,"language":self.recognition_language,"audioMs":self.utterance_ms},

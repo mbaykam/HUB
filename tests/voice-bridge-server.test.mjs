@@ -8,8 +8,8 @@ async function fixture(options) {
   const calls = []; const interrupted = []; let closed = 0, created = 0;
   const conversation = {
     sessionId: "synthetic-session",
-    async speak(utterance, text, sink, language) {
-      calls.push({ utterance, text, ...(language?{language}:{}) });
+    async speak(utterance, text, sink, language,backgroundContext) {
+      calls.push({ utterance, text, ...(language?{language}:{}),...(backgroundContext?{backgroundContext}:{}) });
       sink({ type: "text", utterance, text: "Hello." });
       sink({ type: "end", utterance, status: "completed" });
     },
@@ -21,6 +21,13 @@ async function fixture(options) {
   const post = (path, body, headers = {}) => fetch(bridge.url + path, { method: "POST", headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json", ...headers }, body: JSON.stringify({ callId: call.callId, ...body }) });
   return { bridge, call, post, calls, interrupted, conversation, get closed() { return closed; }, get created() { return created; } };
 }
+
+test('bounded background context is separate from the spoken user message and cannot exceed the private bridge limit',async()=>{
+ const f=await fixture();try{
+  const input={utterance:1,text:'Mira, what was that?',backgroundContext:'A nearby person described a fixture topic.'};const reply=await f.post('/turn',input);assert.equal(reply.status,200);await reply.text();assert.deepEqual(f.calls,[input]);
+  assert.equal((await f.post('/turn',{...input,utterance:2,backgroundContext:'x'.repeat(4097)})).status,400);assert.equal(f.calls.length,1);
+ }finally{await f.bridge.dispose();}
+});
 
 test('only a recognized English or Turkish hint reaches the native utterance',async()=>{
  const f=await fixture();try{

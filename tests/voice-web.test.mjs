@@ -25,6 +25,20 @@ async function fixture(overrides = {}, options = {}) {
   return { web, call, process, requests, post, url, get opened() { return opened; }, get closed() { return closed; }, async dispose() { try { await web.dispose(); } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } } };
 }
 const admission = () => ({ requestId: randomUUID(), requestedAt: Date.now() });
+test('listening controls require the owned live call and accept only a bounded mode, including Telegram',async()=>{
+ const f=await fixture();try{
+  const body={callId:f.call.callId,mode:'background'};
+  assert.equal((await f.post('attention',body)).status,410);
+  await f.post('open',admission());
+  assert.equal((await f.post('attention',body,{cookie:'bad'})).status,401);
+  assert.equal((await f.post('attention',body,{'sec-fetch-site':'cross-site'})).status,403);
+  assert.equal((await f.post('attention',{...body,callId:randomUUID()})).status,410);
+  for(const bad of [{...body,mode:'anything'},{...body,prompt:'run task'},{callId:body.callId}])assert.equal((await f.post('attention',bad)).status,400);
+  assert.equal((await f.post('attention',body)).status,200);f.call.transport='telegram';
+  assert.equal((await f.post('attention',{...body,mode:'active'})).status,200);
+  assert.deepEqual(f.requests.filter(r=>r.path==='/attention').map(r=>r.body),[{mode:'background'},{mode:'active'}]);assert.equal(f.opened,1);
+ }finally{await f.dispose();}
+});
 
 test('camera sharing authenticates the active call and accepts both PWA and Telegram without reopening audio',async()=>{
  const shared=[],f=await fixture({share:async(...args)=>shared.push(args)});const body={callId:f.call.callId,requestId:randomUUID(),uploads:[randomUUID()],instruction:'Read this label'};

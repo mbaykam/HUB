@@ -27,8 +27,11 @@ def create_runtime(bridge_url, bridge_token, control_token, initial_speech=None,
     closing = False
 
     def speech_key(speech):
-        if not isinstance(speech, dict) or set(speech) != {'stt', 'tts'}:
+        if not isinstance(speech, dict) or not {'stt','tts'} <= set(speech) or set(speech)-{'stt','tts','attention'}:
             raise HTTPException(400, "Invalid speech configuration")
+        from voice_attention import attention_settings
+        try:attention_settings(speech.get('attention'))
+        except (ValueError, TypeError):raise HTTPException(400, 'Invalid listening settings') from None
         encoded = json.dumps(speech, sort_keys=True, separators=(',', ':'))
         if len(encoded) > 4000:
             raise HTTPException(400, "Invalid speech configuration")

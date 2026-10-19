@@ -180,8 +180,10 @@ def speech_catalog():
 
 
 def resolve_speech(value):
-    if not isinstance(value, dict) or set(value) != {"stt", "tts"}:
+    if not isinstance(value, dict) or not {'stt', 'tts'} <= set(value) or set(value) - {'stt', 'tts', 'attention'}:
         raise ValueError("Invalid local speech settings")
+    from voice_attention import attention_settings
+    attention_settings(value.get('attention'))
     stt, tts = value["stt"], value["tts"]
     if (not isinstance(stt, dict) or set(stt) - {"engine", "model", "language"}
             or not (stt.get('engine')=='whisper' and stt.get('model') in WHISPER_MODELS

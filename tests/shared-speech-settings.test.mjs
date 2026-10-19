@@ -6,6 +6,11 @@ import {join,dirname} from 'node:path';
 import {SharedSpeechSettings,SpeechSettingsConflict} from '../packages/harness-overlay/src/host/speech-settings.ts';
 import {characterSpeech} from '../packages/harness-overlay/src/speech-settings-contract.ts';
 const speech={stt:{engine:'nemotron',model:'3.5-560ms',language:'auto'},tts:{engine:'supertonic',model:'supertonic-3',voice:'F5',language:'auto',steps:6}};
+test('wake settings are shared and a character cannot override idle, phrase or context policy',()=>{
+ const attention={idleSeconds:180,wakePhrases:['Mira','Hey assistant'],contextSeconds:0};const global={...speech,attention};
+ const character={...speech,attention:{...attention,idleSeconds:0,contextSeconds:120},tts:{...speech.tts,voice:'M1'}};
+ assert.deepEqual(characterSpeech(global,character),{...global,tts:{...speech.tts,voice:'M1'}});
+});
 test('characters only override the voice; global recognition, engine, language and quality win',()=>{
  const legacy={stt:{engine:'whisper',model:'base.en',language:'en'},tts:{...speech.tts,voice:'M2',language:'tr',steps:4}};
  const result=characterSpeech(speech,legacy);assert.deepEqual(result,{...speech,tts:{...speech.tts,voice:'M2'}});assert.equal(legacy.tts.steps,4);

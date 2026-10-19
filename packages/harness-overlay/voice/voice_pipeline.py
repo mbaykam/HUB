@@ -25,6 +25,8 @@ from whisper_auto import AutomaticWhisperSTTService
 from speech_health import SpeechHealth, SpeechHealthProbe, TranscriptionHealthProbe
 from playback_guard import PlaybackGate, PlaybackInputGuard, PlaybackOutputProbe, SpokenReplyProbe
 from pipecat.frames.frames import InterruptionFrame
+from voice_attention import VoiceAttention, AttentionInputGate
+from pipecat.processors.frameworks.rtvi import RTVIObserverParams
 
 
 def prepare_voice_models(speech=None):
@@ -77,6 +79,8 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
         params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     )
     health = SpeechHealth()
+    attention = VoiceAttention(speech.get('attention'))
+    health.attention = attention
     gate = PlaybackGate()
     health.playback_gate = gate
     if speech['stt']['engine']=='nemotron':
@@ -109,9 +113,10 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     user, assistant = LLMContextAggregatorPair(
         context, user_params=voice_user_turn_params(),
     )
+    post_stt_guard = PlaybackInputGuard(gate, mask_audio=False)
     worker = PipelineWorker(
         Pipeline([transport.input(), SpeechHealthProbe(health), PlaybackInputGuard(gate), stt,
-                  PlaybackInputGuard(gate, mask_audio=False), TranscriptionHealthProbe(health), user, llm,
+                  post_stt_guard, AttentionInputGate(attention, health), TranscriptionHealthProbe(health), user, llm,
                   SpokenReplyProbe(gate), tts,
                   transport.output(), PlaybackOutputProbe(gate), assistant]),
         params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=16000,
@@ -119,6 +124,9 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
         idle_timeout_secs=None,
         cancel_on_idle_timeout=False,
         processor_unusable_policy=ProcessorUnusablePolicy.END,
+        # RTVI observes every processor, not only final pipeline output. Publish
+        # transcripts only AFTER the echo/attention gates accept them.
+        rtvi_observer_params=RTVIObserverParams(ignored_sources=[stt, post_stt_guard]),
     )
     worker.speech_health = health
     async def interrupt_voice():
@@ -129,6 +137,15 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
         await transport.output().queue_frame(InterruptionFrame())
         await worker.queue_frame(InterruptionFrame())
     worker.interrupt_voice = interrupt_voice
+    async def set_attention(mode):
+        # A deliberate pause stops current foreground speech but keeps the
+        # native conversation, delegated work, call and warm model weights.
+        await interrupt_voice()
+        attention.set_mode(mode)
+        health.partial_text = ''
+        health.user_speaking = False
+        return attention.snapshot()
+    worker.set_attention = set_attention
     greeted = False
 
     @transport.event_handler("on_client_connected")

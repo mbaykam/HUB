@@ -54,5 +54,6 @@ test('collection search filters before ranking and limiting so chats cannot crow
 test('curation may link a chat to knowledge but cannot create domains for the archived chat',async t=>{
  const store=await fixture(t),original=chat();await store.archive.put(original);const source={id:'curation',conversationId:original.id,channel:'pwa',completedAt:at,authorRole:'user',content:original.messages[0].text},curation={version:2,expectedRegistryRevision:0,domainOps:[{type:'create',ref:'new-source',title:'Chat subject',evidence:'Shared topic original words.'}],decision:'organize',reason:'Source relationship',tags:[],relations:[],reflections:[],profileSuggestions:[]};
  await assert.rejects(store.organization.apply(curation,source),/Chat archive records stay outside brain domains/);assert.equal((await store.organization.domains()).domains.length,0);
- const prompt=organizationPrompt(source,[],defaultKnowledgeSettings,undefined,undefined,'conversation');assert.match(prompt,/domainOps MUST be \[\]/);assert.match(prompt,/Do not create new notes from chat automatically/);
+ const prompt=organizationPrompt(source,[],defaultKnowledgeSettings,undefined,undefined,'conversation');assert.match(prompt,/domainOps MUST be \[\]/);assert.match(prompt,/exact contiguous genuine USER quotation/);assert.match(prompt,/Never rewrite any existing note/);
+ const disabled=organizationPrompt(source,[],{...defaultKnowledgeSettings,extractMemories:false},undefined,undefined,'conversation');assert.match(disabled,/SOURCED MEMORY EXTRACTION: Disabled/);
 });

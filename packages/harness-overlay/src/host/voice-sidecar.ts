@@ -18,12 +18,12 @@ export interface VoiceSubprocess {
     graceMs: number; signal: AbortSignal; env: Record<string, string | undefined>;
   }): ProcessHandle;
 }
-export type VoiceProcessRoute = "/offer" | "/status" | "/interrupt" | "/prepare" | "/admit" | "/release";
+export type VoiceProcessRoute = "/offer" | "/status" | "/interrupt" | "/attention" | "/prepare" | "/admit" | "/release";
 export interface VoiceCallCapability { callId: string; token: string }
 export interface VoiceSidecar {
   done: ProcessHandle["done"];
   request(path: VoiceProcessRoute, method: "GET" | "POST" | "PATCH", body?: unknown, signal?: AbortSignal): Promise<{ status: number; body: Record<string, unknown> }>;
-  requestCall?(capability: VoiceCallCapability, path: "/offer" | "/status" | "/interrupt" | "/ice", method: "GET" | "POST" | "PATCH", body?: unknown, signal?: AbortSignal): Promise<{ status: number; body: Record<string, unknown> }>;
+  requestCall?(capability: VoiceCallCapability, path: "/offer" | "/status" | "/interrupt" | "/attention" | "/ice", method: "GET" | "POST" | "PATCH", body?: unknown, signal?: AbortSignal): Promise<{ status: number; body: Record<string, unknown> }>;
   stop(): Promise<void>;
 }
 export class VoiceSidecarCleanupError extends Error {
@@ -69,7 +69,7 @@ export async function startVoiceSidecar(subprocess: VoiceSubprocess, config: {
   let url = "";
   let exited = false;
   void child.done.then(() => { exited = true; }, () => { exited = true; });
-  async function send(path: VoiceProcessRoute | "/close" | "/ice" | "/call/offer" | "/call/status" | "/call/interrupt" | "/call/ice", method: "GET" | "POST" | "PATCH", body?: unknown, requestSignal?: AbortSignal, capability?: VoiceCallCapability) {
+  async function send(path: VoiceProcessRoute | "/close" | "/ice" | "/call/offer" | "/call/status" | "/call/interrupt" | "/call/attention" | "/call/ice", method: "GET" | "POST" | "PATCH", body?: unknown, requestSignal?: AbortSignal, capability?: VoiceCallCapability) {
     if (exited) throw new Error("Voice process has exited");
     const response = await fetcher(url + path, { method, redirect: "error",
       headers: { authorization: `Bearer ${capability?.token ?? controlToken}`, ...(capability ? { "x-hub-runtime-call": capability.callId } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },

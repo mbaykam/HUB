@@ -11,6 +11,9 @@ import {isQuotaFailure} from "./operation-failure.ts";
 import type {ProviderGate} from "./provider-gate.ts";
 import {knowledgeRestoreHold,resumeRestoredKnowledgeWork,type KnowledgeRestoreHold} from "./knowledge-portable.ts";
 import {conversationMarkdown,conversationTextRanges} from "./knowledge-archive.ts";
+import {distillMemories} from "./knowledge-distillation.ts";
+import {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
+export {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limits?:{maxTokens:number})=>Promise<string>;
 const defaults=defaultKnowledgeSettings;
@@ -102,8 +105,14 @@ export class KnowledgeCurator {
   }
   async configure(settings:KnowledgeSettings){const before=this.routeKey();this.settings=validateSettings(settings);await atomicJson(join(this.store.root,"settings.json"),this.settings);if(before!==this.routeKey()){this.checked=undefined;this.blockedRoute=undefined;await atomicJson(join(this.store.root,"model-health.json"),null);}}
   private routeKey(){return JSON.stringify([this.settings.provider,this.settings.model,this.settings.reasoningEffort]);}
-  async retry(id:string){const j=this.jobs.get(id);if(!j||!["failed","waiting-credit"].includes(j.status))throw new Error("Only failed or credit-waiting jobs may be retried");j.source=cleanKnowledgeSource(j.source);j.status="queued";j.updatedAt=Date.now();j.reason=undefined;j.error=undefined;await atomicJson(this.jobFile(id),j);}
-  async retryFailed(){const ids=[...this.jobs.values()].filter(j=>["failed","waiting-credit"].includes(j.status)).map(j=>j.id);await this.checkModel();for(const id of ids)if(["failed","waiting-credit"].includes(this.jobs.get(id)!.status))await this.retry(id);return ids.length;}
+  async retry(id:string){const j=this.jobs.get(id);if(!j||!["failed","waiting-credit"].includes(j.status))throw new Error("Only failed or credit-waiting jobs may be retried");
+    const receipt=await readFile(join(this.store.root,"distill",`${digest(id)}.json`),"utf8").catch((e:any)=>{if(e.code!=="ENOENT")throw e;return undefined;});
+    if(receipt){const saved=JSON.parse(receipt);if(digest(saved.source.content)!==digest(j.source.content))throw Error("Source changed; inspect before recovering extracted memories");const result=await distillMemories(this.store,saved.plan,j.source,this.settings,j.pass?.id??j.id);j.memoryRevision=result.revision;j.memoryCount=result.count;j.status="done";j.outcome=j.revision?"organized":"skipped";j.reason="Recovered sourced notes from the saved response without another model request.";j.error=undefined;j.updatedAt=Date.now();await atomicJson(this.jobFile(id),j);this.status="ready";return;}
+    j.source=cleanKnowledgeSource(j.source);j.status="queued";j.updatedAt=Date.now();j.reason=undefined;j.error=undefined;await atomicJson(this.jobFile(id),j);}
+  async retryFailed(){const ids=[...this.jobs.values()].filter(j=>["failed","waiting-credit"].includes(j.status)).map(j=>j.id);
+    const cached=await Promise.all(ids.map(id=>readFile(join(this.store.root,"distill",`${digest(id)}.json`),"utf8").then(()=>true,(e:any)=>{if(e.code!=="ENOENT")throw e;return false;})));
+    if(cached.some(value=>!value))await this.checkModel();
+    for(const id of ids)if(["failed","waiting-credit"].includes(this.jobs.get(id)!.status))await this.retry(id);return ids.length;}
   async checkModel(){
     const settings={...this.settings},key=JSON.stringify([settings.provider,settings.model,settings.reasoningEffort]);
     if(this.checked?.key!==key||Date.now()-this.checked.at>300000||this.blockedRoute||await this.gate?.reason(settings.provider)){
@@ -159,12 +168,18 @@ export class KnowledgeCurator {
       validateCuration(raw,job.source,graph.nodes.map(n=>n.id));
       if(raw.version===2)for(const relation of raw.relations){const target=candidates.find(n=>n.id===relation.targetId);if(!target||!target.body.includes(relation.targetEvidence!))throw Error("Relation target was not read or its quote was invented");relation.targetHash=target.contentHash;}
       const plan=proposed=raw as KnowledgeCuration;
-      if(focus==="domains"&&(plan.relations.length||plan.reflections.length||plan.profileSuggestions.length||plan.domainOps?.some(op=>op.type!=="create"&&op.type!=="assign")))throw Error("This pass only assigns brain domains; relationships, profiles and lifecycle changes need a separate organization pass");
+      if(focus==="domains"&&(plan.relations.length||plan.reflections.length||plan.profileSuggestions.length||plan.memories?.length||plan.domainOps?.some(op=>op.type!=="create"&&op.type!=="assign")))throw Error("This pass only assigns brain domains; relationships, profiles and lifecycle changes need a separate organization pass");
+      if(plan.memories?.length&&(settings.extractMemories===false||plan.memories.some(m=>!settings.categories.includes(m.category))||graph.nodes.find(n=>n.id===job.source.conversationId)?.kind==="note"))throw Error("Memory extraction exceeded selected permissions");
       if(settings.linking==="off"&&plan.relations.length||plan.relations.length>settings.maxLinks||settings.reflections===false&&plan.reflections.length||settings.profileSuggestions===false&&plan.profileSuggestions.length)throw Error("Organization exceeded selected permissions");
       if(settings.mode==="review"&&plan.decision==="organize"){
         await atomicJson(join(this.store.root,"reviews",`${digest(job.id)}.json`),plan);job.status="review";job.reason=plan.reason;job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);this.status="awaiting-review";return;
       }
       phase="organization write";const revision=await this.store.organization.apply(plan,job.source,job.pass?.id);
+      // Persist a validated receipt BEFORE note writes. A write failure can be
+      // recovered without another model call or losing the organization result.
+      job.revision=revision??undefined;await atomicJson(this.jobFile(job.id),job);
+      await atomicJson(join(this.store.root,"distill",`${digest(job.id)}.json`),{plan,source:job.source,settings});
+      phase="memory extraction";const memories=await distillMemories(this.store,plan,job.source,settings,job.pass?.id??job.id);job.memoryRevision=memories.revision;job.memoryCount=memories.count;
       job.status="done";job.outcome=revision?"organized":plan.decision==="archive-only"?"archive-only":"skipped";job.revision=revision??undefined;job.error=undefined;job.reason=plan.reason;this.status="ready";
     }catch(error){
       const e=error as {code?:string;message?:string;revision?:string};if(phase==="model response")this.checked=undefined;
@@ -181,16 +196,23 @@ export class KnowledgeCurator {
     job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);
   }
   monthCost(){return Object.entries(this.costs).filter(([d])=>d.startsWith(day().slice(0,7))).reduce((s,[,v])=>s+v,0);}
+  async undoNote(revision:string){
+    await this.store.undo(revision);
+    for(const job of this.jobs.values())if(job.memoryRevision===revision){job.memoryCount=0;job.memoryRevision=undefined;job.reason="Extracted notes undone; the original conversation and its organization are preserved.";job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);}
+  }
   async review(id:string){const job=this.jobs.get(id);if(job?.status!=="review")throw new Error("No pending review");const saved=JSON.parse(await readFile(join(this.store.root,"reviews",`${digest(id)}.json`),"utf8")) as KnowledgeCuration,registry=await this.store.organization.domains(),stale=saved.version===2&&!!saved.domainOps?.length&&saved.expectedRegistryRevision!==registry.revision,plan=stale?{...saved,expectedRegistryRevision:registry.revision}:saved;if(stale)changeKnowledgeDomains(registry,plan.domainOps!,{actor:"curator",source:job.source,knownNodeIds:(await this.store.scan()).filter(n=>n.kind!=="conversation").map(n=>n.id),expectedRevision:registry.revision,revisionId:"preview"});return {source:job.source,plan,stale,reviewHash:digest(JSON.stringify([plan,digest(job.source.content),registry.revision]))};}
   async decideReview(id:string,approve:boolean,reviewHash?:string){
     const job=this.jobs.get(id);if(job?.status!=="review")throw Error("No pending review");job.error=undefined;
     if(approve){
       await this.store.admission.assert(job.source);
       const review=await this.review(id);if(review.stale&&reviewHash!==review.reviewHash)throw Error("Preview the current registry before approving this organization pass");
+      if(review.plan.memories?.length&&(this.settings.extractMemories===false||review.plan.memories.some(m=>!this.settings.categories.includes(m.category))))throw Error("Memory extraction settings changed; review the selected permissions before approval");
       if(job.pass){const note=(await this.store.scan()).find(n=>n.id===job.source.conversationId);if(!note||digest(note.body)!==job.pass.sourceHash)throw Error("Selected source changed; preserve it and queue a fresh pass");}
       try{job.revision=await this.store.organization.apply(review.plan,review.source,job.pass?.id)??undefined;}
       catch(error){const e=error as {code?:string;revision?:string;message?:string};if(e.code!=="KNOWLEDGE_PROJECTION_PENDING")throw error;job.revision=e.revision;job.error={phase:"Obsidian projection",code:e.code,message:e.message!};}
-      job.outcome=job.revision?"organized":"skipped";job.reason=job.error?.message??"Approved; original text preserved, relationships/reflections saved.";
+      await atomicJson(join(this.store.root,"distill",`${digest(job.id)}.json`),{plan:review.plan,source:review.source,settings:this.settings});
+      const memories=await distillMemories(this.store,review.plan,review.source,this.settings,job.pass?.id??job.id);job.memoryRevision=memories.revision;job.memoryCount=memories.count;
+      job.outcome=job.revision?"organized":"skipped";job.reason=job.error?.message??"Approved; original text preserved, relationships/reflections and sourced notes saved.";
     }else{job.outcome="rejected";job.reason="Rejected; original records unchanged.";}
     job.status="done";job.updatedAt=Date.now();await atomicJson(this.jobFile(id),job);this.status=job.error?"projection-pending":"ready";
   }
@@ -230,14 +252,9 @@ export function bindKnowledgePlan(value:any,candidates:{id:string;hash:string;bo
   for(const c of plan.changes)if(redactKnowledgeSecrets(c.body)!==c.body)throw new Error("Credentials do not belong in readable notes");
   return plan;
 }
-export function redactKnowledgeSecrets(text:string){return text
-  .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|(?:ghp|github_pat)_[A-Za-z0-9_-]{12,})\b/g,"[REDACTED_TOKEN]")
-  .replace(/\b\d{6,16}:[A-Za-z0-9_-]{25,}\b/g,"[REDACTED_BOT_TOKEN]")
-  .replace(/\bBearer\s+[^\s"']+/gi,"Bearer [REDACTED_TOKEN]")
-  .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,"[REDACTED_JWT]")
-  .replace(/((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password)\s*[=:]\s*["']?)[^\s"',;}]+/gi,"$1[REDACTED_VALUE]");}
 export function validateSettings(value:KnowledgeSettings){
   value={...defaults,...value};
+  if(typeof value.extractMemories!=="boolean")throw Error("Choose whether useful chat facts become sourced notes");
   if(!value || typeof value.enabled!=="boolean" || ![value.provider,value.model].every(x=>typeof x==="string"&&x.length>0&&x.length<200&&!/[\u0000-\u0020]/.test(x)) || typeof value.reasoningEffort!=="string" || value.reasoningEffort.length>200 || /[\u0000-\u0020]/.test(value.reasoningEffort) || ![value.dailyBudget,value.monthlyBudget,value.inputPrice,value.outputPrice].every(x=>typeof x==="number"&&Number.isFinite(x)&&x>0&&x<=100) || !Number.isInteger(value.idleSeconds)||value.idleSeconds<10||value.idleSeconds>86400)throw new Error("Invalid Knowledge AI settings");
   const options:[[string,string[]],... [string,string[]][]]=[["mode",["automatic","manual","review"]],["detail",["concise","balanced","detailed"]],["language",["auto","tr","en"]],["assistantEvidence",["confirmed-only","useful-explanations"]],["linking",["inline","off"]],["duplicatePolicy",["merge","new-subjects"]]];
   for(const [key,allowed]of options)if(!allowed.includes((value as any)[key]))throw new Error("Invalid memory policy");

@@ -139,7 +139,7 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
     // Direct Host calls do not receive the signal injected by the Remote RPC
     // transport. Let admission settle before the existing exact-RPC interrupt
     // logic cancels queued/running work; do not abandon an uncertain admission.
-    prompt: request => {const {replyLanguage:language,...native}=request;if(language&&automaticOutput)replyLanguage.admit(request.requestId,language);return ctx.sessionController.prompt(native, new AbortController().signal);},
+    prompt: request => {const {replyLanguage:language,backgroundContext,...native}=request;if(language&&automaticOutput||backgroundContext)replyLanguage.admit(request.requestId,automaticOutput?language:undefined,backgroundContext);return ctx.sessionController.prompt(native, new AbortController().signal);},
     // The web plugin's composition can be a sibling of the native session's
     // scope. Observe globally, but deliver ONLY this already-authorized lease's
     // exact session; never depend on incidental composition ancestry.

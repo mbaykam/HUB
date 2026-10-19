@@ -78,12 +78,13 @@ class HubBridgeClient:
                 raise HubBridgeError("HUB voice connection is unavailable")
             await response.read()
 
-    async def turn(self, utterance: int, text: str, *, language=None) -> AsyncIterator[dict]:
+    async def turn(self, utterance: int, text: str, *, language=None, background_context=None) -> AsyncIterator[dict]:
         """Stream one command once. Lost or uncertain admissions are not retried."""
         async with self._http().post(
             self._url + "/turn",
             json={"callId": self._call_id, "utterance": utterance, "text": text,
-                  **({'language': language} if language in ('en', 'tr') else {})},
+                  **({'language': language} if language in ('en', 'tr') else {}),
+                  **({'backgroundContext': background_context} if background_context else {})},
             allow_redirects=False,
         ) as response:
             if response.status != 200:
@@ -197,6 +198,8 @@ class HubNativeLLMService(LLMService):
         if self._speech_closed or self._request_active:return False
         state=self._health
         if state is None:return True
+        attention=getattr(state,'attention',None)
+        if attention and attention.mode=='background':return False
         import time
         gate=getattr(state,'playback_gate',None)
         return not (state.model_active or state.bot_speaking or state.synthesizing or
@@ -277,6 +280,11 @@ class HubNativeLLMService(LLMService):
         # This context is a bounded audio-turn scratchpad, not the saved chat.
         # Native DSH provides full history and automatic memory for each turn.
         frame.context.set_messages([message])
+        attention=getattr(self._health,'attention',None)
+        # Defense in depth: even direct text/RTVI frames cannot accidentally
+        # turn background speech into an LLM request past the input gate.
+        if attention and attention.mode=='background':return
+        background_context=attention.take_context() if attention else ''
         self._utterance += 1
         utterance = self._utterance
         completed = False
@@ -296,7 +304,10 @@ class HubNativeLLMService(LLMService):
             language = getattr(self._health, 'last_transcription_language', None)
             recognized = getattr(self._health, 'last_transcription_text', None)
             language = language if language in ('en', 'tr') and isinstance(recognized, str) and text.endswith(recognized.strip()) else None
-            events = self._bridge.turn(utterance, text, language=language) if language else self._bridge.turn(utterance, text)
+            hints={}
+            if language:hints['language']=language
+            if background_context:hints['background_context']=background_context
+            events = self._bridge.turn(utterance, text, **hints)
             async for event in events:
                 if event["type"] == "text":
                     has_text = True

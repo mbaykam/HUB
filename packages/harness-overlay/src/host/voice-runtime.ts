@@ -62,8 +62,8 @@ export function createPreparedVoiceRuntime(subprocess: VoiceSubprocess, config: 
         const call: VoiceSidecar = {
           done,
           request(path, method, body, callSignal) {
-            if (current?.callId !== callId || stopping || !["/offer", "/status", "/interrupt"].includes(path)) return Promise.reject(new Error("This voice call is closed"));
-            return owned!.requestCall!(capability, path as "/offer" | "/status" | "/interrupt", method, body, callSignal);
+            if (current?.callId !== callId || stopping || !["/offer", "/status", "/interrupt", "/attention"].includes(path)) return Promise.reject(new Error("This voice call is closed"));
+            return owned!.requestCall!(capability, path as "/offer" | "/status" | "/interrupt" | "/attention", method, body, callSignal);
           },
           stop() {
             return stopping ??= (async () => {

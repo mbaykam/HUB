@@ -37,7 +37,7 @@ export function memoryExcerpt(body:string,query:string,max=6000,chunk?:Knowledge
   const starts=[0,...positions.map(p=>Math.max(0,p-800))].filter((p,i,a)=>!a.slice(0,i).some(n=>Math.abs(n-p)<1500)).slice(0,4).sort((a,b)=>a-b),size=Math.floor((max-120)/starts.length);
   return starts.map(p=>body.slice(p,p+size)).join("\n\n[... original conversation continues ...]\n\n");
 }
-interface Stored extends KnowledgeNode { raw: string; body: string; front: string; path: string;retrieval?:{kind:"lexical"|"semantic"|"domain-navigation";score:number;chunk?:KnowledgeSemanticHit["chunk"]} }
+interface Stored extends KnowledgeNode { raw: string; body: string; front: string; path: string;derivedFrom?:string;retrieval?:{kind:"lexical"|"semantic"|"domain-navigation";score:number;chunk?:KnowledgeSemanticHit["chunk"]} }
 interface ScanCoverage {files:number;noteSize:number;recordSize:number;indexed?:number}
 type SemanticLayout={edges:NonNullable<KnowledgeGraph["similarities"]>;coverage:KnowledgeSimilarityCoverage};
 interface RetiredEvidence {id:string;recordId:string;at:number;sourceHash:string;quoteHash:string}
@@ -119,16 +119,17 @@ export class KnowledgeStore {
         const body = raw.slice(front.length);
         const scalar = (key: string) => { const value = front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1]?.trim(); if (!value) return ""; try { return JSON.parse(value); } catch { return value.replace(/^['"]|['"]$/g, ""); } };
         const id = scalar("hub_id") || scalar("external_uuid") || scalar("uuid") || `legacy-${digest(path).slice(0,32)}`;
-        if(held.has(String(id))){if(coverage)coverage.files--;continue;}
+        const derivedFrom=scalar("hub_memory_source");
+        if(held.has(String(id))||derivedFrom&&held.has(String(derivedFrom))){if(coverage)coverage.files--;continue;}
         const title = scalar("title") || body.match(/^#\s+(.+)$/m)?.[1] || basename(path, ".md");
         const kind=scalar("hub_kind")==="conversation"?"conversation":"note";
-        notes.push({ id: String(id), title: String(title), permalink: path.slice(0,-3), hash: digest(raw), modifiedAt: kind==="conversation"?Number(scalar("source_updated_at"))||info.mtimeMs:info.mtimeMs,kind,protected:kind==="conversation", raw, front, body, path });
+        notes.push({ id: String(id), title: String(title), permalink: path.slice(0,-3), hash: digest(raw), modifiedAt: kind==="conversation"?Number(scalar("source_updated_at"))||info.mtimeMs:info.mtimeMs,kind,protected:kind==="conversation", raw, front, body, path,...(derivedFrom?{derivedFrom:String(derivedFrom)}:{}) });
       }
     };
     await visit("");
     // An import can prepare a new projection after this scan's first ledger
     // read. Recheck at the end so a concurrent reader never sees half-admission.
-    const finalHeld=includeHeld?new Set<string>():await this.admission.blocked(),admitted=notes.filter(n=>!finalHeld.has(n.id));if(coverage)coverage.files=Math.max(0,coverage.files-(notes.length-admitted.length));
+    const finalHeld=includeHeld?new Set<string>():await this.admission.blocked(),admitted=notes.filter(n=>!finalHeld.has(n.id)&&(!n.derivedFrom||!finalHeld.has(n.derivedFrom)));if(coverage)coverage.files=Math.max(0,coverage.files-(notes.length-admitted.length));
     if (new Set(admitted.map(n => n.id)).size !== admitted.length) throw new Error("Duplicate note identities; review vault before writing");
     return admitted;
   }
@@ -254,6 +255,9 @@ export class KnowledgeStore {
       else if(!prior.lastHash || prior.lastHash!==n.hash){prior.completedAt=Math.max(prior.completedAt,Math.round(n.modifiedAt));prior.lastHash=n.hash;prior.title=n.title;prior.path=n.path;changed=true;}}
     if(changed)await atomicJson(join(this.root,"notes.json"),meta);
   });}
+  async revisionForSource(sourceId:string){
+    for(const file of await readdir(join(this.root,"journal"))){if(!file.endsWith(".json"))continue;const j=JSON.parse(await readFile(join(this.root,"journal",file),"utf8")) as Journal;if(j.source.id===sourceId&&["committed","undone"].includes(j.state))return {id:j.id,state:j.state,count:j.changes.length};}
+  }
   async apply(plan: KnowledgePlan, source: KnowledgeSource): Promise<string | null> {
     return this.exclusive(async () => {
       validatePlan(plan);
@@ -311,7 +315,7 @@ export class KnowledgeStore {
           body=lines.join("\n");
         }
         if(/^\s*(?:#{1,6}\s*|[-*]\s*)?(?:part_of|related notes|connections|bağlantılar|ilgili notlar)\s*(?:[:\[]|$)/im.test(body) || /<!--|\[\[\s*(?:\||\]\])/i.test(body)) throw new Error("Artificial link or metadata clutter");
-        const front=existing?.front || `---\nhub_id: ${JSON.stringify(change.id)}\ntitle: ${JSON.stringify(change.title)}\ntype: hub_knowledge\n---\n`;
+        const front=existing?.front || `---\nhub_id: ${JSON.stringify(change.id)}\ntitle: ${JSON.stringify(change.title)}\ntype: hub_knowledge\n${source.id.startsWith("distill-")&&source.conversationId?`hub_memory_source: ${JSON.stringify(source.conversationId)}\n`:""}---\n`;
         journal.changes.push({id:change.id,path,before:existing?.raw??null,after:front+body+"\n",category:change.category,beforeCategory:meta[change.id]?.category});
       }
       // Preserve all preexisting human frontmatter and exact before snapshots.

@@ -16,7 +16,7 @@ export interface VoiceConversationPorts {
   sessionId: string;
   running(): boolean;
   /** Native sessionController.prompt: user source and request id stay durable. */
-  prompt(request: { sessionId: string; requestId: string; mode: "queue"; content: { type: "text"; text: string }[];replyLanguage?:ReplyLanguage }): Promise<unknown>;
+  prompt(request: { sessionId: string; requestId: string; mode: "queue"; content: { type: "text"; text: string }[];replyLanguage?:ReplyLanguage;backgroundContext?:string }): Promise<unknown>;
   /** Subscribe to this exact native session only. */
   subscribe(listener: (event: SessionEvent) => void): () => void;
   /** Retract this RPC from the inbox or cancel its own claimed turn only. */
@@ -168,11 +168,12 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       if (closed || active || stopping || ports.running()) return { events: [] };
       return { events: notices.filter(event => event.id > after).slice(0, 4).map(event => ({ ...event })) };
     },
-    async speak(utterance: number, text: string, sink: (event: VoiceEvent) => void,language?:ReplyLanguage): Promise<void> {
+    async speak(utterance: number, text: string, sink: (event: VoiceEvent) => void,language?:ReplyLanguage,backgroundContext?:string): Promise<void> {
       if (closed) throw new VoiceConversationError("closed");
       if (!Number.isSafeInteger(utterance) || utterance < 1 || typeof text !== "string" || !text.trim() || Buffer.byteLength(text, "utf8") > 16_000) {
         throw new VoiceConversationError("invalid-utterance");
       }
+      if(backgroundContext!==undefined&&(typeof backgroundContext!=="string"||Buffer.byteLength(backgroundContext,"utf8")>4096))throw new VoiceConversationError("invalid-utterance");
       if (utterance <= lastUtterance) throw new VoiceConversationError("already-admitted");
       // A child-completion notification may own the native loop between spoken
       // turns. Use its existing queue, retaining one foreground utterance and
@@ -185,7 +186,7 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       const requestId = `hub-voice:${ports.sessionId}:${connectionId}:${utterance}`;
       active = { utterance, requestId, sink, settled: resolve, text: "", input: text, tasks: new Map() };
       try {
-        admission = ports.prompt({ sessionId: ports.sessionId, requestId, mode: "queue", content: [{ type: "text", text: text.trim() }],...(language?{replyLanguage:language}:{}) });
+        admission = ports.prompt({ sessionId: ports.sessionId, requestId, mode: "queue", content: [{ type: "text", text: text.trim() }],...(language?{replyLanguage:language}:{}),...(backgroundContext?{backgroundContext}:{}) });
         await admission;
       } catch {
         // Admission may have partially succeeded. Do not reuse its id or claim

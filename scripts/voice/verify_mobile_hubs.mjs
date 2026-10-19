@@ -10,12 +10,16 @@ const { outputFiles, metafile } = await build({ loader: { '.css': 'text' }, stdi
 assert.ok(!Object.keys(metafile.inputs).some(path => path.includes("node_modules/@pipecat")), "PWA view layer must not include the voice SDK");
 let sdkDownloads = 0;
 let diagnosticStage;
+let attentionMode='active';
 const server = createServer((req, res) => {
   if (req.url === "/ui.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(outputFiles[0].text); return; }
   if (req.url === "/api/hub/voice/status") { res.writeHead(200, { "content-type": "application/json" }); res.end('{"enabled":true}'); return; }
   if (req.url === "/api/hub/voice/diagnostics") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({active:!!diagnosticStage,audio:diagnosticStage?{stage:diagnosticStage,inputPaused:['speaking','echo-tail'].includes(diagnosticStage),inputPauseReason:diagnosticStage==='speaking'?'playback':diagnosticStage==='echo-tail'?'echo-tail':null,receivingAudio:true,inputLevel:.01,recentSound:false,partialText:""}:null}));return;
+    res.end(JSON.stringify({active:!!diagnosticStage,audio:diagnosticStage?{stage:diagnosticStage,attention:{mode:attentionMode,wakePhrases:['Mira']},inputPaused:['speaking','echo-tail'].includes(diagnosticStage),inputPauseReason:diagnosticStage==='speaking'?'playback':diagnosticStage==='echo-tail'?'echo-tail':null,receivingAudio:true,inputLevel:.01,recentSound:false,partialText:""}:null}));return;
+  }
+  if(req.url==='/api/hub/voice/attention'){
+    let text='';req.on('data',part=>text+=part);req.on('end',()=>{const body=JSON.parse(text);assert.equal(body.callId,'synthetic-call');attentionMode=body.mode;diagnosticStage='listening';res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({attention:{mode:attentionMode}}));});return;
   }
   if (req.url === '/fixture/interrupt') {
     diagnosticStage='echo-tail';setTimeout(()=>diagnosticStage='listening',1400);
@@ -24,7 +28,7 @@ const server = createServer((req, res) => {
   if (req.url === "/api/hub/voice/client.js") {
     sdkDownloads++; res.writeHead(200, { "content-type": "text/javascript" });
     res.end(`export function createVoiceClient(options) { globalThis.options=options; return {
-      async start(id) { globalThis.startedWith=id; options.onSession(id || 'voice-coordinator'); options.onState('listening'); },
+      async start(id) { globalThis.startedWith=id; options.onSession(id || 'voice-coordinator'); options.onCall('synthetic-call'); options.onState('listening'); },
       async stop(){ options.onState('idle'); }, mute(value){globalThis.muted=value;}, async play(){},
       async interrupt(){globalThis.interrupts=(globalThis.interrupts||0)+1;await fetch('/fixture/interrupt');options.onState('listening');},
       async sendText(text){ globalThis.sent.push(text); }
@@ -77,6 +81,12 @@ try {
   await page.waitForFunction(() => Boolean(globalThis.options));
   assert.equal(sdkDownloads, 1);
   assert.equal(await page.evaluate(() => globalThis.startedWith), undefined);
+  await page.getByRole('button',{name:'Background',exact:true}).click();
+  await page.getByText('Waiting for “Mira”',{exact:true}).waitFor();
+  assert.equal(await page.locator('[data-voice-live-words]').isVisible(),false);
+  if(process.argv[3]&&!process.argv[3].startsWith('--'))await page.screenshot({path:process.argv[3].replace('.png','-waiting.png'),fullPage:true});
+  await page.getByRole('button',{name:'Resume',exact:true}).click();
+  await page.getByText('Listening to you',{exact:true}).waitFor();
   await page.evaluate(() => {
     options.onTranscript('user', 'Show me', false);
     options.onTranscript('user', 'Show me how this works.', true);
@@ -94,7 +104,7 @@ try {
     for (const state of ['connecting', 'listening', 'thinking', 'speaking', 'ending']) {
       await page.evaluate(state => globalThis.options.onState(state), state);
       assert.equal(await page.locator('[data-hub-voice-hub]').getAttribute('data-voice-state'), state);
-      assert.equal(await page.locator('textarea').count(), 1, 'Voice preserves the mounted native composer');
+      assert.equal(await page.getByLabel('Native text input').count(), 1, 'Voice preserves the mounted native composer');
       assert.equal(await page.getByRole('textbox').count(), 0, 'Voice hides the text box');
       const contained = await page.evaluate(() => {
         const hub = document.querySelector('[data-hub-voice-hub]'), box = hub.getBoundingClientRect();
@@ -139,9 +149,9 @@ try {
   await page.getByText('Listening to you',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>globalThis.interrupts),2);
   diagnosticStage = undefined;
-  assert.equal(await page.locator('textarea').inputValue(), 'Saved text draft');
+  assert.equal(await page.getByLabel('Native text input').inputValue(), 'Saved text draft');
   assert.equal(await page.locator('[data-voice-shared-form]').count(), 0);
-  assert.equal(await page.locator('textarea').isVisible(), false);
+  assert.equal(await page.getByLabel('Native text input').isVisible(), false);
   await page.evaluate(() => { globalThis.byId.task={title:'Other chat',origin:'subagent'}; globalThis.current='task'; document.querySelector('[data-phase]').setAttribute('data-phase','active'); globalThis.changed(); });
   await page.getByRole('button',{name:'‹ Home',exact:true}).click();
   assert.equal(await page.getByRole('button',{name:'End voice',exact:true}).isVisible(),true);
@@ -155,14 +165,14 @@ try {
   await page.getByRole("button", { name: "End voice" }).click();
   await page.locator('[data-voice-start]').waitFor();
   assert.equal(await page.locator('[data-transcript-speaker]').count(), 0, 'Ending clears only the temporary live view');
-  assert.equal(await page.locator('textarea').inputValue(), 'Saved text draft', 'End voice restores the unsent draft');
+  assert.equal(await page.getByLabel('Native text input').inputValue(), 'Saved text draft', 'End voice restores the unsent draft');
   assert.equal(await page.getByRole("textbox", { name: "Native text input" }).isVisible(), true);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   if (process.argv[3] && !process.argv[3].startsWith('--')) await page.screenshot({ path: process.argv[3], fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.waitForFunction(() => !document.querySelector("[data-hub-voice-hub]"));
+  await page.waitForSelector('[data-voice-start]');
   assert.equal(await page.getByRole("textbox", { name: "Native text input" }).isVisible(), true);
   await page.evaluate(() => globalThis.dispose());
   assert.deepEqual(errors, []);
-  console.log(`PASS: real ${process.argv.includes('--webkit') ? 'WebKit' : 'Chrome'} PWA hubs, contained controls at320–768px/short viewport, playback/tail labels, explicit interruption with manual mute preserved, live transcript, lazy SDK, one HUB composer, refreshed call navigation and Home return and desktop exclusion`);
+  console.log(`PASS: real ${process.argv.includes('--webkit') ? 'WebKit' : 'Chrome'} PWA hubs, Background/Resume, contained controls at320–768px/short viewport and1280px PWA, playback/tail labels, explicit interruption with manual mute preserved, live transcript, lazy SDK, one HUB composer, refreshed call navigation and Home return`);
 } finally { await browser?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

@@ -250,6 +250,22 @@ async def main():
         await state['worker'].interrupt_voice()
         return {"ok": True}
 
+    @app.post('/attention')
+    async def attention(request: Request):
+        if request.headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
+            raise HTTPException(415)
+        raw = await request.body()
+        if len(raw) > 1024: raise HTTPException(413)
+        try:
+            value = json.loads(raw)
+            if not isinstance(value, dict) or set(value) != {'mode'} or value['mode'] not in ('active', 'background'):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise HTTPException(400) from None
+        if state['status'] != 'connected' or not state['worker']:
+            raise HTTPException(409)
+        return {'attention': await state['worker'].set_attention(value['mode'])}
+
     import uvicorn
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))

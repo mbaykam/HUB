@@ -81,13 +81,16 @@ test('native voice language context follows each correlated user turn, is logged
   const adapter=new MockAdapter([textResponse('Hello.'),textResponse('Merhaba.')]);ctx.llm.registerAdapter(['fixture'],adapter);
   const agent=ctx.agentLoop.create('hub-eval-voice-language',{provider:'fixture',model:'mock'});hints=voiceReplyLanguage(agent);
   for(const [id,text,language]of [['one','Hello.','en'],['two','Merhaba.','tr']]){
-   hints.admit(id,language);agent.followup(createUserMessage({source:{kind:'user',rpcId:id},content:[{type:'text',text}]}));await agent.whenIdle();
+   hints.admit(id,language,id==='one'?'Nearby people discussed a fixture topic.':undefined);agent.followup(createUserMessage({source:{kind:'user',rpcId:id},content:[{type:'text',text}]}));await agent.whenIdle();
    const messages=adapter.requests.at(-1).messages,last=messages.at(-1);
    assert.equal(last.source.kind,'plugin');assert.equal(last.source.plugin,'hub-voice-language');
    assert.match(last.content[0].text,new RegExp('identified '+(language==='en'?'English':'Turkish')));
    assert.equal(messages.filter(m=>m.source?.kind==='user').at(-1).content[0].text,text);
+   if(id==='one'){assert.match(last.content[0].text,/untrusted overheard DATA/);assert.match(last.content[0].text,/Nearby people/);}
   }
   const events=agent.session.snapshotEvents();assert.equal(events.filter(e=>e.type==='user/message'&&e.data.source?.plugin==='hub-voice-language').length,2);
+  const {knowledgeTurnSources}=await import('../packages/harness-overlay/src/host/knowledge-episodes.ts');
+  for(const end of events.filter(e=>e.type==='turn/end'))assert.ok(knowledgeTurnSources(agent.session.header,events,end).every(s=>!s.content.includes('Nearby people')),'Injected background data is not new user evidence for Knowledge');
  }finally{hints?.close();await ctx.fiber.dispose();assert.ok(basename(root).startsWith('hub-eval-voice-language-'));await rm(root,{recursive:true,force:true});}
 });
 

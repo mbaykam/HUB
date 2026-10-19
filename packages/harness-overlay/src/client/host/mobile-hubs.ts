@@ -45,6 +45,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const controls = root.createElement("div"); controls.setAttribute("data-voice-controls", "");
   const status = root.createElement("span"); status.setAttribute("role", "status");
   const mute = root.createElement("button"); mute.type = "button"; mute.textContent = "Mute";
+  const attentionButton=root.createElement("button");attentionButton.type="button";attentionButton.textContent="Background";attentionButton.setAttribute("data-voice-attention","");
   const end = root.createElement("button"); end.type = "button"; end.textContent = "End voice"; end.setAttribute("data-voice-end", "");
   const interrupt = root.createElement("button"); interrupt.type = "button"; interrupt.textContent = "Interrupt"; interrupt.setAttribute("data-voice-interrupt", ""); interrupt.hidden = true;
   const openCall = root.createElement("button"); openCall.type = "button"; openCall.textContent = "Open chat ↗"; openCall.setAttribute("aria-label", "Open live conversation"); openCall.setAttribute("data-voice-open-chat", ""); openCall.hidden = true;
@@ -57,7 +58,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     } catch { error.textContent = "The conversation could not open. Your call is still connected; try again."; }
     finally { openCall.disabled = false; }
   });
-  const actions = root.createElement("div"); actions.setAttribute("data-voice-actions", ""); actions.append(openCall, mute, interrupt, end);
+  const actions = root.createElement("div"); actions.setAttribute("data-voice-actions", ""); actions.append(openCall, attentionButton, mute, interrupt, end);
   controls.append(status, actions);
   const writeHub = root.createElement("button"); writeHub.type = "button"; writeHub.textContent = "Voice"; writeHub.setAttribute("aria-label", "Back to voice"); writeHub.setAttribute("data-voice-back", "");
   writeHub.addEventListener("click", () => returnToMobileHome(ctx));
@@ -86,6 +87,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   let voiceSession: string | undefined;
   let state: VoiceState = "idle", enabled = false, muted = false, loading = false, cancelledLoad = false,audioStage="listening";
   let inputPaused = false;
+  let attentionMode="active",wakePhrases=["Mira"];
   let receivingAudio: boolean | undefined;
   let audioConnection: string | undefined;
   let external: { callId: string; sessionId: string; profile?: { name: string } } | undefined, externalTranscriptKey = "", statusFlight = false,lastStatusAt=0;
@@ -122,6 +124,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     conversation?.toggleAttribute("data-hub-options-open", optionsOpen);
     conversation?.toggleAttribute("data-hub-home", inHome);
     hub.setAttribute("data-voice-state", loading ? "starting" : state);
+    hub.toggleAttribute("data-voice-background",attentionMode==="background");
     hub.toggleAttribute("data-external-call", !!external);
     hub.toggleAttribute("data-home", inHome);
     hub.toggleAttribute("data-idle-bar", inHome && !busy);
@@ -141,12 +144,17 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     activity.update({ ...nativeSessions, observations: activitySignals.read(nativeSessions), pendingBySession: pendingSource?.getSnapshot() }, voiceSession, ctx.connection?.state ? ctx.connection.state.getSnapshot() ?? "connecting" : "connected");
     start.hidden = busy; start.disabled = !enabled || loading;
     controls.hidden = !busy;
-    liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":audioStage==="echo-tail"||inputPaused&&state==="listening"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
+    liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":attentionMode==="background"?`Waiting for “${wakePhrases[0]}”`:audioStage==="echo-tail"||inputPaused&&state==="listening"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
+    attentionButton.textContent=attentionMode==="background"?"Resume":"Background";attentionButton.setAttribute("aria-pressed",String(attentionMode==="background"));attentionButton.title=attentionMode==="background"?"Resume conversation without reconnecting":"Only respond after hearing the wake phrase";
+    attentionButton.disabled=loading||["microphone","starting","connecting","ending"].includes(state)||!cameraCall;
+    liveWords.hidden=attentionMode==="background";
+    liveVoice.toggleAttribute("data-background",attentionMode==="background");
     mute.hidden = !!external; openCall.hidden = !voiceSession || viewingCall;
     interrupt.hidden = !busy || audioStage === "echo-tail" || !(state === "speaking" || state === "thinking");
     transcript.panel.hidden = !busy || !inHome;
     conversation?.removeAttribute("data-hub-shared-input");
     status.textContent = external ? `Telegram · ${external.profile?.name ?? "Mira"}` : hub.getAttribute("data-active-character") ?? "Mira";
+    status.hidden=inHome;
     mute.disabled = loading || ["microphone", "starting", "connecting", "ending"].includes(state);
     mute.textContent = muted ? "Unmute" : "Mute"; mute.setAttribute("aria-pressed", String(muted));
   }
@@ -209,7 +217,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   start.addEventListener("click", async () => {
     if (active()) return;
     transcript.reset();
-    liveWords.textContent="";liveWords.removeAttribute("data-interim");audioStage="listening";inputPaused=false;receivingAudio=undefined;audioConnection=undefined;
+    liveWords.textContent="";liveWords.removeAttribute("data-interim");audioStage="listening";inputPaused=false;receivingAudio=undefined;audioConnection=undefined;attentionMode="active";
     loading = true; cancelledLoad = false; muted = false; error.textContent = ""; render();
     try {
       if (!voice) {
@@ -249,6 +257,14 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     } else void voice?.stop();
   });
   mute.addEventListener("click", () => { muted = !muted; voice?.mute(muted); render(); });
+  attentionButton.addEventListener("click",async()=>{
+    if(!cameraCall)return;attentionButton.disabled=true;
+    try{
+      const response=await view!.fetch("/api/hub/voice/attention",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json"},body:JSON.stringify({callId:cameraCall,mode:attentionMode==="background"?"active":"background"}),signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(10000)])});
+      if(!response.ok)throw Error();const value=await response.json();attentionMode=value.attention.mode;error.textContent="";
+    }catch{error.textContent="Couldn’t change listening mode. Your call is still connected; try again.";}
+    finally{render();void checkStatus();}
+  });
   interrupt.addEventListener("click", async () => {
     interrupt.disabled = true;
     try {
@@ -293,8 +309,9 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
             audioConnection = diagnostics.status;
             inputPaused=audioState.inputPaused===true;
             audioStage=audioState.stage;
+            if(audioState.attention&&["active","background"].includes(audioState.attention.mode)){attentionMode=audioState.attention.mode;wakePhrases=audioState.attention.wakePhrases;}
             if((external || ["listening","thinking","speaking"].includes(state)) && ["listening","thinking","speaking"].includes(audioStage))state=audioStage as VoiceState;
-            if(!inputPaused&&typeof audioState.partialText==="string"&&audioState.partialText.trim()){transcript.update("user",audioState.partialText,false);liveWords.textContent=audioState.partialText;liveWords.setAttribute("data-interim","");}
+            if(attentionMode!=="background"&&!inputPaused&&typeof audioState.partialText==="string"&&audioState.partialText.trim()){transcript.update("user",audioState.partialText,false);liveWords.textContent=audioState.partialText;liveWords.setAttribute("data-interim","");}
             schedule();
           }
         }

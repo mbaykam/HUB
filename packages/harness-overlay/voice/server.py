@@ -188,6 +188,16 @@ def create_app(bridge: HubBridgeClient, control_token: str, *, worker_factory=bu
         await worker.interrupt_voice()
         return {"ok": True}
 
+    @app.post("/attention")
+    async def attention(request: Request):
+        value = await read_json(request)
+        if set(value) != {'mode'} or value['mode'] not in ('active', 'background'):
+            raise HTTPException(400, 'Invalid listening mode')
+        worker = state['worker']
+        if state['status'] != 'connected' or not worker:
+            raise HTTPException(409, 'Voice is not connected')
+        return {'attention': await worker.set_attention(value['mode'])}
+
     @app.post("/offer")
     async def offer(request: Request):
         value = await read_json(request)

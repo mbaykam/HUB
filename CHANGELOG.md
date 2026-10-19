@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0
+
+- Add Background / Resume for open voice calls, configurable automatic idle and
+  local wake-phrase checks. Keep surrounding speech in a bounded optional recent
+  context instead of sending every utterance to the model.
+- Keep background words out of live user transcripts and personal-fact evidence;
+  preserve the call, warm speech models and queued task results while waiting.
+- Extract selected useful user quotations into separate source-linked Knowledge
+  notes without rewriting original chats or existing notes. Reuse the current
+  curator request and budget, with review, deduplication, retry and note undo.
+- Keep withdrawn import-derived notes out of recall while preserving their bytes.
+  See docs/background-listening.md for operation and physical-device limits.
+
 ## 1.2.2
 
 - Speak Mira's reply to a native agent's relayed result, including results sent

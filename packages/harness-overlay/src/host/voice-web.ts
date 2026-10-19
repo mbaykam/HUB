@@ -187,7 +187,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
         } catch { send(response, 503, { error: "voice-diagnostics-unavailable" }); }
         return;
       }
-      if (!["/api/hub/voice/open", "/api/hub/voice/close", "/api/hub/voice/offer", "/api/hub/voice/status", "/api/hub/voice/interrupt"].includes(path ?? "")) { send(response, 404, { error: "not-found" }); return; }
+      if (!["/api/hub/voice/open", "/api/hub/voice/close", "/api/hub/voice/offer", "/api/hub/voice/status", "/api/hub/voice/interrupt", "/api/hub/voice/attention"].includes(path ?? "")) { send(response, 404, { error: "not-found" }); return; }
       if (request.method !== "POST" && !(path === "/api/hub/voice/offer" && request.method === "PATCH")) { send(response, 405, { error: "method-not-allowed" }); return; }
       try {
         const body = await read(request);
@@ -203,6 +203,12 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
         if (path === "/api/hub/voice/close") { await close(call); send(response, 200, { ok: true }); return; }
         if (call.transport === "telegram" && path === "/api/hub/voice/offer") throw new RequestError(409, "external-call-has-no-browser-audio");
         if (closing) throw new RequestError(410, "voice-call-ending");
+        if(path==="/api/hub/voice/attention"){
+          if(Object.keys(body).length!==2||!["active","background"].includes(body.mode as string))throw new RequestError(400,"invalid-listening-mode");
+          const reply=await call.sidecar.request("/attention","POST",{mode:body.mode});
+          if(current!==call||closing)throw new RequestError(410,"voice-call-ended");
+          send(response,reply.status,reply.status===200?reply.body:{error:"Could not change listening mode. Your call is still connected."});return;
+        }
         if (path === "/api/hub/voice/interrupt") {
           if (Object.keys(body).length !== 1) throw new RequestError(400, "invalid-interrupt");
           const reply = await call.sidecar.request("/interrupt", "POST", {});

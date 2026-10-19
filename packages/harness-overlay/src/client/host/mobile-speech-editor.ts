@@ -1,4 +1,4 @@
-import { localSpeechCatalogSchema, localSpeechSchema, speechDownloadStatusSchema, type LocalSpeechConfig, type LocalSpeechCatalog } from "../../voice-profile-contract.ts";
+import { localSpeechCatalogSchema, localSpeechSchema, speechDownloadStatusSchema, defaultVoiceAttention, type LocalSpeechConfig, type LocalSpeechCatalog } from "../../voice-profile-contract.ts";
 
 /** Global engine editor or character voice-only picker, with cached auditions. */
 export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | null, options:{voiceOnly?:boolean;global?:boolean}={}) {
@@ -30,6 +30,14 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   let catalog: LocalSpeechCatalog | undefined, selectedVoice = seed?.tts.voice ?? "F5", poll: number | undefined, samplePoll: number | undefined;
   const samples = new Map<string, { url: string; audio: HTMLAudioElement }>(), flights = new Map<string, Promise<void>>();
   const advanced = el("details"); advanced.append(el("summary", "Speech models & engines"), stt.parentElement!, engine.parentElement!, quality.parentElement!, models); panel.append(advanced);
+  const attentionSeed=seed?.attention??defaultVoiceAttention;
+  const idle=el("select"),phrases=el("input"),recent=el("select");phrases.type="text";phrases.value=attentionSeed.wakePhrases.join(", ");
+  for(const [value,label] of [[0,"Only when I press Background"],[60,"After 1 minute"],[120,"After 2 minutes"],[180,"After 3 minutes"],[300,"After 5 minutes"],[600,"After 10 minutes"]]){const option=el("option",String(label));option.value=String(value);idle.append(option);}idle.value=String(attentionSeed.idleSeconds);
+  for(const [value,label] of [[0,"Off · ignore background speech"],[30,"Last 30 seconds"],[60,"Last minute"],[120,"Last 2 minutes"]]){const option=el("option",String(label));option.value=String(value);recent.append(option);}recent.value=String(attentionSeed.contextSeconds);
+  const listening=el("details");listening.append(el("summary","Background listening"));
+  for(const [title,input] of [["Wait for my call",idle],["Wake phrases (up to 3, separated by commas)",phrases],["Recent background context",recent]] as const){const label=el("label");label.append(el("span",title),input);input.setAttribute("aria-label",title);listening.append(label);}
+  listening.append(el("p","In Background, recognition stays local and sends no model requests. Say a wake phrase at the start of a sentence, or press Resume. Optional recent context stays briefly in memory before wake; at most 1,024 characters are sent once on wake as labeled background context, not as your message or a personal memory. This mode keeps an open call; it does not override your phone’s background microphone restrictions."));
+  if(options.global)panel.append(listening);
   if(options.voiceOnly){enabled.checked=true;enabled.parentElement!.remove();language.parentElement!.remove();outputLanguage.parentElement!.remove();advanced.remove();panel.append(el("p","Speech engines and language detection are shared. Change them in Settings → Speech. This character only chooses a voice."));}
   if(options.global){enabled.checked=true;enabled.parentElement!.remove();advanced.open=true;panel.insertBefore(advanced,voiceHeading);const defaultVoice=el("details");defaultVoice.append(el("summary","Default voice"),voiceHeading,voices,turkish,voiceMapping);panel.insertBefore(defaultVoice,audio);}
   const key = (item: { engine: string; model: string }) => `${item.engine}:${item.model}`;
@@ -138,7 +146,7 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
     if (!enabled.checked) return null;
     const selectedStt = catalog?.stt.find(item => key(item) === stt.value);
     if (!selectedStt) throw new Error("Choose an installed recognition model.");
-    const value = localSpeechSchema.parse({ stt: { engine: selectedStt.engine, model: selectedStt.model, language: language.value }, tts: ttsValue() });
+    const value = localSpeechSchema.parse({ stt: { engine: selectedStt.engine, model: selectedStt.model, language: language.value }, tts: ttsValue(),...(options.global?{attention:{idleSeconds:Number(idle.value),wakePhrases:phrases.value.split(",").map(s=>s.trim()).filter(Boolean),contextSeconds:Number(recent.value)}}:seed?.attention?{attention:seed.attention}:{}) });
     if (value.stt.model.endsWith(".en") && language.value !== "en") throw new Error("Choose a multilingual Whisper model for automatic or Turkish recognition.");
     if (!catalog?.stt.some(item => key(item) === key(value.stt) && item.available) || !catalog.tts.some(item => key(item) === key(value.tts) && item.available)) throw new Error("Install the selected speech models before saving.");
     return value;
