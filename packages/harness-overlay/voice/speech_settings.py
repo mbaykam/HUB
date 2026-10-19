@@ -187,9 +187,9 @@ def resolve_speech(value):
             or not (stt.get('engine')=='whisper' and stt.get('model') in WHISPER_MODELS
                     or stt.get('engine')=='nemotron' and stt.get('model')==NEMOTRON_MODEL)):
         raise ValueError("Unsupported local STT settings")
-    if stt.get("language", "auto") not in ("auto", "en", "tr"):
+    if stt.get("language", "auto") not in ("auto", "en-tr", "en", "tr"):
         raise ValueError("Invalid speech language")
-    if stt.get('engine')=='whisper' and stt["model"].endswith(".en") and stt.get("language") == "tr":
+    if stt.get('engine')=='whisper' and stt["model"].endswith(".en") and stt.get("language") in ("tr","en-tr"):
         raise ValueError("Select a multilingual Whisper model for Turkish")
     if not isinstance(tts, dict):
         raise ValueError("Invalid local TTS settings")

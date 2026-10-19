@@ -2,10 +2,11 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { VoiceConversationError, type VoiceEvent } from "./voice-conversation.ts";
+import type {ReplyLanguage} from "./voice-reply-language.ts";
 
 export interface VoiceBridgeConversation {
   sessionId: string;
-  speak(utterance: number, text: string, sink: (event: VoiceEvent) => void): Promise<void>;
+  speak(utterance: number, text: string, sink: (event: VoiceEvent) => void,language?:ReplyLanguage): Promise<void>;
   interrupt(utterance: number): Promise<void>;
   close(): Promise<void>;
   notifications?(after: number): { events: { id: number; text: string }[] };
@@ -110,6 +111,7 @@ export async function createVoiceBridgeServer<Admission = undefined>(createConve
         json(response, 200, { ok: true }); return;
       }
       if (typeof input.text !== "string" || !input.text.trim() || Buffer.byteLength(input.text, "utf8") > 16_000) throw new RequestError(400);
+      if(input.language!==undefined&&input.language!=="en"&&input.language!=="tr")throw new RequestError(400);
       response.on("close", interrupt);
       timer = setTimeout(() => { interrupt(); response.destroy(); }, turnMs);
       await current.conversation.speak(utterance, input.text, event => {
@@ -118,7 +120,7 @@ export async function createVoiceBridgeServer<Admission = undefined>(createConve
         if (response.writableLength > 64_000) { interrupt(); response.destroy(); return; }
         response.write(JSON.stringify(event) + "\n");
         if (event.type === "end") { complete = true; response.end(); }
-      });
+      },input.language as ReplyLanguage|undefined);
       if (!response.writableEnded && !response.destroyed) {
         // A missing terminal event is not successful completion.
         if (response.headersSent) response.end(JSON.stringify({ type: "end", utterance, status: "error" }) + "\n");

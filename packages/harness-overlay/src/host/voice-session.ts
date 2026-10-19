@@ -7,6 +7,8 @@ import type { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { voiceProfileSchema, type VoiceProfile } from "../voice-profile-contract.ts";
 import { attachVoiceProfilePolicy } from "./voice-profile-policy.ts";
 import type { createVoiceTaskPolicies } from "./voice-task-policy.ts";
+import type {VoiceTaskAttachment} from "./voice-tasks.ts";
+import {voiceReplyLanguage} from "./voice-reply-language.ts";
 
 export interface VoiceModelRoute { provider: string; model: string; reasoningEffort?: string;temperature?:number;maxTokens?:number }
 export interface VoiceModelCatalog {
@@ -68,7 +70,7 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
   created?: (agent: VoiceAgent) => Promise<void>;
   presentations?: PresentationRuntime;
   history?: VoiceHistoryPort;
-  tasks?: (agent: VoiceAgent) => Promise<(() => Promise<void>) | undefined>;
+  tasks?: (agent: VoiceAgent) => Promise<VoiceTaskAttachment | undefined>;
 } = {}) {
   if (!route.provider?.trim() || !route.model?.trim()) throw new Error("An explicit voice model route is required");
   if (route.reasoningEffort !== undefined && (!route.reasoningEffort.trim() || route.reasoningEffort.length > 80)) throw new Error("Invalid voice reasoning effort");
@@ -109,7 +111,7 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
   }, { prepend: true });
   let offPresentation: (() => void) | undefined;
   let offHistory: (() => void) | undefined;
-  let offTasks: (() => Promise<void>) | undefined;
+  let offTasks: VoiceTaskAttachment | undefined;
   let offTaskPrompt: (() => void) | undefined;
   let offProfile: (() => void) | undefined;
   let offTaskPolicy: (() => void) | undefined;
@@ -127,20 +129,23 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
       if (!agent.ctx.tools) throw new Error("Native visual tool registry is unavailable");
       offPresentation = options.presentations.attach({ id: agent.id, ctx: { tools: agent.ctx.tools, systemPrompt: agent.ctx.systemPrompt } });
     }
-    if (profile) { offProfile = attachVoiceProfilePolicy(agent, profile); offTaskPolicy = await options.taskPolicies?.bind(agent, profile.tools); }
+    if (profile) { offProfile = attachVoiceProfilePolicy(agent, profile,exec=>offTasks?.allowNested?.(exec)??false); offTaskPolicy = await options.taskPolicies?.bind(agent, profile.tools); }
   } catch (error) { offTaskPolicy?.(); offProfile?.(); offPresentation?.(); offHistory?.(); offTaskPrompt?.(); offRoute(); offPrompt(); await offTasks?.(); throw error; }
+  const replyLanguage=voiceReplyLanguage(agent);
+  const automaticOutput=!profile||["supertonic","bilingual"].includes(profile.speech.tts.engine)&&(!("language" in profile.speech.tts)||profile.speech.tts.language===undefined||profile.speech.tts.language==="auto");
   const voice = createVoiceConversation({
     sessionId,
     running: () => agent.status !== "idle",
     // Direct Host calls do not receive the signal injected by the Remote RPC
     // transport. Let admission settle before the existing exact-RPC interrupt
     // logic cancels queued/running work; do not abandon an uncertain admission.
-    prompt: request => ctx.sessionController.prompt(request, new AbortController().signal),
+    prompt: request => {const {replyLanguage:language,...native}=request;if(language&&automaticOutput)replyLanguage.admit(request.requestId,language);return ctx.sessionController.prompt(native, new AbortController().signal);},
     // The web plugin's composition can be a sibling of the native session's
     // scope. Observe globally, but deliver ONLY this already-authorized lease's
     // exact session; never depend on incidental composition ancestry.
     subscribe: listener => ctx.on("session/event", (session, event) => { if (session.header.id === sessionId) listener(event); }, { global: true }),
     cancel: requestId => {
+      replyLanguage.forget(requestId);
       const queued = [...agent.inbox.nextTurn, ...agent.inbox.nextStep].find(message => message.source.kind === "user" && message.source.rpcId === requestId);
       // Retract only this unclaimed utterance. Preserve unrelated queued input
       // and child notifications instead of wiping the native inbox on barge-in.
@@ -178,6 +183,7 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
         const results = await Promise.allSettled([
           Promise.resolve().then(() => offTasks?.()), voice.close(),
         ]);
+        replyLanguage.close();
         const failed = results.find(result => result.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;
         offTaskPolicy?.(); offProfile?.(); offPresentation?.(); offRoute(); offPrompt(); offTaskPrompt?.();

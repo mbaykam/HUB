@@ -17,8 +17,8 @@ const whisperModelSchema = z.enum(whisperModels);
 const nemotronModelSchema = z.literal("3.5-560ms");
 export const localSpeechSchema = z.object({
   stt: z.discriminatedUnion("engine", [
-    z.object({ engine: z.literal("whisper"), model: whisperModelSchema, language: speechLanguageSchema.optional() }).strict(),
-    z.object({ engine: z.literal("nemotron"), model: nemotronModelSchema, language: speechLanguageSchema.optional() }).strict(),
+    z.object({ engine: z.literal("whisper"), model: whisperModelSchema, language: z.enum(["auto","en-tr","en","tr"]).optional() }).strict(),
+    z.object({ engine: z.literal("nemotron"), model: nemotronModelSchema, language: z.enum(["auto","en-tr","en","tr"]).optional() }).strict(),
   ]),
   tts: z.discriminatedUnion("engine", [
     z.object({ engine: z.literal("supertonic"), model: z.literal("supertonic-3"), voice: multilingualVoice, language: speechLanguageSchema.optional(), steps: z.number().int().min(4).max(8).optional() }).strict(),

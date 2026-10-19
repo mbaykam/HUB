@@ -31,6 +31,15 @@ function fixture() {
     setIdle(promise) { idle = promise; }, sink: event => output.push(event) };
 }
 
+test('final recognition language follows its spoken turn and its queued photo without changing the transcript',async()=>{
+ const f=fixture();const first=f.voice.speak(1,'Hello.',f.sink,'en');f.claim();
+ assert.equal(f.prompts[0].replyLanguage,'en');assert.equal(f.prompts[0].content[0].text,'Hello.');
+ f.emit('turn/end',{turn:1,reason:{kind:'completed'}});await first;
+ const second=f.voice.speak(2,'Merhaba.',f.sink,'tr');f.claim(2);
+ await f.voice.share(randomUUID(),'Analyze this image');assert.equal(f.prompts[2].replyLanguage,'tr');
+ f.emit('turn/end',{turn:2,reason:{kind:'completed'}});await second;await f.voice.close();
+});
+
 test("voice uses native human prompt and streams only its public text and tool status", async () => {
   const f = fixture(); const done = f.voice.speak(1, " Hello ", f.sink);
   assert.equal(f.prompts[0].content[0].text, "Hello");

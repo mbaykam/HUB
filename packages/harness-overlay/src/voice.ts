@@ -103,7 +103,8 @@ export function apply(ctx: Context, config: Config): void {
           if (!lease.toolName) throw new Error("Choose a configured delegation target for the voice character");
           const off = await attachNativeVoiceTasks(agent, undefined, lease);
           if (!off) throw new Error("Character background delegation is unavailable");
-          return async () => { try { await off(); } finally { lease.release(); } };
+          const release=Object.assign(async () => { try { await off(); } finally { lease.release(); } },{allowNested:off.allowNested});
+          return release;
         } catch (error) { lease.release(); throw error; }
       },
     }); }, { async incoming() {

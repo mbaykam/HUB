@@ -14,7 +14,7 @@ from playback_guard import EchoProtectedSTTMixin
 class LocalStreamingSTTService(EchoProtectedSTTMixin, SegmentedSTTService):
     def __init__(self, speech, *, health=None, playback_gate=None, **kwargs):
         language = speech.get('language', 'auto')
-        super().__init__(settings=STTSettings(model=speech['model'], language=None if language=='auto' else language),
+        super().__init__(settings=STTSettings(model=speech['model'], language=None if language in ('auto','en-tr') else language),
                          sample_rate=16000, ttfs_p99_latency=.65, **kwargs)
         self.recognizer = StreamingRecognizer(language)
         self.health = health

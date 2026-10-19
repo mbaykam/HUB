@@ -51,6 +51,20 @@ class FakeBridge:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('recognized,code,expected', [('Hello.','en','en'),('Merhaba.','tr',None),('Hello.','de',None)])
+async def test_only_language_correlated_with_new_final_speech_reaches_native_turn(recognized,code,expected):
+    from speech_health import SpeechHealth
+    state=SpeechHealth();state.last_transcription_text=recognized;state.last_transcription_language=code
+    received=[]
+    class HintedBridge(FakeBridge):
+        async def turn(self,utterance,text,*,language=None):
+            received.append((text,language))
+            async for event in super().turn(utterance,text):yield event
+    await run_test(HubNativeLLMService(HintedBridge(),health=state),frames_to_send=[LLMContextFrame(LLMContext([{'role':'user','content':'Hello.'}]))])
+    assert received==[('Hello.',expected)]
+
+
+@pytest.mark.asyncio
 async def test_native_turn_uses_latest_transcript_and_keeps_audio_context_bounded():
     bridge = FakeBridge()
     context = LLMContext([

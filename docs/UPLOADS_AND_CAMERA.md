@@ -25,15 +25,17 @@ file paths. Extracted document text is marked as untrusted source data.
 2. Tap **Camera** and allow camera access. The rear camera opens first; use
    **Switch camera** if needed.
 3. Optionally describe what HUB should do, such as reading a label or explaining
-   a diagram. Tap the round shutter to share one photo.
+   a diagram. Tap the round shutter, then check the full photo. Choose **Retake**
+   or **Send to HUB**. Taking a photo alone does not upload it.
 4. Keep talking to Mira. The share request queues in the same voice conversation,
    and native delegation gives HUB the actual image plus recent public context.
    Follow the background task and its result in the existing conversation/tasks.
 
 The preview uses video only and owns no microphone tracks. Closing it releases
 the camera, while the voice client keeps its separate audio connection. Each
-shutter press sends one image; there is no continuous video feed. Captured photos
-are JPEGs scaled to a maximum 1,600-pixel edge.
+confirmed send shares one image; there is no continuous video feed. Captured
+photos preserve their aspect ratio and are JPEGs scaled to a maximum 2,048-pixel
+edge. The preview fills the phone screen, showing the whole frame.
 
 Camera permission requires a secure browser context, normally the HTTPS PWA.
 If permission is declined, allow it in the browser's site settings and reopen

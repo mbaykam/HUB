@@ -40,6 +40,17 @@ function fixture() {
 }
 const route = { provider: "synthetic", model: "voice" };
 
+test('voice session wires only the owned nested delegation capability into the profile guard',async()=>{
+ const f=fixture();let guard;
+ f.agent.ctx.tools={guard:value=>{guard=value;return()=>{};}};
+ const owned={name:'hub_character_fixture',callId:'owned',parent:{}};
+ const attachment=Object.assign(async()=>{},{allowNested:execution=>execution===owned});
+ const profile={id:'b62c85c4-1775-42db-8a02-e21e165da8c2',name:'Mira',instructions:'Brief',route,speech:{stt:{engine:'whisper',model:'base'},tts:{engine:'supertonic',model:'supertonic-3',voice:'F5',language:'auto',steps:6}},tools:{mode:'allow',names:['hub_task']}};
+ const voice=await openNativeVoiceSession(f.ctx,route,{...f.options,profile,tasks:async()=>attachment});
+ assert.equal(guard(owned),undefined);assert.match(guard({...owned}),/disabled/);assert.match(guard({name:'hub_delegate'}),/disabled/);assert.match(guard({name:'shell'}),/disabled/);
+ await voice.close();
+});
+
 test("closing retains the profile guard until native idle, including repeated or failed shutdown", async () => {
   for (const failure of [false, true]) {
     const f = fixture(); let guard, revoked = 0, settle;

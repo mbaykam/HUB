@@ -2,7 +2,7 @@
 import math
 import time
 import numpy as np
-from pipecat.frames.frames import (InputAudioRawFrame, TranscriptionFrame, VADUserStartedSpeakingFrame,
+from pipecat.frames.frames import (InputAudioRawFrame, TranscriptionFrame, InterimTranscriptionFrame, VADUserStartedSpeakingFrame,
     BotStartedSpeakingFrame, BotStoppedSpeakingFrame, InterruptionFrame, ErrorFrame, VADUserStoppedSpeakingFrame)
 from pipecat.processors.frame_processor import FrameProcessor
 
@@ -24,6 +24,8 @@ class SpeechHealth:
         self.user_speaking = False
         self.recognition_source = None
         self.recognition_language = None
+        self.last_transcription_text = None
+        self.last_transcription_language = None
         self.utterance_ms = None
         self.last_input_sound = 0
         self.input_end_at = None
@@ -113,6 +115,10 @@ class TranscriptionHealthProbe(FrameProcessor):
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
-        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
+        if isinstance(frame, TranscriptionFrame) and not isinstance(frame, InterimTranscriptionFrame) and frame.text.strip():
             self.health.transcriptions += 1
+            self.health.last_transcription_text = frame.text
+            value = getattr(frame.language, 'value', frame.language)
+            language = str(value).lower().split('-')[0] if value else None
+            self.health.last_transcription_language = language if language in ('en', 'tr') else None
         await self.push_frame(frame, direction)

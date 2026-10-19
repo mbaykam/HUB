@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.1
+
+- Fix the voice character allow-list blocking the internal native dispatch of an
+  authorized HUB task, including actual shared photo delivery. Keep other tool
+  permissions and durable child restrictions in force.
+- Add explicit English/Turkish recognition for complete short and long turns,
+  and carry each final utterance's language into automatic spoken replies.
+  Keep uncertain speech from becoming a permanent language preference.
+- Make spoken responses more direct, without repeated introductions, language
+  announcements or emoji.
+- Expand the phone camera preview and add photo review, retake and explicit
+  send. Preserve the whole frame at up to a 2,048-pixel edge and keep retries
+  on the same request while the microphone stays connected.
+
 ## 1.2.0
 
 - Attach photos and files from the PWA Home or chat composer. Keep native image

@@ -21,10 +21,13 @@ def whisper_runtime(path, device, compute_type):
     return WhisperModel(path, device=device, compute_type=compute_type)
 
 class AutomaticWhisperSTTService(EchoProtectedSTTMixin, WhisperSTTService):
-    def __init__(self, *, health=None, playback_gate=None, beam_size=3, **kwargs):
+    def __init__(self, *, health=None, playback_gate=None, beam_size=3, allowed_languages=None, **kwargs):
         if beam_size not in (1, 3):
             raise ValueError('Unsupported recognition beam')
         self._beam_size = beam_size
+        self._allowed_languages = tuple(allowed_languages) if allowed_languages else None
+        if self._allowed_languages and any(code not in ('en','tr') for code in self._allowed_languages):
+            raise ValueError('Unsupported recognition language set')
         self.health=health
         self._preview_buffer=bytearray();self._last_language=None
         self._preview_language=None;self._preview_words=''
@@ -102,12 +105,19 @@ class AutomaticWhisperSTTService(EchoProtectedSTTMixin, WhisperSTTService):
                 language = code
         segments, info = self._model.transcribe(samples, language=language, beam_size=self._beam_size,
             condition_on_previous_text=False, no_speech_threshold=.6)
-        if language is None and info.language not in ("en", "tr"):
+        allowed = getattr(self, '_allowed_languages', None) or ('en','tr')
+        if language is None and info.language not in allowed:
             probabilities = dict(info.all_language_probs or [])
-            language = max(("en", "tr"), key=lambda code: probabilities.get(code, 0))
+            language = max(allowed, key=lambda code: probabilities.get(code, 0))
+            # Restrict the recognizer's language choice, not the displayed text.
+            # Reject an unsupported/noisy segment rather than forcing foreign
+            # audio into invented Turkish/English words.
+            if getattr(self, '_allowed_languages', None) and probabilities.get(language,0)<.15:
+                return '', None
             segments, info = self._model.transcribe(samples, language=language, beam_size=self._beam_size,
                 condition_on_previous_text=False, no_speech_threshold=.6)
-        text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
+        text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()
+                        and not (getattr(self,'_allowed_languages',None) and (getattr(segment,'avg_logprob',0)<-1.0 or getattr(segment,'no_speech_prob',0)>.75))).strip()
         return text, info.language
 
     async def run_stt(self, audio):

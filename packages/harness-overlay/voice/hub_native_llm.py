@@ -78,11 +78,12 @@ class HubBridgeClient:
                 raise HubBridgeError("HUB voice connection is unavailable")
             await response.read()
 
-    async def turn(self, utterance: int, text: str) -> AsyncIterator[dict]:
+    async def turn(self, utterance: int, text: str, *, language=None) -> AsyncIterator[dict]:
         """Stream one command once. Lost or uncertain admissions are not retried."""
         async with self._http().post(
             self._url + "/turn",
-            json={"callId": self._call_id, "utterance": utterance, "text": text},
+            json={"callId": self._call_id, "utterance": utterance, "text": text,
+                  **({'language': language} if language in ('en', 'tr') else {})},
             allow_redirects=False,
         ) as response:
             if response.status != 200:
@@ -290,7 +291,13 @@ class HubNativeLLMService(LLMService):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         try:
-            async for event in self._bridge.turn(utterance, text):
+            # Use only the final STT result correlated with this new input;
+            # never reuse a stale detector hint from another utterance/draft.
+            language = getattr(self._health, 'last_transcription_language', None)
+            recognized = getattr(self._health, 'last_transcription_text', None)
+            language = language if language in ('en', 'tr') and isinstance(recognized, str) and text.endswith(recognized.strip()) else None
+            events = self._bridge.turn(utterance, text, language=language) if language else self._bridge.turn(utterance, text)
+            async for event in events:
                 if event["type"] == "text":
                     has_text = True
                     if self._health and self._health.first_text_at is None:

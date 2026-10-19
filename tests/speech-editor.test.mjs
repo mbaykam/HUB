@@ -3,6 +3,20 @@ import assert from 'node:assert/strict';
 import { JSDOM } from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
 import { createSpeechEditor } from '@minke/harness-overlay/client/host/mobile-speech-editor.ts';
 
+test('global recognition can be limited to English and Turkish without changing the output voice',async()=>{
+ const dom=new JSDOM('<main></main>',{url:'http://localhost'}),view=dom.window;
+ view.HTMLMediaElement.prototype.load=()=>{};view.HTMLMediaElement.prototype.pause=()=>{};view.URL.createObjectURL=()=> 'blob:fixture';view.URL.revokeObjectURL=()=>{};
+ view.fetch=async url=>url.endsWith('/catalog')?Response.json({speech:{stt:[{engine:'nemotron',model:'3.5-560ms',available:true,reason:null}],tts:[{engine:'supertonic',model:'supertonic-3',available:true,reason:null,voices:['F5']}]}}):new Response(Buffer.alloc(48));
+ const seed={stt:{engine:'nemotron',model:'3.5-560ms',language:'auto'},tts:{engine:'supertonic',model:'supertonic-3',voice:'F5',language:'auto',steps:6}},editor=createSpeechEditor(view.document,seed);view.document.querySelector('main').append(editor.panel);
+ try{
+  await new Promise(r=>setTimeout(r,30));
+  const recognition=[...editor.panel.querySelectorAll('select')].find(select=>select.querySelector('option[value="en-tr"]'));
+  assert.ok(recognition);recognition.value='en-tr';recognition.dispatchEvent(new view.Event('change'));
+  assert.equal(editor.value().stt.language,'en-tr');assert.deepEqual(editor.value().tts,seed.tts);
+  assert.equal(editor.panel.querySelectorAll('option[value="en-tr"]').length,1,'The recognition-only choice must not become a TTS output language');
+ }finally{editor.dispose();view.close();}
+});
+
 test('loading another sample preserves an already ready audition button and its focus', async () => {
   const dom = new JSDOM('<main></main>', { url: 'http://localhost', pretendToBeVisual: true });
   const view = dom.window;

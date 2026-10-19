@@ -8,8 +8,8 @@ async function fixture(options) {
   const calls = []; const interrupted = []; let closed = 0, created = 0;
   const conversation = {
     sessionId: "synthetic-session",
-    async speak(utterance, text, sink) {
-      calls.push({ utterance, text });
+    async speak(utterance, text, sink, language) {
+      calls.push({ utterance, text, ...(language?{language}:{}) });
       sink({ type: "text", utterance, text: "Hello." });
       sink({ type: "end", utterance, status: "completed" });
     },
@@ -21,6 +21,16 @@ async function fixture(options) {
   const post = (path, body, headers = {}) => fetch(bridge.url + path, { method: "POST", headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json", ...headers }, body: JSON.stringify({ callId: call.callId, ...body }) });
   return { bridge, call, post, calls, interrupted, conversation, get closed() { return closed; }, get created() { return created; } };
 }
+
+test('only a recognized English or Turkish hint reaches the native utterance',async()=>{
+ const f=await fixture();try{
+  for(const language of ['de','auto',{},true,null])assert.equal((await f.post('/turn',{utterance:1,text:'Hello',language})).status,400);
+  for(const [utterance,language]of [[1,'en'],[2,'tr']]){
+   const response=await f.post('/turn',{utterance,text:'Hello',language});assert.equal(response.status,200);await response.text();
+  }
+  assert.deepEqual(f.calls,[{utterance:1,text:'Hello',language:'en'},{utterance:2,text:'Hello',language:'tr'}]);
+ }finally{await f.bridge.dispose();}
+});
 
 test('photo sharing is host-only, belongs to the live lease and cannot reopen a closed call',async()=>{
  const f=await fixture(),shared=[];f.conversation.share=async(id,text)=>shared.push({id,text});

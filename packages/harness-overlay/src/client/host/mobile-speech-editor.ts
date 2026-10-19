@@ -11,10 +11,10 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   const field = (text: string, input: HTMLElement) => { const label = el("label"); label.append(el("span", text), input); panel.append(label); input.setAttribute("aria-label", text); };
   const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = !!seed; field("Enable local speech", enabled);
   const stt = el("select"); field("Speech recognition model", stt);
-  const language = el("select"); for (const [id, text] of [["auto", "Automatic · English / Türkçe"], ["en", "English"], ["tr", "Türkçe"]]) { const n = el("option", text); n.value = id!; language.append(n); }
+  const language = el("select"); for (const [id, text] of [["auto", "Automatic · all model languages"], ["en-tr", "English + Türkçe only"], ["en", "English"], ["tr", "Türkçe"]]) { const n = el("option", text); n.value = id!; language.append(n); }
   language.value = seed?.stt.language ?? (seed?.stt.model.endsWith(".en") ? "en" : "auto"); field("Recognition language", language);
   const engine = el("select"); field("Speech engine", engine);
-  const outputLanguage = language.cloneNode(true) as HTMLSelectElement; outputLanguage.value = seed?.tts.engine === "bilingual" || seed?.tts.engine === "supertonic" ? seed.tts.language ?? "auto" : "auto"; field("Spoken language", outputLanguage);
+  const outputLanguage = language.cloneNode(true) as HTMLSelectElement;outputLanguage.querySelector('option[value="en-tr"]')?.remove();outputLanguage.querySelector('option[value="auto"]')!.textContent="Automatic · follow English / Türkçe"; outputLanguage.value = seed?.tts.engine === "bilingual" || seed?.tts.engine === "supertonic" ? seed.tts.language ?? "auto" : "auto"; field("Spoken language", outputLanguage);
   const quality = el("select"); for (const [id, text] of [["4", "Fast · 4 steps"], ["6", "Balanced · 6 steps"], ["8", "Detailed · 8 steps"]]) { const n = el("option", text); n.value = id!; quality.append(n); }
   quality.value = String(seed?.tts.engine === "supertonic" ? seed.tts.steps ?? 6 : 6); field("Voice quality", quality);
   const voiceHeading = el("h4", "Choose a voice · listen first"); panel.append(voiceHeading);

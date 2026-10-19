@@ -14,6 +14,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/harness-o
 import speech_settings as settings
 
 
+def test_recognition_only_language_set_accepts_both_installed_multilingual_engines(monkeypatch,tmp_path):
+    monkeypatch.setattr(settings,'nemotron_path',lambda:tmp_path)
+    monkeypatch.setattr(settings,'whisper_path',lambda _:tmp_path)
+    monkeypatch.setattr(settings,'supertonic_path',lambda:tmp_path)
+    # Validation happens before resolving model files; check its dedicated
+    # contract independently from model availability.
+    for engine,model in [('nemotron','3.5-560ms'),('whisper','base')]:
+        value={'stt':{'engine':engine,'model':model,'language':'en-tr'},'tts':{'engine':'supertonic','model':'supertonic-3','voice':'F5','language':'auto','steps':6}}
+        settings.resolve_speech(value)
+    value['stt']['model']='base.en'
+    with pytest.raises(ValueError):settings.resolve_speech(value)
+
+
 def test_voice_index_filters_foreign_names_and_paths(tmp_path, monkeypatch):
     voices = tmp_path / "voices.bin"
     with zipfile.ZipFile(voices, "w") as archive:

@@ -1,15 +1,16 @@
-import type { ToolRunContext } from "@deepseek-ai/dsh-tools";
+import type { ToolRunContext,ToolGuard } from "@deepseek-ai/dsh-tools";
 import type { VoiceAgent, VoiceModelRoute } from "./voice-session.ts";
 import { currentTurnHasUserRequest, TASK_NOTIFICATION_RULE } from "./task-turn.ts";
 
 export const VOICE_TASK_TOOL = "hub_task";
+export type VoiceTaskAttachment = (() => Promise<void>) & { allowNested?: (execution: Parameters<ToolGuard>[0]) => boolean };
 
 /** An optionally route-pinned alias of the existing native delegation tool. Never
  * install a new delegation capability: re-enter native dispatch so its preset,
  * allowed-model policy, depth limit, approvals and tool filters remain binding.
  * The alias owns no child agent, scheduler or cancellation lifetime.
  */
-export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceModelRoute, options?: { toolName?: string; targetName?: string; allowNested?: (exec: { callId: unknown; parent?: unknown }) => boolean }): Promise<(() => Promise<void>) | undefined> {
+export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceModelRoute, options?: { toolName?: string; targetName?: string; allowNested?: (exec: { callId: unknown; parent?: unknown }) => boolean }): Promise<VoiceTaskAttachment | undefined> {
   const tools = agent.ctx.tools;
   const nativeName = options?.toolName ?? "subagent";
   const native = tools?.get?.(nativeName, agent);
@@ -74,5 +75,7 @@ export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceMod
     },
   }); } catch (error) { offSchemas?.(); offGuard(); throw error; }
   if (!tools.get?.(VOICE_TASK_TOOL, agent)) { active = false; off(); offGuard(); offSchemas?.(); return; }
-  return async () => { if (active) { active = false; off(); offGuard(); offSchemas?.(); } };
+  const release:VoiceTaskAttachment=async () => { if (active) { active = false; off(); offGuard(); offSchemas?.(); } };
+  release.allowNested=exec=>active&&exec.agent===agent&&((exec.name===nativeName&&dispatched.has(exec.callId)&&dispatched.get(exec.callId)===exec.parent)||!!options?.allowNested?.(exec));
+  return release;
 }

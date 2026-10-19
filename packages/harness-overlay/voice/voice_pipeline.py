@@ -85,7 +85,8 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     else:
         stt = AutomaticWhisperSTTService(health=health, playback_gate=gate,
             device="cpu", compute_type="int8",
-            settings=WhisperSTTService.Settings(model=stt_model, language=(Language.EN if speech["stt"]["model"].endswith(".en") else None) if speech["stt"].get("language", "auto") == "auto" else Language.TR if speech["stt"]["language"] == "tr" else Language.EN),
+            allowed_languages=('en','tr') if speech['stt'].get('language')=='en-tr' else None,
+            settings=WhisperSTTService.Settings(model=stt_model, language=(Language.EN if speech["stt"]["model"].endswith(".en") else None) if speech["stt"].get("language", "auto") in ("auto","en-tr") else Language.TR if speech["stt"]["language"] == "tr" else Language.EN),
         )
     if speech["tts"]["engine"] in ("bilingual", "supertonic"):
         from bilingual_tts import BilingualTTSService

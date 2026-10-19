@@ -52,18 +52,19 @@ def verify_turkish(audio):
 
 class StreamingRecognizer:
     def __init__(self, language='auto'):
-        if language not in ('auto', 'en', 'tr'):
+        if language not in ('auto', 'en-tr', 'en', 'tr'):
             raise ValueError('Unsupported recognition language')
         self.runtime = nemotron_runtime()
-        self.language = language
+        self.allowed_languages = ('en','tr') if language=='en-tr' else None
+        self.language = 'auto' if language=='en-tr' else language
         # Streaming auto language identification can drop lone greetings. Keep
         # the existing offline verifier for short/empty utterances. Only its
         # decoded audio, never a provisional guess, can start assistant work.
         from whisper_auto import AutomaticWhisperSTTService
         from pipecat.services.whisper.stt import WhisperSTTService
-        self.verifier = AutomaticWhisperSTTService(device='cpu', compute_type='int8', beam_size=1,
+        self.verifier = AutomaticWhisperSTTService(device='cpu', compute_type='int8', beam_size=3 if self.allowed_languages else 1,allowed_languages=self.allowed_languages,
             settings=WhisperSTTService.Settings(model=str(whisper_path('base')),
-                language=None if language=='auto' else language))
+                language=None if self.language=='auto' else self.language))
         seda_runtime()
         self.reset()
 
@@ -82,14 +83,15 @@ class StreamingRecognizer:
 
     def feed(self, audio):
         self.audio_bytes += len(audio)
-        if self.audio_bytes <= 16000*2*6:
+        if self.audio_bytes <= 16000*2*(60 if getattr(self,'allowed_languages',None) else 6):
             self.audio.extend(audio)
         samples = np.frombuffer(audio, dtype='<i2').astype(np.float32)/32768
         self.stream.accept_waveform(16000, speech_gain(samples))
         while self.runtime.is_ready(self.stream):
             self.runtime.decode_stream(self.stream)
         draft = self.runtime.get_result(self.stream).strip()
-        if self.audio_bytes <= 16000*2*4 and self.verifier._preview:
+        restricted=getattr(self,'allowed_languages',None)
+        if (restricted or self.audio_bytes <= 16000*2*4) and self.verifier._preview:
             provisional = self.verifier._preview.feed(audio)
             if provisional:
                 text, code = provisional
@@ -101,7 +103,25 @@ class StreamingRecognizer:
         return draft
 
     def finish(self, audio=None):
-        segment = audio if audio is not None else bytes(self.audio) if self.audio_bytes <= 16000*2*6 else b''
+        segment = audio if audio is not None else bytes(self.audio) if self.audio_bytes <= 16000*2*(60 if getattr(self,'allowed_languages',None) else 6) else b''
+        if getattr(self,'allowed_languages',None):
+            # Long turns previously bypassed bilingual verification entirely.
+            # Keep streaming previews, but submit only the whole-audio result
+            # from the explicitly selected language set.
+            # Bare Turkish greetings are too short for reliable Whisper
+            # language identification. This is a final decoding of the actual
+            # whole audio, limited to greetings; never promote a live draft.
+            if segment and self.audio_bytes<=16000*2*2:
+                greeting=verify_turkish(segment)
+                words=set(re.findall(r'\w+',greeting.lower()))
+                if words and words.issubset({'merhaba','selam'}):
+                    self._finish_native();self.result_language='tr';self.result_source='seda-greeting'
+                    return greeting
+            verified,code=self.verifier._transcribe_audio(segment) if segment else ('',None)
+            self._finish_native()
+            self.result_language=code
+            self.result_source='whisper-bilingual-verified'
+            return verified
         # The segment includes VAD pre-roll and endpoint silence. Six seconds
         # covers a normal short question plus those transport-owned margins.
         short=bool(segment) and self.audio_bytes <= 16000*2*6

@@ -2,6 +2,7 @@
  * or task scheduler. Only explicitly correlated human turns may produce audio.
  */
 import { randomUUID } from "node:crypto";
+import type {ReplyLanguage} from "./voice-reply-language.ts";
 export interface VoiceEvent {
   type: "text" | "tool-start" | "tool-end" | "end";
   utterance: number;
@@ -15,7 +16,7 @@ export interface VoiceConversationPorts {
   sessionId: string;
   running(): boolean;
   /** Native sessionController.prompt: user source and request id stay durable. */
-  prompt(request: { sessionId: string; requestId: string; mode: "queue"; content: { type: "text"; text: string }[] }): Promise<unknown>;
+  prompt(request: { sessionId: string; requestId: string; mode: "queue"; content: { type: "text"; text: string }[];replyLanguage?:ReplyLanguage }): Promise<unknown>;
   /** Subscribe to this exact native session only. */
   subscribe(listener: (event: SessionEvent) => void): () => void;
   /** Retract this RPC from the inbox or cancel its own claimed turn only. */
@@ -60,6 +61,7 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
   let noticeId = 0;
   const notices: { id: number; text: string }[] = [];
   const shares = new Map<string, { text: string; result: Promise<unknown> }>();
+  let lastLanguage:ReplyLanguage|undefined;
   function publicSpeech(text: string) {
     // Some providers put a thinking delimiter in an ordinary text block.
     const clean = text.includes("</think>") ? text.split("</think>").at(-1)! : text;
@@ -154,7 +156,7 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       // Register correlation before native admission can synchronously emit.
       const result = Promise.resolve().then(() => {
         if (closed) throw new VoiceConversationError("closed");
-        return ports.prompt({ sessionId: ports.sessionId, requestId: id, mode: "queue", content: [{ type: "text", text }] });
+        return ports.prompt({ sessionId: ports.sessionId, requestId: id, mode: "queue", content: [{ type: "text", text }],...(lastLanguage?{replyLanguage:lastLanguage}:{}) });
       });
       shares.set(id, { text, result });
       return result;
@@ -163,7 +165,7 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       if (closed || active || stopping || ports.running()) return { events: [] };
       return { events: notices.filter(event => event.id > after).slice(0, 4).map(event => ({ ...event })) };
     },
-    async speak(utterance: number, text: string, sink: (event: VoiceEvent) => void): Promise<void> {
+    async speak(utterance: number, text: string, sink: (event: VoiceEvent) => void,language?:ReplyLanguage): Promise<void> {
       if (closed) throw new VoiceConversationError("closed");
       if (!Number.isSafeInteger(utterance) || utterance < 1 || typeof text !== "string" || !text.trim() || Buffer.byteLength(text, "utf8") > 16_000) {
         throw new VoiceConversationError("invalid-utterance");
@@ -174,12 +176,13 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       // exact RPC correlation rather than dropping the next human command.
       if (active || stopping) throw new VoiceConversationError("busy");
       lastUtterance = utterance;
+      lastLanguage=language;
       let resolve!: () => void;
       const settled = new Promise<void>(done => { resolve = done; });
       const requestId = `hub-voice:${ports.sessionId}:${connectionId}:${utterance}`;
       active = { utterance, requestId, sink, settled: resolve, text: "", input: text, tasks: new Map() };
       try {
-        admission = ports.prompt({ sessionId: ports.sessionId, requestId, mode: "queue", content: [{ type: "text", text: text.trim() }] });
+        admission = ports.prompt({ sessionId: ports.sessionId, requestId, mode: "queue", content: [{ type: "text", text: text.trim() }],...(language?{replyLanguage:language}:{}) });
         await admission;
       } catch {
         // Admission may have partially succeeded. Do not reuse its id or claim

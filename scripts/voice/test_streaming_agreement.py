@@ -95,3 +95,42 @@ def test_numeric_turkish_candidates_still_receive_final_verification(monkeypatch
     recognizer.verifier = SimpleNamespace(_preview=None, _preview_language=None, _preview_words='',
         _transcribe_audio=lambda _: ('Yedi kere sekiz ne yapar?', 'tr'))
     assert recognizer.finish() == 'Yedi kere sekiz ne yapar?'
+
+
+@pytest.mark.parametrize('seconds', [2, 11])
+def test_explicit_bilingual_mode_verifies_whole_audio_including_long_turns(monkeypatch,seconds):
+    monkeypatch.setattr(streaming_asr,'verify_turkish',lambda _:'')
+    verified=[]
+    recognizer=streaming_asr.StreamingRecognizer.__new__(streaming_asr.StreamingRecognizer)
+    recognizer.allowed_languages=('en','tr');recognizer.language='auto';recognizer._final_text=None
+    recognizer.stream=SimpleNamespace(accept_waveform=lambda *_:None,input_finished=lambda:None)
+    recognizer.runtime=SimpleNamespace(is_ready=lambda _:False,get_result=lambda _:'unverified foreign draft')
+    raw=b'\x01\x04'*(16000*seconds);recognizer.audio=bytearray(raw);recognizer.audio_bytes=len(raw)
+    def verify(audio):
+        verified.append(audio);return 'Türkçe ve English konuşuyorum.','tr'
+    recognizer.verifier=SimpleNamespace(_transcribe_audio=verify)
+    assert recognizer.finish()=='Türkçe ve English konuşuyorum.'
+    assert verified==[raw];assert recognizer.result_language=='tr'
+    assert recognizer.result_source=='whisper-bilingual-verified'
+
+
+def test_explicit_bilingual_mode_never_falls_back_to_a_foreign_draft_after_rejection(monkeypatch):
+    monkeypatch.setattr(streaming_asr,'verify_turkish',lambda _:'')
+    recognizer=streaming_asr.StreamingRecognizer.__new__(streaming_asr.StreamingRecognizer)
+    recognizer.allowed_languages=('en','tr');recognizer._final_text=None;recognizer.audio_bytes=100
+    recognizer.audio=bytearray(b'\x01\x04'*50)
+    recognizer.stream=SimpleNamespace(accept_waveform=lambda *_:None,input_finished=lambda:None)
+    recognizer.runtime=SimpleNamespace(is_ready=lambda _:False,get_result=lambda _:'foreign invented words')
+    recognizer.verifier=SimpleNamespace(_transcribe_audio=lambda _:('',None))
+    assert recognizer.finish()=='';assert recognizer.result_language is None
+
+
+def test_explicit_bilingual_mode_can_confirm_a_short_turkish_greeting_from_whole_audio(monkeypatch):
+    monkeypatch.setattr(streaming_asr,'verify_turkish',lambda _:'merhaba')
+    recognizer=streaming_asr.StreamingRecognizer.__new__(streaming_asr.StreamingRecognizer)
+    recognizer.allowed_languages=('en','tr');recognizer._final_text=None;recognizer.audio_bytes=32000
+    recognizer.audio=bytearray(b'\x01\x04'*16000)
+    recognizer.stream=SimpleNamespace(accept_waveform=lambda *_:None,input_finished=lambda:None)
+    recognizer.runtime=SimpleNamespace(is_ready=lambda _:False,get_result=lambda _:'')
+    recognizer.verifier=SimpleNamespace(_transcribe_audio=lambda _:pytest.fail('A confirmed greeting must not be replaced by an unreliable language guess'))
+    assert recognizer.finish()=='merhaba';assert recognizer.result_language=='tr'
