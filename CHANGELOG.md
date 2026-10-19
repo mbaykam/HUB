@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 - Group character tool permissions into memory reading, note saving, skills and
   other tools. Retire redundant legacy MCP memory tools in the second-brain profile.
