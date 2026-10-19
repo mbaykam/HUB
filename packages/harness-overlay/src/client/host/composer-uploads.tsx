@@ -29,7 +29,7 @@ export function installComposerUploads(ctx:HarnessClientContext,conversation:Com
       const item=refs.get(ref);if(!item)throw Error("This attachment draft expired. Remove it and select the file again.");
       if(item.uploaded)return item.uploaded;
       item.status=`Uploading ${item.file.name}…`;changed();
-      try{const receipt=await uploadFile(root.defaultView!.fetch.bind(root.defaultView),item.sessionId,ref,item.file,signal);item.uploaded=receipt.text;return receipt.text;}
+      try{const receipt=await uploadFile(root.defaultView!.fetch.bind(root.defaultView),item.sessionId,ref,item.file,signal);item.uploaded=receipt.text.replace(`Original: /api/hub/uploads/${receipt.id}`,`Original: [Download original](/api/hub/uploads/${receipt.id})`);return item.uploaded;}
       finally{item.status=undefined;changed();}
     },
   }});
