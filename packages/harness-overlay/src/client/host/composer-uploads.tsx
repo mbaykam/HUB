@@ -1,4 +1,5 @@
-import {useEffect,useRef,useState} from "react";
+import {useEffect,useLayoutEffect,useRef,useState,type CSSProperties} from "react";
+import {createPortal} from "react-dom";
 import type {HarnessClientContext} from "../core/context.ts";
 import {defineOverlayStyle} from "../shared/style-runtime.ts";
 import {UPLOAD_MAX_BYTES,UPLOAD_MAX_FILES} from "../../upload-contract.ts";
@@ -35,11 +36,20 @@ export function installComposerUploads(ctx:HarnessClientContext,conversation:Com
   }});
   function Control({sessionId,useInput,useProjection}:Props){
     const [open,setOpen]=useState(false),[error,setError]=useState(""),[,update]=useState(0);
-    const photos=useRef<HTMLInputElement>(null),files=useRef<HTMLInputElement>(null),shell=useRef<HTMLDivElement>(null);
+    const photos=useRef<HTMLInputElement>(null),files=useRef<HTMLInputElement>(null),shell=useRef<HTMLDivElement>(null),panel=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null);
+    const [anchor,setAnchor]=useState({left:16,bottom:80});
     const phase=useInput(s=>s.phase);
     const limits=useProjection?.("imageLimits");
     useEffect(()=>{const fn=()=>update(v=>v+1);listeners.add(fn);return()=>{listeners.delete(fn);};},[]);
-    useEffect(()=>{if(!open)return;const close=(e:Event)=>{if(!shell.current?.contains(e.target as Node))setOpen(false);};const key=(e:KeyboardEvent)=>{if(e.key==="Escape")setOpen(false);};root.addEventListener("pointerdown",close);root.addEventListener("keydown",key);return()=>{root.removeEventListener("pointerdown",close);root.removeEventListener("keydown",key);};},[open]);
+    const status=[...refs.values()].find(item=>item.sessionId===sessionId&&item.status)?.status;
+    useLayoutEffect(()=>{
+      if(!open&&!error&&!status)return;const view=root.defaultView!;
+      const place=()=>{const box=trigger.current?.getBoundingClientRect();if(box)setAnchor({left:Math.max(16,Math.min(box.left,view.innerWidth-Math.min(270,view.innerWidth-32)-16)),bottom:Math.max(16,view.innerHeight-box.top+12)});};
+      place();view.addEventListener("resize",place);root.addEventListener("scroll",place,true);view.visualViewport?.addEventListener("resize",place);
+      return()=>{view.removeEventListener("resize",place);root.removeEventListener("scroll",place,true);view.visualViewport?.removeEventListener("resize",place);};
+    },[open,error,status]);
+    function closeMenu(){setOpen(false);trigger.current?.focus();}
+    useEffect(()=>{if(!open)return;const close=(e:Event)=>{if(!shell.current?.contains(e.target as Node)&&!panel.current?.contains(e.target as Node))setOpen(false);};const key=(e:KeyboardEvent)=>{if(e.key==="Escape")closeMenu();};root.addEventListener("pointerdown",close);root.addEventListener("keydown",key);return()=>{root.removeEventListener("pointerdown",close);root.removeEventListener("keydown",key);};},[open]);
     function stage(list:FileList|null){
       setOpen(false);setError("");if(!list?.length)return;
       try{
@@ -71,13 +81,13 @@ export function installComposerUploads(ctx:HarnessClientContext,conversation:Com
         }
       }catch(err){setError(err instanceof Error?err.message:"Couldn’t add these files.");}
     }
-    const status=[...refs.values()].find(item=>item.sessionId===sessionId&&item.status)?.status;
+    const position={"--minke-upload-left":`${anchor.left}px`,"--minke-upload-bottom":`${anchor.bottom}px`} as CSSProperties;
     return <div className="hub-upload-control" ref={shell}>
-      <button type="button" aria-label="Attach photos or files" title="Attach photos or files" aria-expanded={open} disabled={phase!=="plain"} onClick={()=>setOpen(!open)}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9a6 6 0 0 1 8 8l-9 9"/></svg></button>
-      {open&&<div className="hub-upload-menu" role="group" aria-label="Add attachment"><button type="button" onClick={()=>photos.current?.click()}>Photos</button><button type="button" onClick={()=>files.current?.click()}>Files</button><small>Up to 8 items · 25 MB each</small><button type="button" onClick={()=>setOpen(false)}>Close</button></div>}
+      <button ref={trigger} type="button" aria-label="Attach photos or files" title="Attach photos or files" aria-expanded={open} disabled={phase!=="plain"} onClick={()=>setOpen(!open)}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9a6 6 0 0 1 8 8l-9 9"/></svg></button>
+      {open&&createPortal(<div className="hub-upload-menu" ref={panel} style={position} role="group" aria-label="Add attachment"><button type="button" onClick={()=>photos.current?.click()}>Photos</button><button type="button" onClick={()=>files.current?.click()}>Files</button><small>Up to 8 items · 25 MB each</small><button type="button" onClick={closeMenu}>Close</button></div>,root.body)}
       <input ref={photos} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden onChange={e=>{stage(e.target.files);e.target.value="";}}/>
       <input ref={files} type="file" multiple hidden onChange={e=>{stage(e.target.files);e.target.value="";}}/>
-      {(error||status)&&<div className="hub-upload-status" role="status">{error||status}{error&&<button type="button" aria-label="Dismiss attachment error" onClick={()=>setError("")}>×</button>}</div>}
+      {(error||status)&&createPortal(<div className="hub-upload-status" style={position} role="status">{error||status}{error&&<button type="button" aria-label="Dismiss attachment error" onClick={()=>setError("")}>×</button>}</div>,root.body)}
     </div>;
   }
   const offSlot=ctx.slots.register({name:"conversation.input.left",id:"hub-uploads",order:-100},Control);

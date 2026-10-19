@@ -1,7 +1,7 @@
 .hub-upload-control{position:relative;display:flex;align-items:center}
 .hub-upload-control>button{display:grid;place-items:center;min-width:40px;min-height:40px;border:0;background:transparent;color:inherit;border-radius:12px;cursor:pointer}
 .hub-upload-control>button:hover,.hub-upload-control>button:focus-visible{background:#a9b8ff20;outline:2px solid #a9b8ff70}
-.hub-upload-menu,.hub-upload-status{position:absolute;bottom:calc(100% + 12px);left:0;z-index:50;width:min(270px,75vw);padding:10px;background:#1b2033f5;color:#edf0ff;border:1px solid #a9b8ff40;border-radius:18px;box-shadow:0 12px 40px #0006;backdrop-filter:blur(24px)}
+.hub-upload-menu,.hub-upload-status{position:fixed;box-sizing:border-box;bottom:var(--minke-upload-bottom,80px);left:var(--minke-upload-left,16px);z-index:10000;width:min(270px,calc(100vw - 32px));max-height:calc(100dvh - var(--minke-upload-bottom,80px) - 16px);overflow:auto;padding:10px;background:#1b2033f5;color:#edf0ff;border:1px solid #a9b8ff40;border-radius:18px;box-shadow:0 12px 40px #0006;backdrop-filter:blur(24px);font:14px/1.5 system-ui}
 .hub-upload-menu button{display:block;width:100%;text-align:left;min-height:42px;border:0;border-radius:10px;padding:8px 12px;background:transparent;color:inherit;cursor:pointer}
 .hub-upload-menu button:hover{background:#a9b8ff20}.hub-upload-menu small{display:block;padding:8px 12px;color:#b1b8d0}
 .hub-upload-status{font-size:13px;overflow-wrap:anywhere}.hub-upload-status button{float:right;color:inherit;background:transparent;border:0;min-width:32px;min-height:32px}
