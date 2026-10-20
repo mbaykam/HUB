@@ -29,6 +29,7 @@ import {
   inspectHarnessClientCryptoBoundary,
 } from "./client-crypto-boundary.mjs";
 import { resolvePnpmInvocation } from "./pnpm-invocation.mjs";
+import { preservePnpmWorkspace } from "./pnpm-workspace-guard.mjs";
 import {
   assertRuntimeFileBudget,
   assertRuntimeSizeBudget,
@@ -75,6 +76,7 @@ const runtimeFingerprintPaths = [
   "scripts/harness/command-invocation.mjs",
   "scripts/harness/contract.mjs",
   "scripts/harness/pnpm-invocation.mjs",
+  "scripts/harness/pnpm-workspace-guard.mjs",
   "scripts/harness/runtime-entry.mjs",
   "scripts/harness/runtime-adapters.mjs",
   "scripts/harness/runtime-patches.mjs",
@@ -1036,42 +1038,39 @@ async function main() {
   let stagingContainer;
   try {
     await writeDeployRoot(generatedPackageDir, selectedPackages, contract);
-    await runPnpm(
-      [
-        "install",
-        "--filter",
-        `${generatedPackageName}...`,
-        "--lockfile=false",
-        "--ignore-scripts",
-        // The frozen install above has populated the reviewed dependency store.
-        // Re-resolving online can select a fresh transitive version and cause
-        // pnpm to rewrite the pinned workspace's release-age policy file.
-        "--offline",
-        "--config.node-linker=isolated",
-      ],
-      harnessRoot,
-    );
-
     const runtimeParent = dirname(activeRuntimeRoot);
     await mkdir(runtimeParent, { recursive: true });
     stagingContainer = await mkdtemp(join(runtimeParent, ".host-staging-"));
     const candidateRuntimeRoot = join(stagingContainer, "host");
     assertGeneratedPath(candidateRuntimeRoot, "runtime candidate");
-    await runPnpm(
-      [
-        "--filter",
-        generatedPackageName,
-        "deploy",
-        "--legacy",
-        "--prod",
-        "--offline",
-        "--config.node-linker=hoisted",
-        "--config.auto-install-peers=false",
-        "--config.link-workspace-packages=true",
-        candidateRuntimeRoot,
-      ],
-      harnessRoot,
-    );
+    await preservePnpmWorkspace(join(harnessRoot,"pnpm-workspace.yaml"),async()=>{
+      await runPnpm(
+        [
+          "install",
+          "--filter",
+          `${generatedPackageName}...`,
+          "--lockfile=false",
+          "--ignore-scripts",
+          "--config.node-linker=isolated",
+        ],
+        harnessRoot,
+      );
+  
+      await runPnpm(
+        [
+          "--filter",
+          generatedPackageName,
+          "deploy",
+          "--legacy",
+          "--prod",
+          "--config.node-linker=hoisted",
+          "--config.auto-install-peers=false",
+          "--config.link-workspace-packages=true",
+          candidateRuntimeRoot,
+        ],
+        harnessRoot,
+      );
+    });
     await injectMissingWorkspacePackages(
       candidateRuntimeRoot,
       selectedPackages,

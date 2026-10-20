@@ -54,6 +54,7 @@ const taskFiles = Object.freeze({
     "harness-runtime-prune.test.mjs",
     "harness-runtime-state.test.mjs",
     "harness-source-boundary.test.mjs",
+    "pnpm-workspace-guard.test.mjs",
     "module-boundaries.test.mjs",
     "path-aliases.test.mjs",
     "web-search.test.mjs",
