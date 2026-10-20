@@ -31,8 +31,8 @@ const {
 
 function assertHarnessStagingOrder(stageSource) {
   stageSource = stageSource.replaceAll("\r\n", "\n");
-  const completeInstall = stageSource.indexOf(
-    '"install",\n        "--recursive",\n        "--frozen-lockfile"',
+  const completeInstall = stageSource.search(
+    /"install",\s*"--recursive",\s*"--frozen-lockfile"/u,
   );
   const clean = stageSource.search(
     /await runPnpm\(\["run", "clean"\], harnessRoot\);/u,
@@ -40,8 +40,8 @@ function assertHarnessStagingOrder(stageSource) {
   const build = stageSource.search(
     /await runPnpm\(\s*\["run", "build"\],\s*harnessRoot,\s*minkeHarnessClientBuildEnvironment\(process\.env\),?\s*\);/u,
   );
-  const runtimeOnlyInstall = stageSource.indexOf(
-    '"--filter",\n        `${generatedPackageName}...`',
+  const runtimeOnlyInstall = stageSource.search(
+    /"--filter",\s*`\$\{generatedPackageName\}\.\.\.`/u,
   );
 
   assert.ok(completeInstall >= 0, "staging must restore every workspace link");
