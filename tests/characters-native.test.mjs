@@ -302,7 +302,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   let legacyRan=false;ctx.tools.register({name:'mcp__hub_memory__search_notes',description:'Retired fixture store',parameters:{type:'object',properties:{}},output:{schema:{type:'string'},render:()=>[]},execute:async()=>{legacyRan=true;return 'Must not run';}});ctx.effect(()=>installKnowledgeToolPolicy(ctx));
   backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
   let voiceIdentity;
-  const main=new MockAdapter([()=>toolCallResponse('natural-handoff','hub_switch_character',{character:voiceIdentity}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.'),toolCallResponse('text-canvas','hub_present',{title:'Native conversation canvas',kind:'html',html:'<p>Fixture plan</p>'}),textResponse('The visual is available.')]);
+  const main=new MockAdapter([()=>toolCallResponse('natural-handoff','hub_switch_character',{character:voiceIdentity}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.'),toolCallResponse('text-canvas','hub_present',{title:'Native conversation canvas',kind:'html',html:'<p>Fixture plan</p>'}),textResponse('The visual is available.'),textResponse('Telegram coordinator ready.')]);
   const fast=new MockAdapter([textResponse('Hi, I am Vera.'),textResponse('I run fast/mock.'),toolCallResponse('return-hub','hub_switch_character',{character:'HUB'})]);
   ctx.llm.registerAdapter(['main'],main);ctx.llm.registerAdapter(['fast'],fast);ctx.llm.registerAdapter(['legacy'],new MockAdapter([textResponse('Must not run')]));
   let deployment={provider:'main',model:'mock'};const selections=new Map();
@@ -352,5 +352,21 @@ test('model identity and natural conversation handoffs stay consistent without a
   const revision=characters.store.snapshot().revision;
   const denied=await parent.ctx.tools.execute({agent:parent,name:'hub_switch_character',arguments:{character:voice.id},callId:'notification-switch',signal:AbortSignal.timeout(1000)});
   assert.equal(denied.isError,true);assert.equal(characters.store.snapshot().revision,revision);
+  // A selected specialist owns its Telegram work; forced coordinator handoffs
+  // must not override its instructions or its configured tool permissions.
+  const specialistAdapter=new MockAdapter([textResponse('I will solve the specialist task myself.')]);ctx.llm.registerAdapter(['specialist'],specialistAdapter);
+  const unconfigured=characters.store.snapshot().characters.find(c=>c.id!==state.mainId&&c.id!==state.voiceId);
+  await characters.store.change({action:'save',revision:characters.store.snapshot().revision,character:{...unconfigured,route:{provider:'specialist',model:'mock'},instructions:'Own your task. Delegate only neutral auxiliary work.',tools:{mode:'allow',names:['fixture_local_check']}}},c=>characters.validate(c));
+  const telegram=ctx.agentLoop.create('minke-im-telegram-specialist-policy',{provider:'legacy',model:'old-qwen'});let localRuns=0;
+  telegram.ctx.tools.register({name:'fixture_local_check',description:'Isolated permitted fixture action',parameters:{type:'object',properties:{}},output:{schema:{type:'string'},render:()=>[]},execute:async()=>{localRuns++;return 'Done';}});
+  telegram.ctx.tools.register({name:'fixture_disabled_check',description:'Isolated disabled fixture action',parameters:{type:'object',properties:{}},output:{schema:{type:'string'},render:()=>[]},execute:async()=>{throw Error('Must remain disabled');}});
+  const execute=name=>telegram.ctx.tools.execute({agent:telegram,name,arguments:{},callId:'telegram-policy-'+name,signal:AbortSignal.timeout(1000)});
+  await say(telegram,'Hello, main assistant.');assert.match(main.requests.at(-1).system,/Telegram conversation coordinator/);
+  assert.equal((await execute('fixture_local_check')).isError,true);assert.equal(localRuns,0);
+  await characters.store.change({action:'select',revision:characters.store.snapshot().revision,id:unconfigured.id,sessionId:telegram.id},c=>characters.validate(c));
+  await say(telegram,'Please handle this specialist task yourself.');
+  assert.match(specialistAdapter.requests[0].system,/Own your task/);assert.doesNotMatch(specialistAdapter.requests[0].system,/Telegram conversation coordinator/);
+  assert.equal((await execute('fixture_local_check')).isError,false);assert.equal(localRuns,1);
+  assert.equal((await execute('fixture_disabled_check')).isError,true);
  }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-characters-native-'));await rm(root,{recursive:true,force:true});}
 });

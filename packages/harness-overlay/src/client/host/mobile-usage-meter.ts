@@ -317,6 +317,7 @@ function formatAudio(milliseconds: number): string {
 }
 
 function renderSoniox(root: Document, content: HTMLDivElement, usage: SonioxUsage): void {
+  const expanded = content.querySelector<HTMLDetailsElement>("[data-hub-usage-models]")?.open ?? false;
   if (!providerState(root,content,usage,"Connect Soniox in Settings → Speech to see usage.") || usage.state !== "ready") return;
   const nodes: HTMLElement[] = [stats(root,[
     {label:"Today",value:formatUsd(usage.today.costUsd)}, {label:"Last 7 days",value:formatUsd(usage.last7Days.costUsd)},
@@ -326,6 +327,7 @@ function renderSoniox(root: Document, content: HTMLDivElement, usage: SonioxUsag
   ])];
   if (usage.models.length) {
     const models = element(root,"details","data-hub-usage-models"), summary = element(root,"summary");summary.textContent="By model · this month";
+    models.open = expanded;
     models.append(summary,stats(root,usage.models.map(m=>({label:m.id,value:`${formatUsd(m.month.costUsd)} · ${m.month.requests.toLocaleString()} requests · ${formatAudio(m.month.inputAudioMs)} input`}))));
     nodes.push(models);
   } else nodes.push(statusMessage(root,"No completed Soniox usage is reported for this month."));
