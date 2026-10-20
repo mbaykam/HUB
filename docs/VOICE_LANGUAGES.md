@@ -14,7 +14,7 @@ detection. **English** and **Türkçe** select a single recognition language. An
 English-only Whisper model cannot use Turkish or the two-language selection.
 
 With automatic spoken output, the recognized language accompanies each final
-utterance into the native conversation. Mira follows that turn's language unless
+utterance into the native conversation. The voice assistant follows that turn's language unless
 you explicitly request another. This hint is visible in the conversation's full
 model context and does not rewrite your transcript or your saved preferences.
 An explicitly selected spoken language still takes precedence.

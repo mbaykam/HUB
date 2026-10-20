@@ -38,7 +38,7 @@ export function installVoiceMediaContext(ctx: any, assets: KnowledgeAssets) {
     const context = events.filter((event: any) => event.type === "user/message" && event.data.source?.kind === "user" || event.type === "assistant/message")
       .slice(-12).map((event: any) => {
         const message = event.type === "user/message" ? event.data : event.data.message;
-        return `${event.type === "user/message" ? "User" : "Mira"}: ${(message.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")}`;
+        return `${event.type === "user/message" ? "User" : "Voice assistant"}: ${(message.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")}`;
       }).join("\n").slice(-16000);
     let injected = false;
     agent.ctx.on("agent/pre-step", async (_payload: any, next: any) => {

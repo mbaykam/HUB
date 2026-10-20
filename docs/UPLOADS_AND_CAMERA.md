@@ -20,14 +20,14 @@ file paths. Extracted document text is marked as untrusted source data.
 
 ## Show HUB something while talking
 
-1. Start a voice conversation with Mira, or open the PWA while your Telegram
+1. Start a voice conversation with your voice assistant, or open the PWA while your Telegram
    voice call is active.
 2. Tap **Camera** and allow camera access. The rear camera opens first; use
    **Switch camera** if needed.
 3. Optionally describe what HUB should do, such as reading a label or explaining
    a diagram. Tap the round shutter, then check the full photo. Choose **Retake**
    or **Send to HUB**. Taking a photo alone does not upload it.
-4. Keep talking to Mira. The share request queues in the same voice conversation,
+4. Keep talking to your voice assistant. The share request queues in the same voice conversation,
    and native delegation gives HUB the actual image plus recent public context.
    Follow the background task and its result in the existing conversation/tasks.
 

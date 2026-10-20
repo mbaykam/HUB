@@ -38,7 +38,7 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     const {tools:_tools,warning,sharedSpeech,...record}=value;if(sharedSpeech)speechSettings=speechSettingsSchema.parse(sharedSpeech);warningMessage=typeof warning==="string"?warning:"";state=charactersStateSchema.parse(record);return state;
   }
   function grid(){
-    editorCleanup?.();editorCleanup=undefined;heading.textContent="Characters";content.replaceChildren();status.textContent=warningMessage||"HUB handles writing and Telegram messages. Your voice assistant delegates complex work to HUB. Ask for other characters by name.";dialog.scrollTop=0;
+    editorCleanup?.();editorCleanup=undefined;heading.textContent="Characters";content.replaceChildren();status.textContent=warningMessage||"Your main assistant handles writing and Telegram. Your voice assistant delegates complex work to the main assistant. Ask for another character by name or role.";dialog.scrollTop=0;
     if(!state)return;
     const list=el("div");list.className="hub-character-grid";
     for(const c of state.characters){
@@ -66,7 +66,7 @@ export function installCharactersClient(ctx:HarnessClientContext,root:Document=d
     const input=(value:string,max:number)=>{const n=el("input");n.value=value;n.maxLength=max;return n;};
     const name=input(seed.name,60);name.required=true;field("Name",name);
     const description=input(seed.description,240);field("About this character",description);
-    const avatar=el("select");for(const value of ["hub","voice","devil","mint","rose","amber"]){const o=el("option",value[0]!.toUpperCase()+value.slice(1));o.value=value;avatar.append(o);}avatar.value=seed.avatar;field("Portrait",avatar);
+    const avatar=el("select");for(const value of ["hub","voice","devil","mint","rose","amber"]){const o=el("option",value==="devil"?"Horns":value[0]!.toUpperCase()+value.slice(1));o.value=value;avatar.append(o);}avatar.value=seed.avatar;field("Portrait",avatar);
     const preview=picture(seed);basics.prepend(preview);avatar.addEventListener("change",()=>{seed.avatar=avatar.value as HubCharacter["avatar"];preview.src=characterAvatar(seed);});
     const instructions=el("textarea");instructions.rows=4;instructions.value=seed.instructions;instructions.maxLength=12000;field("Personality & instructions",instructions);
     const brain=el("section");brain.append(el("h3","Model"));const modelLabel=el("p",seed.route?`${seed.route.provider} · ${seed.route.model}${seed.route.reasoningEffort?" · "+seed.route.reasoningEffort:""}`:"No model configured");brain.append(modelLabel);modelPane.append(brain);

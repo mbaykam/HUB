@@ -16,7 +16,7 @@ const server = createServer((req, res) => {
   if (req.url === "/api/hub/voice/status") { res.writeHead(200, { "content-type": "application/json" }); res.end('{"enabled":true}'); return; }
   if (req.url === "/api/hub/voice/diagnostics") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({active:!!diagnosticStage,audio:diagnosticStage?{stage:diagnosticStage,attention:{mode:attentionMode,wakePhrases:['Mira']},inputPaused:['speaking','echo-tail'].includes(diagnosticStage),inputPauseReason:diagnosticStage==='speaking'?'playback':diagnosticStage==='echo-tail'?'echo-tail':null,receivingAudio:true,inputLevel:.01,recentSound:false,partialText:""}:null}));return;
+    res.end(JSON.stringify({active:!!diagnosticStage,audio:diagnosticStage?{stage:diagnosticStage,attention:{mode:attentionMode,wakePhrases:['Vera']},inputPaused:['speaking','echo-tail'].includes(diagnosticStage),inputPauseReason:diagnosticStage==='speaking'?'playback':diagnosticStage==='echo-tail'?'echo-tail':null,receivingAudio:true,inputLevel:.01,recentSound:false,partialText:""}:null}));return;
   }
   if(req.url==='/api/hub/voice/attention'){
     let text='';req.on('data',part=>text+=part);req.on('end',()=>{const body=JSON.parse(text);assert.equal(body.callId,'synthetic-call');attentionMode=body.mode;diagnosticStage='listening';res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({attention:{mode:attentionMode}}));});return;
@@ -82,7 +82,7 @@ try {
   assert.equal(sdkDownloads, 1);
   assert.equal(await page.evaluate(() => globalThis.startedWith), undefined);
   await page.getByRole('button',{name:'Background',exact:true}).click();
-  await page.getByText('Waiting for “Mira”',{exact:true}).waitFor();
+  await page.getByText('Waiting for “Vera”',{exact:true}).waitFor();
   assert.equal(await page.locator('[data-voice-live-words]').isVisible(),false);
   if(process.argv[3]&&!process.argv[3].startsWith('--'))await page.screenshot({path:process.argv[3].replace('.png','-waiting.png'),fullPage:true});
   await page.getByRole('button',{name:'Resume',exact:true}).click();

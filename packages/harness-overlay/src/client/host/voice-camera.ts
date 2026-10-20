@@ -11,7 +11,7 @@ export function createVoiceCamera(root:Document){
   const button=root.createElement("button");button.type="button";button.textContent="Camera";button.hidden=true;button.setAttribute("data-voice-camera","");
   const dialog=root.createElement("dialog");dialog.setAttribute("data-voice-camera-dialog","");dialog.setAttribute("aria-label","Share your camera with HUB");
   const header=root.createElement("header"),title=root.createElement("strong"),close=root.createElement("button");title.textContent="Show HUB";close.type="button";close.textContent="Close";header.append(title,close);
-  const hint=root.createElement("p");hint.textContent="Mira stays connected. Take a photo, check it, then send it to HUB.";hint.setAttribute("data-camera-hint","");
+  const hint=root.createElement("p");hint.textContent="Keep talking to your voice assistant. Take a photo, check it, then send it for analysis.";hint.setAttribute("data-camera-hint","");
   const stage=root.createElement("div");stage.setAttribute("data-camera-stage","");
   const video=root.createElement("video");video.autoplay=true;video.muted=true;video.playsInline=true;video.setAttribute("playsinline","");video.setAttribute("aria-label","Camera preview");
   const preview=root.createElement("img");preview.alt="Captured photo";preview.hidden=true;stage.append(video,preview);
@@ -51,11 +51,11 @@ export function createVoiceCamera(root:Document){
     try{
       if(!item.uploaded){status.textContent="Uploading photo…";const receipt=await uploadFile(view.fetch.bind(view),item.owner.sessionId,item.id,item.file,signal);if(!receipt.image)throw Error("The captured photo could not be prepared for visual analysis.");item.uploaded=receipt.id;}
       if(!owner||owner.callId!==item.owner.callId||version!==epoch)return;
-      status.textContent="Sending to Mira…";
+      status.textContent="Sharing with your voice assistant…";
       const response=await view.fetch("/api/hub/voice/share",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json","x-hub-voice-share":"1"},body:JSON.stringify({callId:item.owner.callId,requestId:item.requestId,uploads:[item.uploaded],instruction:item.instruction}),signal});
       const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||"Sharing could not be confirmed. Retry with the same photo.");
       if(version!==epoch)return;
-      status.textContent="Sent to Mira. HUB’s work will appear with your tasks; keep talking.";again.textContent="Take another";again.hidden=false;
+      status.textContent="Photo shared. The main assistant’s work will appear with your tasks; keep talking.";again.textContent="Take another";again.hidden=false;
     }catch(err){if(version!==epoch)return;status.textContent=err instanceof Error&&err.name==="TimeoutError"?"Sending wasn’t confirmed. Retry this photo to check the same request; it won’t be duplicated.":err instanceof Error?err.message:"Couldn’t send. Retry this photo.";retry.hidden=false;again.hidden=false;}
     finally{if(version===epoch){busy=false;pending=undefined;}}
   }

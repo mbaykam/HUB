@@ -13,7 +13,7 @@ from pipecat.frames.frames import (InputAudioRawFrame, TranscriptionFrame,
     InterimTranscriptionFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
-DEFAULT_ATTENTION = {"idleSeconds": 180, "wakePhrases": ["Mira"], "contextSeconds": 60}
+DEFAULT_ATTENTION = {"idleSeconds": 180, "wakePhrases": ["Vera"], "contextSeconds": 60}
 
 
 def attention_settings(value=None):

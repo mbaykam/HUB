@@ -1,7 +1,7 @@
 # Background listening and sourced memory
 
 Start a voice conversation normally. Press **Background** to keep the call open
-without replying to surrounding conversations. Say **Mira** at the start of a
+without replying to surrounding conversations. Say your configured wake phrase (initially **Vera**) at the start of a
 sentence, or press **Resume**, to continue. Saying the name alone gets a short
 local acknowledgement. A name followed by a request submits that request once.
 After three minutes without conversation, HUB switches to Background automatically.

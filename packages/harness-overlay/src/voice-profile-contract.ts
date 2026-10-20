@@ -20,7 +20,7 @@ export const voiceAttentionSchema=z.object({
   wakePhrases:z.array(z.string().trim().min(1).max(40).regex(/^[\p{L} '-]+$/u).refine(v=>/\p{L}/u.test(v)&&v.split(/\s+/).length<=4)).min(1).max(3),
   contextSeconds:z.union([z.literal(0),z.literal(30),z.literal(60),z.literal(120)]),
 }).strict();
-export const defaultVoiceAttention={idleSeconds:180 as const,wakePhrases:["Mira"],contextSeconds:60 as const};
+export const defaultVoiceAttention={idleSeconds:180 as const,wakePhrases:["Vera"],contextSeconds:60 as const};
 export const localSpeechSchema = z.object({
   attention:voiceAttentionSchema.optional(),
   stt: z.discriminatedUnion("engine", [

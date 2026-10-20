@@ -128,7 +128,7 @@ export function installInstructionEditor(container: HTMLElement, root: Document,
     if (!selected) {editor.value = ""; updateControls(); return;}
     const character = characters.find(item => item.instructions.id === selected!.id);
     const copy = section === "shared" ? {
-      title: "Ortak davranış kuralları", description: "HUB, Mira ve diğer sohbet karakterlerinin nasıl yanıt vermesini istediğini yaz. Karakterlerin kendi talimatları bunlara eklenir.",
+      title: "Ortak davranış kuralları", description: "Ana asistanın, konuşma asistanının ve diğer karakterlerin nasıl yanıt vermesini istediğini yaz. Karakterlerin kendi talimatları bunlara eklenir.",
       label: "Asistanlar nasıl davranmalı?", hint: "İsteğe bağlı. Boş bırakırsan ek bir ortak kural uygulanmaz.",
       example: "Örnek: Kısa ve açık cevap ver. Ben hangi dilde konuşuyorsam o dilde devam et.",
     } : section === "user" ? {

@@ -87,7 +87,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   let voiceSession: string | undefined;
   let state: VoiceState = "idle", enabled = false, muted = false, loading = false, cancelledLoad = false,audioStage="listening";
   let inputPaused = false;
-  let attentionMode="active",wakePhrases=["Mira"];
+  let attentionMode="active",wakePhrases=["Vera"];
   let receivingAudio: boolean | undefined;
   let audioConnection: string | undefined;
   let external: { callId: string; sessionId: string; profile?: { name: string } } | undefined, externalTranscriptKey = "", statusFlight = false,lastStatusAt=0;
@@ -153,7 +153,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     interrupt.hidden = !busy || audioStage === "echo-tail" || !(state === "speaking" || state === "thinking");
     transcript.panel.hidden = !busy || !inHome;
     conversation?.removeAttribute("data-hub-shared-input");
-    status.textContent = external ? `Telegram · ${external.profile?.name ?? "Mira"}` : hub.getAttribute("data-active-character") ?? "Mira";
+    status.textContent = external ? `Telegram · ${external.profile?.name ?? "Voice assistant"}` : hub.getAttribute("data-active-character") ?? "Voice assistant";
     status.hidden=inHome;
     mute.disabled = loading || ["microphone", "starting", "connecting", "ending"].includes(state);
     mute.textContent = muted ? "Unmute" : "Mute"; mute.setAttribute("aria-pressed", String(muted));
@@ -289,8 +289,8 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
       if (call?.transport === "telegram" && typeof call.callId === "string" && typeof call.sessionId === "string") {
         if (!external || external.callId !== call.callId) { transcript.reset(); externalTranscriptKey = ""; }
         external = call; voiceSession = call.sessionId; state = "listening";
-        transcript.setAssistant(call.profile?.name ?? "Mira");
-        presentation.setCall(call.callId); hub.setAttribute("data-active-character", call.profile?.name ?? "Mira");
+        transcript.setAssistant(call.profile?.name ?? "Voice assistant");
+        presentation.setCall(call.callId); hub.setAttribute("data-active-character", call.profile?.name ?? "Voice assistant");
         const lines = Array.isArray(call.transcript) ? call.transcript.filter((line: any) => ["user", "assistant"].includes(line?.role) && typeof line.text === "string" && typeof line.final === "boolean").slice(-60) : [];
         const next = JSON.stringify(lines); if (next !== externalTranscriptKey) { externalTranscriptKey = next; transcript.snapshot(lines); const spoken = lines.findLast((line: any) => line.role === "user"); if(spoken){liveWords.textContent=spoken.text;liveWords.removeAttribute("data-interim");} }
       } else if (external) {

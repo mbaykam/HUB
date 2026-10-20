@@ -280,7 +280,7 @@ test('native character delegation uses the target model/persona while the coordi
   assert.match(JSON.stringify(mainAdapter.requests[0]),/Character: HUB/);
   assert.ok(mainAdapter.requests[0].tools.some(t=>t.name==='camofox_search'));
   await offVoiceTasks?.();
-  state=characters.store.snapshot();const devil=state.characters.find(c=>c.name==='Devil');assert.equal(devil.route,null);
+  state=characters.store.snapshot();const custom=state.characters.find(c=>c.name==='B4D');assert.equal(custom.route,null);
   assert.equal(characters.store.selected('minke-im-telegram-example').id,state.mainId);
   // Same-process recall must pass the real Telegram coordinator guard without
   // allowing a knowledge write tool or starting another paid model request.
@@ -301,8 +301,9 @@ test('model identity and natural conversation handoffs stay consistent without a
   await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'spawn'});await ctx.plugin(Storage);
   let legacyRan=false;ctx.tools.register({name:'mcp__hub_memory__search_notes',description:'Retired fixture store',parameters:{type:'object',properties:{}},output:{schema:{type:'string'},render:()=>[]},execute:async()=>{legacyRan=true;return 'Must not run';}});ctx.effect(()=>installKnowledgeToolPolicy(ctx));
   backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
-  const main=new MockAdapter([toolCallResponse('natural-handoff','hub_switch_character',{character:'Mira'}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.'),toolCallResponse('text-canvas','hub_present',{title:'Native conversation canvas',kind:'html',html:'<p>Fixture plan</p>'}),textResponse('The visual is available.')]);
-  const fast=new MockAdapter([textResponse('Hi, I am Mira.'),textResponse('I run fast/mock.'),toolCallResponse('return-hub','hub_switch_character',{character:'HUB'})]);
+  let voiceIdentity;
+  const main=new MockAdapter([()=>toolCallResponse('natural-handoff','hub_switch_character',{character:voiceIdentity}),textResponse('HUB is back.'),textResponse('A new chat starts with HUB.'),toolCallResponse('text-canvas','hub_present',{title:'Native conversation canvas',kind:'html',html:'<p>Fixture plan</p>'}),textResponse('The visual is available.')]);
+  const fast=new MockAdapter([textResponse('Hi, I am Vera.'),textResponse('I run fast/mock.'),toolCallResponse('return-hub','hub_switch_character',{character:'HUB'})]);
   ctx.llm.registerAdapter(['main'],main);ctx.llm.registerAdapter(['fast'],fast);ctx.llm.registerAdapter(['legacy'],new MockAdapter([textResponse('Must not run')]));
   let deployment={provider:'main',model:'mock'};const selections=new Map();
   ctx.on('agent/created',({agent})=>{const ref={current:{provider:'legacy',model:'old-qwen'},assembled:undefined};selections.set(agent.id,ref);installModelSelection(agent.ctx,ref);},{global:true});
@@ -313,27 +314,35 @@ test('model identity and natural conversation handoffs stay consistent without a
   let inspectorRoute;ctx.webServer.register=route=>{if(route.path==='/api/hub/character-request')inspectorRoute=route;return()=>{};};
   const characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
   const state=characters.store.snapshot(),voice=state.characters.find(c=>c.id===state.voiceId);
-  await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Mira',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
+  voiceIdentity=voice.id;
+  assert.equal(voice.name,'Vera');assert.ok(state.characters.some(c=>c.name==='B4D'&&c.route===null));
+  await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Vera',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
   const parent=ctx.agentLoop.create('handoff-parent',{provider:'legacy',model:'old-qwen'});
   const instructionFiles=new InstructionFiles(join(root,'characters','instructions'));await instructionFiles.load();const soul=instructionFiles.files().find(f=>f.id==='SOUL.md');await instructionFiles.save('SOUL.md',soul.hash,'Shared instruction proof for native requests.');
   let navigation='Memory index revision one: retrieve sources by stable identity.';
   const offMemory=characters.instructions.registerManaged('memory.md',async()=>navigation);t.after(offMemory);
   async function say(agent,text){const before=agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length;agent.followup(createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}));const end=Date.now()+8000;while(agent.status!=='idle'||agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length<=before){assert.ok(Date.now()<end,'Turn did not settle');await new Promise(r=>setTimeout(r,10));}}
-  await say(parent,'Biraz Mira’yla sohbet etmek istiyorum; konuşmayı ona devretir misin?');
+  await say(parent,'Konuşma asistanıyla sohbet etmek istiyorum; konuşmayı ona devretir misin?');
   assert.equal(main.requests.length,1);assert.equal(fast.requests.length,1);
   assert.match(JSON.stringify(main.requests[0]),/powered by main\/mock/);assert.doesNotMatch(JSON.stringify(main.requests[0]),/powered by legacy\/old-qwen/);
   assert.ok(main.requests[0].tools.every(tool=>!tool.name.startsWith('mcp__hub_memory__')));const blockedLegacy=await parent.ctx.tools.execute({agent:parent,name:'mcp__hub_memory__search_notes',arguments:{},callId:'legacy-denied',signal:AbortSignal.timeout(1000)});assert.equal(blockedLegacy.isError,true);assert.equal(legacyRan,false);
-  assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Character: Mira/);
+  assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Character: Vera/);
+  assert.match(main.requests[0].system,new RegExp(`ID: ${voice.id} · Role: voice assistant · Display name: Vera`));
+  assert.match(main.requests[0].system,/names are editable display labels/);
   assert.match(main.requests[0].system,/Shared instruction proof/);assert.match(fast.requests[0].system,/Shared instruction proof/);
   assert.match(main.requests[0].system,/Memory index revision one/);assert.match(fast.requests[0].system,/Memory index revision one/);
   const memory=ctx.agentLoop.create('hub-memory-instruction-test',{provider:'main',model:'mock'});const assembled=await ctx.systemPrompt.assemble({scope:memory});assert.ok(!assembled.sections.some(s=>s.text.includes('Shared instruction proof')));
   assert.equal(ctx.agents.list().filter(a=>a.session.header.origin==='subagent').length,0);
-  assert.equal(characters.store.selected(parent.id).name,'Mira');assert.equal(deployment.provider,'main');
+  assert.equal(characters.store.selected(parent.id).name,'Vera');assert.equal(deployment.provider,'main');
+  const beforeRename=characters.store.snapshot(),bound=characters.store.selected(parent.id);
+  await characters.store.change({action:'save',revision:beforeRename.revision,character:{...bound,name:'Nova'}},c=>characters.validate(c));
+  assert.equal(characters.store.selected(parent.id).id,voice.id);assert.equal(characters.store.selected(parent.id).name,'Nova');
   navigation='Memory index revision two: changed domains are current.';
   await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);
   const inspected=await new Promise(resolve=>inspectorRoute.handler({method:'GET',url:'/api/hub/character-request?characterId='+voice.id,headers:{'x-hub-characters':'1'}},{writeHead:code=>assert.equal(code,200),end:body=>resolve(JSON.parse(body))}));
   assert.deepEqual(JSON.parse(inspected.record.json),JSON.parse(JSON.stringify(fast.requests[1],(k,v)=>k==='signal'?undefined:v)),'Inspector must match the native adapter request, including shared instructions, tool schemas and conversation history');
   assert.match(fast.requests[1].system,/Memory index revision two/);assert.doesNotMatch(fast.requests[1].system,/Memory index revision one/);
+  assert.match(fast.requests[1].system,/Character: Nova/);assert.match(fast.requests[1].system,new RegExp(`ID: ${voice.id} · Role: voice assistant · Display name: Nova`));
   await say(parent,'Let your main assistant take over our conversation again.');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
   const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');
   await say(newChat,'Show the fixture plan as a visual.');
@@ -341,7 +350,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   assert.equal(characters.presentations.summary(parent.id),null);
   assert.match(JSON.stringify(main.requests.at(-1)),/hub_present/);
   const revision=characters.store.snapshot().revision;
-  const denied=await parent.ctx.tools.execute({agent:parent,name:'hub_switch_character',arguments:{character:'Mira'},callId:'notification-switch',signal:AbortSignal.timeout(1000)});
+  const denied=await parent.ctx.tools.execute({agent:parent,name:'hub_switch_character',arguments:{character:voice.id},callId:'notification-switch',signal:AbortSignal.timeout(1000)});
   assert.equal(denied.isError,true);assert.equal(characters.store.snapshot().revision,revision);
  }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-characters-native-'));await rm(root,{recursive:true,force:true});}
 });

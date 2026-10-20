@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.3
+
+- Keep character references independent of editable display names: expose roles
+  and stable IDs to the assistant for handoffs and background delegation.
+- Use Vera and B4D (pronounced Bad) for the initial voice and custom specialist
+  characters. Keep existing saved character choices and historical chats intact.
+- Remove fixed character names from camera, instruction and attachment guidance.
+  Use Vera as the initial wake phrase; saved wake phrases remain editable.
+
 ## 1.3.2
 
 - Fix the Background / Resume button's missing host route. Listening changes now
