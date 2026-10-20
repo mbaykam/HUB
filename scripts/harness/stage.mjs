@@ -1043,6 +1043,10 @@ async function main() {
         `${generatedPackageName}...`,
         "--lockfile=false",
         "--ignore-scripts",
+        // The frozen install above has populated the reviewed dependency store.
+        // Re-resolving online can select a fresh transitive version and cause
+        // pnpm to rewrite the pinned workspace's release-age policy file.
+        "--offline",
         "--config.node-linker=isolated",
       ],
       harnessRoot,
@@ -1060,6 +1064,7 @@ async function main() {
         "deploy",
         "--legacy",
         "--prod",
+        "--offline",
         "--config.node-linker=hoisted",
         "--config.auto-install-peers=false",
         "--config.link-workspace-packages=true",
