@@ -12,6 +12,7 @@ import {KnowledgeSkills} from '../packages/harness-overlay/src/host/knowledge-sk
 import {createKnowledgeSkillsPanel} from '../packages/harness-overlay/src/client/memory/knowledge-skills-panel.ts';
 import {installPanelDisclosure} from '../packages/harness-overlay/src/client/host/panel-disclosure.ts';
 const settle=async()=>{for(let i=0;i<5;i++)await setImmediate();};
+const waitFor=async(predicate)=>{const deadline=Date.now()+5000;while(!predicate()){assert.ok(Date.now()<deadline,'File-backed UI action did not finish');await new Promise(resolve=>setTimeout(resolve,10));}};
 const click=(root,text)=>[...root.querySelectorAll('button')].find(b=>b.textContent===text).click();
 
 async function catalogFixture(){
@@ -44,10 +45,10 @@ test('Skills editor saves a portable workflow, preserves a stale draft and requi
   const panel=createKnowledgeSkillsPanel(root,()=>saved++);root.querySelector('main').append(panel.pane);t.after(async()=>{panel.dispose();dom.window.close();await rm(directory,{recursive:true,force:true});});await panel.show();click(root,'New skill');
   const title=root.querySelector('form>label input'),description=root.querySelectorAll('form>label input')[1],instructions=root.querySelector('textarea');title.value='Check a source';title.dispatchEvent(new dom.window.Event('input'));description.value='Before citing a page';instructions.value='Read the original and verify the date.';
   assert.equal(panel.canLeave(),false);root.querySelector('form').dispatchEvent(new dom.window.Event('submit',{cancelable:true}));
-  for(let i=0;i<30&&saved===0;i++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(saved,1);const original=await skills.read('check-a-source');assert.ok(original);assert.equal(panel.canLeave(),true);
-  root.querySelector('.knowledge-skill-list button').click();for(let i=0;i<30&&root.querySelector('form').hidden;i++)await new Promise(resolve=>setTimeout(resolve,10));
+  await waitFor(()=>saved!==0);assert.equal(saved,1);const original=await skills.read('check-a-source');assert.ok(original);assert.equal(panel.canLeave(),true);
+  root.querySelector('.knowledge-skill-list button').click();await waitFor(()=>!root.querySelector('form').hidden);
   await skills.save({...original,content:'Changed outside this editor.',expectedHash:original.hash});instructions.value='Keep my draft.';instructions.dispatchEvent(new dom.window.Event('input',{bubbles:true}));root.querySelector('form').dispatchEvent(new dom.window.Event('submit',{cancelable:true}));await settle();
-  for(let i=0;i<30&&root.querySelector('button[type=submit]').disabled;i++)await new Promise(resolve=>setTimeout(resolve,10));
+  await waitFor(()=>!root.querySelector('button[type=submit]').disabled);
   assert.match(root.querySelector('[role=status]').textContent,/changed/);assert.equal(instructions.value,'Keep my draft.');assert.equal(panel.canLeave(),false);click(root,'Discard changes');assert.equal(panel.canLeave(),true);assert.equal((await skills.read('check-a-source')).content,'Changed outside this editor.\n');
 });
 
