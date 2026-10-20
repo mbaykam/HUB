@@ -57,10 +57,41 @@ export type OpenRouterUsage =
   | { readonly state: "not-configured" }
   | { readonly state: "error"; readonly message: string };
 
+type ProviderUsageUnavailable =
+  | { readonly state: "not-configured" }
+  | { readonly state: "error"; readonly message: string };
+
+export type UnlidUsage = ProviderUsageUnavailable | {
+  readonly state: "ready";
+  readonly balance: number;
+  readonly held: number;
+  readonly available: number;
+  readonly usageMonthly: number;
+  readonly account?: { readonly totalCredits: number; readonly totalUsage: number };
+  readonly warning?: string;
+};
+
+export interface SpeechUsagePeriod {
+  readonly costUsd: number;
+  readonly requests: number;
+  readonly inputAudioMs: number;
+  readonly outputAudioMs: number;
+}
+
+export type SonioxUsage = ProviderUsageUnavailable | {
+  readonly state: "ready";
+  readonly today: SpeechUsagePeriod;
+  readonly last7Days: SpeechUsagePeriod;
+  readonly month: SpeechUsagePeriod;
+  readonly models: readonly { readonly id: string; readonly month: SpeechUsagePeriod }[];
+};
+
 export interface MinkeUsageSnapshot {
   readonly updatedAt: string;
   readonly codex: CodexUsage;
   readonly openRouter: OpenRouterUsage;
+  readonly unlid: UnlidUsage;
+  readonly soniox: SonioxUsage;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -255,6 +286,40 @@ export function parseOpenRouterUsage(value: unknown): OpenRouterUsage {
   };
 }
 
+function providerUnavailable(value: Record<string, unknown>): ProviderUsageUnavailable | undefined {
+  if (value.state === "not-configured") return { state: "not-configured" };
+  if (value.state === "error") return { state: "error", message: text(value.message, "Provider usage error") };
+  if (value.state !== "ready") throw new TypeError("Provider usage state is invalid");
+}
+
+export function parseUnlidUsage(value: unknown): UnlidUsage {
+  const usage = record(value, "Unlid usage"), unavailable = providerUnavailable(usage);
+  if (unavailable) return unavailable;
+  const account = usage.account === undefined ? undefined : record(usage.account, "Unlid account");
+  return {
+    state: "ready", balance: amount(usage.balance, "Unlid balance"), held: amount(usage.held, "Unlid holds"),
+    available: amount(usage.available, "Unlid available balance"), usageMonthly: amount(usage.usageMonthly, "Unlid monthly spend"),
+    ...(account ? { account: { totalCredits: amount(account.totalCredits, "Unlid credits"), totalUsage: amount(account.totalUsage, "Unlid total spend") } } : {}),
+    ...(usage.warning === undefined ? {} : { warning: text(usage.warning, "Unlid warning") }),
+  };
+}
+
+function speechPeriod(value: unknown): SpeechUsagePeriod {
+  const period = record(value, "Speech usage period");
+  const requests = amount(period.requests, "Speech requests");
+  if (!Number.isSafeInteger(requests)) throw new TypeError("Speech request count is invalid");
+  return { costUsd: amount(period.costUsd, "Speech cost"), requests,
+    inputAudioMs: amount(period.inputAudioMs, "Speech input duration"), outputAudioMs: amount(period.outputAudioMs, "Speech output duration") };
+}
+
+export function parseSonioxUsage(value: unknown): SonioxUsage {
+  const usage = record(value, "Soniox usage"), unavailable = providerUnavailable(usage);
+  if (unavailable) return unavailable;
+  if (!Array.isArray(usage.models) || usage.models.length > 256) throw new TypeError("Soniox models are invalid");
+  return { state: "ready", today: speechPeriod(usage.today), last7Days: speechPeriod(usage.last7Days), month: speechPeriod(usage.month),
+    models: usage.models.map(value => { const model = record(value, "Soniox model"); return { id: text(model.id, "Soniox model id"), month: speechPeriod(model.month) }; }) };
+}
+
 /** Validate all data before it reaches either side of the browser boundary. */
 export function parseMinkeUsageSnapshot(value: unknown): MinkeUsageSnapshot {
   const snapshot = record(value, "HUB usage snapshot");
@@ -266,5 +331,7 @@ export function parseMinkeUsageSnapshot(value: unknown): MinkeUsageSnapshot {
     updatedAt,
     codex: parseCodexUsage(snapshot.codex),
     openRouter: parseOpenRouterUsage(snapshot.openRouter),
+    unlid: parseUnlidUsage(snapshot.unlid ?? { state: "error", message: "Update your HUB host to see Unlid usage." }),
+    soniox: parseSonioxUsage(snapshot.soniox ?? { state: "error", message: "Update your HUB host to see Soniox usage." }),
   };
 }

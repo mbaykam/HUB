@@ -422,7 +422,7 @@ export function apply(
       installMinkeUsageHost({
         webServer: ctx.webServer,
         credentials: ctx.credentials,
-      }),
+      }, request => ctx.connection.requestRejection(request)),
     "minke-host: usage meter",
   );
   const capabilities: MinkeHostCapabilities = {

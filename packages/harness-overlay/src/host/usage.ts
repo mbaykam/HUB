@@ -11,6 +11,7 @@ import {
   type MinkeUsageSnapshot,
   type OpenRouterUsage,
 } from "../usage-contract.ts";
+import { readSonioxUsage, readUnlidUsage } from "./provider-usage.ts";
 
 const CODEX_STATUS_PATH = "/plugins/dsh-openai-codex/auth/status";
 const OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key";
@@ -283,14 +284,18 @@ export async function readCodexUsage(host: UsageHost): Promise<CodexUsage> {
 export async function readMinkeUsage(
   host: UsageHost,
 ): Promise<MinkeUsageSnapshot> {
-  const [codex, openRouter] = await Promise.all([
+  const [codex, openRouter, unlid, soniox] = await Promise.all([
     readCodexUsage(host),
     readOpenRouterUsage(host),
+    readUnlidUsage(host),
+    readSonioxUsage(host),
   ]);
   return parseMinkeUsageSnapshot({
     updatedAt: new Date().toISOString(),
     codex,
     openRouter,
+    unlid,
+    soniox,
   });
 }
 
@@ -308,11 +313,13 @@ function sendJson(
 }
 
 /** Register one secret-free, read-only endpoint for the mobile usage meter. */
-export function installMinkeUsageHost(host: UsageHost): () => void {
+export function installMinkeUsageHost(host: UsageHost, reject: (request: IncomingMessage) => 401 | 403 | undefined): () => void {
   return host.webServer.register({
     kind: "exact",
     path: MINKE_USAGE_ROUTE,
     async handler(request, response) {
+      const rejection = reject(request);
+      if (rejection) { sendJson(response, rejection, { error: "unauthorized" }); return; }
       if (request.method !== "GET" && request.method !== "HEAD") {
         response.writeHead(405, { allow: "GET, HEAD" });
         response.end();
@@ -322,7 +329,6 @@ export function installMinkeUsageHost(host: UsageHost): () => void {
         sendJson(response, 403, { error: "forbidden" });
         return;
       }
-      const snapshot = await readMinkeUsage(host);
       if (request.method === "HEAD") {
         response.writeHead(200, {
           "content-type": "application/json; charset=utf-8",
@@ -332,6 +338,7 @@ export function installMinkeUsageHost(host: UsageHost): () => void {
         response.end();
         return;
       }
+      const snapshot = await readMinkeUsage(host);
       sendJson(response, 200, snapshot);
     },
   });

@@ -4,6 +4,8 @@ import {
   type CodexUsage,
   type MinkeUsageSnapshot,
   type OpenRouterUsage,
+  type SonioxUsage,
+  type UnlidUsage,
 } from "../../usage-contract.ts";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -32,11 +34,12 @@ function formatPercent(value: number): string {
 }
 
 function formatUsd(value: number): string {
+  if (value > 0 && value < 0.000001) return "<$0.000001";
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: value >= 10 ? 2 : 3,
-    maximumFractionDigits: value >= 10 ? 2 : 4,
+    maximumFractionDigits: value >= 10 ? 2 : value < 0.01 ? 6 : 4,
   }).format(value);
 }
 
@@ -286,6 +289,51 @@ function renderOpenRouter(
   content.replaceChildren(...nodes);
 }
 
+function providerState(root: Document, content: HTMLElement, usage: UnlidUsage | SonioxUsage, setup: string): boolean {
+  const dot = content.closest("[data-minke-usage-card]")?.querySelector<HTMLElement>("[data-minke-usage-provider-dot]");
+  if (dot) dot.dataset.state = usage.state;
+  if (usage.state === "ready") return true;
+  content.replaceChildren(statusMessage(root, usage.state === "error" ? usage.message : setup, usage.state === "error" ? "warning" : "muted"));
+  return false;
+}
+
+function renderUnlid(root: Document, content: HTMLDivElement, usage: UnlidUsage): void {
+  if (!providerState(root,content,usage,"Unlid is not connected. Add its API key on your HUB host." ) || usage.state !== "ready") return;
+  const nodes: HTMLElement[] = [];
+  if (usage.account && usage.account.totalCredits > 0) nodes.push(progress(root,"Available credit",usage.available/usage.account.totalCredits*100,`${formatUsd(usage.available)} available`));
+  nodes.push(stats(root,[
+    {label:"Available",value:formatUsd(usage.available)}, {label:"Reserved",value:formatUsd(usage.held)},
+    {label:"Account balance",value:formatUsd(usage.balance)}, {label:"This month",value:formatUsd(usage.usageMonthly)},
+    ...(usage.account ? [{label:"Lifetime spend",value:formatUsd(usage.account.totalUsage)}, {label:"Total credits",value:formatUsd(usage.account.totalCredits)}] : []),
+  ]), statusMessage(root,"Provider-reported account totals, including usage outside HUB. Reservations are released when requests settle."));
+  if (usage.warning) nodes.push(statusMessage(root,usage.warning,"warning"));
+  content.replaceChildren(...nodes);
+}
+
+function formatAudio(milliseconds: number): string {
+  const seconds = milliseconds/1000;
+  if (seconds < 60) return `${new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(seconds)} sec`;
+  return `${new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(seconds/60)} min`;
+}
+
+function renderSoniox(root: Document, content: HTMLDivElement, usage: SonioxUsage): void {
+  if (!providerState(root,content,usage,"Connect Soniox in Settings → Speech to see usage.") || usage.state !== "ready") return;
+  const nodes: HTMLElement[] = [stats(root,[
+    {label:"Today",value:formatUsd(usage.today.costUsd)}, {label:"Last 7 days",value:formatUsd(usage.last7Days.costUsd)},
+    {label:"This month",value:formatUsd(usage.month.costUsd)}, {label:"Monthly requests",value:usage.month.requests.toLocaleString()},
+    {label:"Monthly audio input",value:formatAudio(usage.month.inputAudioMs)},
+    ...(usage.month.outputAudioMs>0 ? [{label:"Monthly audio output",value:formatAudio(usage.month.outputAudioMs)}] : []),
+  ])];
+  if (usage.models.length) {
+    const models = element(root,"details","data-hub-usage-models"), summary = element(root,"summary");summary.textContent="By model · this month";
+    models.append(summary,stats(root,usage.models.map(m=>({label:m.id,value:`${formatUsd(m.month.costUsd)} · ${m.month.requests.toLocaleString()} requests · ${formatAudio(m.month.inputAudioMs)} input`}))));
+    nodes.push(models);
+  } else nodes.push(statusMessage(root,"No completed Soniox usage is reported for this month."));
+  nodes.push(statusMessage(root,"Project totals use UTC dates and include other apps using this project. Active sessions appear after they finish. For your remaining credit balance, open Soniox billing."));
+  const consoleLink = element(root,"a");consoleLink.href="https://console.soniox.com/";consoleLink.target="_blank";consoleLink.rel="noopener noreferrer";consoleLink.textContent="Open Soniox billing";nodes.push(consoleLink);
+  content.replaceChildren(...nodes);
+}
+
 export class MobileUsageMeterRuntime {
   readonly #root: Document;
   readonly #view: UsageMeterView;
@@ -295,6 +343,8 @@ export class MobileUsageMeterRuntime {
   readonly #content: HTMLDivElement;
   readonly #codexContent: HTMLDivElement;
   readonly #openRouterContent: HTMLDivElement;
+  readonly #unlidContent: HTMLDivElement;
+  readonly #sonioxContent: HTMLDivElement;
   readonly #refreshButton: HTMLButtonElement;
   readonly #updated: HTMLParagraphElement;
   #controller: AbortController | undefined;
@@ -343,7 +393,9 @@ export class MobileUsageMeterRuntime {
       "OpenRouter",
       "Shared API-key spend",
     );
-    providers.append(codex.card, openRouter.card);
+    const unlid = providerCard(root,"Unlid","Account credits and spend");
+    const soniox = providerCard(root,"Soniox","Speech usage · project totals · UTC");
+    providers.append(codex.card, openRouter.card, unlid.card, soniox.card);
     const updated = element(root, "p", "data-minke-usage-updated");
     updated.setAttribute("role", "status");
     updated.setAttribute("aria-live", "polite");
@@ -356,6 +408,8 @@ export class MobileUsageMeterRuntime {
     this.#content = content;
     this.#codexContent = codex.content;
     this.#openRouterContent = openRouter.content;
+    this.#unlidContent = unlid.content;
+    this.#sonioxContent = soniox.content;
     this.#refreshButton = refresh;
     this.#updated = updated;
   }
@@ -434,6 +488,8 @@ export class MobileUsageMeterRuntime {
     const loading = () => statusMessage(this.#root, "Loading usage…");
     this.#codexContent.replaceChildren(loading());
     this.#openRouterContent.replaceChildren(loading());
+    this.#unlidContent.replaceChildren(loading());
+    this.#sonioxContent.replaceChildren(loading());
     this.#updated.textContent = "";
   }
 
@@ -444,6 +500,8 @@ export class MobileUsageMeterRuntime {
       this.#openRouterContent,
       snapshot.openRouter,
     );
+    renderUnlid(this.#root,this.#unlidContent,snapshot.unlid);
+    renderSoniox(this.#root,this.#sonioxContent,snapshot.soniox);
     this.#lastUpdatedAt = Date.parse(snapshot.updatedAt);
     this.#updated.textContent = `Updated ${new Intl.DateTimeFormat(undefined, {
       hour: "numeric",
@@ -455,6 +513,8 @@ export class MobileUsageMeterRuntime {
     const failure = () => statusMessage(this.#root, message, "warning");
     this.#codexContent.replaceChildren(failure());
     this.#openRouterContent.replaceChildren(failure());
+    this.#unlidContent.replaceChildren(failure());
+    this.#sonioxContent.replaceChildren(failure());
     this.#updated.textContent = "Pull down the panel or tap refresh to retry.";
   }
 

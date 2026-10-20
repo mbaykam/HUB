@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+
+- Add Unlid account credit and spending trackers and Soniox project cost,
+  request and audio-duration trackers in Settings → HUB → Usage.
+- Preserve visible balances during partial provider failures, distinguish
+  unavailable readings from zero usage, and retain precision for small charges.
+- Explain usage scope, UTC speech periods and the Soniox billing link.
+
 ## 1.4.0
 
 - Add Soniox streaming recognition setup in global Speech settings, with host

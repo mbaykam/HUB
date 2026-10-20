@@ -1104,7 +1104,8 @@ html[data-minke-mobile-web] [data-minke-usage-stats] dt {
   color: var(--dsw-alias-label-secondary);
   font-size: 10px;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 html[data-minke-mobile-web] [data-minke-usage-stats] dd {
@@ -1115,6 +1116,21 @@ html[data-minke-mobile-web] [data-minke-usage-stats] dd {
   font-weight: 620;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+html[data-minke-mobile-web] [data-hub-usage-models] summary {
+  padding-block: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+html[data-minke-mobile-web] [data-hub-usage-models] [data-minke-usage-stats] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+html[data-minke-mobile-web] [data-hub-usage-models] dd {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 html[data-minke-mobile-web] [data-minke-usage-message] {
