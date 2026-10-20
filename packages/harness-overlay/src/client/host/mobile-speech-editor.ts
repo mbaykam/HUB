@@ -9,7 +9,7 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   if(panel instanceof view.HTMLDetailsElement){panel.open=!!seed;panel.append(el("summary","Speech & languages"));}
   const status = el("p"); status.setAttribute("role", "status");
   const field = (text: string, input: HTMLElement) => { const label = el("label"); label.append(el("span", text), input); panel.append(label); input.setAttribute("aria-label", text); };
-  const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = !!seed; field("Enable local speech", enabled);
+  const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = !!seed; field("Enable speech", enabled);
   const stt = el("select"); field("Speech recognition model", stt);
   const language = el("select"); for (const [id, text] of [["auto", "Automatic · all model languages"], ["en-tr", "English + Türkçe only"], ["en", "English"], ["tr", "Türkçe"]]) { const n = el("option", text); n.value = id!; language.append(n); }
   language.value = seed?.stt.language ?? (seed?.stt.model.endsWith(".en") ? "en" : "auto"); field("Recognition language", language);
@@ -25,7 +25,7 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   const turkish = button("▶ Türkçe · DFKI voice", () => void audition("tr")); panel.append(turkish);
   const voiceMapping = el("p"); voiceMapping.setAttribute("data-speech-voice-mapping", ""); panel.append(voiceMapping);
   let audio = el("audio"); audio.controls = true; audio.hidden = true; audio.setAttribute("playsinline", ""); panel.append(audio, status);
-  panel.append(el("p", "Speech stays on your PC. Automatic mode detects each utterance and switches the spoken language by sentence. Changes apply to the next call."));
+  panel.append(el("p", "Local engines run on your PC. Soniox sends foreground audio to its speech service; Background uses a local wake word model and closes the paid stream. Changes apply to the next call."));
   const models = el("details"); models.append(el("summary", "Install speech models")); const downloads = el("div"); models.append(downloads); panel.append(models);
   let catalog: LocalSpeechCatalog | undefined, selectedVoice = seed?.tts.voice ?? "F5", poll: number | undefined, samplePoll: number | undefined;
   const samples = new Map<string, { url: string; audio: HTMLAudioElement }>(), flights = new Map<string, Promise<void>>();
@@ -38,8 +38,24 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   for(const [title,input] of [["Wait for my call",idle],["Wake phrases (up to 3, separated by commas)",phrases],["Recent background context",recent]] as const){const label=el("label");label.append(el("span",title),input);input.setAttribute("aria-label",title);listening.append(label);}
   listening.append(el("p","In Background, recognition stays local and sends no model requests. Say a wake phrase at the start of a sentence, or press Resume. Optional recent context stays briefly in memory before wake; at most 1,024 characters are sent once on wake as labeled background context, not as your message or a personal memory. This mode keeps an open call; it does not override your phone’s background microphone restrictions."));
   if(options.global)panel.append(listening);
+  let connectionPanel:HTMLDetailsElement|undefined;
+  if(options.global){
+    const connection=el("details"),connectionStatus=el("p"),secret=el("input");
+    connectionPanel=connection;
+    connection.append(el("summary","Soniox connection"));connectionStatus.setAttribute("role","status");
+    secret.type="password";secret.autocomplete="new-password";secret.maxLength=512;secret.setAttribute("aria-label","Soniox API key");secret.placeholder="Paste your Soniox API key";
+    const consoleLink=el("a","Open Soniox Console");consoleLink.href="https://console.soniox.com/";consoleLink.target="_blank";consoleLink.rel="noopener noreferrer";
+    const saveKey=button("Save API key",()=>void connectSoniox());
+    connection.append(connectionStatus,secret,saveKey,consoleLink,el("p","Uses your Soniox balance. The key is stored in HUB’s credential store and is never included in character prompts. Background closes the paid stream; Mute only disables your microphone."));
+    panel.insertBefore(connection,advanced);
+    async function connectionRequest(apiKey?:string){const response=await view.fetch("/api/hub/voice/soniox",{method:apiKey?"POST":"GET",credentials:"same-origin",cache:"no-store",headers:{"x-hub-speech-settings":"1",...(apiKey?{"content-type":"application/json"}:{})},body:apiKey?JSON.stringify({apiKey}):undefined,signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(15000)])});if(!response.ok)throw Error("Could not save the Soniox connection. Check the key and try again.");return response.json() as Promise<{configured:boolean}>;}
+    let connectionRevision=0;
+    async function connectSoniox(){const value=secret.value.trim();if(value.length<16){connectionStatus.textContent="Enter your Soniox API key first.";return;}connectionRevision++;saveKey.disabled=true;try{await connectionRequest(value);secret.value="";connectionStatus.textContent="Key saved; connection not yet tested. Choose Soniox below and save speech settings for your next call.";await load();updateBackground();}catch(e){if(!lifetime.signal.aborted)connectionStatus.textContent=(e as Error).message;}finally{saveKey.disabled=false;}}
+    void connectionRequest().then(value=>{if(!lifetime.signal.aborted&&!connectionRevision){connection.open=!value.configured;connectionStatus.textContent=value.configured?"API key saved. Usage is charged to Soniox when a foreground call starts.":"Add an API key to enable Soniox. Local speech remains available.";}}).catch(()=>{if(!lifetime.signal.aborted&&!connectionRevision)connectionStatus.textContent="Connection settings could not load. Reopen Speech to retry.";});
+    lifetime.signal.addEventListener("abort",()=>{secret.value="";},{once:true});
+  }
   if(options.voiceOnly){enabled.checked=true;enabled.parentElement!.remove();language.parentElement!.remove();outputLanguage.parentElement!.remove();advanced.remove();panel.append(el("p","Speech engines and language detection are shared. Change them in Settings → Speech. This character only chooses a voice."));}
-  if(options.global){enabled.checked=true;enabled.parentElement!.remove();advanced.open=true;panel.insertBefore(advanced,voiceHeading);const defaultVoice=el("details");defaultVoice.append(el("summary","Default voice"),voiceHeading,voices,turkish,voiceMapping);panel.insertBefore(defaultVoice,audio);}
+  if(options.global){enabled.checked=true;enabled.parentElement!.remove();advanced.open=true;panel.insertBefore(advanced,voiceHeading);if(connectionPanel)panel.insertBefore(connectionPanel,advanced);const defaultVoice=el("details");defaultVoice.append(el("summary","Default voice"),voiceHeading,voices,turkish,voiceMapping);panel.insertBefore(defaultVoice,audio);}
   const key = (item: { engine: string; model: string }) => `${item.engine}:${item.model}`;
   let initialStt = seed ? key(seed.stt) : "nemotron:3.5-560ms", initialTts = seed ? key(seed.tts) : "supertonic:supertonic-3";
   function ttsValue(voice = selectedVoice): LocalSpeechConfig["tts"] {
@@ -113,12 +129,12 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
   function renderCatalog() {
     if (!catalog) return; const wantedStt = stt.value || initialStt, wantedTts = engine.value || initialTts;
     stt.replaceChildren(); engine.replaceChildren();
-    for (const item of catalog.stt) { const n = el("option", `${item.engine === "nemotron" ? "Nemotron 3.5 · live English / Türkçe" : `Whisper ${item.model} · ${item.model.endsWith(".en") ? "English only" : "multilingual"}`}${item.available ? "" : " · install first"}`); n.value = key(item); n.disabled = !item.available; stt.append(n); }
+    for (const item of catalog.stt) { const n = el("option", `${item.engine === "soniox" ? "Soniox · multilingual cloud + local wake" : item.engine === "nemotron" ? "Nemotron 3.5 · live English / Türkçe" : `Whisper ${item.model} · ${item.model.endsWith(".en") ? "English only" : "multilingual"}`}${item.available ? "" : item.engine==="soniox"?" · setup needed":" · install first"}`); n.value = key(item); n.disabled = !item.available; stt.append(n); }
     for (const item of catalog.tts) { const n = el("option", `${item.engine === "supertonic" ? "Supertonic 3 · same voice in English / Türkçe" : item.engine === "bilingual" ? "Automatic · Kokoro English + Piper Türkçe" : item.engine === "kokoro" ? "Kokoro · English" : `Piper · ${item.model.startsWith("tr_") ? "Türkçe" : "English"}`}${item.available ? "" : " · install first"}`); n.value = key(item); engine.append(n); }
     stt.value = wantedStt; engine.value = wantedTts; renderVoices(); void warmSamples(); downloads.replaceChildren();
     for (const item of [...catalog.stt, ...catalog.tts]) {
-      if (item.available || !item.downloadable || !["whisper", "piper", "supertonic", "nemotron"].includes(item.engine)) continue;
-      const install = button(`Install ${item.model}`, () => void download({ engine: item.engine, model: item.model })); downloads.append(install);
+      if (item.available || !item.downloadable || !["whisper", "piper", "supertonic", "nemotron", "soniox"].includes(item.engine)) continue;
+      const install = button(item.engine==="soniox"?"Install local wake listener":`Install ${item.model}`, () => void download({ engine: item.engine, model: item.model })); downloads.append(install);
     }
     if (!downloads.childElementCount) downloads.append(el("p", "All supported downloadable models are installed."));
   }
@@ -139,8 +155,10 @@ export function createSpeechEditor(root: Document, seed: LocalSpeechConfig | nul
     } catch (error) { if (!lifetime.signal.aborted) status.textContent = (error as Error).message; }
   }
   engine.addEventListener("change", () => { const item = catalog?.tts.find(item => key(item) === engine.value); if (!item?.voices.some(id => id === selectedVoice)) selectedVoice = item?.engine === "supertonic" ? "F5" : item?.voices[0] ?? ""; audio.pause(); renderVoices(); void warmSamples(); });
+  const updateBackground=()=>{const cloud=stt.value.startsWith("soniox:");recent.disabled=cloud;listening.lastElementChild!.textContent=cloud?"Background closes Soniox and listens locally only for your wake phrase. Nearby conversations are not transcribed in this mode. Resume also returns to Soniox. The call stays connected; phone microphone restrictions still apply.":"In Background, recognition stays local and sends no model requests. Optional recent context stays briefly in memory and is sent once on wake as labeled background context. The call stays connected; phone microphone restrictions still apply.";};
+  stt.addEventListener("change",updateBackground);
   status.textContent = "Loading local speech models…";
-  void load().then(() => { status.textContent = "Listen to a sample before choosing a voice."; }).catch(error => { if (!lifetime.signal.aborted) status.textContent = error.message; });
+  void load().then(() => { updateBackground();status.textContent = "Listen to a sample before choosing a voice."; }).catch(error => { if (!lifetime.signal.aborted) status.textContent = error.message; });
   return { panel, value(): LocalSpeechConfig | null {
     if(options.voiceOnly&&!catalog)return seed;
     if (!enabled.checked) return null;

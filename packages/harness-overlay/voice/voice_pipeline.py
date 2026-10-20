@@ -10,7 +10,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import UserTurnStrategies, ExternalUserTurnStrategies
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.services.kokoro.tts import KokoroTTSService
@@ -34,7 +34,10 @@ def prepare_voice_models(speech=None):
     speech = speech or DEFAULT_SPEECH
     stt_model, _, _, _ = resolve_speech(speech)
     def recognition():
-        if speech['stt']['engine']=='nemotron':
+        if speech['stt']['engine']=='soniox':
+            from wake_word import LocalWakeDetector
+            LocalWakeDetector(speech.get('attention',{}).get('wakePhrases',['Vera']))
+        elif speech['stt']['engine']=='nemotron':
             from streaming_asr import StreamingRecognizer
             StreamingRecognizer(speech['stt'].get('language','auto'))
         else:
@@ -60,11 +63,11 @@ def prepare_voice_models(speech=None):
         for future in futures:future.result()
 
 
-def voice_user_turn_params():
+def voice_user_turn_params(cloud=False):
     """Keep a short thinking pause inside the caller's current utterance."""
     return LLMUserAggregatorParams(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(confidence=0.5, start_secs=0.08, stop_secs=0.8, min_volume=0.0)),
-        user_turn_strategies=UserTurnStrategies(
+        user_turn_strategies=ExternalUserTurnStrategies(enable_interruptions=False) if cloud else UserTurnStrategies(
             start=[MinWordsUserTurnStartStrategy(min_words=1, use_interim=False)],
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=.2)]),
     )
@@ -77,7 +80,7 @@ def voice_user_turn_params():
 CALL_OUTPUT_SAMPLE_RATE = 48000
 
 
-def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, transport=None) -> PipelineWorker:
+def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, transport=None, soniox_api_key=None) -> PipelineWorker:
     """Build one call; the sidecar owns its runner and releases models on exit."""
     stt_model, tts_voice, model_path, voices_path = resolve_speech(speech or DEFAULT_SPEECH)
     speech = speech or DEFAULT_SPEECH
@@ -91,7 +94,11 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     health.attention = attention
     gate = PlaybackGate()
     health.playback_gate = gate
-    if speech['stt']['engine']=='nemotron':
+    if speech['stt']['engine']=='soniox':
+        from soniox_stt import SonioxWakeSTTService
+        stt = SonioxWakeSTTService(speech['stt'], api_key=soniox_api_key,
+            attention=attention, health=health, playback_gate=gate)
+    elif speech['stt']['engine']=='nemotron':
         from native_streaming_stt import LocalStreamingSTTService
         stt = LocalStreamingSTTService(speech['stt'], health=health, playback_gate=gate)
     else:
@@ -119,7 +126,7 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     llm = HubNativeLLMService(bridge, health=health)
     context = LLMContext()
     user, assistant = LLMContextAggregatorPair(
-        context, user_params=voice_user_turn_params(),
+        context, user_params=voice_user_turn_params(speech['stt']['engine']=='soniox'),
     )
     post_stt_guard = PlaybackInputGuard(gate, mask_audio=False)
     worker = PipelineWorker(
@@ -148,8 +155,11 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     async def set_attention(mode):
         # A deliberate pause stops current foreground speech but keeps the
         # native conversation, delegated work, call and warm model weights.
+        if speech['stt']['engine']=='soniox':
+            await stt.set_attention(mode)
+        else:
+            attention.set_mode(mode)
         await interrupt_voice()
-        attention.set_mode(mode)
         health.partial_text = ''
         health.user_speaking = False
         return attention.snapshot()

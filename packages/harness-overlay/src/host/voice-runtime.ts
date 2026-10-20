@@ -8,6 +8,7 @@ import { startVoiceSidecar, VoiceSidecarCleanupError, type VoiceSidecar, type Vo
  * weights; closing this owner confirms whole-process termination. */
 export function createPreparedVoiceRuntime(subprocess: VoiceSubprocess, config: {
   python: string; script: string; bridgeUrl: string; bridgeToken: string;
+  sonioxKey?(): Promise<string | undefined>;
 }, signal: AbortSignal, ports: { start?: typeof startVoiceSidecar } = {}) {
   let process: VoiceSidecar | undefined;
   let starting: Promise<VoiceSidecar> | undefined;
@@ -50,7 +51,10 @@ export function createPreparedVoiceRuntime(subprocess: VoiceSubprocess, config: 
       try {
         owned = await ensure(normalized);
         if (!owned.requestCall) throw new Error("Voice runtime does not support isolated calls");
-        const result = await owned.request("/admit", "POST", { callId, token: capability.token, speech: normalized }, requestSignal);
+        const sonioxKey = normalized.stt.engine === "soniox" ? await config.sonioxKey?.() : undefined;
+        if (normalized.stt.engine === "soniox" && !sonioxKey) throw new Error("Connect Soniox in Settings → Speech before starting a call");
+        const result = await owned.request("/admit", "POST", { callId, token: capability.token, speech: normalized,
+          ...(sonioxKey ? { sonioxKey } : {}) }, requestSignal);
         if (result.status !== 200 || result.body.ok !== true) throw new Error("Voice runtime could not admit this call");
         if (relay.length) {
           const configured = await owned.requestCall(capability, "/ice", "POST", { iceServers: relay }, requestSignal);

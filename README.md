@@ -64,7 +64,7 @@ find, inspect and update.
 
 | Capability | How it works |
 | --- | --- |
-| **Multilingual voice** | Local speech recognition and synthesis, language detection, prepared voice samples and a live transcript. Available languages depend on the selected engines. |
+| **Multilingual voice** | Local recognition or optional Soniox streaming, local synthesis, prepared voice samples and a live transcript. Available languages depend on the selected engines. See [voice setup](docs/voice.md). |
 | **Photos and files** | Add attachments in the PWA composer. During voice, open Camera and share one still photo with HUB while the voice assistant keeps the conversation open. Originals stay linked to their conversation. See [uploads and camera](docs/UPLOADS_AND_CAMERA.md). |
 | **Telegram** | Paired text conversations with replies updated in place. An optional, separate Telegram user account provides incoming voice calls. |
 | **Characters and delegation** | Choose a model, voice and tool policy for each character. A fast voice companion can hand deeper work to HUB while preserving the native task history. |
@@ -115,7 +115,7 @@ provision accounts. Follow the [setup guide](docs/setup.md) and the
 flowchart LR
     PWA[Mobile PWA] <--> Sessions[Conversations and tasks]
     Telegram[Telegram] <--> HUB[HUB · main assistant]
-    Voice[Local speech] <--> Companion[Voice companion]
+    Voice[Speech recognition + local voice] <--> Companion[Voice companion]
     Companion -->|Delegate| HUB
     HUB <--> Sessions
     Companion <--> Sessions
@@ -131,7 +131,8 @@ flowchart LR
 ```
 
 Your conversations, vault and local speech stay on the host. Prompts and tool
-results reach the language-model provider you select; Telegram and web browsing
+results reach the language-model provider you select; optional Soniox recognition
+sends foreground microphone audio to Soniox. Telegram and web browsing
 use their respective services. Local storage does not make a cloud model offline.
 Accounts, credentials, personal records and model weights are excluded from this
 repository. See [SECURITY.md](SECURITY.md).

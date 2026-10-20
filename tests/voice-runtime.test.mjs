@@ -5,6 +5,18 @@ import { VoiceSidecarCleanupError } from "@minke/harness-overlay/host/voice-side
 
 const speech = { stt: { engine: "whisper", model: "tiny.en" }, tts: { engine: "kokoro", model: "82m", voice: "af_heart" } };
 const config = { python: "C:/fixture/python.exe", script: "C:/fixture/runtime.py", bridgeUrl: "http://127.0.0.1:9000", bridgeToken: "b".repeat(43) };
+
+test('Soniox credentials are resolved per call and never travel to browser-scoped requests',async()=>{
+ const requests=[],process={done:new Promise(()=>{}),async request(path,method,body){requests.push({path,body});return {status:200,body:{ok:true}};},async requestCall(cap,path,method,body){requests.push({path,body,scoped:true});return {status:200,body:{ok:true}};},async stop(){}};
+ let key='fixture-key-first';
+ const pool=createPreparedVoiceRuntime({}, {...config,sonioxKey:async()=>key},new AbortController().signal,{start:async()=>process});
+ const cloud={...speech,stt:{engine:'soniox',model:'stt-rt-v5',language:'en-tr'}};
+ await pool.prepare(cloud);assert.equal(JSON.stringify(requests).includes(key),false);
+ const first=await pool.open('cloud-first',cloud,[],new AbortController().signal);assert.equal(requests.find(r=>r.path==='/admit').body.sonioxKey,key);
+ await first.request('/status','GET');await first.stop();key='fixture-key-second';
+ const second=await pool.open('cloud-second',cloud,[],new AbortController().signal);assert.equal(requests.filter(r=>r.path==='/admit').at(-1).body.sonioxKey,key);
+ assert.equal(JSON.stringify(requests.filter(r=>r.scoped)).includes('fixture-key'),false);await second.stop();await pool.close();
+});
 function fixture() {
   let starts = 0, stopped = 0, settle;
   const requests = [], scoped = [];

@@ -3,6 +3,34 @@ import assert from 'node:assert/strict';
 import { JSDOM } from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
 import { createSpeechEditor } from '@minke/harness-overlay/client/host/mobile-speech-editor.ts';
 
+test('Soniox setup is discoverable and keeps credentials out of speech settings',async()=>{
+ const dom=new JSDOM('<main></main>',{url:'https://hub.test',pretendToBeVisual:true}),view=dom.window;
+ view.HTMLMediaElement.prototype.load=()=>{};view.HTMLMediaElement.prototype.pause=()=>{};view.URL.createObjectURL=()=> 'blob:fixture';view.URL.revokeObjectURL=()=>{};
+ let configured=false,saved;
+ view.fetch=async(url,init)=>{
+  if(url.endsWith('/soniox')){if(init.method==='POST'){saved=JSON.parse(init.body);configured=true;}return Response.json({configured});}
+  if(url.endsWith('/catalog'))return Response.json({speech:{stt:[{engine:'nemotron',model:'3.5-560ms',available:true,reason:null},{engine:'soniox',model:'stt-rt-v5',available:configured,reason:configured?null:'Connect Soniox.'}],tts:[{engine:'supertonic',model:'supertonic-3',available:true,reason:null,voices:['F5']}]}});
+  return new Response(Buffer.alloc(48));
+ };
+ const seed={stt:{engine:'nemotron',model:'3.5-560ms',language:'en-tr'},tts:{engine:'supertonic',model:'supertonic-3',voice:'F5',language:'auto',steps:4},attention:{idleSeconds:120,wakePhrases:['Vera'],contextSeconds:60}};
+ const editor=createSpeechEditor(view.document,seed,{global:true});view.document.querySelector('main').append(editor.panel);
+ const wait=async predicate=>{for(let n=0;n<100&&!predicate();n++)await new Promise(r=>setTimeout(r,10));assert.ok(predicate());};
+ try{
+  const input=editor.panel.querySelector('[aria-label="Soniox API key"]');
+  await wait(()=>input.closest('details').open&&editor.panel.querySelector('option[value="soniox:stt-rt-v5"]'));
+  assert.equal(input.type,'password');assert.equal(editor.panel.querySelector('option[value="soniox:stt-rt-v5"]').disabled,true);
+  assert.deepEqual(editor.value(),seed);
+  input.value='fixture-private-key-123';[...editor.panel.querySelectorAll('button')].find(b=>b.textContent==='Save API key').click();
+  await wait(()=>input.value===''&&!editor.panel.querySelector('option[value="soniox:stt-rt-v5"]').disabled);
+  assert.deepEqual(saved,{apiKey:'fixture-private-key-123'});
+  const select=editor.panel.querySelector('[aria-label="Speech recognition model"]');select.value='soniox:stt-rt-v5';select.dispatchEvent(new view.Event('change'));
+  assert.deepEqual(editor.value().stt,{engine:'soniox',model:'stt-rt-v5',language:'en-tr'});assert.deepEqual(editor.value().tts,seed.tts);
+  assert.ok(editor.panel.querySelector('[aria-label="Recent background context"]').disabled);
+  assert.ok(!JSON.stringify(editor.value()).includes('fixture-private'));
+  input.value='unsaved-sensitive-text';editor.dispose();assert.equal(input.value,'');
+ }finally{editor.dispose();view.close();}
+});
+
 test('global recognition can be limited to English and Turkish without changing the output voice',async()=>{
  const dom=new JSDOM('<main></main>',{url:'http://localhost'}),view=dom.window;
  view.HTMLMediaElement.prototype.load=()=>{};view.HTMLMediaElement.prototype.pause=()=>{};view.URL.createObjectURL=()=> 'blob:fixture';view.URL.revokeObjectURL=()=>{};

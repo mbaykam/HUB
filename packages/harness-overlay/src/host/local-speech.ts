@@ -47,6 +47,7 @@ export async function readLocalSpeechCatalog(subprocess: VoiceSubprocess, python
 }
 
 export function validateLocalSpeech(catalog: LocalSpeechCatalog, speech: LocalSpeechConfig): void {
-  if (!catalog.stt.some(model => model.engine === speech.stt.engine && model.model === speech.stt.model && model.available)) throw new Error("The selected speech-to-text model is not installed on the host PC");
+  const recognition=catalog.stt.find(model=>model.engine===speech.stt.engine&&model.model===speech.stt.model);
+  if (!recognition?.available) throw new Error(recognition?.reason??"The selected speech-to-text model is unavailable");
   if (!catalog.tts.some(model => model.engine === speech.tts.engine && model.model === speech.tts.model && model.available && model.voices.some(voice => voice === speech.tts.voice))) throw new Error("The selected text-to-speech model or voice is not installed on the host PC");
 }

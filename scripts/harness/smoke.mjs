@@ -684,6 +684,13 @@ async function main() {
       `staged product bundle ${productPackageName} does not match ${verified.productBundle.bundle.packageName}`,
     );
   }
+  // Voice imports are deferred until a call/catalog scan. Catch omitted Python
+  // modules here rather than treating a healthy JavaScript host as sufficient.
+  const productRoot = join(runtimeRoot, "node_modules", ...productPackageName.split("/"));
+  const productManifest = JSON.parse(await readFile(join(productRoot, "package.json"), "utf8"));
+  await Promise.all(productManifest.files.filter(file => /^voice\/[a-z_]+\.py$/u.test(file)).map(async file => {
+    if (!(await readFile(join(productRoot, file), "utf8")).trim()) throw new Error(`Empty speech module: ${file}`);
+  }));
   const temporaryRoot = await mkdtemp(join(tmpdir(), "dsh-runtime-smoke-"));
   const harnessHome = join(temporaryRoot, "home");
   const negativeHome = join(temporaryRoot, "negative-home");

@@ -109,7 +109,8 @@ async def main():
                 # Model loading can take several seconds on CPU. Keep MTProto
                 # cancellation updates and the host's health probe responsive.
                 await ensure_speech(admission["speech"])
-                worker = await asyncio.to_thread(build_voice_worker, None, bridge, admission["speech"], transport=transport)
+                worker = await asyncio.to_thread(build_voice_worker, None, bridge, admission["speech"], transport=transport,
+                                                soniox_api_key=admission.get('sonioxKey'))
                 state["worker"] = worker
                 if state["cancelled"]:
                     raise RuntimeError("The caller hung up during voice preparation")

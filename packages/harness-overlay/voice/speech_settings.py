@@ -113,6 +113,16 @@ def english_voices():
 
 def speech_catalog():
     stt = []
+    from wake_word import wake_path
+    wake_available = False
+    if importlib.util.find_spec('faster_whisper') is not None:
+        try:
+            wake_path()
+            wake_available = True
+        except ValueError: pass
+    stt.append({'engine':'soniox','model':'stt-rt-v5','available':wake_available,
+        'downloadable':not wake_available and importlib.util.find_spec('faster_whisper') is not None,
+        'reason':None if wake_available else 'Install the local wake listener before using Soniox.'})
     runtime_stt = importlib.util.find_spec("faster_whisper") is not None
     for model in WHISPER_MODELS:
         available = False
@@ -187,7 +197,8 @@ def resolve_speech(value):
     stt, tts = value["stt"], value["tts"]
     if (not isinstance(stt, dict) or set(stt) - {"engine", "model", "language"}
             or not (stt.get('engine')=='whisper' and stt.get('model') in WHISPER_MODELS
-                    or stt.get('engine')=='nemotron' and stt.get('model')==NEMOTRON_MODEL)):
+                    or stt.get('engine')=='nemotron' and stt.get('model')==NEMOTRON_MODEL
+                    or stt.get('engine')=='soniox' and stt.get('model')=='stt-rt-v5')):
         raise ValueError("Unsupported local STT settings")
     if stt.get("language", "auto") not in ("auto", "en-tr", "en", "tr"):
         raise ValueError("Invalid speech language")
@@ -195,7 +206,11 @@ def resolve_speech(value):
         raise ValueError("Select a multilingual Whisper model for Turkish")
     if not isinstance(tts, dict):
         raise ValueError("Invalid local TTS settings")
-    stt_path = nemotron_path() if stt['engine']=='nemotron' else whisper_path(stt['model'])
+    if stt['engine']=='soniox':
+        from wake_word import wake_path
+        stt_path = wake_path()
+    else:
+        stt_path = nemotron_path() if stt['engine']=='nemotron' else whisper_path(stt['model'])
     if tts.get('engine') == 'supertonic':
         if (set(tts) - {'engine','model','voice','language','steps'} or tts.get('model') != 'supertonic-3'
                 or tts.get('voice') not in SUPERTONIC_VOICES

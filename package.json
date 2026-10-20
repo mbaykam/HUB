@@ -14,7 +14,7 @@
     "url": "https://github.com/mbaykam/HUB/issues"
   },
   "private": true,
-  "version": "1.3.3",
+  "version": "1.4.0",
   "packageManager": "pnpm@11.7.0",
   "main": ".vite/build/main.js",
   "scripts": {

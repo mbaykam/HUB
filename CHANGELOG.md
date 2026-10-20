@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0
+
+- Add Soniox streaming recognition setup in global Speech settings, with host
+  credential storage and multilingual recognition choices.
+- Close the paid stream in Background and on hangup. Use a bounded
+  local wake listener, preserve same-breath requests and discard ambient text.
+- Keep local voice synthesis and saved model/character choices. Provide a retry
+  path for speech connection and balance errors. Physical Soniox acceptance is
+  pending the user's key; this is a local candidate.
+
 ## 1.3.3
 
 - Keep character references independent of editable display names: expose roles

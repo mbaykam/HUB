@@ -2,13 +2,51 @@
 
 [Documentation](README.md) · [Setup](setup.md) · [Telegram](telegram.md)
 
-HUB uses a local speech pipeline around the configured voice character. Set shared
+HUB connects speech recognition and local voice synthesis around the configured voice character. Set shared
 engines and languages in **Settings → HUB → Speech**; choose each character’s
 voice in **Characters → Voice**. See [Settings](settings.md) for migration and model options.
 Speech recognition produces text for a normal native conversation. Public reply
 text reaches TTS incrementally; tool arguments and hidden reasoning are not
 spoken. A stronger HUB character can handle delegated tasks and return their
 results to the active call.
+
+## Soniox streaming recognition
+
+Open **Settings → HUB → Speech → Soniox connection** and enter your Soniox API
+key in the password field. It is stored by the host credential service, never
+returned to the browser or included in character instructions. Saving a key
+does not validate it with Soniox or start paid usage. Get a key and manage your
+balance in the [Soniox Console](https://console.soniox.com/).
+
+In **Speech models & engines**, select **Soniox · multilingual cloud + local
+wake**, choose the recognition languages and save the speech settings. If the
+local wake listener is missing, install it under **Install speech models** first.
+The listener uses the pinned multilingual Whisper base model with local Silero
+speech detection. Model licenses are separate from HUB. Existing local speech
+choices remain available; adding a key does not replace them automatically.
+
+During an active call, microphone audio streams to Soniox v5. Interim words
+appear live; its completed semantic utterance goes to the conversation model.
+The selected local TTS engine speaks the answer. Soniox uses its own account
+balance, independently of the conversation model provider. The current connector
+uses Soniox's global service endpoint; keys scoped to other regions require a
+matching regional connector.
+
+**Background** closes the paid Soniox connection. A local listener checks short
+speech prefixes for the configured wake phrase; unrelated text is discarded and
+no ambient transcript or model request is created. This replaces the optional
+recent-background-context behavior while Soniox is selected. A bounded three
+seconds of audio stays in RAM to retain a command spoken with the wake phrase.
+Say the phrase at the beginning of a sentence, or press **Resume**. Background
+and hangup close the cloud stream. **Mute** only disables the PWA microphone;
+use **Background** to stop the paid stream while keeping the call. A connection or balance failure returns to
+local waiting with a retry message rather than reconnecting on every audio frame.
+
+An open foreground stream can incur Soniox usage even in silence. Check the
+provider's [current billing details](https://soniox.com/pricing). Browser
+microphone restrictions still apply when the phone locks or the PWA is hidden.
+Local synthetic checks and protocol fixtures do not replace a real phone test
+of wake reliability, recognition quality, echo and latency.
 
 New voice conversations receive topic titles from their first substantive user
 utterances, skipping greetings and microphone checks. This needs no additional
@@ -58,7 +96,7 @@ stack; availability and settings are shown in the speech editor.
 
 Voice previews read prepared local recordings rather than starting a new
 inference on each click. A fresh installation needs the models and samples
-prepared first. Engine/model selection remains in character settings, keeping
+prepared first. Engine/model selection remains in global Speech settings, keeping
 the active voice interface focused on the conversation.
 
 ## What streams

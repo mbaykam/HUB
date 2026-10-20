@@ -173,6 +173,7 @@ const taskFiles = Object.freeze({
     "voice-sidecar.test.mjs",
     "voice-runtime.test.mjs",
     "voice-registration.test.mjs",
+    "soniox-credentials.test.mjs",
     "voice-web.test.mjs",
     "voice-session.test.mjs",
     "voice-history-tool.test.mjs",

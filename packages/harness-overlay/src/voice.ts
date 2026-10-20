@@ -25,12 +25,14 @@ import { voiceTranscript } from "./host/voice-transcript.ts";
 import { createPreparedVoiceRuntime } from "./host/voice-runtime.ts";
 import {installVoiceTitles} from "./host/voice-titles.ts";
 import {prepareVoiceShare} from "./host/voice-media.ts";
+import {createSonioxCredentialsHandler,type SpeechCredentials} from "./host/soniox-credentials.ts";
 
 export const name = "hub-voice";
-export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess"];
+export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess", "credentials"];
 export interface Config { python: string; provider: string; model: string; reasoningEffort?: string; iceServers?: VoiceIceServer[]; taskModel?: VoiceModelRoute; telegramCallAccount?: string }
 interface Context extends NativeVoiceContext {
   hubCharacters: HubCharacters;
+  credentials?: SpeechCredentials;
   on: NativeVoiceContext["on"] & TaskPolicyContext["on"];
   agents: NativeVoiceContext["agents"] & TaskPolicyContext["agents"];
   llm: VoiceModelCatalog & {
@@ -77,7 +79,11 @@ export function apply(ctx: Context, config: Config): void {
     if (!fresh && speechCache && Date.now() - speechCache.at < 30000) return Promise.resolve(speechCache.value);
     const generation = speechGeneration;
     speechFlight ??= readLocalSpeechCatalog(ctx.subprocess, config.python, fileURLToPath(new URL("../voice/speech_settings.py", import.meta.url)), lifetime.signal)
-      .then(value => { if (generation === speechGeneration) speechCache = { at: Date.now(), value }; return value; })
+      .then(async value => {
+        const configured=!!(await ctx.credentials?.resolve("SONIOX_API_KEY"))?.value;
+        for(const item of value.stt) if(item.engine==="soniox"&&!configured){item.available=false;item.reason="Connect Soniox in Settings → Speech.";}
+        if (generation === speechGeneration) speechCache = { at: Date.now(), value }; return value;
+      })
       .catch(error => { if (error instanceof VoiceSidecarCleanupError) cleanupUncertain = true; throw error; })
       .finally(() => { speechFlight = undefined; });
     return speechFlight.then(value => generation === speechGeneration ? value : speechCatalog(true));
@@ -110,13 +116,15 @@ export function apply(ctx: Context, config: Config): void {
     }); }, { async incoming() {
       if (!web || !telegramListener || lifetime.signal.aborted) throw new Error("Telegram call admission is unavailable");
       const call = await web.openTelegram();
-      return { callId: call.callId, speech: call.speech };
+      const sonioxKey=call.speech?.stt.engine==="soniox"?(await ctx.credentials?.resolve("SONIOX_API_KEY"))?.value:undefined;
+      return { callId: call.callId, speech: call.speech, ...(sonioxKey?{sonioxKey}:{}) };
     } });
     bridge = localBridge;
     if (lifetime.signal.aborted) { await localBridge.dispose(); return; }
     preparedRuntime = createPreparedVoiceRuntime(ctx.subprocess, { python: config.python,
       script: fileURLToPath(new URL("../voice/runtime_server.py", import.meta.url)),
-      bridgeUrl: localBridge.url, bridgeToken: localBridge.token }, lifetime.signal);
+      bridgeUrl: localBridge.url, bridgeToken: localBridge.token,
+      sonioxKey:async()=>(await ctx.credentials?.resolve("SONIOX_API_KEY"))?.value }, lifetime.signal);
     const selectedSpeech = () => {
       return ctx.hubCharacters.speechFor();
     };
@@ -248,6 +256,10 @@ export function apply(ctx: Context, config: Config): void {
       send(200,saved);
     }catch(e){send(e instanceof SpeechSettingsConflict?409:400,{error:e instanceof SpeechSettingsConflict?"revision-conflict":"invalid-speech-settings"});}
   }}));
+  off.push(ctx.webServer.register({kind:"exact",path:"/api/hub/voice/soniox",handler:createSonioxCredentialsHandler({
+    credentials:ctx.credentials,reject:req=>ctx.connection.requestRejection(req),
+    changed(){speechGeneration++;speechCache=undefined;},
+  })}));
   off.push(ctx.webServer.register({ kind: "exact", path: "/api/hub/voice/speech-models",
     handler: createSpeechModelsHandler(downloads, request => ctx.connection.requestRejection(request)),
   }));

@@ -149,8 +149,14 @@ def create_runtime(bridge_url, bridge_token, control_token, initial_speech=None,
     async def admit(request: Request):
         nonlocal active
         value = await body(request)
-        if set(value) != {'callId', 'token', 'speech'}:
+        if not {'callId','token','speech'} <= set(value) or set(value)-{'callId','token','speech','sonioxKey'}:
             raise HTTPException(400)
+        soniox_key = value.get('sonioxKey')
+        if soniox_key is not None and (not isinstance(soniox_key,str) or not 16 <= len(soniox_key) <= 512 or any(c.isspace() for c in soniox_key)):
+            raise HTTPException(400)
+        if not isinstance(value['speech'],dict): raise HTTPException(400)
+        if isinstance(value['speech'].get('stt'),dict) and value['speech']['stt'].get('engine')=='soniox' and not soniox_key:
+            raise HTTPException(400,'Soniox is not connected')
         call_id, token = value['callId'], value['token']
         if (not isinstance(call_id, str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,200}', call_id)
                 or not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', token)):
@@ -166,7 +172,7 @@ def create_runtime(bridge_url, bridge_token, control_token, initial_speech=None,
                 raise HTTPException(503, 'Speech models could not prepare') from None
             child = (call_factory(call_id, token, value['speech']) if call_factory else create_app(
                 HubBridgeClient(bridge_url, bridge_token, call_id), token,
-                worker_factory=lambda connection, bridge: build_voice_worker(connection, bridge, value['speech'])))
+                worker_factory=lambda connection, bridge: build_voice_worker(connection, bridge, value['speech'],soniox_api_key=soniox_key)))
             child_ready = asyncio.get_running_loop().create_future()
             child_stop = asyncio.Event()
             child_task = asyncio.create_task(own_call(child, child_ready, child_stop))

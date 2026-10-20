@@ -22,7 +22,8 @@ def install(engine, model):
     if not ((engine == "whisper" and model in WHISPER_REVISIONS)
             or (engine == "piper" and model in PIPER_MODELS)
             or (engine == 'supertonic' and model == 'supertonic-3')
-            or (engine == 'nemotron' and model == NEMOTRON_MODEL)):
+            or (engine == 'nemotron' and model == NEMOTRON_MODEL)
+            or (engine == 'soniox' and model == 'stt-rt-v5')):
         raise ValueError("Unsupported speech model")
     if engine == "piper" and importlib.util.find_spec("piper") is None:
         raise ValueError("Install the optional Piper runtime on the host PC first")
@@ -32,7 +33,10 @@ def install(engine, model):
     if shutil.disk_usage(Path.home()).free < required:
         raise ValueError("Not enough free disk space for this speech model")
     print(json.dumps({"phase": "downloading"}), flush=True)
-    if engine == "whisper":
+    if engine == 'soniox':
+        from wake_word import install_wake_model
+        install_wake_model()
+    elif engine == "whisper":
         from faster_whisper.utils import download_model
         download_model(model, revision=WHISPER_REVISIONS[model], use_auth_token=False)
     elif engine == 'nemotron':
@@ -60,7 +64,10 @@ def install(engine, model):
         snapshot_download(PIPER_REPOSITORY, revision=PIPER_REVISION, token=False,
             allow_patterns=[f"{directory}/{model}.onnx", f"{directory}/{model}.onnx.json", f"{directory}/MODEL_CARD"])
     print(json.dumps({"phase": "verifying"}), flush=True)
-    if engine == "whisper": whisper_path(model)
+    if engine == 'soniox':
+        from wake_word import wake_path
+        wake_path()
+    elif engine == "whisper": whisper_path(model)
     elif engine == 'supertonic': supertonic_path()
     elif engine == 'nemotron': nemotron_path()
     else: piper_paths(model)

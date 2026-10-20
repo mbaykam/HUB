@@ -1,7 +1,7 @@
 {
   "name": "@lencx/minke-harness-overlay",
   "description": "HUB-owned DeepSeek Harness product extensions",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -46,7 +46,7 @@
     "assets",
     "voice/server.py", "voice/media_inspect.py",
     "voice/supertonic_tts.py", "voice/streaming_asr.py", "voice/native_streaming_stt.py",
-    "voice/voice_pipeline.py", "voice/voice_attention.py",
+    "voice/voice_pipeline.py", "voice/voice_attention.py", "voice/soniox_stt.py", "voice/wake_word.py",
     "voice/playback_guard.py",
     "voice/speech_settings.py",
     "voice/speech_download.py",

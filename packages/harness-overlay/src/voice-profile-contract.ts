@@ -24,6 +24,7 @@ export const defaultVoiceAttention={idleSeconds:180 as const,wakePhrases:["Vera"
 export const localSpeechSchema = z.object({
   attention:voiceAttentionSchema.optional(),
   stt: z.discriminatedUnion("engine", [
+    z.object({ engine: z.literal("soniox"), model: z.literal("stt-rt-v5"), language: z.enum(["auto","en-tr","en","tr"]).optional() }).strict(),
     z.object({ engine: z.literal("whisper"), model: whisperModelSchema, language: z.enum(["auto","en-tr","en","tr"]).optional() }).strict(),
     z.object({ engine: z.literal("nemotron"), model: nemotronModelSchema, language: z.enum(["auto","en-tr","en","tr"]).optional() }).strict(),
   ]),
@@ -71,9 +72,10 @@ export type VoiceToolPolicy = z.infer<typeof voiceToolPolicySchema>;
 export type LocalSpeechConfig = z.infer<typeof localSpeechSchema>;
 export const localSpeechCatalogSchema = z.object({
   stt: z.array(z.discriminatedUnion("engine", [
+    z.object({ engine: z.literal("soniox"), model: z.literal("stt-rt-v5"), available: z.boolean(), downloadable: z.boolean().default(false), reason: z.string().max(300).nullable() }).strict(),
     z.object({ engine: z.literal("whisper"), model: whisperModelSchema, available: z.boolean(), downloadable: z.boolean().default(false), reason: z.string().max(300).nullable() }).strict(),
     z.object({ engine: z.literal("nemotron"), model: nemotronModelSchema, available: z.boolean(), downloadable: z.boolean().default(false), reason: z.string().max(300).nullable() }).strict(),
-  ])).max(9),
+  ])).max(10),
   tts: z.array(z.discriminatedUnion("engine", [
     z.object({ engine: z.literal("supertonic"), model: z.literal("supertonic-3"), available: z.boolean(), downloadable: z.boolean().default(false), voices: z.array(multilingualVoice).max(10), reason: z.string().max(300).nullable() }).strict(),
     z.object({ engine: z.literal("kokoro"), model: z.literal("82m"), available: z.boolean(), downloadable: z.boolean().default(false), voices: z.array(kokoroVoice).max(100), reason: z.string().max(300).nullable() }).strict(),
@@ -82,6 +84,7 @@ export const localSpeechCatalogSchema = z.object({
   ])).max(5),
 }).strict();
 export const speechModelInstallSchema = z.discriminatedUnion("engine", [
+  z.object({ engine: z.literal("soniox"), model: z.literal("stt-rt-v5") }).strict(),
   z.object({ engine: z.literal("supertonic"), model: z.literal("supertonic-3") }).strict(),
   z.object({ engine: z.literal("whisper"), model: whisperModelSchema }).strict(),
   z.object({ engine: z.literal("nemotron"), model: nemotronModelSchema }).strict(),
@@ -89,7 +92,7 @@ export const speechModelInstallSchema = z.discriminatedUnion("engine", [
 ]);
 export type SpeechModelInstall = z.infer<typeof speechModelInstallSchema>;
 export const speechDownloadStatusSchema = z.object({
-  download: z.object({ id: z.string().uuid(), engine: z.enum(["whisper", "piper", "supertonic", "nemotron"]), model: z.string().max(100),
+  download: z.object({ id: z.string().uuid(), engine: z.enum(["whisper", "piper", "supertonic", "nemotron", "soniox"]), model: z.string().max(100),
     phase: z.enum(["starting", "downloading", "verifying", "complete", "failed"]),
   }).strict().nullable(),
 }).strict();
