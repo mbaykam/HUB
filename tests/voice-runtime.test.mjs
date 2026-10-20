@@ -21,12 +21,19 @@ test("prepared PWA weights survive sequential calls while capabilities and close
   const f = fixture(); await f.pool.prepare(speech);
   const first = await f.pool.open("first", speech, [], new AbortController().signal);
   await first.request("/status", "GET");
+  await first.request("/attention", "POST", { mode: "background" });
+  await first.request("/attention", "POST", { mode: "active" });
+  assert.deepEqual(f.scoped.filter(item => item.path === "/attention").map(item => ({ callId: item.capability.callId, body: item.body })), [
+    { callId: "first", body: { mode: "background" } },
+    { callId: "first", body: { mode: "active" } },
+  ]);
   await assert.rejects(f.pool.open("second", speech, [], new AbortController().signal), /busy/);
   const firstToken = f.scoped[0].capability.token;
   await Promise.all([first.stop(), first.stop()]); await first.done;
   assert.equal(f.stopped, 0, "Ending a call must not discard prepared weights");
   assert.equal(f.requests.filter(r => r.path === "/release").length, 1);
   await assert.rejects(first.request("/status", "GET"), /closed/);
+  await assert.rejects(first.request("/attention", "POST", { mode: "background" }), /closed/);
   const second = await f.pool.open("second", speech, [], new AbortController().signal);
   await second.request("/offer", "POST", { sdp: "fixture" });
   assert.equal(f.starts, 1);

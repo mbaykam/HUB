@@ -172,6 +172,7 @@ const taskFiles = Object.freeze({
     "voice-bridge-server.test.mjs",
     "voice-sidecar.test.mjs",
     "voice-runtime.test.mjs",
+    "voice-registration.test.mjs",
     "voice-web.test.mjs",
     "voice-session.test.mjs",
     "voice-history-tool.test.mjs",

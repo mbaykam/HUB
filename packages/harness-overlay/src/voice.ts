@@ -220,7 +220,7 @@ export function apply(ctx: Context, config: Config): void {
   })();
   // Keep startup rejection handled even if no browser ever opens voice.
   void startup.catch(() => {});
-  const off = ["open", "close", "offer", "status", "diagnostics", "history", "presentation", "presentation-document", "interrupt", "share"].map(action => ctx.webServer.register({ kind: "exact", path: `/api/hub/voice/${action}`,
+  const off = ["open", "close", "offer", "status", "diagnostics", "history", "presentation", "presentation-document", "interrupt", "attention", "share"].map(action => ctx.webServer.register({ kind: "exact", path: `/api/hub/voice/${action}`,
     async handler(request, response) {
       const rejection = ctx.connection.requestRejection(request);
       if (rejection || request.headers["sec-fetch-site"] === "cross-site" || !web || lifetime.signal.aborted || cleanupUncertain) {

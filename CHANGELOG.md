@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2
+
+- Fix the Background / Resume button's missing host route. Listening changes now
+  reach the existing call through the authenticated PWA endpoint, including
+  Telegram calls controlled from the PWA, without reconnecting the call.
+- Cover plugin route registration as well as call ownership and runtime dispatch.
+
 ## 1.3.1
 
 - Keep local speech at the native 48 kHz call output rate. Avoid a second
