@@ -1,6 +1,6 @@
 [data-hub-response-markdown]{box-sizing:border-box;min-width:0;max-width:min(100%,72ch);font-family:inherit;font-size:var(--dsh-content-font-size,16px);line-height:1.7;color:#dce5f4;text-align:start;overflow-wrap:anywhere;word-break:normal}
 [data-hub-response-markdown] :where(p,ul,ol,blockquote,pre,table){font-size:inherit;line-height:inherit}
-[data-hub-response-markdown] :where(h1,h2,h3,h4,h5,h6){font-family:inherit;font-weight:650;line-height:1.35;color:#f2f5fd;letter-spacing:-.015em;margin:1.5em 0 .55em;text-wrap:pretty}
+[data-hub-response-markdown] :is(h1,h2,h3,h4,h5,h6){font-family:inherit;font-weight:650;line-height:1.35;color:#f2f5fd;letter-spacing:-.015em;margin:1.5em 0 .55em;text-wrap:pretty}
 [data-hub-response-markdown] h1{font-size:1.4em}[data-hub-response-markdown] h2{font-size:1.2em}[data-hub-response-markdown] h3{font-size:1.075em}[data-hub-response-markdown] :where(h4,h5,h6){font-size:1em}
 [data-hub-response-markdown] p{margin:.85em 0;text-wrap:pretty}
 [data-hub-response-markdown] strong{font-weight:650;color:#f0f4fc}
