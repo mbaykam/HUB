@@ -7,7 +7,8 @@ import asyncio
 import json
 import time
 from pipecat.frames.frames import (TranscriptionFrame, InterimTranscriptionFrame, ErrorFrame, STTMuteFrame,
-    ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame, TTSSpeakFrame)
+    ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame, TTSSpeakFrame,
+    VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)
 from pipecat.services.stt_service import STTService
 from pipecat.services.settings import STTSettings
 from pipecat.transcriptions.language import Language
@@ -22,6 +23,7 @@ def soniox_config(language):
     config = {'model':'stt-rt-v5', 'audio_format':'pcm_s16le', 'sample_rate':16000,
               'num_channels':1, 'enable_language_identification':True,
               'enable_endpoint_detection':True, 'endpoint_latency_adjustment_level':0,
+              'endpoint_sensitivity':-0.3,
               'max_endpoint_delay_ms':2000}
     if language != 'auto':
         config['language_hints'] = ['en','tr'] if language == 'en-tr' else [language]
@@ -31,7 +33,7 @@ def soniox_config(language):
 
 class SonioxWakeSTTService(STTService):
     def __init__(self, speech, *, api_key, attention, health, playback_gate,
-                 connector=None, wake=None, **kwargs):
+                 connector=None, wake=None, endpoint_settle_seconds=.35, **kwargs):
         if not isinstance(api_key,str) or not 16 <= len(api_key) <= 512 or any(c.isspace() for c in api_key):
             raise ValueError('Connect Soniox in Settings → Speech before starting a call')
         super().__init__(settings=STTSettings(model='stt-rt-v5',language=None),
@@ -54,6 +56,13 @@ class SonioxWakeSTTService(STTService):
         self.cloud_seconds = 0.0
         self.mode = attention.mode
         self.echo_generation = playback_gate.generation
+        # A provider endpoint can precede the caller's last word. Local VAD is
+        # only a veto: it never finalizes unconfirmed words or forces an endpoint.
+        self.vad_speaking = False
+        self.vad_stopped_at = 0.0
+        self.endpoint_settle_seconds = endpoint_settle_seconds
+        self.endpoint_task = None
+        self.endpoint_pending = False
         health.recognition_source = 'soniox'
         health.preview_ready = True
 
@@ -105,6 +114,9 @@ class SonioxWakeSTTService(STTService):
 
     async def _disconnect(self):
         self.generation += 1
+        await self._cancel_endpoint()
+        self.vad_speaking = False
+        if self.health.stage == 'transcribing': self.health.stage = 'listening'
         socket, self.socket = self.socket, None
         receiver, self.receiver = self.receiver, None
         self.tokens.clear()
@@ -169,6 +181,7 @@ class SonioxWakeSTTService(STTService):
                     if value.get('error_code') or value.get('error_type'):
                         raise PermissionError('Speech service unavailable')
                     if self.gate.input_blocked:
+                        await self._cancel_endpoint()
                         self.tokens.clear();self.language_counts.clear()
                         self.health.partial_text = ''
                         await self._turn_stopped()
@@ -188,32 +201,23 @@ class SonioxWakeSTTService(STTService):
             if token.get('translation_status') == 'translation': continue
             text = token.get('text','')
             if text == '<end>' and token.get('is_final'):
-                text = ''.join(self.tokens).strip()
-                self.tokens.clear()
-                if text and not self.gate.accepts_transcript(text, final=True):
-                    self.language_counts.clear()
-                    self.health.partial_text = ''
-                    await self._turn_stopped()
-                    continue
-                if text:
-                    self.language_code=max(self.language_counts,key=self.language_counts.get) if self.language_counts else None
-                    language = Language.TR if self.language_code=='tr' else Language.EN if self.language_code=='en' else None
-                    self.language_counts.clear()
-                    self.health.recognition_language = self.language_code
-                    self.health.partial_text = ''
-                    words=normalized_words(text)
-                    wake_only=self.wake_pending and any(words==normalized_words(p) or any(words==[hello,*normalized_words(p)] for hello in ('hey','hi','hello','merhaba','selam')) for p in self.attention.settings['wakePhrases'])
-                    self.wake_pending=False
-                    if wake_only:
-                        await self._turn_stopped()
-                        await self.push_frame(TTSSpeakFrame('Dinliyorum.' if self.language_code=='tr' else "I'm listening."))
-                    else:
-                        await self._turn_started()
-                        await self.push_frame(TranscriptionFrame(text,self._user_id,time_now_iso8601(),language,finalized=True))
-                        await self._turn_stopped()
+                self.health.endpoint_events += 1
+                self.endpoint_pending = bool(self.tokens)
+                self.health.endpoint_pending = self.endpoint_pending
+                if self.endpoint_pending and self.vad_speaking:
+                    self.health.endpoint_vad_deferrals += 1
                 continue
             if not isinstance(text,str): continue
             if text.startswith('<') and text.endswith('>'): continue
+            if text.strip() and self.endpoint_pending:
+                # A continued segment belongs to the still-open caller turn.
+                # Keep its confirmed prefix and wait for the NEW final endpoint.
+                self.health.endpoint_continuations += 1
+                await self._cancel_endpoint()
+                # The first token of a new segment need not carry the preceding
+                # segment's space. Keep words separate across the semantic split.
+                if self.tokens and not self.tokens[-1][-1:].isspace() and text[0].isalnum():
+                    self.tokens.append(' ')
             if token.get('is_final'):
                 self.tokens.append(text)
                 if token.get('language'):
@@ -221,7 +225,10 @@ class SonioxWakeSTTService(STTService):
                     self.language_counts[code]=self.language_counts.get(code,0)+len(text.strip())
             else: partial.append(text)
         if sum(map(len,self.tokens)) > 12000: raise ValueError('Recognition turn exceeded its bound')
-        draft = ''.join(self.tokens+partial).strip()
+        if self.endpoint_pending and self.endpoint_task is None:
+            self.health.stage = 'transcribing'
+            self.endpoint_task = asyncio.create_task(self._settle_endpoint(self.generation))
+        draft = ' '.join(''.join(self.tokens+partial).split())
         if draft:
             if not self.gate.accepts_transcript(draft):
                 self.health.partial_text = ''
@@ -230,6 +237,58 @@ class SonioxWakeSTTService(STTService):
             self.health.partial_text = draft[-2000:]
             self.health.partial_at = time.perf_counter()
             await self.push_frame(InterimTranscriptionFrame(draft,self._user_id,time_now_iso8601()))
+
+    async def _cancel_endpoint(self):
+        task, self.endpoint_task = self.endpoint_task, None
+        self.endpoint_pending = False
+        self.health.endpoint_pending = False
+        if task and task is not asyncio.current_task():
+            task.cancel()
+            await asyncio.gather(task,return_exceptions=True)
+
+    async def _settle_endpoint(self, generation):
+        try:
+            # Let a just-arriving VAD start or next Soniox segment veto an early
+            # semantic split. This adds only a bounded 350 ms in normal silence.
+            await asyncio.sleep(self.endpoint_settle_seconds)
+            while True:
+                async with self.lock:
+                    if (generation != self.generation or not self.endpoint_pending or
+                        self.closed or self._muted or self.attention.mode != 'active'):
+                        return
+                    if not self.vad_speaking and time.perf_counter()-self.vad_stopped_at >= .1:
+                        await self._publish_endpoint()
+                        return
+                await asyncio.sleep(.025)
+        finally:
+            if self.endpoint_task is asyncio.current_task():
+                self.endpoint_task = None
+
+    async def _publish_endpoint(self):
+        text = ' '.join(''.join(self.tokens).split())
+        self.tokens.clear()
+        self.endpoint_pending = False
+        self.health.endpoint_pending = False
+        self.health.partial_text = ''
+        if self.health.stage == 'transcribing': self.health.stage = 'listening'
+        if not text or not self.gate.accepts_transcript(text, final=True):
+            self.language_counts.clear()
+            await self._turn_stopped()
+            return
+        self.language_code=max(self.language_counts,key=self.language_counts.get) if self.language_counts else None
+        language = Language.TR if self.language_code=='tr' else Language.EN if self.language_code=='en' else None
+        self.language_counts.clear()
+        self.health.recognition_language = self.language_code
+        words=normalized_words(text)
+        wake_only=self.wake_pending and any(words==normalized_words(p) or any(words==[hello,*normalized_words(p)] for hello in ('hey','hi','hello','merhaba','selam')) for p in self.attention.settings['wakePhrases'])
+        self.wake_pending=False
+        if wake_only:
+            await self._turn_stopped()
+            await self.push_frame(TTSSpeakFrame('Dinliyorum.' if self.language_code=='tr' else "I'm listening."))
+        else:
+            await self._turn_started()
+            await self.push_frame(TranscriptionFrame(text,self._user_id,time_now_iso8601(),language,finalized=True))
+            await self._turn_stopped()
 
     async def _remote_failed(self,socket,generation,code='connection'):
         async with self.lock:
@@ -241,6 +300,7 @@ class SonioxWakeSTTService(STTService):
             await self._sync_mode()
             if self.closed or self._muted: return
             if self.gate.input_blocked:
+                await self._cancel_endpoint()
                 self.preroll.clear()
                 self.tokens.clear()
                 self.wake.reset()
@@ -279,6 +339,11 @@ class SonioxWakeSTTService(STTService):
         if False: yield None  # STTService consumes an async generator.
 
     async def process_frame(self, frame, direction):
+        if isinstance(frame,VADUserStartedSpeakingFrame):
+            self.vad_speaking = True
+        elif isinstance(frame,VADUserStoppedSpeakingFrame):
+            self.vad_speaking = False
+            self.vad_stopped_at = time.perf_counter()
         if isinstance(frame,STTMuteFrame) and frame.mute:
             async with self.lock:
                 await self._disconnect()

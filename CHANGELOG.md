@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.3
+
+- Hold Soniox endpoints while local voice activity still indicates speech, and
+  merge a continuing segment before sending one confirmed utterance to HUB.
+- Use a short endpoint settling window and lower semantic endpoint sensitivity
+  to protect sentence endings; keep unconfirmed words out of model requests.
+- Cancel pending speech submissions on Background, mute, disconnect and hangup.
+  Add numeric endpoint diagnostics without recording microphone audio.
+
 ## 1.6.2
 
 - Clarify Knowledge AI's decision contract: relationships, reflections and

@@ -1,7 +1,7 @@
 {
   "name": "@lencx/minke-im-telegram",
   "description": "HUB Telegram Bot API transport",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "private": true,
   "type": "module",
   "scripts": {

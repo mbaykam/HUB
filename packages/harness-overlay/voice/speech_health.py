@@ -24,6 +24,10 @@ class SpeechHealth:
         self.user_speaking = False
         self.recognition_source = None
         self.recognition_language = None
+        self.endpoint_events = 0
+        self.endpoint_vad_deferrals = 0
+        self.endpoint_continuations = 0
+        self.endpoint_pending = False
         self.last_transcription_text = None
         self.last_transcription_language = None
         self.utterance_ms = None
@@ -62,7 +66,9 @@ class SpeechHealth:
                 "stage":('speaking' if gate.speaking else 'thinking' if gate.pending_replies else 'echo-tail') if gate and gate.blocked else self.stage,
                 "canInterrupt":bool(gate and gate.barge_in and gate.foreground()),
                 "decodeMs":self.decode_ms,"inputPaused":paused,
-                "recognition":{"source":self.recognition_source,"language":self.recognition_language,"audioMs":self.utterance_ms},
+                "recognition":{"source":self.recognition_source,"language":self.recognition_language,"audioMs":self.utterance_ms,
+                    "endpointEvents":self.endpoint_events,"vadDeferrals":self.endpoint_vad_deferrals,
+                    "continuedSegments":self.endpoint_continuations,"endpointPending":self.endpoint_pending},
                 "inputPauseReason":gate.reason if gate else None,
                 "echoSuppressedFrames":gate.suppressed_frames if gate else 0,
                 "timing": {"asrAfterSoundMs": self._elapsed(self.input_end_at, self.model_start_at),

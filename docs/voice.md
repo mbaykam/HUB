@@ -27,6 +27,12 @@ choices remain available; adding a key does not replace them automatically.
 
 During an active call, microphone audio streams to Soniox v5. Interim words
 appear live; its completed semantic utterance goes to the conversation model.
+HUB gives a confirmed endpoint a short 350 ms settling window and holds it while
+local voice activity still indicates speech. A continuing segment joins the same
+utterance before submission. Interim words stay provisional; local voice activity
+cannot finalize uncertain text. This protects sentence endings at the cost of a
+small additional delay. Recognition and speakerphone quality still require a
+physical test on the caller's device.
 The selected local TTS engine speaks the answer. Soniox uses its own account
 balance, independently of the conversation model provider. The current connector
 uses Soniox's global service endpoint; keys scoped to other regions require a
