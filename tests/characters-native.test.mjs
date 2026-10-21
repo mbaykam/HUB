@@ -331,7 +331,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   assert.match(main.requests[0].system,/names are editable display labels/);
   assert.match(main.requests[0].system,/Shared instruction proof/);assert.match(fast.requests[0].system,/Shared instruction proof/);
   assert.match(main.requests[0].system,/Memory index revision one/);assert.match(fast.requests[0].system,/Memory index revision one/);
-  const memory=ctx.agentLoop.create('hub-memory-instruction-test',{provider:'main',model:'mock'});const assembled=await ctx.systemPrompt.assemble({scope:memory});assert.ok(!assembled.sections.some(s=>s.text.includes('Shared instruction proof')));
+  const memory=ctx.agentLoop.create('hub-memory-instruction-test',{provider:'main',model:'mock'});const assembled=await ctx.systemPrompt.assemble({scope:memory});assert.ok(!assembled.sections.some(s=>s.text.includes('Shared instruction proof')));assert.ok(!assembled.sections.some(s=>s.text.includes('Daily tools and collaboration')),'No-tool curator does not receive conversational planner/tool instructions');
   assert.equal(ctx.agents.list().filter(a=>a.session.header.origin==='subagent').length,0);
   assert.equal(characters.store.selected(parent.id).name,'Vera');assert.equal(deployment.provider,'main');
   const beforeRename=characters.store.snapshot(),bound=characters.store.selected(parent.id);
