@@ -20,7 +20,7 @@ async function catalogFixture(){
   const manager={ready:Promise.resolve(),store:{snapshot:()=>({revision:2,characters})},effectiveCharacter:id=>characters.find(c=>c.id===id)};
   const shared={name:'web_fetch',description:'Read a public page.',parameters:{type:'object'}};
   const agents=characters.map(c=>({id:c.id,session:{header:{id:c.id}}}));
-  const ctx={hubCharacters:manager,agentPresets:{standingKeyFor:async()=> 'standing'},agents:{list:()=>agents},tools:{schemas:scope=>scope==='standing'?[shared]:scope.id==='hub'?[shared,{name:'hub_knowledge_read',description:'Read a saved source.',parameters:{type:'object'}}]:[shared]}};
+  const ctx={hubCharacters:manager,agentPresets:{standingKeyFor:async()=> 'standing'},agents:{list:()=>agents},tools:{schemas:scope=>scope==='standing'?[shared,{name:'mcp__hub_memory__delete_note',description:'Retired memory operation',parameters:{type:'object'}}]:scope.id==='hub'?[shared,{name:'hub_knowledge_read',description:'Read a saved source.',parameters:{type:'object'}}]:[shared]}};
   return toolCatalog(ctx,manager);
 }
 
@@ -32,7 +32,7 @@ test('inventory reflects registered scopes, character policy and absent permissi
 test('Tools settings filters actual access and never sends a mutation',async t=>{
   const dom=new JSDOM('<main/>',{url:'https://hub.test',pretendToBeVisual:true}),root=dom.window.document,catalog=await catalogFixture(),requests=[];
   dom.window.fetch=async(url,options)=>{requests.push({url,options});return{ok:true,json:async()=>catalog};};const dispose=installToolBrowser(root.querySelector('main'),root);t.after(()=>{dispose();dom.window.close();});await settle();
-  const character=root.querySelector('[aria-label="Character tool access"]'),filter=root.querySelector('[aria-label="Tool access filter"]');character.value='mira';character.dispatchEvent(new dom.window.Event('change'));filter.value='denied';filter.dispatchEvent(new dom.window.Event('change'));
+  const character=root.querySelector('[aria-label="Character tool access"]'),filter=root.querySelector('[aria-label="Tool access filter"]');assert.doesNotMatch(root.querySelector('.hub-tool-list').textContent,/mcp__hub_memory__/);filter.value='retired';filter.dispatchEvent(new dom.window.Event('change'));assert.match(root.querySelector('.hub-tool-list').textContent,/delete_note.*Retired · execution disabled/s);assert.doesNotMatch(root.querySelector('.hub-tool-list').textContent,/Allowed/);character.value='mira';character.dispatchEvent(new dom.window.Event('change'));filter.value='denied';filter.dispatchEvent(new dom.window.Event('change'));
   assert.match(root.querySelector('.hub-tool-list').textContent,/hub_knowledge_read.*Disabled/s);assert.doesNotMatch(root.querySelector('.hub-tool-list').textContent,/Read a public page/);
   filter.value='unavailable';filter.dispatchEvent(new dom.window.Event('change'));assert.match(root.querySelector('.hub-tool-list').textContent,/missing_plugin.*Not registered/s);
   click(root,'Refresh');await settle();assert.ok(requests.every(r=>!r.options.method||r.options.method==='GET'));assert.equal(character.value,'mira');

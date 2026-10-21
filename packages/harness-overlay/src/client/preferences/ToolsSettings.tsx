@@ -1,6 +1,7 @@
 import {useEffect,useRef} from "react";
 import {defineOverlayStyle} from "../shared/style-runtime.ts";
 import styles from "./tools.css";
+import {isLegacyMemoryTool} from "../../memory-tool-groups.ts";
 const installStyles=defineOverlayStyle("hub-tool-inventory",styles);
 interface Tool {name:string;description:string;parameters:unknown;hostRegistered:boolean;contexts:number;characterContexts:string[]}
 interface Catalog {tools:Tool[];characters:{id:string;name:string;configured:boolean;policy:{mode:"inherit"|"allow";names?:string[]}}[];services?:{browser:{ready:boolean;installed:boolean;version?:string}};meaning:string}
@@ -11,13 +12,14 @@ export function installToolBrowser(container:HTMLElement,root:Document){
   container.setAttribute("data-hub-tools","");const header=el("header"),refresh=el("button","Refresh");refresh.type="button";header.append(el("h2","Tools"),refresh);
   const filters=el("div"),character=el("select"),search=el("input"),access=el("select"),list=el("div"),status=el("p"),help=el("p");
   search.type="search";search.placeholder="Find a tool…";search.setAttribute("aria-label","Find a tool");character.setAttribute("aria-label","Character tool access");access.setAttribute("aria-label","Tool access filter");
-  for(const [value,label]of [["all","All tools"],["allowed","Allowed by character"],["denied","Disabled for character"],["unavailable","Not registered"]]){const option=el("option",label);option.value=value!;access.append(option);}
+  for(const [value,label]of [["all","Current tools"],["allowed","Allowed by character"],["denied","Disabled for character"],["unavailable","Not registered"],["retired","Retired tools"]]){const option=el("option",label);option.value=value!;access.append(option);}
   filters.append(character,search,access);status.setAttribute("role","status");list.className="hub-tool-list";container.append(header,el("p","Explore the harness tools and each character’s permissions. Select a character to see its access."),filters,status,list,help);
   let catalog:Catalog|undefined;
   function render(){if(!catalog)return;const owner=catalog.characters.find(c=>c.id===character.value),query=search.value.toLocaleLowerCase();list.replaceChildren();let count=0;
-    for(const tool of catalog.tools){const allowed=!owner||owner.policy.mode==="inherit"||owner.policy.names?.includes(tool.name),registered=tool.hostRegistered||tool.contexts>0;
+    for(const tool of catalog.tools){const retired=isLegacyMemoryTool(tool.name),allowed=!retired&&(!owner||owner.policy.mode==="inherit"||owner.policy.names?.includes(tool.name)),registered=tool.hostRegistered||tool.contexts>0;
+      if(retired!== (access.value==="retired"))continue;
       if(!(tool.name+" "+tool.description).toLocaleLowerCase().includes(query)||access.value==="allowed"&&!allowed||access.value==="denied"&&allowed||access.value==="unavailable"&&registered)continue;
-      count++;const row=el("details"),summary=el("summary"),name=el("strong",tool.name),badge=el("small",!allowed?"Disabled":!registered?"Not registered":tool.hostRegistered?"Allowed · host tool":tool.characterContexts.includes(owner?.id??"")?"Allowed · active context":"Allowed · context dependent");summary.append(name,badge);row.append(summary,el("p",tool.description));
+      count++;const row=el("details"),summary=el("summary"),name=el("strong",tool.name),badge=el("small",retired?"Retired · execution disabled":!allowed?"Disabled":!registered?"Not registered":tool.hostRegistered?"Allowed · host tool":tool.characterContexts.includes(owner?.id??"")?"Allowed · active context":"Allowed · context dependent");summary.append(name,badge);row.append(summary,el("p",retired?"This legacy store is retired. Use the current Knowledge and Skills tools. Saved permissions do not enable it.":tool.description));
       if(owner&&!owner.configured)row.append(el("p","Choose a model for this character before it can run."));
       if(tool.parameters){const schema=el("details"),pre=el("pre",JSON.stringify(tool.parameters,null,2));schema.append(el("summary","Tool inputs"),pre);row.append(schema);}
       row.append(el("small",registered?(tool.hostRegistered?"Registered in the host.":"Registered in "+tool.contexts+" active context(s).") :"This permission name currently has no registered tool."));list.append(row);

@@ -41,7 +41,7 @@ async function fixture(t,options={}){
     const value=query.get('view')==='note'?(options.noteDetails?.[query.get('id')]??note):query.get('view')==='search'?{nodes:displayedGraph.nodes}:query.get('view')==='assets'?{assets:[]}:query.get('view')==='graph'?displayedGraph:{vault:'C:/fixture/vault'};
     return {ok:true,json:async()=>structuredClone(value)};
   };
-  const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,displayedGraph,()=>{});
+  const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,displayedGraph,()=>{},options.initialNoteId);
   t.after(()=>{dispose();dom.window.close();});
   if(options.openNote!==false){
     button(root,'Notes').click();
@@ -51,6 +51,11 @@ async function fixture(t,options={}){
   }
   return {view,root,requests,note};
 }
+
+test('Home preview opens the exact note and Back returns to the usable default 2D graph without writing',async t=>{
+ const {root,requests}=await fixture(t,{openNote:false,initialNoteId:noteId});await setImmediate();
+ assert.equal(root.querySelector('[data-graph-note] h3').textContent,'Reading list');assert.equal(root.querySelector('dialog').dataset.mobilePane,'note');assert.ok(requests.some(r=>new URL(r.url,'https://hub.test').searchParams.get('id')===noteId));button(root,'‹ Back').click();assert.equal(root.querySelector('dialog').dataset.mobilePane,'graph');assert.equal(root.querySelector('[data-graph-canvas]').hidden,false);assert.ok(requests.every(r=>r.method==='GET'));
+});
 
 test('returning from a searched Knowledge note restores the note list, query and reading position',async t=>{
   const {view,root}=await fixture(t);

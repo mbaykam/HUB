@@ -8,10 +8,10 @@ import type { KnowledgeGraph } from "../../knowledge-contract.ts";
 const installStyles = defineOverlayStyle("hub-memory-graph-viewer", styles);
 
 /** Trusted product renderer; note text/data never become executable code. */
-export function openMemoryGraph(container: HTMLElement, root: Document, initial: MemoryGraphPage, onClose: () => void): () => void {
+export function openMemoryGraph(container: HTMLElement, root: Document, initial: MemoryGraphPage, onClose: () => void, initialNoteId?:string): () => void {
   const removeStyles = installStyles(root);
   if ((initial as Partial<KnowledgeGraph>).secondBrain) {
-    const close = openKnowledgeWorkspace(container, root, initial as KnowledgeGraph, () => { removeStyles(); onClose(); });
+    const close = openKnowledgeWorkspace(container, root, initial as KnowledgeGraph, () => { removeStyles(); onClose(); },initialNoteId);
     return close;
   }
   const lifetime = new AbortController();

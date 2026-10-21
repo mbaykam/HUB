@@ -1,7 +1,16 @@
 # Changelog
 
-## 1.7.0
+## 1.7.1
 
+- PWA Home: larger interactive 2D Knowledge preview with compact statistics,
+  simpler daily planner, working empty-field to-do creation, and protection
+  against a delayed refresh hiding a newly saved item. Retired memory tools
+  are distinguished from available tools. See [daily use](docs/daily-assistant.md).
+- Match the model's advertised tools to the selected character's existing
+  permissions, including voice delegation. Keep wide-PWA panel controls behind
+  Settings so its Close button remains usable.
+
+## 1.7.0
 - PWA UI update: consistent written-answer typography, readable comparisons and
   code, with scoped table scrolling. See [written replies](docs/written-replies.md).
 - Full-screen PWA apps with isolated HTML playback and optional touch game controls.

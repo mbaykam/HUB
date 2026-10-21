@@ -253,6 +253,7 @@ test('native character delegation uses the target model/persona while the coordi
   const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'})));
   const characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
   let state=characters.store.snapshot();const spoken=state.characters.find(c=>c.id===state.voiceId);
+  const userProfile=characters.instructions.files().find(f=>f.id==='USER.md');await characters.instructions.save('USER.md',userProfile.hash,'Confirmed fixture preference: use the PWA for daily work.');
   await characters.store.change({action:'save',revision:state.revision,character:{...spoken,route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
   state=characters.store.snapshot();await characters.store.change({action:'select',revision:state.revision,id:state.voiceId,sessionId:'character-parent'},c=>characters.validate(c));
   const parent=ctx.agentLoop.create('character-parent',{provider:'fast',model:'mock'});
@@ -266,10 +267,16 @@ test('native character delegation uses the target model/persona while the coordi
   assert.equal(mainAdapter.requests.length,0,'Specialist is still waiting while coordinator is available');
   parent.followup(createUserMessage({content:[{type:'text',text:'Can we keep talking?'}],source:{kind:'user'}}));
   while(fastAdapter.requests.length<2||parent.status!=='idle'){assert.ok(Date.now()<deadline,'Coordinator could not answer while specialist runs');await new Promise(r=>setTimeout(r,10));}
+  const currentProfile=characters.instructions.files().find(f=>f.id==='USER.md');await characters.instructions.save('USER.md',currentProfile.hash,'Confirmed fixture preference: updated context before delegated work.');
   releaseWorker();
   while(mainAdapter.requests.length<1){assert.ok(Date.now()<deadline,'Specialist did not run');await new Promise(r=>setTimeout(r,10));}
   while(fastAdapter.requests.length<3||parent.status!=='idle'){assert.ok(Date.now()<deadline,'Completion notice did not settle');await new Promise(r=>setTimeout(r,10));}
   assert.equal(mainAdapter.requests.length,1,'A completion notification must not start another paid specialist');
+  assert.match(fastAdapter.requests[0].system,/Confirmed fixture preference: use the PWA for daily work/);
+  // This worker's prompt was assembled before agent/request waited on the
+  // gate. Keep that request coherent; subsequent assemblies use the edit.
+  assert.match(mainAdapter.requests[0].system,/Confirmed fixture preference: use the PWA for daily work/);
+  assert.ok(fastAdapter.requests.slice(2).every(r=>r.system.includes('Confirmed fixture preference: updated context before delegated work.')));
   const deniedRetry=parent.session.snapshotEvents().filter(e=>e.type==='tool/result').at(-1)?.data?.message?.content?.[0];
   assert.equal(deniedRetry?.isError,true);
   assert.match(JSON.stringify(deniedRetry),/not a new user request/);
@@ -319,6 +326,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   await characters.store.change({action:'save',revision:state.revision,character:{...voice,name:'Vera',route:{provider:'fast',model:'mock'}}},c=>characters.validate(c));
   const parent=ctx.agentLoop.create('handoff-parent',{provider:'legacy',model:'old-qwen'});
   const instructionFiles=new InstructionFiles(join(root,'characters','instructions'));await instructionFiles.load();const soul=instructionFiles.files().find(f=>f.id==='SOUL.md');await instructionFiles.save('SOUL.md',soul.hash,'Shared instruction proof for native requests.');
+  const userFile=instructionFiles.files().find(f=>f.id==='USER.md');await instructionFiles.save('USER.md',userFile.hash,'User fixture version one: daily PWA and Telegram use.');
   let navigation='Memory index revision one: retrieve sources by stable identity.';
   const offMemory=characters.instructions.registerManaged('memory.md',async()=>navigation);t.after(offMemory);
   async function say(agent,text){const before=agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length;agent.followup(createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}));const end=Date.now()+8000;while(agent.status!=='idle'||agent.session.snapshotEvents().filter(e=>e.type==='turn/end').length<=before){assert.ok(Date.now()<end,'Turn did not settle');await new Promise(r=>setTimeout(r,10));}}
@@ -330,18 +338,21 @@ test('model identity and natural conversation handoffs stay consistent without a
   assert.match(main.requests[0].system,new RegExp(`ID: ${voice.id} · Role: voice assistant · Display name: Vera`));
   assert.match(main.requests[0].system,/names are editable display labels/);
   assert.match(main.requests[0].system,/Shared instruction proof/);assert.match(fast.requests[0].system,/Shared instruction proof/);
+  assert.match(main.requests[0].system,/User fixture version one/);assert.match(fast.requests[0].system,/User fixture version one/);
   assert.match(main.requests[0].system,/Memory index revision one/);assert.match(fast.requests[0].system,/Memory index revision one/);
-  const memory=ctx.agentLoop.create('hub-memory-instruction-test',{provider:'main',model:'mock'});const assembled=await ctx.systemPrompt.assemble({scope:memory});assert.ok(!assembled.sections.some(s=>s.text.includes('Shared instruction proof')));assert.ok(!assembled.sections.some(s=>s.text.includes('Daily tools and collaboration')),'No-tool curator does not receive conversational planner/tool instructions');
+  const memory=ctx.agentLoop.create('hub-memory-instruction-test',{provider:'main',model:'mock'});const assembled=await ctx.systemPrompt.assemble({scope:memory});assert.ok(!assembled.sections.some(s=>s.text.includes('Shared instruction proof')));assert.ok(!assembled.sections.some(s=>s.text.includes('User fixture version one')));assert.ok(!assembled.sections.some(s=>s.text.includes('Daily tools and collaboration')),'No-tool curator does not receive conversational planner/tool instructions');
   assert.equal(ctx.agents.list().filter(a=>a.session.header.origin==='subagent').length,0);
   assert.equal(characters.store.selected(parent.id).name,'Vera');assert.equal(deployment.provider,'main');
   const beforeRename=characters.store.snapshot(),bound=characters.store.selected(parent.id);
   await characters.store.change({action:'save',revision:beforeRename.revision,character:{...bound,name:'Nova'}},c=>characters.validate(c));
   assert.equal(characters.store.selected(parent.id).id,voice.id);assert.equal(characters.store.selected(parent.id).name,'Nova');
   navigation='Memory index revision two: changed domains are current.';
+  await instructionFiles.refresh();const latestUserFile=instructionFiles.files().find(f=>f.id==='USER.md');await instructionFiles.save('USER.md',latestUserFile.hash,'User fixture version two: current explicit preferences override old guesses.');
   await say(parent,'What model are you running?');assert.equal(fast.requests.length,2);assert.equal(main.requests.length,1);
   const inspected=await new Promise(resolve=>inspectorRoute.handler({method:'GET',url:'/api/hub/character-request?characterId='+voice.id,headers:{'x-hub-characters':'1'}},{writeHead:code=>assert.equal(code,200),end:body=>resolve(JSON.parse(body))}));
   assert.deepEqual(JSON.parse(inspected.record.json),JSON.parse(JSON.stringify(fast.requests[1],(k,v)=>k==='signal'?undefined:v)),'Inspector must match the native adapter request, including shared instructions, tool schemas and conversation history');
   assert.match(fast.requests[1].system,/Memory index revision two/);assert.doesNotMatch(fast.requests[1].system,/Memory index revision one/);
+  assert.match(fast.requests[1].system,/User fixture version two/);assert.doesNotMatch(fast.requests[1].system,/User fixture version one/);
   assert.match(fast.requests[1].system,/Character: Nova/);assert.match(fast.requests[1].system,new RegExp(`ID: ${voice.id} · Role: voice assistant · Display name: Nova`));
   await say(parent,'Let your main assistant take over our conversation again.');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
   const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');
@@ -366,7 +377,26 @@ test('model identity and natural conversation handoffs stay consistent without a
   await characters.store.change({action:'select',revision:characters.store.snapshot().revision,id:unconfigured.id,sessionId:telegram.id},c=>characters.validate(c));
   await say(telegram,'Please handle this specialist task yourself.');
   assert.match(specialistAdapter.requests[0].system,/Own your task/);assert.doesNotMatch(specialistAdapter.requests[0].system,/Telegram conversation coordinator/);
+  assert.match(specialistAdapter.requests[0].system,/User fixture version two/);
   assert.equal((await execute('fixture_local_check')).isError,false);assert.equal(localRuns,1);
   assert.equal((await execute('fixture_disabled_check')).isError,true);
  }finally{await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-characters-native-'));await rm(root,{recursive:true,force:true});}
+});
+
+test('a restricted voice character delegates personal planning to HUB and keeps its work plan on the durable conversation',{timeout:20000},async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-eval-daily-planner-')),ctx=new Context();let facility,backend,offTasks,offProfile,lease;
+ try{
+  await mountAgentLoopTestDependencies(ctx);await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'spawn'});await ctx.plugin(Storage);
+  backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
+  const hub=new MockAdapter([toolCallResponse('planner-list','hub_planner',{action:'list'}),toolCallResponse('planner-save','hub_planner',{action:'save',item:{kind:'todo',title:'Review the isolated fixture brief',details:'User-requested test item',horizon:'near',timeZone:'Europe/Istanbul'}}),toolCallResponse('visible-plan','hub_work_plan',{action:'update',version:0,title:'Fixture planning',steps:[{title:'Save the requested commitment',state:'done'}]}),textResponse('The fixture to-do is saved.')]);
+  const voice=new MockAdapter([toolCallResponse('delegate-planning','hub_task',{description:'Save a personal to-do',prompt:'Read the personal planner and add the requested isolated fixture brief without duplicates.'}),textResponse('HUB is saving your requested item.'),textResponse('The requested item is saved.')]);ctx.llm.registerAdapter(['main'],hub);ctx.llm.registerAdapter(['fast'],voice);
+  for(const [name,value]of Object.entries({agentDefaultModel:{currentSelection:()=>({provider:'main',model:'mock'})},storageDomain:facility,connection:{requestRejection:()=>undefined},webServer:{register:()=>()=>{}}}))Object.defineProperty(ctx,name,{value,configurable:true});
+  const camo=new CamofoxRuntime({},new AbortController().signal,async()=>new Response(JSON.stringify({ok:true,engine:'camoufox',version:'test'}))),characters=new HubCharacters(ctx,join(root,'characters'),camo);await characters.ready;
+  let state=characters.store.snapshot();const spoken=state.characters.find(c=>c.id===state.voiceId),permissions={mode:'allow',names:['hub_task','hub_delegate','list_agents','send_message','interrupt_agent','hub_present','todo_write']};await characters.store.change({action:'save',revision:state.revision,character:{...spoken,route:{provider:'fast',model:'mock'},tools:permissions}},c=>characters.validate(c));state=characters.store.snapshot();await characters.store.change({action:'select',revision:state.revision,id:state.voiceId,sessionId:'hub-eval-daily-planner-parent'},c=>characters.validate(c));
+  const parent=ctx.agentLoop.create('hub-eval-daily-planner-parent',{provider:'fast',model:'mock'});await characters.prepare(parent);const profile=await characters.voiceProfile();lease=await characters.beginVoice(parent,profile);offTasks=await attachNativeVoiceTasks(parent,undefined,lease);const {attachVoiceProfilePolicy}=await import('../packages/harness-overlay/src/host/voice-profile-policy.ts');offProfile=attachVoiceProfilePolicy(parent,profile,exec=>offTasks.allowNested(exec));
+  const denied=await parent.ctx.tools.execute({agent:parent,name:'hub_planner',arguments:{action:'list'},callId:'direct-not-permitted',signal:AbortSignal.timeout(1000)});assert.equal(denied.isError,true);
+  parent.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Add the isolated fixture brief to my to-dos, asking the main assistant if needed.'}]}));
+  const deadline=Date.now()+12000;while(hub.requests.length<4||parent.status!=='idle'||ctx.agents.list().some(a=>a.status!=='idle')){assert.ok(Date.now()<deadline,'Delegated planner workflow did not settle');await new Promise(resolve=>setTimeout(resolve,10));}
+  const saved=JSON.parse(await readFile(join(root,'hub-planner','planner.json'),'utf8'));assert.equal(saved.items.length,1);assert.equal(saved.items[0].title,'Review the isolated fixture brief');assert.equal(saved.plans.length,1);assert.equal(saved.plans[0].rootSessionId,parent.id);assert.equal(saved.plans[0].sessionId,saved.items[0].sourceSessionId);assert.equal(saved.plans[0].state,'completed');assert.notEqual(saved.items[0].sourceSessionId,parent.id);assert.ok(voice.requests.every(r=>!r.tools.some(t=>t.name==='hub_planner')));assert.ok(hub.requests[0].tools.some(t=>t.name==='hub_planner'));assert.deepEqual(characters.store.snapshot().characters.find(c=>c.id===spoken.id).tools,permissions);
+ }finally{offProfile?.();await offTasks?.();lease?.release();await ctx.fiber.dispose();await facility?.closeAll();await backend?.close();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-eval-daily-planner-'));await rm(root,{recursive:true,force:true});}
 });

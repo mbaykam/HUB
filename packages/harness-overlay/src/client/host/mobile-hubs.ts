@@ -34,7 +34,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const nav = root.createElement("div"); nav.setAttribute("data-hub-home-nav", "");
   const textHeading = root.createElement("div"); textHeading.setAttribute("data-hub-text-heading", "");
   const textLabel = root.createElement("span"); textLabel.textContent = "Write";
-  const options = root.createElement("button"); options.type = "button"; options.textContent = "Chat options"; options.setAttribute("aria-expanded", "false");
+  const options = root.createElement("button"); options.type = "button"; options.textContent = "⋯"; options.setAttribute("aria-label","Chat options");options.title="Chat options"; options.setAttribute("aria-expanded", "false");
   textHeading.append(textLabel, options);
   let optionsOpen = false;
   options.addEventListener("click", () => { optionsOpen = !optionsOpen; render(); });

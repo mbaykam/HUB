@@ -41,7 +41,7 @@ export function createMobilePlanner(root:Document,openSession:(id:string)=>void)
   function endpoint(){return "/api/hub/planner"+(sessionId?"?sessionId="+encodeURIComponent(sessionId):"");}
   async function request(command?:PlannerCommand){const r=await view.fetch(endpoint(),{method:command?"POST":"GET",credentials:"same-origin",cache:"no-store",headers:{"x-hub-planner":"1",...(command?{"content-type":"application/json"}:{})},body:command?JSON.stringify(command):undefined,signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(10_000)])});const data=await r.json();if(!r.ok)throw Error(data.detail??"Planner could not load. Retry when HUB is connected.");if(!Array.isArray(data.items)||!Array.isArray(data.plans))throw Error("Planner returned incomplete data. Retry.");return data as PlannerSnapshot;}
   async function load(){if(flight||busy||disposed||root.hidden||!homeVisible&&!dialog.open)return;flight=true;const own=sessionId;
-    try{const value=await request();if(own!==sessionId||disposed)return;state=value;renderPersonal();renderPlans();if(retry.hidden===false||status.textContent==="Loading your day…")message("");}
+    try{const value=await request();if(own!==sessionId||disposed||value.revision<state.revision)return;state=value;renderPersonal();renderPlans();if(retry.hidden===false||status.textContent==="Loading your day…")message("");}
     catch(e){if(!disposed)message((e as Error).message,true);}finally{flight=false;}
   }
   async function change(command:PlannerCommand,success:string){if(busy)return false;busy=true;addTodo.disabled=true;
@@ -50,6 +50,7 @@ export function createMobilePlanner(root:Document,openSession:(id:string)=>void)
   }
   function moveMonth(delta:number){const date=new Date(month+"-01T12:00:00Z");date.setUTCMonth(date.getUTCMonth()+delta);month=date.toISOString().slice(0,7);calendarOpen=true;renderCalendar();}
   function renderCalendar(){
+    calendar.toggleAttribute("data-expanded",calendarOpen);
     monthButton.textContent=new Intl.DateTimeFormat(undefined,calendarOpen?{month:"long",year:"numeric",timeZone:"UTC"}:{month:"short",day:"numeric",timeZone:"UTC"}).format(new Date((calendarOpen?month+"-01":selectedDate)+"T12:00Z"));monthButton.setAttribute("aria-expanded",String(calendarOpen));monthButton.setAttribute("aria-label",(calendarOpen?"Collapse":"Expand")+" calendar · "+monthButton.textContent);prev.hidden=next.hidden=!calendarOpen;calendar.replaceChildren();
     const start=new Date((calendarOpen?month+"-01":selectedDate)+"T12:00Z"),offset=(start.getUTCDay()+6)%7;start.setUTCDate(start.getUTCDate()-offset);
     const dates=new Set(state.items.filter(i=>!i.deleted&&i.state==="open").map(plannerItemDay).filter(Boolean));
@@ -87,7 +88,7 @@ export function createMobilePlanner(root:Document,openSession:(id:string)=>void)
     editor.showModal();name.focus();
   }
   let quickDraft:{title:string;horizon:string;id:string}|undefined;
-  quick.addEventListener("submit",event=>{event.preventDefault();if(!input.value.trim()||busy)return;const title=input.value;if(!quickDraft||quickDraft.title!==title||quickDraft.horizon!==horizon)quickDraft={title,horizon,id:view.crypto.randomUUID()};void change({action:"save",item:{id:quickDraft.id,version:0,kind:"todo",title,details:"",horizon,timeZone:browserZone}},"To-do added.").then(ok=>{if(ok&&input.value===title){input.value="";quickDraft=undefined;}});});
+  quick.addEventListener("submit",event=>{event.preventDefault();if(busy)return;if(!input.value.trim()){edit();return;}const title=input.value;if(!quickDraft||quickDraft.title!==title||quickDraft.horizon!==horizon)quickDraft={title,horizon,id:view.crypto.randomUUID()};void change({action:"save",item:{id:quickDraft.id,version:0,kind:"todo",title,details:"",horizon,timeZone:browserZone}},"To-do added.").then(ok=>{if(ok&&input.value===title){input.value="";quickDraft=undefined;}});});
   function schedule(){view.clearInterval(timer);if(homeVisible||dialog.open){void load();timer=view.setInterval(()=>void load(),voice?2500:15000);}}
   function open(){if(dialog.open)return;dialog.append(panel);expand.hidden=true;dialog.showModal();schedule();}
   function dismiss(){if(editor.open)return;dialog.close();homeSeat.append(panel);expand.hidden=false;panel.hidden=!homeVisible;schedule();}

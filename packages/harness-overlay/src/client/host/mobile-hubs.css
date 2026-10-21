@@ -174,9 +174,10 @@ html[data-minke-mobile-web] [data-hub-home] [data-composer-seat]{position:relati
 [data-hub-home-surface] [data-hub-live-transcript]{max-height:none}
 [data-hub-home] [data-hub-text-heading]{min-height:0;height:0;margin:0;padding:0;position:relative;z-index:2}
 [data-hub-home] [data-hub-text-heading]>span{display:none}
-[data-hub-home] [data-hub-text-heading]>button{position:absolute;right:8px;bottom:6px;min-height:36px;font-size:11px;padding:6px 8px}
+[data-hub-home] [data-hub-text-heading]>button{position:absolute;right:60px;top:12px;min-height:44px;min-width:44px;font-size:24px;line-height:1;padding:0}
 [data-hub-home] [data-composer-card]{padding:14px 16px!important;border-radius:24px!important}
-[data-hub-home] [data-input-scroll]{min-height:48px;padding-right:54px}
+[data-hub-home] [data-input-scroll]{min-height:36px;padding-right:104px}
+[data-hub-home] [data-composer-placeholder]{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:calc(100% - 104px)}
 [data-hub-home] [data-hub-voice-hub][data-idle-bar]{position:absolute;right:12px;top:12px;z-index:3;margin:0;width:44px;min-height:44px;height:44px;padding:0;border:0;border-radius:14px;background:none;box-shadow:none;backdrop-filter:none}
 [data-hub-home] [data-hub-voice-hub][data-idle-bar] [data-voice-start]{min-height:44px;height:44px;width:44px;padding:0;border:1px solid #b8c8ff24;border-radius:14px;background:#a1baff12;align-items:center;justify-content:center}
 [data-hub-home] [data-hub-voice-hub][data-idle-bar] [data-voice-start] strong{display:none}
@@ -194,3 +195,6 @@ html[data-minke-mobile-web] [data-hub-chat-stats]{display:flex;flex-wrap:wrap;ju
 html[data-minke-mobile-web] [data-hub-chat-stats]>span{min-width:0;overflow-wrap:anywhere}
 html[data-minke-mobile-web] [data-hub-chat-stats]>span[aria-hidden]{display:none}
 [data-voice-now][data-background] [data-voice-orb]{animation:none;opacity:.45;filter:saturate(.45);transform:scale(.92)}
+/* Finished work reads as a compact inbox; current work retains its detail. */
+[data-hub-home-surface] [data-hub-work]:not([data-work-status=running]):not([data-work-status=stopping]):not([data-work-status=waiting]):not([data-work-status=attention]) [data-hub-work-open]{gap:4px;padding:10px 12px}
+[data-hub-home-surface] [data-hub-work]:is([data-work-status=finished],[data-work-status=completed],[data-work-status=failed],[data-work-status=killed]) [data-hub-work-open]>p{display:none}

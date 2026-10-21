@@ -60,6 +60,7 @@ const taskFiles = Object.freeze({
     "web-search.test.mjs",
   ]),
   ui: Object.freeze([
+    "desktop-right-panel.test.mjs",
     "response-typography.test.mjs",
     "ambient-theme.test.mjs",
     "agent-browser-annotations.test.mjs",
@@ -101,6 +102,10 @@ const taskFiles = Object.freeze({
     "window-theme.test.mjs",
   ]),
   host: Object.freeze([
+    "home-knowledge-ui.test.mjs",
+    "knowledge-preview-2d.test.mjs",
+    "planner.test.mjs",
+    "planner-ui.test.mjs",
     "character-request.test.mjs",
     "voice-titles.test.mjs",
     "presentation-ui.test.mjs",
@@ -201,6 +206,7 @@ const taskFiles = Object.freeze({
     "telegram-network.test.mjs",
   ]),
   native: Object.freeze([
+    "planner-native.test.mjs",
     "characters-native.test.mjs",
     "voice-profiles.test.mjs",
     "voice-task-continuation.test.mjs",

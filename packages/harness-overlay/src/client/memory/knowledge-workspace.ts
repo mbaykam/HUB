@@ -14,7 +14,7 @@ import type {KnowledgeAsset} from "../../knowledge-contract.ts";
 
 /** Full note workspace. DOM text rendering deliberately never executes vault
  * HTML. Useful wiki aliases display inline and open the real target note. */
-export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,initial:KnowledgeGraph,onClose:()=>void){
+export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,initial:KnowledgeGraph,onClose:()=>void,initialNoteId?:string){
   const view=root.defaultView!,lifetime=new AbortController();
   const el=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const node=root.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
   const btn=(label:string,run:()=>void)=>{const b=el("button",label);b.type="button";b.addEventListener("click",run);return b;};
@@ -158,5 +158,5 @@ export function openKnowledgeWorkspace(_container:HTMLElement,root:Document,init
   const timer=view.setInterval(()=>void load(),5000);
   function dispose(){if(disposed)return;disposed=true;lifetime.abort();noteRequest?.abort();view.clearTimeout(searchTimer);view.clearInterval(timer);view.cancelAnimationFrame(layout2DFrame);resize.disconnect();navigationObserver.disconnect();removeBack();neighbors.dispose();skillsPanel.dispose();dataPanel.dispose();domainPanel.dispose();cloud.dispose();cy.destroy();dialog.remove();onClose();}
   dialog.addEventListener("close",dispose);dialog.addEventListener("cancel",event=>{if(!canLeaveNote())event.preventDefault();else if(!notePane.hidden){event.preventDefault();returnFromNote();}});
-  render(initial);showGraph();return dispose;
+  render(initial);showGraph();if(initialNoteId&&initial.nodes.some(n=>n.id===initialNoteId))void open(initialNoteId);return dispose;
 }

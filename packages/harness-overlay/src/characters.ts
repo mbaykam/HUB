@@ -108,7 +108,11 @@ export class HubCharacters extends Service {
         await this.syncNativeRoute(agent,selected);
         mount.assembled={character:selected,state:s};
         const assembly=await next();
-        return {...assembly,variables:{...assembly.variables,provider:selected.route!.provider,model:selected.route!.model},
+        const allowed=selected.tools.mode==="allow"?new Set(selected.tools.names):undefined;
+        // Advertise the same character policy enforced at execution. Keep the
+        // explicit text-navigation tool; voice calls use their pinned policy.
+        const tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||!this.voiceCalls.has(agent.id)&&tool.name==="hub_switch_character"):assembly.tools;
+        return {...assembly,tools,variables:{...assembly.variables,provider:selected.route!.provider,model:selected.route!.model},
           sections:assembly.sections.map((section:any)=>section.name==="hub:character"?{...section,text:characterPrompt(s,selected!)}:section)};
       },{prepend:true});
       agent.ctx.on("agent/request",async({agent:subject}:any,next:()=>Promise<any>)=>{
