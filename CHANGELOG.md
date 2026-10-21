@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.2
+
+- Clarify Knowledge AI's decision contract: relationships, reflections and
+  sourced memories require an organization decision, while archive-only and
+  skipped records have no mutations. Keep evidence validation unchanged.
+
 ## 1.6.1
 
 - Fix the model-catalogue middleware returning a promise instead of a token
