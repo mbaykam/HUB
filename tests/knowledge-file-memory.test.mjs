@@ -42,7 +42,7 @@ test('one curator pass extracts file facts with original file, when/where/why, p
  const job=curator.jobs.get(source.id);assert.equal(job.status,'done',job.reason);assert.equal(job.memoryCount,1);assert.equal(calls,1);
  const note=await store.note((await store.scan()).find(n=>n.kind!=='conversation').id);assert.match(note.content,/Project%20brief/);assert.equal(note.sources[0].reason,plan(memory).reason);assert.equal(note.sources[0].evidence.assetId,asset.id);assert.equal(note.sources[0].completedAt,at);assert.equal(note.sources[0].conversationId,conversation.id);
  const relationship=(await store.graph()).relationships.find(r=>r.sourceId===note.id);assert.equal(relationship.evidence[0].quote,memory.evidence);assert.equal((await store.inspectEvidence(relationship.id,0)).version,'current');
- assert.equal(await readFile(join(store.root,'conversations',conversation.id+'.json'),'utf8'),canonical);
+ assert.equal(await readFile(join(store.root,'conversations',conversation.id+'.json'),'utf8'),canonical);assert.deepEqual((await store.note(conversation.id)).assets,[asset],'Original reader retains exact file identities instead of guessing names from Markdown');
  const cold=new KnowledgeStore(store.vault,store.root);await cold.initialize();assert.ok((await cold.recall('bilingual agenda Türkçe')).some(n=>n.note.id===note.id));assert.equal((await cold.sourceEpisode(note.sources[0].id)).assets[0].id,asset.id);
  await writeFile(join(store.vault,asset.path),'Changed externally');assert.equal((await cold.inspectEvidence(relationship.id,0)).version,'captured-episode','Retain the exact original quoted preview when file bytes change');
 });
