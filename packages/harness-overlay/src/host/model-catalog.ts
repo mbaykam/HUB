@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import type { HubCatalogModel } from "../model-catalog-contract.ts";
+import {openRouterReasoning} from "./openrouter-capabilities.ts";
 
 const TTL = 6 * 60 * 60 * 1000;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -30,6 +31,7 @@ export function parseOpenRouterModels(value: unknown): HubCatalogModel[] {
       ...(positive(m.created) ? { created: m.created } : {}),
       input: Array.isArray(architecture.input_modalities) ? architecture.input_modalities.filter((x: unknown) => ["text", "image", "audio", "file"].includes(String(x))) : ["text"],
       tools: params.includes("tools"), reasoning: params.includes("reasoning")||params.includes("reasoning_effort"),supportedParameters:params,defaults,
+      ...openRouterReasoning(m.reasoning),
       ...(m.pricing?.prompt != null && m.pricing?.completion != null && Number.isFinite(prompt) && prompt >= 0 && Number.isFinite(completion) && completion >= 0 ? { pricing: { input: prompt * 1e6, output: completion * 1e6 } } : {}),
       enabled: false, source: "provider" });
   }
@@ -94,6 +96,7 @@ export class ModelCatalogStore {
   #loaded = false;
   #warning: string | undefined;
   #lastAttempt = 0;
+  #legacyReasoning=false;
   readonly #abort = new AbortController();
   readonly root: string;
   readonly fetchImpl: typeof globalThis.fetch;
@@ -107,9 +110,10 @@ export class ModelCatalogStore {
       const openrouter = parseOpenRouterModels({ data: s.openrouter });
       const codex = parseCodexModelData({ "openai-codex-responses": Object.fromEntries(s.codex.map((x: any) => [x.id, x])) });
       this.#snapshot = { at: s.at, openrouter, codex };
+      this.#legacyReasoning=s.schemaVersion!==2;
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.#warning = "Saved catalogue unavailable; refresh to recover."; }
   }
-  snapshot() { return { ...this.#snapshot, warning: this.#warning, stale: !this.#snapshot || Date.now() - Date.parse(this.#snapshot.at) >= TTL }; }
+  snapshot() { return { ...this.#snapshot, warning: this.#warning, stale: this.#legacyReasoning||!this.#snapshot || Date.now() - Date.parse(this.#snapshot.at) >= TTL }; }
   async favorites(): Promise<Set<string>> {
     try {
       const data = record(JSON.parse(await readFile(join(this.root, "favorites.json"), "utf8")));
@@ -141,13 +145,13 @@ export class ModelCatalogStore {
         const codex = parseCodexModelData(extractCodexTarData(archive));
         const at = new Date().toISOString();
         // Preserve the exact provider response for strict cache parsing.
-        const data = { at, openrouter: openrouter.map(m => ({ id: m.id, name: m.name, description: m.description, context_length: m.contextWindow,
+        const data = { schemaVersion:2,at, openrouter: openrouter.map(m => ({ id: m.id, name: m.name, description: m.description, context_length: m.contextWindow,
           created: m.created, architecture: { input_modalities: m.input, output_modalities: ["text"] }, top_provider: { max_completion_tokens: m.maxTokens },
-          supported_parameters: m.supportedParameters??[],default_parameters:m.defaults??{},
+          supported_parameters: m.supportedParameters??[],default_parameters:m.defaults??{},reasoning:m.reasoningConfig,
           ...(m.pricing ? { pricing: { prompt: String(m.pricing.input / 1e6), completion: String(m.pricing.output / 1e6) } } : {}) })), codex };
         await atomic(join(this.root, "codex-models.json"), { version: 1, models: codex });
         await atomic(join(this.root, "catalog.json"), data);
-        this.#snapshot = { at, openrouter, codex }; this.#warning = undefined;
+        this.#snapshot = { at, openrouter, codex }; this.#warning = undefined;this.#legacyReasoning=false;
       } catch { this.#warning = "Refresh failed. The last saved catalogue and installed models remain available."; throw new Error(this.#warning); }
     })().finally(() => { this.#flight = undefined; });
     return this.#flight;

@@ -34,6 +34,8 @@ import {installPanelNavigation} from "../host/panel-navigation.ts";
 import {ToolsSettings} from "../preferences/ToolsSettings.tsx";
 import {installChatActivityGroups} from "../host/chat-activity-groups.ts";
 import { installConversationPresentation } from "../host/mobile-presentation.ts";
+import {installMobileArtifacts} from "../host/mobile-artifacts.ts";
+import {installConversationChrome} from "../host/conversation-chrome.ts";
 import { installComposerUploads } from "../host/composer-uploads.tsx";
 import { installMobileSettings } from "../host/mobile-settings.ts";
 import { installMobileConversationVisibility, type NavigationVisibilityPort } from "../host/mobile-conversation-visibility.ts";
@@ -198,6 +200,8 @@ export function installTabs(
     ctx.theme.getTheme().active.colorScheme,
   );
   ctx.effect(() => installConversationPresentation(ctx), "hub: live conversation canvas");
+  ctx.effect(()=>installMobileArtifacts(ctx),"hub: full-screen conversation applications");
+  ctx.effect(()=>installConversationChrome(ctx),"hub: compact conversation header and actions");
   if (!tabsPort.embeddedWebAvailable) {
     ctx.inject?.(["conversation","inputTriggers"],scope=>{
       scope.effect(()=>installComposerUploads(ctx,scope.get("conversation") as Parameters<typeof installComposerUploads>[1],scope.get("inputTriggers") as Parameters<typeof installComposerUploads>[2]),"HUB PWA photos and files");

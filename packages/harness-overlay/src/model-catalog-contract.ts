@@ -8,11 +8,17 @@ export interface HubCatalogModel {
   defaults?:Record<string,number|string|boolean|null>;
   editableParameters?:string[];
   defaultEffort?:string;
+  /** Sanitized live provider schema, retained through catalogue caching. */
+  reasoningConfig?:{mandatory?:boolean;default_enabled?:boolean;supported_efforts?:string[]|null;default_effort?:string;supports_max_tokens?:boolean};
   available?:boolean;
   outputLimitFallback?:boolean;
   effortNote?:string;
   enabled: boolean; source: "provider" | "installed" | "upstream";
   favorite?: boolean;
+}
+/** A capability ceiling is not a reservation for every request. */
+export function catalogOutputDefault(model: HubCatalogModel) {
+  return Math.min(32768,catalogOutputLimit(model));
 }
 export interface HubModelCatalog {
   providers: { id: string; name: string }[];

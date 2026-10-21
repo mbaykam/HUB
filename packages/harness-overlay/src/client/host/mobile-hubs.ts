@@ -6,6 +6,7 @@ import type { HarnessClientContext } from "../core/context.ts";
 import {createVoiceCamera} from "./voice-camera.ts";
 import type { createVoiceClient, VoiceState } from "../voice/browser-client.ts";
 import { createMobileActivity, createActivitySignals, type ActivityPendingSource } from "./mobile-activity.ts";
+import {createDurableActivity} from "./mobile-durable-activity.ts";
 import { returnToMobileHome } from "./mobile-home-navigation.ts";
 import { openMobileConversation } from "./mobile-session-navigation.ts";
 import { createMobileBrowserView } from "./mobile-browser-view.ts";
@@ -79,8 +80,8 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const play = root.createElement("button"); play.type = "button"; play.textContent = "Tap to hear audio"; play.hidden = true;
   const transcript = createMobileLiveTranscript(root);
   hub.append(start, controls,liveVoice, transcript.panel, play, error); root.body.append(audio);
-  const activity = createMobileActivity(root, id => {
-    void openMobileConversation(ctx.sessions, id).catch(() => {
+  const activity = createMobileActivity(root, (id,parentHint) => {
+    void openMobileConversation(ctx.sessions, id,parentHint).catch(() => {
       error.textContent = "Couldn’t open this task’s conversation. Try again; your voice call is still connected.";
     });
   });
@@ -102,6 +103,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   let frame: number | undefined;
   let conversation: HTMLElement | undefined;
   const activitySignals = createActivitySignals(ctx.sessions, schedule);
+  const durableActivity=createDurableActivity(root,schedule);
   let pendingSource: ActivityPendingSource | undefined;
   ctx.inject?.(["uiSession"], scope => {
     scope.effect(() => {
@@ -113,9 +115,11 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   });
   const active = () => !!external || loading || !["idle", "error"].includes(state);
   const isHome = () => ctx.sessions.list.getSnapshot().current === undefined || conversation?.getAttribute("data-phase") === "hero";
+  let artifactSession:string|undefined;
   function render() {
     if (lifetime.signal.aborted) return;
     const inHome = isHome();
+    if(artifactSession!==voiceSession){artifactSession=voiceSession;root.dispatchEvent(new CustomEvent("hub:artifact-session",{detail:{sessionId:voiceSession}}));}
     identity.hidden = inHome || identitySession !== ctx.sessions.list.getSnapshot().current;
     if (!inHome && (identitySession !== ctx.sessions.list.getSnapshot().current || Date.now() - identityCheckedAt > 2000)) void checkIdentity();
     const busy = active();
@@ -148,9 +152,10 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     hub.hidden = !inHome && !busy;
     nav.hidden = inHome;
     activity.panel.hidden = !inHome;
-    const nativeSessions = ctx.sessions.list.getSnapshot();
+    const nativeSessions = ctx.sessions.list.getSnapshot();durableActivity.update(inHome);
     browser.update(inHome && root.querySelector("[data-minke-mobile-web]") !== null && view!.innerWidth <= 1024, new Map(Object.entries(nativeSessions.byId).filter(([, session]) => session !== undefined).map(([id, session]) => [id, session?.displayTitle ?? session?.title ?? "Task"])), voiceSession);
-    activity.update({ ...nativeSessions, observations: activitySignals.read(nativeSessions), pendingBySession: pendingSource?.getSnapshot() }, voiceSession, ctx.connection?.state ? ctx.connection.state.getSnapshot() ?? "connecting" : "connected");
+    const work=durableActivity.read(nativeSessions);
+    activity.update({ ...work, observations: activitySignals.read(work), pendingBySession: pendingSource?.getSnapshot() }, voiceSession,durableActivity.failed?"disconnected": ctx.connection?.state ? ctx.connection.state.getSnapshot() ?? "connecting" : "connected");
     start.hidden = busy; start.disabled = !enabled || loading;
     controls.hidden = !busy;
     liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":attentionMode==="background"?`Waiting for “${wakePhrases[0]}”`:audioStage==="echo-tail"||inputPaused&&state==="listening"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
@@ -332,7 +337,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     finally { statusFlight = false; }
   }
   const callPoll = view.setInterval(() => {if(active()||Date.now()-lastStatusAt>=2500)void checkStatus();}, 500);
-  const visibleStatus = () => { if (!root.hidden) void checkStatus(); }; root.addEventListener("visibilitychange", visibleStatus);
+  const visibleStatus = () => { if (!root.hidden) {void checkStatus();void ctx.sessions.refresh?.().catch(()=>{});} }; root.addEventListener("visibilitychange", visibleStatus);
   void checkStatus();
-  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); planner.dispose();knowledge.dispose();plannerNav.remove();audio.remove(); removeStyles();removeDashboardStyles(); };
+  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose();durableActivity.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); planner.dispose();knowledge.dispose();plannerNav.remove();audio.remove(); removeStyles();removeDashboardStyles(); };
 }

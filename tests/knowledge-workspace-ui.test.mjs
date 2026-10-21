@@ -54,13 +54,13 @@ async function fixture(t,options={}){
 
 test('returning from a searched Knowledge note restores the note list, query and reading position',async t=>{
   const {view,root}=await fixture(t);
-  button(root,'‹ Knowledge').click();
+  button(root,'‹ Back').click();
   const search=root.querySelector('[aria-label="Search knowledge"]');
   search.value='Reading';search.dispatchEvent(new view.Event('input'));
   await new Promise(resolve=>view.setTimeout(resolve,280));
   const sidebar=root.querySelector('aside');sidebar.scrollTop=180;
   button(root,'Reading list').focus();button(root,'Reading list').click();await setImmediate();
-  button(root,'‹ Knowledge').click();
+  button(root,'‹ Back').click();
   assert.equal(root.querySelector('dialog').dataset.mobilePane,'files');
   assert.equal(search.value,'Reading');
   assert.equal(sidebar.scrollTop,180);
@@ -76,7 +76,7 @@ test('unsaved Knowledge edits survive navigation and closing until explicitly di
   button(root,'Edit').click();
   const editor=root.querySelector('[aria-label="Note Markdown"]');
   editor.value=note.content+'\nUnsaved fixture addition.';editor.dispatchEvent(new view.Event('input'));
-  for(const label of ['Graph','Notes','Chat archive','Attachments','Home','‹ Knowledge']){
+  for(const label of ['Graph','Notes','Chat archive','Attachments','Home','‹ Back']){
     button(root,label).click();await setImmediate();
     assert.equal(dialog.open,true,label+' must not close a dirty note');
     assert.equal(dialog.dataset.mobilePane,'note',label+' must not hide a dirty note');
@@ -99,7 +99,7 @@ test('unsaved Knowledge edits survive navigation and closing until explicitly di
 
 test('leaving an unchanged Knowledge editor hides Save and returns to the original list',async t=>{
   const {root}=await fixture(t);
-  button(root,'Edit').click();button(root,'‹ Knowledge').click();
+  button(root,'Edit').click();button(root,'‹ Back').click();
   assert.equal(root.querySelector('dialog').dataset.mobilePane,'files');
   assert.equal(button(root,'Save').hidden,true);
   button(root,'Reading list').click();await setImmediate();
@@ -115,7 +115,7 @@ test('an explicit Knowledge save updates the note once and allows navigation',as
   assert.match(root.querySelector('[data-graph-note]').textContent,/Human-authored revision/);
   button(root,'Save').click();await setImmediate();
   assert.equal(requests.filter(request=>request.method==='POST').length,1);
-  button(root,'‹ Knowledge').click();assert.equal(root.querySelector('dialog').dataset.mobilePane,'files');
+  button(root,'‹ Back').click();assert.equal(root.querySelector('dialog').dataset.mobilePane,'files');
 });
 
 test('a failed Knowledge save keeps the draft and navigation protection',async t=>{

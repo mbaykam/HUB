@@ -1,5 +1,5 @@
 import type {KnowledgeGraph} from "../../knowledge-contract.ts";
-import {knowledgeRecordCounts} from "../../knowledge-record-scope.ts";
+import {knowledgeRecordCounts,isArchivedConversation} from "../../knowledge-record-scope.ts";
 import {createKnowledgeCloud} from "../memory/knowledge-cloud.ts";
 import {openMemoryGraph} from "../memory/graph-browser.ts";
 
@@ -15,7 +15,7 @@ export function createHomeKnowledge(root:Document){
       const count=knowledgeRecordCounts(next.nodes),domains=next.domains?.filter(d=>!d.parentId&&d.status==="active").length??0;numbers.replaceChildren();
       for(const [label,value]of [["Brain notes",count.brain],["Domains",domains],["Connections",next.edges.length],["Chat archive",count.chats]] as const){const row=root.createElement("div"),term=root.createElement("dt"),number=root.createElement("dd");term.textContent=label;number.textContent=value.toLocaleString();row.append(number,term);numbers.append(row);}
       status.textContent=next.partial?"Showing the indexed part of your knowledge.":next.nodes.length?"":"Your saved knowledge will grow here.";
-      if(!cloud){cloud=createKnowledgeCloud(root,()=>open.click());preview.append(cloud.canvas);cloud.canvas.setAttribute("aria-label","3D knowledge preview. Drag to rotate; explore knowledge to read records.");}cloud.update(next);cloud.resize();open.disabled=false;retrying=false;open.textContent="Explore knowledge";
+      if(!cloud){cloud=createKnowledgeCloud(root,()=>open.click(),{compact:true});preview.append(cloud.canvas);cloud.canvas.setAttribute("aria-label","Brain preview. Explore knowledge to read records and chat sources.");}const brain=next.nodes.filter(n=>!isArchivedConversation(n)),ids=new Set(brain.map(n=>n.id));cloud.update({...next,nodes:brain,edges:next.edges.filter(e=>ids.has(e.source)&&ids.has(e.target))});cloud.resize();open.disabled=false;retrying=false;open.textContent="Explore knowledge";
     }catch{if(enabled&&!controller.signal.aborted){status.textContent="Knowledge could not load. Tap to retry.";open.textContent="Retry knowledge";retrying=true;}}
     finally{if(flight===controller)flight=undefined;}
   }

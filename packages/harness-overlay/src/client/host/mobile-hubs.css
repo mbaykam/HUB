@@ -163,10 +163,10 @@ html[data-minke-mobile-web] [data-hub-home][data-hub-voice-active] [data-compose
 
 /* Home has one bottom interaction bar. Native editor/attachment/approval
    ownership is retained; live content lives in the scrollable space above. */
-html[data-minke-mobile-web] [data-hub-home] [data-conversation-scroll]{display:flex;flex-direction:column;justify-content:flex-start}
-html[data-minke-mobile-web] [data-hub-home] [data-composer-seat]{position:sticky;bottom:0;margin-top:auto;flex:none;padding:10px 16px max(12px,env(safe-area-inset-bottom));background:linear-gradient(transparent,#0d1220dd 35%)}
+html[data-minke-mobile-web] [data-hub-home] [data-conversation-scroll]{display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;min-height:0}
+html[data-minke-mobile-web] [data-hub-home] [data-composer-seat]{position:relative;bottom:auto;margin-top:0;flex:none;padding:10px 16px max(12px,env(safe-area-inset-bottom));background:#0d1220}
 [data-hub-home] [data-hub-composer-stack]{position:relative}
-[data-hub-home-surface]{flex:1 0 auto;min-height:0;min-width:0;box-sizing:border-box;width:100%;max-width:728px;margin:0 auto;padding:12px 16px 20px;color:#edf1fc}
+[data-hub-home-surface]{flex:1 1 0;overflow-y:auto;overscroll-behavior:contain;min-height:0;min-width:0;box-sizing:border-box;width:100%;max-width:728px;margin:0 auto;padding:12px 16px 32px;color:#edf1fc}
 [data-hub-home-surface][hidden]{display:none!important}
 [data-hub-home-surface] [hidden]{display:none!important}
 [data-hub-home-surface] [data-hub-activity],[data-hub-home-surface] [data-hub-browser-view]{width:100%;margin:16px 0 0;max-width:none}

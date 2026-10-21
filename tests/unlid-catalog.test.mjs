@@ -46,7 +46,7 @@ test('model API merges all Unlid models despite another provider outage; adding 
  const ctx={credentials,llm:{listProviders:()=>[{id:'unlid',name:'Unlid'}],async listModels(){return profile.models.map(m=>({...m,provider:'unlid'}))},async resolveCallConfig(s){return s}},
  settings:{get(){return{providers:{unlid:profile}}},describe(){return[{ns:'llm-pi-ai',revision:3}]},async mutate(ns,ops,revision){assert.equal(ns,'llm-pi-ai');assert.equal(revision,3);assert.deepEqual(ops[0].path,['providers','unlid','models']);profile.models=ops[0].value;mutations++;}},
  sessionController:{selectModel(){throw Error('No session selection')}},agentDefaultModel:{saveSelection(){throw Error('No default change')}},connection:{requestRejection:()=>undefined},
- webServer:{register(r){if(r.path==='/api/hub/models')route=r;return()=>{}}},on(_event,callback){hook=callback;return()=>{}},effect(f){disposers.push(f())}};
+ webServer:{register(r){if(r.path==='/api/hub/models')route=r;return()=>{}}},on(event,callback){if(event==='llm/stream')hook=callback;return()=>{}},effect(f){disposers.push(f())}};
  apply(ctx,{root,fetch:async url=>{if(url==='https://api.unlid.ai/v1/models')return new Response(JSON.stringify(data));throw Error('Other catalogue offline');}});
  const server=createServer((req,res)=>void route.handler(req,res));server.listen(0,'127.0.0.1');await once(server,'listening');const url=`http://127.0.0.1:${server.address().port}/api/hub/models`,headers={'x-hub-models':'1','content-type':'application/json'};
  const command=async body=>fetch(url,{method:'POST',headers,body:JSON.stringify(body)});

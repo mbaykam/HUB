@@ -5,6 +5,7 @@ export interface ActivitySession {
   readonly title?: string; readonly displayTitle?: string; readonly running?: boolean;
   readonly completed?: boolean; readonly blank?: boolean; readonly updatedAt?: number;
   readonly origin?: string; readonly parentId?: string;
+  readonly failed?:boolean; readonly stopped?:boolean;
 }
 interface Observation { readonly queued?: number; readonly failed?: boolean; readonly lastAction?: string; }
 export interface ActivityPendingSource {
@@ -77,11 +78,11 @@ export function projectMobileActivity(snapshot: ActivitySnapshot, voiceSession?:
     const running = members.filter(id => sessions[id]?.running), queued = members.filter(id => (snapshot.observations?.[id]?.queued ?? 0) > 0);
     const pending = members.find(id => snapshot.pendingBySession?.has(id));
     const activeProcesses = value.jobs.filter(({ job }) => activeJob(job));
-    const finished = members.some(id => sessions[id]?.completed || now - (recent.get(id) ?? -Infinity) < recentMs);
+    const finished = members.some(id => sessions[id]?.completed || sessions[id]?.failed || sessions[id]?.stopped || now - (recent.get(id) ?? -Infinity) < recentMs);
     if (!running.length && !queued.length && !pending && !activeProcesses.length && !finished && !value.jobs.length) continue;
     const latestJob = [...value.jobs].sort((a, b) => (b.job.finishedAt ?? b.job.startedAt) - (a.job.finishedAt ?? a.job.startedAt))[0];
-    const failed = members.some(id => snapshot.observations?.[id]?.failed);
-    const status: Status = pending ? "attention" : activeProcesses.some(({ job }) => job.status === "stopping") ? "stopping" : running.length || activeProcesses.length ? "running" : queued.length ? "waiting" : failed || latestJob?.job.status === "failed" ? "failed" : latestJob?.job.status === "killed" ? "killed" : finished ? "finished" : "completed";
+    const failed = members.some(id => sessions[id]?.failed||snapshot.observations?.[id]?.failed),stopped=members.some(id=>sessions[id]?.stopped);
+    const status: Status = pending ? "attention" : activeProcesses.some(({ job }) => job.status === "stopping") ? "stopping" : running.length || activeProcesses.length ? "running" : queued.length ? "waiting" : failed || latestJob?.job.status === "failed" ? "failed" : stopped||latestJob?.job.status === "killed" ? "killed" : finished ? "finished" : "completed";
     const actionId = running[0] ?? queued[0], lastAction = members.map(id => snapshot.observations?.[id]?.lastAction).find(Boolean), process = activeProcesses[0];
     const detail = pending ? pendingLabel(snapshot.pendingBySession!.get(pending)!.kind) : process ? process.job.detail || process.job.label : running.length ? lastAction ? "Last observed step: " + lastAction : actionId !== rootId ? "Delegated work: " + titleOf(actionId!, sessions[actionId!]) : "The assistant is working on this conversation" : queued.length ? "A message is queued for the next turn" : failed || status === "failed" ? "The last operation reported an error; open the conversation to inspect it" : lastAction ? "Last observed step: " + lastAction : latestJob ? "Background process ended · " + latestJob.job.label : "A reply is ready to review";
     const steps: ActivityStep[] = members.filter(id => id !== rootId).map(id => ({ id: "session:" + id, sessionId: id, label: titleOf(id, sessions[id]), status: snapshot.pendingBySession?.has(id) ? "attention" : sessions[id]?.running ? "running" : (snapshot.observations?.[id]?.queued ?? 0) > 0 ? "waiting" : snapshot.observations?.[id]?.failed ? "failed" : sessions[id]?.completed || recent.has(id) ? "finished" : "idle", detail: snapshot.observations?.[id]?.lastAction }));
@@ -143,7 +144,7 @@ export function createActivitySignals(sessions: HarnessClientContext["sessions"]
 
 const labels: Record<Status | "idle", string> = { running: "Working", stopping: "Stopping", waiting: "Queued", attention: "Needs your input", finished: "Reply ready", completed: "Process ended", killed: "Stopped", failed: "Failed", idle: "Idle" };
 function age(at: number, now: number) { if (!at) return ""; const minutes = Math.max(0, Math.floor((now - at) / 60000)); return minutes < 1 ? "Updated just now" : minutes < 60 ? `Updated ${minutes}m ago` : `Updated ${Math.floor(minutes / 60)}h ago`; }
-export function createMobileActivity(root: Document, open: (id: string) => void) {
+export function createMobileActivity(root: Document, open: (id: string,parentHint?:string) => void) {
   const panel = root.createElement("section"); panel.setAttribute("data-hub-activity", ""); panel.setAttribute("aria-label", "Your work");
   const heading = root.createElement("h2"); heading.textContent = "Your work";
   const status = root.createElement("p"); status.setAttribute("role", "status");
@@ -174,7 +175,7 @@ export function createMobileActivity(root: Document, open: (id: string) => void)
       const badge = root.createElement("span"); badge.setAttribute("data-work-badge", ""); badge.textContent = link === "connected" ? labels[item.status] : "Status unavailable"; line.append(title, badge);
       const detail = root.createElement("p"); detail.textContent = item.detail;
       const meta = root.createElement("small"); meta.textContent = [item.activeAssistants ? `${item.activeAssistants} assistant${item.activeAssistants === 1 ? "" : "s"} working` : "", item.activeProcesses ? `${item.activeProcesses} background process${item.activeProcesses === 1 ? "" : "es"}` : "", age(item.updatedAt, now), item.status === "attention" ? "Open to respond →" : "Open conversation →"].filter(Boolean).join(" · ");
-      button.append(line, detail, meta); button.addEventListener("click", () => open(item.sessionId)); row.append(button);
+      button.append(line, detail, meta); button.addEventListener("click", () => open(item.sessionId,value.byId[item.sessionId]?.parentId)); row.append(button);
       if (item.steps.length) {
         const steps = root.createElement("details"); steps.open = expandedSteps.has(item.id); const summary = root.createElement("summary"); summary.textContent = `Steps & background work (${item.steps.length})`; steps.append(summary);
         steps.addEventListener("toggle", () => { if (steps.open) expandedSteps.add(item.id); else expandedSteps.delete(item.id); });
@@ -182,7 +183,7 @@ export function createMobileActivity(root: Document, open: (id: string) => void)
         for (const step of item.steps) {
           const li = root.createElement("li"), b = root.createElement("button"); b.type = "button"; b.setAttribute("data-work-step", step.id);
           const name = root.createElement("strong"); name.textContent = step.label; const state = root.createElement("span"); state.textContent = `${link === "connected" ? labels[step.status] : "Last known: " + labels[step.status]}${step.detail ? " · " + step.detail : ""}`;
-          b.append(name, state); b.addEventListener("click", () => open(step.sessionId)); li.append(b); ul.append(li);
+          b.append(name, state); b.addEventListener("click", () => open(step.sessionId,value.byId[step.sessionId]?.parentId)); li.append(b); ul.append(li);
         }
         steps.append(ul); row.append(steps);
       }

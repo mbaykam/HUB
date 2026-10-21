@@ -53,7 +53,7 @@ export function installMobileSettings(root: Document = document): () => void {
     header.append(back, heading, close); dialog.prepend(header);
     const oldLabel = dialog.getAttribute("aria-labelledby"); dialog.setAttribute("aria-labelledby", heading.id);
     const intro = root.createElement("section"); intro.setAttribute("data-hub-settings-intro", "");
-    nav.prepend(intro);
+    const general=root.createElement("button");general.type="button";general.textContent="General · appearance & language";general.addEventListener("click",()=>{nav!.querySelectorAll<HTMLButtonElement>("button").forEach(b=>{if(/^(General|常规)$/.test(b.textContent?.trim()??""))b.click();});});intro.append(general);
     const removeUpdate = installMobileUiUpdate(intro, root);
     let section = false;
     let selected: HTMLButtonElement | undefined;
@@ -67,11 +67,12 @@ export function installMobileSettings(root: Document = document): () => void {
     function show(detail: boolean) {
       section = detail;
       mark(dialog, "data-hub-settings-view", detail ? "section" : "index");
-      heading.textContent = detail ? selected?.textContent?.trim() || "Settings" : "Settings";
-      back.hidden = !detail;
+      heading.textContent = detail&&selected&&!/^(HUB|Minke)$/.test(selected.textContent?.trim()??"") ? selected.textContent?.trim() || "Settings" : "Settings";
+      back.hidden = !detail||heading.textContent==="Settings";
       if (detail) options!.scrollTop = 0;
     }
     function refresh() {
+      const controls=options!.querySelector<HTMLElement>('[data-hub-settings-controls]');if(controls&&intro.parentElement!==controls)controls.append(intro);
       for (const button of nav!.querySelectorAll<HTMLButtonElement>(":scope > div:last-child > button")) {
         mark(button, "data-hub-settings-category");
         mark(button, "data-hub-settings-description", descriptions[button.textContent?.trim() ?? ""] ?? "Manage preferences");
@@ -89,7 +90,7 @@ export function installMobileSettings(root: Document = document): () => void {
           }
         }
       }
-      if (section && selected && !selected.isConnected) { selected = undefined; show(false); close.focus({ preventScroll: true }); }
+      if (section && selected && !selected.isConnected) { selected = undefined;toIndex(); }
     }
     const onSelect = (event: Event) => {
       const target = event.target instanceof view!.Element ? event.target.closest<HTMLButtonElement>("button[data-hub-settings-category]") : null;
@@ -98,10 +99,10 @@ export function installMobileSettings(root: Document = document): () => void {
       // The original React click still selects and renders its native section.
       view!.requestAnimationFrame(() => { if (dialog.isConnected && section) heading.focus({ preventScroll: true }); });
     };
-    const toIndex = () => { show(false); (selected?.isConnected ? selected : close).focus({ preventScroll: true }); };
+    const toIndex = () => {const hub=[...nav!.querySelectorAll<HTMLButtonElement>("button")].find(b=>/^(HUB|Minke)$/.test(b.textContent?.trim()??""));if(hub){selected=hub;hub.click();show(true);}close.focus({preventScroll:true});};
     const onKey = (event: KeyboardEvent) => {
       if (root.activeElement instanceof view!.Element && root.activeElement.closest('[role="dialog"]') !== dialog) return;
-      if (event.key === "Escape" && section) { event.preventDefault(); event.stopImmediatePropagation(); toIndex(); return; }
+      if (event.key === "Escape" && section) { event.preventDefault(); event.stopImmediatePropagation(); if(back.hidden)nativeClose.click();else toIndex(); return; }
       if (event.key !== "Tab") return;
       const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]')]
         .filter(node => node.getClientRects().length > 0 && !node.closest('[inert], [hidden]'));
@@ -113,8 +114,8 @@ export function installMobileSettings(root: Document = document): () => void {
     root.addEventListener("keydown", onKey, true);
     back.addEventListener("click", toIndex);
     close.addEventListener("click", () => nativeClose.click());
-    show(false); refresh(); close.focus({ preventScroll: true });
-    const removeSwipe = installMobileWidgetBack(dialog, header, () => { if (section) toIndex(); else nativeClose.click(); });
+    refresh();toIndex();close.focus({ preventScroll: true });
+    const removeSwipe = installMobileWidgetBack(dialog, header, () => { if (section&&!back.hidden) toIndex(); else nativeClose.click(); });
     mounted = dialog; refreshPanel = refresh;
     disposePanel = () => {
       removeSwipe();
@@ -132,7 +133,7 @@ export function installMobileSettings(root: Document = document): () => void {
     frame = undefined;
     if (disposed) return;
     tidyNavigation();
-    const mobile = root.documentElement.hasAttribute("data-minke-mobile-web") && view!.innerWidth < 1024;
+    const mobile = root.documentElement.hasAttribute("data-minke-mobile-web");
     const dialog = mobile ? root.querySelector<HTMLElement>('[data-slot="sidebar.settings"] [role="dialog"]') : null;
     if (mounted !== dialog) { disposePanel?.(); disposePanel = undefined; refreshPanel = undefined; mounted = undefined; if (dialog) mount(dialog); }
     else refreshPanel?.();

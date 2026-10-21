@@ -1,4 +1,9 @@
 [data-slot="sidebar.settings"] [data-hub-legacy-setting]{display:none!important}
+[data-hub-settings-controls]>h3,[data-hub-settings-controls]>p{display:none}
+[data-hub-settings-controls] [data-hub-settings-intro]{margin:18px 0 0;border-top:1px solid #b5c6ef22;padding-top:16px}
+[data-hub-settings-intro]>button{display:block;width:100%;text-align:left;font:inherit;font-size:14px;padding:12px;min-height:44px;color:inherit;background:#a9bdff08;border:1px solid #a9bdff20;border-radius:12px}
+[data-hub-settings-controls] [data-hub-ui-update]{font-size:11px;margin-top:16px}
+@media(min-width:1024px){html[data-minke-mobile-web] [data-slot="sidebar.settings"] [data-hub-mobile-settings]{inset:5vh 0;margin:auto;width:min(900px,95vw)!important;height:90dvh!important;max-height:90dvh;border-radius:24px}}
 /* Markers exist only on phone/tablet PWA dialogs. Native desktop styles and
  * all native settings values/actions remain owned by their original modules. */
 /* Focus must not scroll the off-canvas sidebar's containing frame. Unlike

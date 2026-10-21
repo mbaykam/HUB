@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0
+
+- Full-screen PWA apps with isolated HTML playback and optional touch game controls.
+- Recover running work and recent replies after reopening the PWA; retain generated
+  file originals, source conversations and Knowledge excerpts.
+- Correct OpenRouter reasoning discovery and automatic output reservations; simplify
+  model parameter editing with clear save and cancel behavior.
+- Compact conversation, Settings and Knowledge navigation; remove Home overlap and
+  preserve readable currency formatting. See [release notes](docs/releases/v1.7.0.md).
+
 ## 1.6.3
 
 - Hold Soniox endpoints while local voice activity still indicates speech, and

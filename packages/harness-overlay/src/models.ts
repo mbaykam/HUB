@@ -4,7 +4,8 @@ import { join, isAbsolute } from "node:path";
 import { ModelCatalogStore } from "./host/model-catalog.ts";
 import { installTelegramWeb } from "./host/telegram-web.ts";
 import type { HubCatalogModel, HubModelCatalog } from "./model-catalog-contract.ts";
-import {catalogOutputLimit} from "./model-catalog-contract.ts";
+import {catalogOutputLimit,catalogOutputDefault} from "./model-catalog-contract.ts";
+import {openRouterEffortProfile,prepareOpenRouterRequest} from "./host/openrouter-capabilities.ts";
 import {voiceRouteSchema} from "./voice-profile-contract.ts";
 import {UnlidCatalogStore, prepareUnlidRequest} from "./host/unlid-catalog.ts";
 import type {UsageCredentials} from "./host/usage.ts";
@@ -14,7 +15,7 @@ export const inject = ["llm", "settings", "sessionController", "agentDefaultMode
 interface Model { id: string; name: string; provider: string; contextWindow?: number; maxTokens?: number;context?:{contextWindow:number};defaultMaxTokens?:number;inputModalities?:string[]; reasoning?: { efforts: { id: string; name?: string }[];defaultEffort?:string } }
 interface Context {
   credentials: UsageCredentials;
-  on?(event: "llm/stream", callback: (options:any,next:()=>AsyncIterable<unknown>)=>AsyncIterable<unknown>, flags:{global:true;prepend:true}):()=>void;
+  on?(event: string, callback: (...args:any[])=>any, flags:{global:true;prepend:true}):()=>void;
   llm: { listProviders(): { id: string; name: string }[]; listModels(id: string): Promise<Model[]>; resolveModelInfo?(provider: string, model: string): Promise<Model>; resolveCallConfig(value: { provider: string; model: string; reasoningEffort?: string }): Promise<{ provider: string; model: string; reasoningEffort?: string }> };
   settings: { describe(options: { redactSecrets: true }): { ns: string; revision: number }[]; get(ns: string): unknown; mutate(ns: string, operations: { op: "set"; path: string[]; value: unknown }[], revision: number): Promise<void> };
   sessionController: { selectModel(value: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown> };
@@ -47,6 +48,11 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
     // Promise<AsyncIterable>, which breaks every provider before dispatch.
     await ready; prepareUnlidRequest(options,unlid.snapshot().models); yield* next();
   }, {global:true,prepend:true});
+  // Requests are logged and frozen at llm/stream. Set defaults at assembly so
+  // the durable request header describes the exact dispatch, without mutation.
+  const removeRequestDefaults=ctx.on?.("agent/request",async (_request:any,next:()=>Promise<any>)=>{
+    await ready;const config={...await next()};prepareOpenRouterRequest(config,store.snapshot().openrouter??[]);return config;
+  },{global:true,prepend:true});
   async function snapshot(): Promise<HubModelCatalog> {
     await ready; store.revalidate(); if (hasUnlid()) unlid.revalidate();
     const current = store.snapshot();
@@ -63,7 +69,7 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
     }
     for (const m of current.openrouter ?? []) {
       const key = `${m.provider}/${m.id}`, enabled = active.get(key);
-      active.set(key, { ...m, enabled: !!enabled, ...(enabled?.efforts ? { efforts: enabled.efforts,defaultEffort:enabled.defaultEffort } : {}) });
+      active.set(key, { ...m, enabled: !!enabled, ...(!m.reasoningConfig&&enabled?.efforts ? { efforts: enabled.efforts,defaultEffort:enabled.defaultEffort } : {}) });
     }
     const unlidState = unlid.snapshot();
     if (hasUnlid()) for (const m of unlidState.models) {
@@ -82,17 +88,19 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
   }
   async function enable(model: HubCatalogModel) {
     if (model.available === false) throw Error("model-paused");
-    if (model.enabled) return;
+    if (model.enabled&&(model.provider!=="openrouter"||!model.reasoningConfig)) return;
     if (!["openrouter","unlid"].includes(model.provider) || !ctx.llm.listProviders().some(p => p.id === model.provider)) throw new Error("adapter-unavailable");
     const section = ctx.settings.get("llm-pi-ai") as { providers?: Record<string, { models?: unknown[] }> } | undefined;
     const profile = section?.providers?.[model.provider];
     const revision = ctx.settings.describe({ redactSecrets: true }).find(x => x.ns === "llm-pi-ai")?.revision;
     if (!profile || revision === undefined) throw new Error("provider-unavailable");
-    const row = { id: model.id, name: model.name, contextWindow: model.contextWindow,
-      maxTokens: Math.min(model.maxTokens ?? 8192, model.contextWindow ?? 8192), input: model.input.filter(x => x === "text" || x === "image"),
-      // Unknown models advertise reasoning, but not a verified effort vocabulary.
-      ...(model.provider==="unlid"&&model.efforts?.length ? {reasoningEfforts:Object.fromEntries(model.efforts.map(e=>[e.id,e.id==="off"?"none":e.id]))} : model.reasoning ? {} : { reasoningEfforts: false }) };
     const existing = profile.models?.length ? profile.models : (await ctx.llm.listModels(model.provider)).map(m => ({ id: m.id }));
+    const prior=existing.find((x:any)=>x.id===model.id) as Record<string,unknown>|undefined;
+    const efforts=openRouterEffortProfile(model);
+    const row = { ...prior,id: model.id, name: model.name, contextWindow: model.contextWindow,
+      maxTokens:prior?.maxTokens??catalogOutputDefault(model), input: model.input.filter(x => x === "text" || x === "image"),
+      ...(efforts?{reasoningEfforts:efforts}:model.reasoning?{}:{reasoningEfforts:false}) };
+    if(prior&&JSON.stringify(prior)===JSON.stringify(row))return;
     // Change exactly one model-list path; retain key, endpoint and all other providers.
     await ctx.settings.mutate("llm-pi-ai", [{ op: "set", path: ["providers", model.provider, "models"], value: [...existing.filter((x: any) => x.id !== model.id), row] }], revision);
   }
@@ -122,10 +130,11 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
       // Native session/default selection persists identity and effort only.
       // Character editors use enable, then save the complete route themselves.
       if(command.action!=="enable"&&(command.temperature!==undefined||command.maxTokens!==undefined)){send(res,400,{error:"character-options-required"});return;}
-      await enable(model);
       const selection = voiceRouteSchema.parse({ provider: model.provider, model: model.id, ...(command.reasoningEffort ? { reasoningEffort: command.reasoningEffort } : {}),...(command.temperature!==undefined?{temperature:command.temperature}:{}),...(command.maxTokens!==undefined?{maxTokens:command.maxTokens}:{}) });
       if(selection.temperature!==undefined&&!model.editableParameters?.includes("temperature"))throw Error("Temperature unavailable");
       if(selection.maxTokens!==undefined&&selection.maxTokens>catalogOutputLimit(model))throw Error("Output limit exceeded");
+      if(selection.reasoningEffort&&model.efforts&&!model.efforts.some(e=>e.id===selection.reasoningEffort))throw Error("Reasoning level unavailable");
+      await enable(model);
       if (command.action === "enable") { await ctx.llm.resolveCallConfig(selection); send(res, 200, { available: selection }); return; }
       if (command.action === "select") {
         await ctx.sessionController.selectModel({ sessionId: command.sessionId, ...selection });
@@ -141,5 +150,5 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
   const revalidate=()=>{store.revalidate();if(hasUnlid())unlid.revalidate();};
   const timer = setInterval(() => { void ready.then(revalidate); }, 60_000); timer.unref();
   void ready.then(revalidate);
-  ctx.effect(() => () => { clearInterval(timer); store.dispose(); unlid.dispose(); removeCapabilities?.(); remove(); removeTelegram(); }, "hub: shared live model catalogue");
+  ctx.effect(() => () => { clearInterval(timer); store.dispose(); unlid.dispose(); removeCapabilities?.();removeRequestDefaults?.(); remove(); removeTelegram(); }, "hub: shared live model catalogue");
 }

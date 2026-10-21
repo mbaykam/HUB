@@ -31,5 +31,6 @@ test('catalogue capability middleware preserves native streaming for every provi
    const message=agent.session.snapshotEvents().findLast(e=>e.type==='assistant/message');assert.equal(message.data.message.content.filter(b=>b.type==='text').map(b=>b.text).join(''),answer);
   }
   assert.deepEqual(adapter.requests.map(r=>r.provider),['openrouter','unlid']);
+  assert.equal(adapter.requests[0].maxTokens,32768,'assembled OpenRouter request carries an operating allowance, not the provider ceiling');
  }finally{await ctx.fiber.dispose();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-eval-model-stream-'));await rm(root,{recursive:true,force:true});}
 });

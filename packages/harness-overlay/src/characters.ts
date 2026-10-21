@@ -1,4 +1,5 @@
 import { Context, Service } from "@deepseek-ai/cordis";
+import {installDailyUseWeb} from "./host/daily-use-web.ts";
 import * as nativeSubagent from "@deepseek-ai/dsh-tool-subagent";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -157,6 +158,7 @@ export class HubCharacters extends Service {
     ctx.on("session/event",(session:any,event:any)=>{if(event.type!=="turn/start"||this.voiceCalls.has(session.header.id))return;const mount=this.mounts.get(session.header.id);if(mount){try{mount.turnSnapshot=this.store.snapshot();}catch{}}},{global:true});
     for(const agent of ctx.agents.list())attach(agent as any);
     ctx.effect(()=>this.installWeb(),"HUB character management");
+    ctx.effect(()=>installDailyUseWeb(ctx),"HUB durable activity and generated applications");
     ctx.effect(()=>{
       let renderer:Promise<string>|undefined;
       const handler=createPresentationHandler(this.presentations,req=>ctx.connection.requestRejection(req),()=>renderer??=readFile(new URL("./presentation-renderer.js",import.meta.url),"utf8"));
@@ -207,7 +209,7 @@ export class HubCharacters extends Service {
       for(const c of s.characters){
         if(!c.route)continue;
         const toolName=`hub_character_${c.id.replaceAll("-","")}`;
-        const fiber=agent.ctx.plugin(nativeSubagent,{provider,toolName,backgroundMode:"continuable",enableRunInBackground:true,maxDepth:3,agentOptions:{...c.route,maxTokens:c.route.maxTokens??8192},persona:characterAuthorityPersona(c)+`Character: ${c.name}.\n${c.instructions}\nExecution role: you are the specialist worker for this delegated task. Perform the requested work directly with your configured tools and report verified results to the parent. Do not turn this task into another coordinator unless the request explicitly needs additional workers. For live prices, use a current public source, name its quote currency and timestamp, and include a source URL. Never substitute a remembered price.`, ...(c.tools.mode==="allow"?{toolFilter:{allow:c.tools.names}}:{})});
+        const fiber=agent.ctx.plugin(nativeSubagent,{provider,toolName,backgroundMode:"continuable",enableRunInBackground:true,maxDepth:3,agentOptions:{...c.route,...(c.route.maxTokens===undefined&&c.route.provider!=="openrouter"?{maxTokens:8192}:{})},persona:characterAuthorityPersona(c)+`Character: ${c.name}.\n${c.instructions}\nExecution role: you are the specialist worker for this delegated task. Perform the requested work directly with your configured tools and report verified results to the parent. Do not turn this task into another coordinator unless the request explicitly needs additional workers. For live prices, use a current public source, name its quote currency and timestamp, and include a source URL. Never substitute a remembered price.`, ...(c.tools.mode==="allow"?{toolFilter:{allow:c.tools.names}}:{})});
         await fiber.await();
         mount.fibers.push(fiber);mount.names.set(c.id,toolName);
       }

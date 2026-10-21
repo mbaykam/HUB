@@ -11,7 +11,7 @@ import type {AgentTurnInput} from "../agent-turn-contract.ts";
 import {voiceRuntimeEnvironment,type VoiceSubprocess} from "./voice-sidecar.ts";
 
 const MAX=25_000_000;
-const mime:Record<string,string>={".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".gif":"image/gif",".pdf":"application/pdf",".mp3":"audio/mpeg",".wav":"audio/wav",".mp4":"video/mp4",".txt":"text/plain",".md":"text/markdown",".csv":"text/csv"};
+const mime:Record<string,string>={".html":"text/html",".htm":"text/html",".js":"text/javascript",".json":"application/json",".css":"text/css",".svg":"image/svg+xml",".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".gif":"image/gif",".pdf":"application/pdf",".mp3":"audio/mpeg",".wav":"audio/wav",".mp4":"video/mp4",".txt":"text/plain",".md":"text/markdown",".csv":"text/csv"};
 export function knowledgeUrls(text:string){const values=new Set<string>();for(const match of text.matchAll(/https?:\/\/[^\s<>"'\]\)]+/g)){try{const url=new URL(match[0].replace(/[.,;!?]+$/,""));if(!url.username&&!url.password&&url.href.length<=2000)values.add(url.href);}catch{}}return [...values].slice(0,30);}
 /** Originals belong to the real vault; only lookup metadata stays outside it. */
 import {KnowledgeMutationGate} from "./knowledge-mutation-gate.ts";

@@ -8,7 +8,7 @@ type Point=CloudPosition&{sx:number;sy:number;r:number;depth:number;visible:bool
 type Label={id:string;kind:"root"|"domain"|"node";text:string;x:number;y:number;radius:number;depth:number;selected:boolean;group?:string};
 /** Canvas projects XYZ coordinates; detail budgets only affect drawing, never
  * the persisted graph or a record's discoverable neighborhood. */
-export function createKnowledgeCloud(root:Document,onOpen:(id:string)=>void){
+export function createKnowledgeCloud(root:Document,onOpen:(id:string)=>void,options:{compact?:boolean}={}){
   const view=root.defaultView!,canvas=root.createElement("canvas"),controls=root.createElement("div"),summary=root.createElement("span"),open=root.createElement("button");
   canvas.setAttribute("data-knowledge-cloud","");canvas.tabIndex=0;canvas.setAttribute("aria-label","3D knowledge brain. Drag to rotate; pinch or use zoom controls. Tap to select, then Open record. Domains and Notes provide keyboard lists.");controls.className="knowledge-brain-controls";summary.setAttribute("role","status");open.type="button";open.textContent="Open record";open.hidden=true;open.addEventListener("click",()=>{if(active)onOpen(active);});
   let graph:KnowledgeGraph|undefined,points:Point[]=[],byId=new Map<string,Point>(),groups:CloudGroup[]=[],yaw=.2,pitch=.12,zoom=1,frame=0,disposed=false,active:string|undefined,local=false,focus:string|undefined,wasVisible=new Set<string>(),groupHits:{id:string;x:number;y:number;width:number;height:number}[]=[];
@@ -41,7 +41,7 @@ export function createKnowledgeCloud(root:Document,onOpen:(id:string)=>void){
     for(const p of [...shown].sort((a,b)=>b.depth-a.depth)){if(!p.visible)continue;ctx.globalAlpha=local&&active&&!neighbors.has(p.id)?.15:1;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.sx,p.sy,Math.min(24,Math.max(1,p.r)),0,Math.PI*2);ctx.fill();if(p.domainIds.length>1){ctx.strokeStyle="#e4def8a0";ctx.lineWidth=1;ctx.beginPath();ctx.arc(p.sx,p.sy,p.r+3,0,Math.PI*2);ctx.stroke();}labels.push({id:p.id,kind:"node",text:p.label,x:p.sx,y:p.sy+p.r+10,radius:p.r,depth:p.depth,selected:p.id===active});}ctx.globalAlpha=1;
     const boxes:KnowledgeLabelBox[]=[],visible=new Set<string>();groupHits=[];let labelCount=0;
     for(const label of labels.sort((a,b)=>Number(b.selected)-Number(a.selected)||({root:0,domain:1,node:2}[a.kind])-({root:0,domain:1,node:2}[b.kind])||a.depth-b.depth||knowledgeHash(a.id)-knowledgeHash(b.id))){
-      if(labelCount>=60&&!label.selected)continue;const style=knowledgeLabelStyle(label.kind,label.radius,label.selected,wasVisible.has(label.id),points.length<=12);if(style.opacity<=.05)continue;
+      if(options.compact||labelCount>=60&&!label.selected)continue;const style=knowledgeLabelStyle(label.kind,label.radius,label.selected,wasVisible.has(label.id),points.length<=12);if(style.opacity<=.05)continue;
       ctx.font=`${label.selected?"600 ":""}${style.font.toFixed(1)}px system-ui`;
       const text=label.text.length>36?label.text.slice(0,34)+"…":label.text,width=ctx.measureText(text).width+10,base={x:label.x-width/2,y:label.y-style.font/2,width,height:style.font+10},placement=placeKnowledgeLabel(base,{width:w,height:h},boxes,label.kind,label.selected,labelOffsets.get(label.id));
       if(!placement)continue;const {box,offset}=placement;labelOffsets.set(label.id,offset);boxes.push(box);visible.add(label.id);labelCount++;ctx.globalAlpha=style.opacity;

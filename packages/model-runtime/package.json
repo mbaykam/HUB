@@ -1,7 +1,7 @@
 {
   "name": "@lencx/minke-model-runtime",
   "description": "HUB local model discovery, lifecycle, and DeepSeek Harness integration",
-  "version": "1.6.3",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "scripts": {

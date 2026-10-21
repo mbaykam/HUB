@@ -1,0 +1,36 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
+--- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
+@@ -2886,21 +2886,31 @@
+ 		//#region lib/types/client/chat/AssistantMarkdown.js
+ 		/** Reasoning block as the Think variant summary row (figma 39:28304). */
++function escapeCurrencyMarkdown(text) {
++  return text.split(/(`{3,}[\s\S]*?`{3,}|~{3,}[\s\S]*?~{3,}|`[^`\n]*`)/g).map((part,index)=>{
++    if(index%2)return part;
++    return part.replace(/(?<!\\)\$(?=\d)/g,(dollar,at)=>{
++      const rest=part.slice(at+1),end=rest.indexOf('$');
++      if(end>=0){const formula=rest.slice(0,end);if(formula&&!/\n/.test(formula)&&/^[\d\sA-Za-z.,+*/=^_{}()\\-]+$/.test(formula)&&!/(?:\d|\s)[A-Za-z]{2,}/.test(formula)&&!/[+*/=^_-]$/.test(formula.trim()))return dollar;}
++      return '\\$';
++    });
++  }).join('');
++}
+ 		const AssistantMarkdown = (0, react.memo)(function AssistantMarkdown({ blocks, streaming, interrupted, renderMessageImages, reasoningHidden = false, revealProcess, mentions, t }) {
+ 			const labels = (0, react.useMemo)(() => markdownLabels(t), [t]);
+ 			const last = blocks.length - 1;
+ 			if (!(streaming || interrupted === true || blocks.some((block) => block.kind !== "tool-call"))) return null;
+ 			const rendered = [];
+ 			for (let i = 0; i < blocks.length; i++) {
+ 				const block = blocks[i];
+ 				if (block === void 0) continue;
+ 				switch (block.kind) {
+ 					case "text":
+ 						rendered.push((0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, {
+-							text: block.text,
++							text: escapeCurrencyMarkdown(block.text),
+ 							streaming,
+ 							labels,
+ 							fileMentions: mentions
+ 						}, i));
+ 						break;
+ 					case "reasoning":
+ 						rendered.push((0, react_jsx_runtime.jsx)(ProcessReasoning, {

@@ -21,6 +21,7 @@
     "patches/deepseek-harness/client-navigation-visibility.patch",
     "patches/deepseek-harness/mobile-unified-recents.patch",
     "patches/deepseek-harness/chat-responsive-stats.patch",
+    "patches/deepseek-harness/chat-currency-markdown.patch",
     "patches/deepseek-harness/personal-assistant-context.patch",
     "patches/deepseek-harness/compaction-cancellation.patch"
   ],

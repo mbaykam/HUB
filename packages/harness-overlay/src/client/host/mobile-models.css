@@ -12,6 +12,11 @@
 .hub-model-toolbar input { grid-column:1/-1; width:100%; }
 .hub-model-note { opacity:.7; font-size:13px; line-height:1.5; }
 .hub-model-list { display:grid; gap:10px; margin-top:12px; }
+.hub-model-editor label{display:flex;flex-direction:column;gap:8px;margin:18px 0 6px;font-size:14px}.hub-model-editor input,.hub-model-editor select{width:100%}
+[data-hub-models] [hidden]{display:none!important}
+[data-hub-models] header{gap:8px;padding-block:12px}.hub-model-toolbar{grid-template-columns:minmax(0,1fr) minmax(115px,.65fr)}.hub-model-toolbar input{grid-column:auto}
+.hub-model-filters{margin:6px 0}.hub-model-filters>summary{font-size:13px;color:#b6c3da;padding-block:8px}.hub-model-filters>details{font-size:13px;padding:8px 0}
+.hub-model-list article:has(.hub-model-editor){padding:16px;border:0;background:transparent}.hub-model-list button{min-height:44px}
 .hub-model-list details{margin:12px 0;padding:10px 0;border-top:1px solid #ffffff16}.hub-model-list summary{cursor:pointer;min-height:44px;padding:10px 0}.hub-model-list label{display:flex;flex-direction:column;gap:7px;margin:12px 0;font-size:13px}.hub-model-list small{display:block;overflow-wrap:anywhere;line-height:1.5;color:#b8c3d9;font-size:12px;margin:8px 0}
 .hub-model-list article { position:relative;border:1px solid #ffffff16; border-radius:16px; padding:16px; background:#ffffff04; }
 .hub-model-list article>.hub-model-favorite{position:absolute;right:8px;top:8px;display:block;width:44px;height:44px;min-height:44px;padding:0;margin:0;font-size:22px;background:transparent}.hub-model-list h3{padding-right:42px}

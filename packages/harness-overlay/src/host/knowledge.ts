@@ -13,6 +13,7 @@ import { KnowledgeEmbeddings } from "./knowledge-embeddings.ts";
 import { boundedKnowledgeRecall,visibleKnowledgeReflections } from "./knowledge-recall.ts";
 import { knowledgeRecallContext,isKnowledgeEvaluation } from "./knowledge-evidence.ts";
 import {nativeConversation,conversationSources} from "./knowledge-archive.ts";
+import {archiveGeneratedArtifacts} from "./conversation-artifacts.ts";
 import {organizationPrompt} from "./knowledge-organization.ts";
 import {currentTurnHasUserRequest} from "./task-turn.ts";
 import {providerGate} from "./provider-gate.ts";
@@ -74,11 +75,16 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
     }
     for(const e of turn.filter(e=>e.type==="user/message"&&typeof e.data?.source?.rpcId==="string"))for(const asset of await store.assets.forRequest(sessionId,e.data.source.rpcId))if(!assets.some(a=>a.id===asset.id))assets.push(asset);
     for(const e of turn.filter(e=>e.type==="user/message"&&e.data?.source?.kind==="user"))for(const block of e.data.content??[])if(block.type==="text")for(const asset of await store.assets.uploadedAssets(sessionId,block.text))if(!assets.some(a=>a.id===asset.id))assets.push(asset);
+    for(const {asset}of await archiveGeneratedArtifacts(sessionId,turn,store.assets))if(!assets.some(a=>a.id===asset.id))assets.push(asset);
     return {...source,assets,urls:knowledgeUrls(source.content)};
   }
   const pending=new Set<Promise<unknown>>();
   async function archiveConversation(header:any,snapshot:readonly any[],channel:string,inherited=0){
     const record=nativeConversation(header,snapshot,channel,inherited,await store.cutoff());if(!record)return;
+    for(const {artifact,asset}of await archiveGeneratedArtifacts(header.id,snapshot.slice(inherited),store.assets)){
+      const end=snapshot.find(e=>e.type==="turn/end"&&e.data?.turn===artifact.turn),message=record.messages.filter(m=>m.role==="assistant"&&m.at>=artifact.at&&(!end||m.at<=end.time)).at(-1);
+      if(message){message.assets??=[];if(!message.assets.some(a=>a.id===asset.id))message.assets.push(asset);}
+    }
     for(const [index,event]of snapshot.slice(inherited).entries())if(event.type==="user/message"){
       const message=record.messages.find(m=>m.id===String(event.seq??index));if(!message)continue;
       const assets=[];for(const block of event.data?.content??[])if(block.type==="image"&&block.attachment){const asset=await store.assets.original(block.attachment.attachmentId);if(asset)assets.push(asset);}

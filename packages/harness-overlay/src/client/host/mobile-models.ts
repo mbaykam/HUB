@@ -1,7 +1,7 @@
 import { defineOverlayStyle } from "../shared/style-runtime.ts";
 import { installMobileWidgetBack } from "./mobile-widget-back.ts";
 import type { HubModelCatalog, HubCatalogModel } from "../../model-catalog-contract.ts";
-import {catalogOutputLimit} from "../../model-catalog-contract.ts";
+import {catalogOutputLimit,catalogOutputDefault} from "../../model-catalog-contract.ts";
 import type {VoiceProfile} from "../../voice-profile-contract.ts";
 import styles from "./mobile-models.css";
 const installStyles = defineOverlayStyle("hub-mobile-models", styles);
@@ -14,7 +14,7 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
   const launcher = button("Models & providers", () => void open()); launcher.setAttribute("data-hub-models-launcher", "");
   launcher.setAttribute("aria-haspopup", "dialog"); container.append(launcher);
   const dialog = element("dialog"); dialog.setAttribute("data-hub-models", ""); dialog.setAttribute("aria-label", "Models and providers");
-  const header = element("header"), close = button("Done", () => dismiss()); header.append(element("h2", "Models & providers"), close);
+  const header = element("header"),close=button("Done",()=>dismiss()),back=button("‹ Models",()=>cancelEdit()),heading=element("h2","Models & providers");back.hidden=true;header.append(back,heading,close);
   const toolbar = element("div"); toolbar.className = "hub-model-toolbar";
   const search = element("input"); search.type = "search"; search.placeholder = "Search models"; search.setAttribute("aria-label", "Search models");
   const provider = element("select"); provider.setAttribute("aria-label", "Provider");
@@ -23,9 +23,9 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
   const refresh = button("Refresh catalogue", () => void load(true));
   let onlyFavorites = false;
   const favorites = button("Favorites", () => { onlyFavorites = !onlyFavorites; favorites.setAttribute("aria-pressed", String(onlyFavorites)); render(); }); favorites.setAttribute("aria-pressed", "false");
-  const connections=element("details");connections.append(element("summary","Provider connections"));
+  const connections=element("details");connections.dataset.hubCompactDisclosure="";connections.append(element("summary","Connected providers"));
   toolbar.append(search, provider);
-  const filters=element("details"),filterBody=element("div");filters.className="hub-model-filters";filters.append(element("summary","Filters & catalogue"),filterBody);filterBody.append(sort,favorites,refresh);
+  const filters=element("details"),filterBody=element("div");filters.dataset.hubCompactDisclosure="";filters.className="hub-model-filters";filters.append(element("summary","Catalogue options"),filterBody);filterBody.append(sort,favorites,refresh);
   const status = element("p"); status.setAttribute("role", "status");
   const explanation = element("p", options?.browseOnly?"Browse live capabilities and add available models here. Choose a character’s model and its options in Settings → Characters.":options?.reasoningOnly?"Choose the Knowledge AI model and reasoning level. Its processing policy manages output and sampling limits; other model capabilities are shown for reference.":"Options follow the selected model and installed adapter. Refreshing the catalogue keeps your choices. OpenRouter uses API credits; Codex uses your existing subscription."); explanation.className = "hub-model-note";
   const scope = element("select"); scope.setAttribute("aria-label", "Apply model to");
@@ -33,9 +33,12 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
   const next = element("option", "New chats only"); next.value = "default"; scope.append(current, next);
   scope.hidden = !!options;
   const list = element("div"); list.className = "hub-model-list";
-  filters.append(explanation);dialog.append(header, toolbar, filters,connections, scope, status, list); root.body.append(dialog);
+  filters.append(connections,explanation);dialog.append(header, toolbar, filters, scope, status, list); root.body.append(dialog);
   const removeBack = installMobileWidgetBack(dialog, header, () => dismiss());
   let catalog: HubModelCatalog | undefined, busy = false, ticket = 0, timer: number | undefined;
+  let editing:string|undefined;
+  const keyOf=(m:HubCatalogModel)=>JSON.stringify([m.provider,m.id]);
+  function cancelEdit(){if(editing)drafts.delete(editing);editing=undefined;status.textContent="";render();search.focus();}
   const drafts=new Map<string,{effort:string;temperature:string;maxTokens:string;expanded:boolean}>();
   const draft=(m:HubCatalogModel)=>{const id=JSON.stringify([m.provider,m.id]);let d=drafts.get(id);if(!d){const saved=options?.initialRoute?.provider===m.provider&&options.initialRoute.model===m.id?options.initialRoute:undefined;d={effort:saved?.reasoningEffort??"",temperature:saved?.temperature===undefined?"":String(saved.temperature),maxTokens:saved?.maxTokens===undefined?"":String(saved.maxTokens),expanded:!!saved};drafts.set(id,d);}return d;};
   function dismiss() { ticket++; view.clearTimeout(timer); dialog.close(); }
@@ -48,6 +51,9 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
   }
   function render() {
     if (!catalog) return;
+    const chosen=catalog.models.find(m=>keyOf(m)===editing);
+    back.hidden=!chosen;heading.textContent=chosen?"Model settings":"Models & providers";toolbar.hidden=filters.hidden=!!chosen;scope.hidden=!!options||!!chosen;
+    if(chosen){list.replaceChildren(card(chosen,true));return;}
     const query = search.value.trim().toLowerCase(), filter = provider.value;
     const models = catalog.models.filter(m => (!onlyFavorites || m.favorite) && (!filter || m.provider === filter) && `${m.name} ${m.id}`.toLowerCase().includes(query));
     models.sort(sort.value === "newest" ? (a,b) => (b.created ?? 0) - (a.created ?? 0) : sort.value === "price" ? (a,b) => (a.pricing?.input ?? Infinity) - (b.pricing?.input ?? Infinity) : (a,b) => a.name.localeCompare(b.name));
@@ -56,33 +62,36 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
     for (const model of models.slice(0, 100)) list.append(card(model));
     if (!models.length) list.append(element("p", "No matching models."));
   }
-  function card(m: HubCatalogModel) {
+  function card(m: HubCatalogModel,editingCard=false) {
     const row = element("article"); row.setAttribute("data-model-id", m.id);
     row.append(element("h3", m.name), element("p", `${m.provider} · ${m.id}`));
     const star=button(m.favorite?"★":"☆",()=>void favorite(m));star.className="hub-model-favorite";star.setAttribute("aria-label",(m.favorite?"Remove favorite ":"Favorite ")+m.name);star.setAttribute("aria-pressed",String(!!m.favorite));row.append(star);
     const facts = [m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k context` : "", m.tools ? "Tools" : "Chat only · no tools", m.input.includes("image") ? "Images" : "", m.reasoning ? "Reasoning" : "",m.available===false?"Temporarily paused":""].filter(Boolean);
     row.append(element("p", facts.join(" · ")));
     if (m.pricing) row.append(element("p", `$${m.pricing.input.toFixed(3)} input / $${m.pricing.output.toFixed(3)} output per 1M tokens`));
+    if(!editingCard){const edit=button(options?.browseOnly?"Details & availability":"Choose & configure",()=>{editing=keyOf(m);status.textContent="";render();dialog.scrollTop=0;back.focus();});edit.disabled=busy;row.append(edit);return row;}
     const effort = element("select"); effort.disabled=!!options?.browseOnly;effort.setAttribute("aria-label", `Reasoning for ${m.name}`);
-    const base = element("option", "Provider default"); base.value = ""; effort.append(base);
+    const base = element("option",m.defaultEffort?"Default · "+m.defaultEffort:"Automatic"); base.value = ""; effort.append(base);
     for (const e of m.efforts ?? []) { const option = element("option", e.name); option.value = e.id; effort.append(option); }
-    const settings=element("details"),d=draft(m);settings.open=d.expanded;settings.append(element("summary","Model options & capabilities"));settings.addEventListener("toggle",()=>d.expanded=settings.open);
+    const settings=element("div"),d=draft(m);settings.className="hub-model-editor";
     const field=(label:string,input:HTMLElement)=>{const l=element("label");l.append(element("span",label),input);settings.append(l);};
     if(m.efforts?.length){if(d.effort&&!m.efforts.some(e=>e.id===d.effort)){const old=element("option",d.effort+" · unavailable");old.value=d.effort;old.disabled=true;effort.append(old);}effort.value=d.effort;effort.addEventListener("change",()=>d.effort=effort.value);field("Reasoning effort",effort);settings.append(element("small",m.effortNote??`Levels reported by the installed adapter${m.defaultEffort?" · default: "+m.defaultEffort:""}.`));}
     else if(m.reasoning)settings.append(element("p","Reasoning is advertised, but selectable levels are not reported by this adapter. Provider default is used."));
-    const maxTokens=element("input");maxTokens.type="number";maxTokens.disabled=!parameterControls;maxTokens.min="1";maxTokens.max=String(catalogOutputLimit(m));maxTokens.placeholder=m.defaults?.max_tokens?"Default: "+m.defaults.max_tokens:"Provider default";maxTokens.value=d.maxTokens;maxTokens.setAttribute("aria-label",`Output tokens for ${m.name}`);maxTokens.addEventListener("input",()=>d.maxTokens=maxTokens.value);field("Maximum output tokens",maxTokens);
+    const maxTokens=element("input");maxTokens.type="number";maxTokens.disabled=!parameterControls;maxTokens.min="1";maxTokens.step="1";maxTokens.max=String(catalogOutputLimit(m));maxTokens.placeholder=`Automatic · ${m.provider==="openrouter"?catalogOutputDefault(m).toLocaleString():m.defaults?.max_tokens??"adapter default"}`;maxTokens.value=d.maxTokens;maxTokens.setAttribute("aria-label",`Output tokens for ${m.name}`);maxTokens.addEventListener("input",()=>d.maxTokens=maxTokens.value);field("Maximum output tokens",maxTokens);
+    settings.append(element("small",`Per reply, including reasoning. Maximum ${catalogOutputLimit(m).toLocaleString()}. Leave empty for automatic; a higher limit can reserve more credit.`));
     if(m.editableParameters?.includes("temperature")){const temp=element("input");temp.type="number";temp.disabled=!parameterControls;temp.min="0";temp.max="2";temp.step="0.1";temp.value=d.temperature;temp.placeholder=m.defaults?.temperature!=null?"Default: "+m.defaults.temperature:"Provider default";temp.setAttribute("aria-label",`Temperature for ${m.name}`);temp.addEventListener("input",()=>d.temperature=temp.value);field("Temperature",temp);}
-    if(m.description)settings.append(element("p",m.description));
-    settings.append(element("p",`Input: ${m.input.join(", ")} · Output limit: ${m.maxTokens?.toLocaleString()??"not disclosed"}`));
+    const technical=element("details");technical.dataset.hubCompactDisclosure="";technical.append(element("summary","About this model"));
+    if(m.description)technical.append(element("p",m.description));
+    technical.append(element("p",`Input: ${m.input.join(", ")} · Output capacity: ${m.maxTokens?.toLocaleString()??"not disclosed"}`));
     if(m.outputLimitFallback)settings.append(element("small","The provider does not disclose maximum output. HUB starts with an 8,192-token cap; this is an operating limit, not the model’s advertised capacity."));
-    if(m.supportedParameters){settings.append(element("small","Provider-advertised parameters: "+(m.supportedParameters.join(", ")||"none disclosed")));const others=m.supportedParameters.filter(p=>!m.editableParameters?.includes(p));if(others.length)settings.append(element("small","Provider capabilities without a per-character control in this adapter: "+others.join(", ")+". Tools and response structure are managed by the harness; these are not editable overrides."));}
-    else settings.append(element("small","This provider does not publish a complete parameter schema. Only verified adapter controls are shown."));
-    row.append(settings);
+    if(m.supportedParameters){const others=m.supportedParameters.filter(p=>!m.editableParameters?.includes(p));if(others.length)technical.append(element("small","Other provider capabilities: "+others.join(", ")+". Tool and response formats are managed by HUB."));}
+    else technical.append(element("small","Only verified adapter controls are shown."));
+    row.append(settings,technical);
     const canAdd=["openrouter","unlid"].includes(m.provider);
-    const select = button(m.available===false?"Temporarily paused":options?.browseOnly?m.enabled?"Available":"Add to available models":m.enabled ? "Use model" : canAdd ? "Add & use model" : "Adapter update needed", () => void choose(m,d));
+    const select = button(m.available===false?"Temporarily paused":options?.browseOnly?m.enabled?"Available":"Add to available models":m.enabled ? "Save & use model" : canAdd ? "Add & use model" : "Adapter update needed", () => void choose(m,d));
     const connected=catalog?.providers.some(p=>p.id===m.provider);if(!connected)select.textContent="Provider adapter unavailable";
     select.disabled = busy || !connected || m.available===false || (!m.enabled && !canAdd);if(options?.browseOnly&&m.enabled&&connected&&m.available!==false)row.append(element("small","Available for characters"));else row.append(select);
-    return row;
+    row.append(button("Cancel",()=>cancelEdit()));return row;
   }
   async function choose(m: HubCatalogModel, d:{effort:string;temperature:string;maxTokens:string}) {
     if (busy) return;
@@ -125,7 +134,7 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
     } catch (error) { if (own === ticket) status.textContent = (error as Error).message; }
     finally { busy = false; refresh.disabled = false; render(); }
   }
-  async function open() { dialog.showModal(); current.disabled = !currentSession(); if (current.disabled) scope.value = "default"; await load(); }
+  async function open() { editing=undefined;dialog.showModal(); current.disabled = !currentSession(); if (current.disabled) scope.value = "default"; await load();const saved=options?.initialRoute;if(saved&&!options?.browseOnly&&catalog?.models.some(m=>m.provider===saved.provider&&m.id===saved.model)){editing=JSON.stringify([saved.provider,saved.model]);render();} }
   search.addEventListener("input", render); provider.addEventListener("change", render); sort.addEventListener("change", render);
   dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(); });
   return () => { lifetime.abort(); dismiss(); removeBack(); dialog.remove(); launcher.remove(); removeStyles(); };

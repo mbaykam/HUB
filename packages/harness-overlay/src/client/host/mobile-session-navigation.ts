@@ -5,7 +5,7 @@ import type { HarnessClientContext } from "../core/context.ts";
  * @param id - Conversation selected from the voice view or task list.
  * @returns Completion after the validated history address has been selected.
  */
-export async function openMobileConversation(sessions: HarnessClientContext["sessions"], id: string): Promise<void> {
+export async function openMobileConversation(sessions: HarnessClientContext["sessions"], id: string,parentHint?:string): Promise<void> {
   let snapshot = sessions.list.getSnapshot();
   const catalogParent = () => Object.entries(snapshot.subagentsByParent ?? {}).find(([, catalog]) =>
     catalog.entries.some(entry => entry.kind === "child" && entry.id === id))?.[0];
@@ -14,8 +14,8 @@ export async function openMobileConversation(sessions: HarnessClientContext["ses
     snapshot = sessions.list.getSnapshot();
   }
   const summary = snapshot.byId[id];
-  const parent = summary?.parentId ?? catalogParent();
-  if (summary?.origin !== "subagent" && !catalogParent()) {
+  const parent = summary?.parentId ?? catalogParent()??parentHint;
+  if (summary?.origin !== "subagent" && !catalogParent()&&!parentHint) {
     sessions.open(id);
     return;
   }
