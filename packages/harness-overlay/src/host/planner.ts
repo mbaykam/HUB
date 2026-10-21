@@ -59,7 +59,7 @@ export class PlannerStore {
     if(!session(input.sessionId)||!session(input.rootSessionId)||!version(input.version)||!text(input.title,180)||!input.title.trim()||!Array.isArray(input.steps)||input.steps.length>1000||input.steps.some(s=>!text(s.title,240)||!s.title.trim()||!["pending","active","done","blocked"].includes(s.state))||!allowParallel&&input.steps.filter(s=>s.state==="active").length>1)throw Error("Use a short plan with at most one active step");
     const old=state.plans.find(p=>p.id===input.sessionId);if(old?old.version!==input.version:input.version!==0)throw Error("The work plan changed; read it before updating");
     if(old&&old.rootSessionId!==input.rootSessionId)throw Error("Work plan lineage changed");
-    const plan:WorkPlan={...input,id:input.sessionId,version:(old?.version??0)+1,state:input.steps.length&&input.steps.every(s=>s.state==="done")?"completed":input.steps.some(s=>s.state==="blocked")?"blocked":"active",updatedAt:Date.now()};
+    const plan:WorkPlan={...input,id:input.sessionId,version:(old?.version??0)+1,state:input.steps.every(s=>s.state==="done")?"completed":input.steps.some(s=>s.state==="blocked")?"blocked":"active",updatedAt:Date.now()};
     if(old)state.plans[state.plans.indexOf(old)]=plan;else{if(state.plans.length>=10000)throw Error("Work plan storage is full; existing plans were preserved");state.plans.push(plan);}return plan;
   });}
   settle(sessionId:string,failed:boolean){if(!this.#state.plans.some(p=>p.sessionId===sessionId&&p.state==="active"))return Promise.resolve();return this.mutate(state=>{const p=state.plans.find(p=>p.sessionId===sessionId)!;p.state=failed?"blocked":p.steps.every(s=>s.state==="done")?"completed":"paused";p.updatedAt=Date.now();p.version++;});}
@@ -93,13 +93,13 @@ export function installPlanner(ctx:any,characters:any){
       if(event.type==="turn/end"){await store.settle(source.header.id,event.data?.reason?.kind!=="completed");return;}
       const todos=event.data?.todos;if(!Array.isArray(todos)||todos.length>1000)return;
       const rootSessionId=await rootSession(source.header.id,{session:source}),old=store.snapshot(rootSessionId).plans.find(p=>p.sessionId===source.header.id);
-      await store.plan({sessionId:source.header.id,rootSessionId,version:old?.version??0,title:old?.title??"Current task",steps:todos.map((t:any)=>({title:t.content,state:t.status==="completed"?"done":t.status==="in_progress"?"active":"pending"}))},true);
+      await store.plan({sessionId:source.header.id,rootSessionId,version:old?.version??0,title:old?.title??"Current task",steps:todos.map((t:any)=>({title:typeof t.content==="string"&&t.content.length>240?t.content.slice(0,239)+"…":t.content,state:t.status==="completed"?"done":t.status==="in_progress"?"active":"pending"}))},true);
     }).catch(()=>{});
   },{global:true});
   const offRoute=ctx.webServer.register({kind:"exact",path:"/api/hub/planner",async handler(req:IncomingMessage,res:ServerResponse){
     const send=(code:number,data:unknown)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(data));};
     const rejected=ctx.connection.requestRejection(req);if(rejected||req.headers["sec-fetch-site"]==="cross-site"||req.headers["x-hub-planner"]!=="1"){send(rejected??403,{error:"unauthorized"});return;}
-    try{await ready;if(req.method==="POST"){
+    try{await ready;await events;if(req.method==="POST"){
       if(!req.headers["content-type"]?.startsWith("application/json")){send(415,{error:"json-required"});return;}
       const chunks:Buffer[]=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>16000)throw Error("Planner edit is too large");chunks.push(chunk);}await store.change(JSON.parse(Buffer.concat(chunks).toString("utf8")));
     }else if(req.method!=="GET"){send(405,{error:"method-not-allowed"});return;}

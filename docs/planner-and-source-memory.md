@@ -29,6 +29,8 @@ and versions. Native `todo_write` lists also project into conversation work step
 Each worker is bound to its durable parent conversation. A completed agent turn
 does not automatically certify that unfinished steps succeeded. Tool permissions
 and existing goal/automation policies remain binding.
+Cleared native checklists disappear from the work-step area. Long native step
+titles have a concise preview; Open task retains the full original checklist.
 
 ## What Knowledge keeps
 

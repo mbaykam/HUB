@@ -50,3 +50,16 @@ test('agent tools bind plans to actual durable parents and enforce unchanged per
  assert.equal((await fetch(url)).status,401);assert.equal((await fetch(url,{headers:{...headers,'sec-fetch-site':'cross-site'}})).status,403);
  const state=await(await fetch(url,{headers})).json();assert.equal(state.plans[0].title,'Fixture research');assert.deepEqual(state.items,[]);assert.equal(JSON.parse(await readFile(join(root,'hub-planner','planner.json'),'utf8')).plans.length,1);
 });
+
+test('native checklists preserve worker lineage and parallel steps, pause unfinished work and clear without personal items',async t=>{
+ const {root}=await fixture(t),routes=new Map(),events=new Map(),main={id:'fixture-main',session:{header:{id:'fixture-main'}}};
+ const ctx={tools:{register(){return()=>{}}},agents:{get:id=>id===main.id?main:undefined},sessionPersistence:{async inspect(id){assert.equal(id,main.id);return{meta:main.session.header}}},systemPrompt:{section(){return()=>{}}},on(name,handler){events.set(name,handler);return()=>{}},connection:{requestRejection:()=>undefined},webServer:{register(route){routes.set(route.path,route);return()=>{}}}};
+ const dispose=installPlanner(ctx,{store:{root:join(root,'characters')}});t.after(dispose);
+ const server=createServer((req,res)=>void routes.get('/api/hub/planner').handler(req,res));server.listen(0,'127.0.0.1');await once(server,'listening');t.after(async()=>{server.close();await once(server,'close');});
+ const snapshot=async()=>{const response=await fetch(`http://127.0.0.1:${server.address().port}/api/hub/planner?sessionId=fixture-main`,{headers:{'x-hub-planner':'1'}});assert.equal(response.status,200);return response.json();};
+ const worker={header:{id:'fixture-worker',parentSession:main.id,origin:'subagent'}},emit=event=>events.get('session/event')(worker,event),longTitle='Check each source before writing the result. '.repeat(12);
+ emit({type:'todo/write',data:{todos:[{content:longTitle,status:'in_progress'},{content:'Compare independent evidence',status:'in_progress'}]}});
+ let state=await snapshot();assert.equal(state.plans.length,1);assert.equal(state.plans[0].sessionId,worker.header.id);assert.equal(state.plans[0].rootSessionId,main.id);assert.equal(state.plans[0].steps.filter(s=>s.state==='active').length,2);assert.match(state.plans[0].steps[0].title,/…$/);assert.equal(state.items.length,0);
+ emit({type:'turn/end',data:{reason:{kind:'completed'}}});state=await snapshot();assert.equal(state.plans[0].state,'paused','Finished agent turn is not proof that checklist steps succeeded');
+ emit({type:'todo/write',data:{todos:[]}});state=await snapshot();assert.equal(state.plans[0].state,'completed');assert.deepEqual(state.plans[0].steps,[]);assert.equal(state.items.length,0);
+});
