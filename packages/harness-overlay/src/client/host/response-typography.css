@@ -1,0 +1,30 @@
+[data-hub-response-markdown]{box-sizing:border-box;min-width:0;max-width:min(100%,72ch);font-family:inherit;font-size:var(--dsh-content-font-size,16px);line-height:1.7;color:#dce5f4;text-align:start;overflow-wrap:anywhere;word-break:normal}
+[data-hub-response-markdown] :where(p,ul,ol,blockquote,pre,table){font-size:inherit;line-height:inherit}
+[data-hub-response-markdown] :where(h1,h2,h3,h4,h5,h6){font-family:inherit;font-weight:650;line-height:1.35;color:#f2f5fd;letter-spacing:-.015em;margin:1.5em 0 .55em;text-wrap:pretty}
+[data-hub-response-markdown] h1{font-size:1.4em}[data-hub-response-markdown] h2{font-size:1.2em}[data-hub-response-markdown] h3{font-size:1.075em}[data-hub-response-markdown] :where(h4,h5,h6){font-size:1em}
+[data-hub-response-markdown] p{margin:.85em 0;text-wrap:pretty}
+[data-hub-response-markdown] strong{font-weight:650;color:#f0f4fc}
+[data-hub-response-markdown] :where(ul,ol){margin:.8em 0;padding-inline-start:1.45em}
+[data-hub-response-markdown] li{margin:.35em 0;padding-inline-start:.15em}
+[data-hub-response-markdown] li::marker{color:#9cb2d9}
+[data-hub-response-markdown] li>p{margin:.35em 0}
+[data-hub-response-markdown] li>:where(ul,ol){margin:.3em 0}
+[data-hub-response-markdown] a{color:#b6caff;text-decoration:underline;text-decoration-color:#b6caff80;text-underline-offset:.18em;text-decoration-thickness:1px;border:0;margin:0;overflow-wrap:anywhere}
+[data-hub-response-markdown] a:hover{color:#dae4ff;text-decoration-color:currentColor}
+[data-hub-response-markdown] a:focus-visible,[data-hub-response-table]:focus-visible{outline:2px solid #afc3ff;outline-offset:3px;border-radius:4px}
+[data-hub-response-markdown] :not(pre)>code{display:inline;white-space:break-spaces;overflow-wrap:anywhere;font-family:var(--ds-font-family-code,monospace);font-size:.875em!important;line-height:inherit;padding:.12em .35em;border-radius:5px;background:#bdd0f512;color:#d9e6ff;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+[data-hub-response-markdown] .md-code-block{max-width:100%;min-width:0;border:1px solid #b8c9e626;border-radius:12px;overflow:clip;margin:1em 0}
+[data-hub-response-markdown] pre{box-sizing:border-box;max-width:100%;white-space:pre!important;word-break:normal!important;overflow-wrap:normal;overflow-x:auto;overscroll-behavior-x:contain;font-size:.875em;line-height:1.6;tab-size:2}
+[data-hub-response-markdown] pre code{font:inherit;white-space:inherit;word-break:inherit;overflow-wrap:inherit}
+[data-hub-response-markdown] blockquote{margin:1em 0;padding:.15em 0 .15em 1em;border-inline-start:3px solid #9baee770;color:#b9c7df}
+[data-hub-response-markdown] hr{height:1px;border:0;background:#b7c9e62b;margin:1.5em 0}
+[data-hub-response-markdown] :where(img,video){max-width:100%;height:auto;border-radius:10px}
+[data-hub-response-markdown] .katex-display{max-width:100%;overflow-x:auto;overflow-y:hidden;padding-block:.2em}
+[data-hub-response-markdown] [data-hub-response-table]{box-sizing:border-box;width:100%!important;max-width:100%!important;min-width:0;margin:1em 0!important;padding:0!important;overflow-x:auto!important;overscroll-behavior-x:contain;scrollbar-width:thin;border:1px solid #bdcde326;border-radius:10px}
+[data-hub-response-table] table{width:max-content;min-width:100%;max-width:none;border-collapse:collapse;font-size:.9em}
+[data-hub-response-table] :where(th,td){box-sizing:border-box;min-width:7rem;max-width:28ch;padding:.7em .9em;font:inherit;line-height:1.5;text-align:start;vertical-align:top;white-space:normal;overflow-wrap:anywhere;border:0;border-bottom:1px solid #bdcde320}
+[data-hub-response-table] th{font-weight:650;color:#edf2fd;background:#9eb9f010}
+[data-hub-response-table] tbody tr:nth-child(even){background:#abc5ee05}
+[data-hub-response-table] tbody tr:last-child td{border-bottom:0}
+[data-hub-response-markdown]>:first-child{margin-top:0}[data-hub-response-markdown]>:last-child{margin-bottom:0}
+@media(max-width:600px){[data-hub-response-markdown]{max-width:100%}[data-hub-response-markdown] :where(h1,h2,h3){letter-spacing:-.01em}[data-hub-response-table] :where(th,td){padding:.65em .75em}}

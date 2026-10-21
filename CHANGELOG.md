@@ -2,6 +2,8 @@
 
 ## 1.7.0
 
+- PWA UI update: consistent written-answer typography, readable comparisons and
+  code, with scoped table scrolling. See [written replies](docs/written-replies.md).
 - Full-screen PWA apps with isolated HTML playback and optional touch game controls.
 - Recover running work and recent replies after reopening the PWA; retain generated
   file originals, source conversations and Knowledge excerpts.
