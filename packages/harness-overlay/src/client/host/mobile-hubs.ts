@@ -12,7 +12,7 @@ import { createMobileBrowserView } from "./mobile-browser-view.ts";
 import { createMobileLiveTranscript } from "./mobile-live-transcript.ts";
 import { readMobileSessionIdentity } from "./mobile-session-identity.ts";
 import {createHomeKnowledge} from "./mobile-home-knowledge.ts";
-import {createMobilePlanner} from "./mobile-planner.ts";
+import {createMobilePlanner,attachPlannerShortcut} from "./mobile-planner.ts";
 import dashboardStyles from "./mobile-dashboard.css";
 const installDashboardStyles=defineOverlayStyle("hub-home-dashboard",dashboardStyles);
 
@@ -170,7 +170,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   function reconcile() {
     frame = undefined;
     const mobile = root.querySelector("[data-minke-mobile-web]") !== null;
-    const footer=root.querySelector("[data-hub-mobile-nav-footer]");if(footer&&plannerNav.parentElement!==footer)footer.prepend(plannerNav);
+    attachPlannerShortcut(root,plannerNav);
     // A running PWA call must retain End/Mute controls through a resize.
     const next = mobile || active() ? root.querySelector<HTMLElement>('[data-slot="conversation"] [data-phase]') : null;
     const seat = next?.querySelector<HTMLElement>("[data-composer-seat]");

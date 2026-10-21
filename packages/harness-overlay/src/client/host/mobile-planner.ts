@@ -2,6 +2,15 @@ import type {PlannerItem,PlannerSnapshot,PlannerCommand} from "../../planner-con
 import {plannerDay,plannerItemDay,plannerLocalTime,plannerZonedInstant} from "../../planner-contract.ts";
 import {installMobileWidgetBack} from "./mobile-widget-back.ts";
 
+/** The responsive drawer footer is lazy; the native Settings slot is the
+ * persistent sidebar seat on desktop and before that drawer has opened. */
+export function attachPlannerShortcut(root:Document,button:HTMLButtonElement){
+  const mobile=root.querySelector("[data-hub-mobile-nav-footer]");
+  if(mobile){if(button.parentElement!==mobile)mobile.prepend(button);return;}
+  const settings=root.querySelector('[data-slot="sidebar.settings"]');
+  if(settings&&button.nextSibling!==settings)settings.before(button);
+}
+
 /** Personal commitments and agent-owned steps share a view, never a ledger entry. */
 export function createMobilePlanner(root:Document,openSession:(id:string)=>void){
   const view=root.defaultView!,lifetime=new AbortController(),el=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const n=root.createElement(tag);if(text!==undefined)n.textContent=text;return n;};

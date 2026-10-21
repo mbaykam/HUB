@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {JSDOM} from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
 import {PlannerStore} from '../packages/harness-overlay/src/host/planner.ts';
-import {createMobilePlanner} from '../packages/harness-overlay/src/client/host/mobile-planner.ts';
+import {createMobilePlanner,attachPlannerShortcut} from '../packages/harness-overlay/src/client/host/mobile-planner.ts';
 import {plannerZonedInstant,plannerLocalTime} from '../packages/harness-overlay/src/planner-contract.ts';
 const button=(root,text)=>[...root.querySelectorAll('button')].find(b=>b.textContent===text);
 const field=(root,text)=>[...root.querySelectorAll('label')].find(l=>l.querySelector('span')?.textContent===text)?.querySelector('input,select,textarea');
@@ -32,4 +32,10 @@ test('failed save preserves an editable draft, then retry succeeds without dupli
 
 test('calendar wall times preserve the selected timezone and reject the skipped DST hour',()=>{
  assert.equal(plannerZonedInstant('2026-10-21T09:30','Europe/Istanbul'),'2026-10-21T06:30:00.000Z');assert.equal(plannerLocalTime('2026-10-21T06:30:00Z','Europe/Istanbul'),'2026-10-21T09:30');assert.throws(()=>plannerZonedInstant('2026-03-08T02:30','America/New_York'),/does not exist/);assert.equal(plannerZonedInstant('2026-11-01T01:30','America/New_York'),'2026-11-01T05:30:00.000Z');
+});
+
+test('the planner shortcut works with native sidebar slots and survives a lazy drawer footer',()=>{
+ const dom=new JSDOM('<aside><div><div data-slot="sidebar.settings"><button>Settings</button></div></div></aside>'),root=dom.window.document,nav=root.createElement('button');nav.textContent='Agenda & to-dos';nav.hidden=true;
+ try{attachPlannerShortcut(root,nav);assert.equal(nav.nextSibling,root.querySelector('[data-slot="sidebar.settings"]'));assert.equal(nav.hidden,true,'Home controls visibility, not sidebar placement');attachPlannerShortcut(root,nav);assert.equal(root.querySelectorAll('aside button').length,2);const footer=root.createElement('div');footer.dataset.hubMobileNavFooter='';root.querySelector('aside').append(footer);attachPlannerShortcut(root,nav);assert.equal(footer.firstChild,nav);footer.remove();attachPlannerShortcut(root,nav);assert.equal(nav.isConnected,true);assert.equal(nav.nextSibling,root.querySelector('[data-slot="sidebar.settings"]'));
+ }finally{dom.window.close();}
 });
