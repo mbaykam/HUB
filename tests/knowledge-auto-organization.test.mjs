@@ -91,3 +91,17 @@ test('failed quota probes back off across restarts rather than spending on every
   const generate=async()=>{calls++;throw quota();};let c=new KnowledgeCurator(store,generate);await c.initialize();await c.enqueue({id:'source-quota',channel:'pwa',completedAt:now,content:'Original evidence.'});await c.tick(true);now+=900001;await c.tick(true);assert.equal(calls,2);await c.dispose();
   c=new KnowledgeCurator(store,generate);await c.initialize();for(let i=0;i<8;i++)await c.tick(true);assert.equal(calls,2);now+=900001;await c.tick(true);assert.equal(calls,3);assert.equal((await c.snapshot()).organization.retryAt,now+1800000);assert.equal(c.jobs.get('source-quota').attempts,1);await c.dispose();
 });
+
+test('changing the curator route requeues old credit waits without a call, preserves other failures and respects budgets',async t=>{
+ const {store,root}=await fixture(t),gate=new ProviderGate(join(root,'availability'));let calls=0;
+ const c=new KnowledgeCurator(store,async(_prompt,settings)=>{calls++;if(settings.provider==='openai-codex'){if(calls===1)return 'not JSON';throw quota();}return skip;},gate);
+ await c.initialize();await c.configure({...c.settings,provider:'openai-codex',model:'old-fixture'});
+ await c.enqueue({id:'bad-output',channel:'pwa',completedAt:Date.now(),content:'Keep this original malformed-response source.'});await c.tick(true);
+ await c.enqueue({id:'credit-wait',channel:'pwa',completedAt:Date.now(),content:'Keep this original quota source.'});await c.tick(true);
+ assert.equal(c.jobs.get('bad-output').status,'failed');assert.equal(c.jobs.get('credit-wait').status,'waiting-credit');assert.equal(calls,2);
+ await c.configure({...c.settings,instructions:'An unrelated instruction edit.'});assert.equal(c.jobs.get('credit-wait').status,'waiting-credit');assert.equal(calls,2);
+ await c.configure({...c.settings,provider:'openrouter',model:'glm-fixture',dailyBudget:.00000001});assert.equal(c.jobs.get('credit-wait').status,'queued');assert.equal(c.jobs.get('bad-output').status,'failed');assert.equal(calls,2);
+ assert.ok(await gate.reason('openai-codex'));assert.equal(await gate.reason('openrouter'),undefined);
+ await c.tick(true);assert.equal(calls,2);assert.equal(c.status,'budget-paused');
+ await c.configure({...c.settings,dailyBudget:1});await c.tick(true);assert.equal(calls,3);assert.equal(c.jobs.get('credit-wait').status,'done');assert.equal(c.jobs.get('credit-wait').source.content,'Keep this original quota source.');assert.equal((await store.scan()).length,0);await c.dispose();
+});

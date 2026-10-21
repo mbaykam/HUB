@@ -104,7 +104,16 @@ export class KnowledgeCurator {
       this.status=this.blockedRoute?.quota?"waiting-credit":"model-unavailable";return false;
     }
   }
-  async configure(settings:KnowledgeSettings){const before=this.routeKey();this.settings=validateSettings(settings);await atomicJson(join(this.store.root,"settings.json"),this.settings);if(before!==this.routeKey()){this.checked=undefined;this.blockedRoute=undefined;await atomicJson(join(this.store.root,"model-health.json"),null);}}
+  async configure(settings:KnowledgeSettings){
+    const before=this.routeKey();this.settings=validateSettings(settings);await atomicJson(join(this.store.root,"settings.json"),this.settings);
+    if(before!==this.routeKey()){
+      this.checked=undefined;this.blockedRoute=undefined;await atomicJson(join(this.store.root,"model-health.json"),null);
+      // Credit waits belong to the previous route. Let the normal queue try
+      // the selected route under its existing provider gate and budgets;
+      // unrelated validation failures still require an explicit retry.
+      for(const job of this.jobs.values())if(job.status==="waiting-credit")await this.retry(job.id);
+    }
+  }
   private routeKey(){return JSON.stringify([this.settings.provider,this.settings.model,this.settings.reasoningEffort]);}
   async retry(id:string){const j=this.jobs.get(id);if(!j||!["failed","waiting-credit"].includes(j.status))throw new Error("Only failed or credit-waiting jobs may be retried");
     const receipt=await readFile(join(this.store.root,"distill",`${digest(id)}.json`),"utf8").catch((e:any)=>{if(e.code!=="ENOENT")throw e;return undefined;});

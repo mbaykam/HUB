@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.1
+
+- Fix the model-catalogue middleware returning a promise instead of a token
+  stream, which stopped inference before requests reached the provider.
+- Requeue credit-waiting Knowledge jobs when its selected model route changes,
+  while retaining unrelated validation failures and existing spending limits.
+- Keep historical quota errors from reopened chats out of current provider health.
+
 ## 1.6.0
 
 - Add the Home Knowledge overview, personal agenda and near/later to-dos, with

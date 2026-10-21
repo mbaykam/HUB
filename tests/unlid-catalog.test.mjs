@@ -54,6 +54,7 @@ test('model API merges all Unlid models despite another provider outage; adding 
   assert.equal((await command({action:'enable',provider:'unlid',model:'chat-only',maxTokens:8192})).status,200);assert.equal(mutations,1);assert.deepEqual(profile.models[0],original.models[0]);assert.equal(profile.baseURL,original.baseURL);assert.equal(profile.apiKeyEnv,original.apiKeyEnv);assert.deepEqual(profile.models[1].input,['text']);
   assert.equal((await command({action:'enable',provider:'unlid',model:'paused'})).status,409);assert.equal(mutations,1);
   assert.equal((await command({action:'enable',provider:'unlid',model:'chat-only',maxTokens:9000})).status,409);
-  let dispatched;const input={provider:'unlid',model:'chat-only',tools:[{name:'test'}]};await hook(input,()=>{dispatched=input;return 'done'});assert.deepEqual(dispatched.tools,[]);
+  let dispatched;const input={provider:'unlid',model:'chat-only',tools:[{name:'test'}]},stream=hook(input,async function*(){dispatched=input;yield 'done'});
+  assert.equal(typeof stream[Symbol.asyncIterator],'function');const chunks=[];for await(const chunk of stream)chunks.push(chunk);assert.deepEqual(chunks,['done']);assert.deepEqual(dispatched.tools,[]);
  }finally{disposers.forEach(d=>d());server.close();await once(server,'close');await rm(root,{recursive:true,force:true});}
 });

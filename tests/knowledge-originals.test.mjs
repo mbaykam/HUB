@@ -29,8 +29,21 @@ test('host capture records a quota-failed chat even though successful episode ca
  applyKnowledge(ctx,{vault:store.vault,knowledgeRoot:store.root,captureSince:0});
  const events=[message(0,'user','A request without credits.'),{seq:1,time:at+1,type:'turn/end',data:{turn:1,reason:{kind:'error',error:{code:'QUOTA',message:'No credits'}}}}],session={header:{id:'actual-failed-chat'},snapshotEvents:()=>events};
  handlers.get('session/event')(session,events[1]);const expected=nativeConversation(session.header,events,'pwa'),until=Date.now()+3000;
- while(true){try{await store.archive.read(expected.id);break;}catch(e){if(e.code!=='ENOENT'||Date.now()>=until)throw e;await new Promise(r=>setTimeout(r,10));}}await effects[0]();
+ while(true){try{await store.archive.read(expected.id);break;}catch(e){if(e.code!=='ENOENT'||Date.now()>=until)throw e;await new Promise(r=>setTimeout(r,10));}}for(const dispose of effects.reverse())if(typeof dispose==='function')await dispose();
  const c=nativeConversation(session.header,events,'pwa');assert.match((await store.archive.read(c.id)).messages[0].text,/without credits/);assert.equal(route.path,'/api/hub/memory');
+});
+
+test('resuming historical quota errors never blocks the currently selected provider; new live quota errors still do',async t=>{
+ const {store}=await fixture(t),handlers=new Map(),effects=[],blocks=[];
+ const ctx=new Context();Object.assign(ctx,{attachments:undefined,get:()=>undefined,on:(name,fn)=>{handlers.set(name,fn);return ()=>{};},emit:()=>{},agents:{},hubCharacters:{quota:{async block(provider,reason){blocks.push({provider,reason})}}},sessionQuery:{listSessions:async()=>[]},webServer:{register:()=>()=>{}},connection:{requestRejection:()=>undefined},effect:fn=>effects.push(fn())});
+ applyKnowledge(ctx,{vault:store.vault,knowledgeRoot:store.root,captureSince:0});
+ const events=[message(0,'user','The original chat remains available.'),{seq:1,time:at+1,type:'turn/end',data:{turn:1,reason:{kind:'error',error:{code:'QUOTA',message:'Old Codex usage limit reached'}}}}],session={header:{id:'historical-quota'},requestHeader:()=>({config:{provider:'openrouter'}}),snapshotEvents:()=>events};
+ handlers.get('agent/session-start')({agent:{session}});
+ const expected=nativeConversation(session.header,events,'pwa'),until=Date.now()+3000;while(true){try{await store.archive.read(expected.id);break;}catch(e){if(e.code!=='ENOENT'||Date.now()>=until)throw e;await new Promise(r=>setTimeout(r,10));}}
+ assert.deepEqual(blocks,[]);
+ const live={seq:2,time:Date.now(),type:'turn/end',data:{turn:2,reason:{kind:'error',error:{code:'QUOTA',message:'Current provider has no credits'}}}};events.push(live);handlers.get('session/event')(session,live);
+ await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(blocks,[{provider:'openrouter',reason:'Current provider has no credits'}]);
+ handlers.get('agent/session-start')({agent:{session}});for(const dispose of effects.reverse())if(typeof dispose==='function')await dispose();assert.equal(blocks.length,1);
 });
 test('original body and raw messages stay unchanged when real relations are projected for Obsidian',async t=>{
  const {store}=await fixture(t),a=original('first'),b=original('second');await store.archive.put(a);await store.archive.put(b);

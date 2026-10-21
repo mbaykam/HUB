@@ -90,12 +90,14 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   }
   const track=(task:Promise<unknown>)=>{pending.add(task);void task.catch(()=>{curator.status="capture-needs-attention";}).finally(()=>pending.delete(task));};
   const timers=new Map<string,ReturnType<typeof setTimeout>>();
-  const capture=(session:any,event:any)=>{
+  const capture=(session:any,event:any,replay=false)=>{
     // Goal working context and generated drafts live in their own workspace.
     // Only an explicitly requested, approved output note enters Knowledge.
     if(session.header.id.startsWith("hub-goal-")||session.header.parentSession?.startsWith("hub-goal-"))return;
     if(isKnowledgeEvaluation(session.header.id)||session.header.parentSession&&isKnowledgeEvaluation(session.header.parentSession))return;
-    if(event.type==="turn/end"){const failure=operationFailure(event.data?.reason),provider=session.requestHeader?.()?.config?.provider;if(failure?.quota&&typeof provider==="string")track(gate.block(provider,redactKnowledgeSecrets(failure.message)));}
+    // Reopening a chat replays its old ends against today's request header.
+    // Those are archive evidence, not fresh provider availability failures.
+    if(!replay&&event.time>=bootAt&&event.type==="turn/end"){const failure=operationFailure(event.data?.reason),provider=session.requestHeader?.()?.config?.provider;if(failure?.quota&&typeof provider==="string")track(gate.block(provider,redactKnowledgeSecrets(failure.message)));}
     const characters=ctx.hubCharacters??ctx.get?.("hubCharacters"),activeAgent=ctx.agents.list?.().find((a:any)=>a.id===session.header.id),captureCharacter=activeAgent?effectiveKnowledgeCharacter(ctx,activeAgent):characters?.effectiveCharacter?.(session.header.id),channel=session.header.origin==="subagent"?"hub-worker-result":session.header.id.startsWith("minke-im-telegram-")?"telegram":characters?.voiceCalls?.has(session.header.id)?"voice":"pwa";
     if(["user/message","assistant/message","turn/end"].includes(event.type))track(ready.then(async()=>{const archived=await archiveConversation(session.header,session.snapshotEvents(),channel,session.inheritedEventCount??0),record=archived?.record,endKey=session.header.id+":"+event.seq;if(record&&event.type==="turn/end"&&event.time>=bootAt&&!publishedEnds.has(endKey)){publishedEnds.add(endKey);if(publishedEnds.size>2000)publishedEnds.delete(publishedEnds.values().next().value!);ctx.emit("hub/knowledge-archived",{id:record.id,channel:record.channel,sessionId:record.sessionId});}
       if(record&&event.type==="turn/end"&&event.time>=config.captureSince&&event.data?.reason?.kind!=="completed")for(const source of conversationSources({...record,messages:record.messages.filter(m=>m.role!=="status").slice(-4)}))await curator.enqueue({...source,characterId:captureCharacter?.id});
@@ -126,8 +128,8 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
     }});goalImportMounts.set(agent.id,off);
   };
   const offGoalImports=ctx.on("agent/created",({agent}:any)=>attachGoalImport(agent),{global:true}),offGoalImportDispose=ctx.on("agent/disposed",({agent}:any)=>{goalImportMounts.get(agent.id)?.();goalImportMounts.delete(agent.id);},{global:true});
-  const offCapture=ctx.on("session/event",capture);
-  const offResume=ctx.on("agent/session-start",({agent}:any)=>{for(const event of agent.session.snapshotEvents())capture(agent.session,event);});
+  const offCapture=ctx.on("session/event",(session:any,event:any)=>capture(session,event));
+  const offResume=ctx.on("agent/session-start",({agent}:any)=>{for(const event of agent.session.snapshotEvents())capture(agent.session,event,true);});
   const mounts=new Map<string,()=>void>();
   const offCreated=ctx.on("agent/created",({agent}:any)=>{
     if(agent.id.startsWith("hub-memory-"))return;

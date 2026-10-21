@@ -14,7 +14,7 @@ export const inject = ["llm", "settings", "sessionController", "agentDefaultMode
 interface Model { id: string; name: string; provider: string; contextWindow?: number; maxTokens?: number;context?:{contextWindow:number};defaultMaxTokens?:number;inputModalities?:string[]; reasoning?: { efforts: { id: string; name?: string }[];defaultEffort?:string } }
 interface Context {
   credentials: UsageCredentials;
-  on?(event: "llm/stream", callback: (options:any,next:()=>unknown)=>unknown, flags:{global:true;prepend:true}):()=>void;
+  on?(event: "llm/stream", callback: (options:any,next:()=>AsyncIterable<unknown>)=>AsyncIterable<unknown>, flags:{global:true;prepend:true}):()=>void;
   llm: { listProviders(): { id: string; name: string }[]; listModels(id: string): Promise<Model[]>; resolveModelInfo?(provider: string, model: string): Promise<Model>; resolveCallConfig(value: { provider: string; model: string; reasoningEffort?: string }): Promise<{ provider: string; model: string; reasoningEffort?: string }> };
   settings: { describe(options: { redactSecrets: true }): { ns: string; revision: number }[]; get(ns: string): unknown; mutate(ns: string, operations: { op: "set"; path: string[]; value: unknown }[], revision: number): Promise<void> };
   sessionController: { selectModel(value: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown> };
@@ -41,8 +41,11 @@ export function apply(ctx: Context, config: { root?: string; fetch?: typeof glob
   const hasUnlid = () => ctx.llm.listProviders().some(p=>p.id==="unlid");
   const removeTelegram = installTelegramWeb(ctx);
   const ready = Promise.all([store.load(),unlid.load()]);
-  const removeCapabilities = ctx.on?.("llm/stream", async (options,next) => {
-    await ready; prepareUnlidRequest(options,unlid.snapshot().models); return next();
+  const removeCapabilities = ctx.on?.("llm/stream", async function* (options,next) {
+    // The native waterfall is synchronous: callers immediately iterate its
+    // result. Await catalogue loading inside a generator, never return a
+    // Promise<AsyncIterable>, which breaks every provider before dispatch.
+    await ready; prepareUnlidRequest(options,unlid.snapshot().models); yield* next();
   }, {global:true,prepend:true});
   async function snapshot(): Promise<HubModelCatalog> {
     await ready; store.revalidate(); if (hasUnlid()) unlid.revalidate();
