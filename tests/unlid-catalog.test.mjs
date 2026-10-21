@@ -27,7 +27,9 @@ test('Unlid catalogue is host authenticated, bounded, cached without extras, and
   return new Response(JSON.stringify({...data,private:'synthetic-private-key',baseURL:'https://wrong.example'}));
  });
  try{await store.load();await Promise.all([store.refresh(),store.refresh()]);assert.equal(calls,1);assert.equal(store.snapshot().models.length,4);
-  const disk=await readFile(join(root,'unlid.json'),'utf8');assert.doesNotMatch(disk,/synthetic-private-key|wrong.example/);
+  const disk=JSON.parse(await readFile(join(root,'unlid.json'),'utf8'));
+  const publicData=data.data.map(m=>({id:m.id,created:m.created,unlid:{name:m.unlid.name,context_length:m.unlid.context_length,max_output:m.unlid.max_output??null,available:m.unlid.available,supports_tools:m.unlid.supports_tools,supports_reasoning:m.unlid.supports_reasoning,can_disable_reasoning:m.unlid.can_disable_reasoning===true,pricing:m.unlid.pricing}}));
+  assert.deepEqual(disk,{at:store.snapshot().at,data:publicData});
   mode='fail';await assert.rejects(store.refresh(),/saved models remain/);assert.equal(store.snapshot().models.length,4);assert.doesNotMatch(store.snapshot().warning,/synthetic-private-key/);
   mode='large';await assert.rejects(store.refresh());assert.equal(store.snapshot().models.length,4);
   const resumed=new UnlidCatalogStore(root,{async resolve(){return undefined}},()=>{throw Error('must not fetch without key')});await resumed.load();await assert.rejects(resumed.refresh());assert.equal(resumed.snapshot().models[1].tools,false);resumed.dispose();
