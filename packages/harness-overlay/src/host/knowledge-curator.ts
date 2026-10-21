@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { KnowledgeStore, atomicJson, digest, validatePlan, memoryExcerpt } from "./knowledge-store.ts";
 import type { KnowledgeJob, KnowledgePlan, KnowledgeSettings, KnowledgeSource, KnowledgeStatus, KnowledgeRecall, KnowledgeCuration } from "../knowledge-contract.ts";
 import { defaultKnowledgeSettings } from "../knowledge-contract.ts";
-import {cleanKnowledgeSource} from "./knowledge-evidence.ts";
+import {cleanKnowledgeSource,maskKnowledgeFileData} from "./knowledge-evidence.ts";
 import {organizationPrompt,validateCuration,normalizeCurationReferences} from "./knowledge-organization.ts";
 import {changeKnowledgeDomains} from "./knowledge-domains.ts";
 import {isQuotaFailure} from "./operation-failure.ts";
@@ -13,6 +13,7 @@ import {knowledgeRestoreHold,resumeRestoredKnowledgeWork,type KnowledgeRestoreHo
 import {conversationMarkdown,conversationTextRanges} from "./knowledge-archive.ts";
 import {distillMemories} from "./knowledge-distillation.ts";
 import {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
+import {withKnowledgeAssetExcerpts} from "./knowledge-assets.ts";
 export {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limits?:{maxTokens:number})=>Promise<string>;
@@ -64,7 +65,7 @@ export class KnowledgeCurator {
     const notes=await this.store.scan(),selected=nodeIds.map(id=>{const n=notes.find(n=>n.id===id),window=windows.find(w=>w.nodeId===id);if(!n)throw Error("Selected source is unavailable");if(window&&(window.hash!==digest(n.body)||window.end>n.body.length))throw Error("Source changed; preview the excerpt again");if(n.body.length>23500&&!window)throw Error("Preview and choose an excerpt of this long source before queuing");return {note:n,window};}),registry=await this.store.organization.domains(),passId=randomUUID(),ids:string[]=[];
     if(focus&&selected.some(({note})=>note.kind==="conversation"))throw Error("Chat archive records stay outside brain domains");
     const admission=await this.store.admission.read();for(const {note:n,window} of selected){const entry=admission.records[n.id],start=window?.start??0,end=window?.end??n.body.length,id="reorganize-"+passId+"-"+digest(n.id).slice(0,16),source:KnowledgeSource={id:"record-"+n.id,conversationId:n.id,completedAt:Math.max(1,Math.floor(n.modifiedAt)),channel:"pwa",authorRole:n.kind==="conversation"||focus?"mixed":"user",content:n.body.slice(start,end),originalWindow:{contentHash:digest(n.body),start,end},evidenceVersion:2,...(entry?{importBatchId:entry.batchId,importAdmissionId:entry.receiptId}:{})};
-      if(n.kind==="conversation"){const original=await this.store.archive.read(n.id),markdown=conversationMarkdown(original),body=markdown.slice(markdown.indexOf("\n---\n")+5);if(body===n.body)source.spans=conversationTextRanges(original).flatMap(range=>{const a=Math.max(range.start,start),b=Math.min(range.end,end);if(a>=b||range.message.role==="status")return [];const from=a-range.start;return [{messageId:range.message.id,start:from,end:from+b-a,text:range.message.text.slice(from,from+b-a),contentHash:digest(range.message.text),role:range.message.role,occurredAt:range.message.at}];});}
+      if(n.kind==="conversation"){const original=await this.store.archive.read(n.id),markdown=conversationMarkdown(original),body=markdown.slice(markdown.indexOf("\n---\n")+5);if(body===n.body)source.spans=conversationTextRanges(original).flatMap(range=>{const a=Math.max(range.start,start),b=Math.min(range.end,end);if(a>=b||range.message.role==="status")return [];const from=a-range.start;return [{messageId:range.message.id,start:from,end:from+b-a,text:range.message.text.slice(from,from+b-a),...(range.message.role==="user"?{userText:maskKnowledgeFileData(range.message.text).slice(from,from+b-a)}:{}),contentHash:digest(range.message.text),role:range.message.role,occurredAt:range.message.at}];});}
       await this.enqueue(source,{id,sourceHash:digest(n.body),policyHash:digest(JSON.stringify(this.settings)),registryRevision:registry.revision,...(focus?{focus}:{})});ids.push(id);}
     return {passId,queued:ids.length,jobIds:ids,automatic:this.settings.enabled&&this.settings.mode!=="manual"};
   }
@@ -151,7 +152,9 @@ export class KnowledgeCurator {
     if(!settings.channels.includes(sourceChannel(job.source))){job.status="done";job.outcome="skipped";job.reason="Seçili kanalların dışında; bilgi çıkarılmadı.";await atomicJson(this.jobFile(job.id),job);return;}
     if(job.source.completedAt<=await this.store.cutoff()){job.status="done";job.outcome="skipped";job.reason="Skipped: source is older than the saved forget policy.";await atomicJson(this.jobFile(job.id),job);return;}
     if(sourceChannel(job.source)==="workers"&&settings.assistantEvidence==="confirmed-only"){job.status="done";job.outcome="archive-only";job.reason="Görev sonucu arşivlendi. Seçili kurala göre kalıcı bilgi için kullanıcı doğrulaması gerekiyor.";await atomicJson(this.jobFile(job.id),job);return;}
-    const candidates=(await this.store.search(job.source.content,12)).map(n=>({...n,contentHash:digest(n.body),body:memoryExcerpt(n.body,job.source.content,6000,n.retrieval?.chunk)}));
+    job.source=await withKnowledgeAssetExcerpts(job.source,this.store.assets);
+    const searchText=job.source.content+"\n"+(job.source.assetExcerpts??[]).map(e=>e.text).join("\n");
+    const candidates=(await this.store.search(searchText,12)).map(n=>({...n,contentHash:digest(n.body),body:memoryExcerpt(n.body,searchText,6000,n.retrieval?.chunk)}));
     const graph=await this.store.graph(),registry=await this.store.organization.domains(),focus=job.pass?.focus??(job.pass&&job.id.startsWith("brain-organize-")?"domains":undefined),prompt=redactKnowledgeSecrets(organizationPrompt(job.source,candidates,settings,registry,graph.communityCandidates,graph.nodes.find(n=>n.id===job.source.conversationId)?.kind??"conversation",focus));
     const reserve=((Buffer.byteLength(prompt)+12000)*settings.inputPrice+6000*settings.outputPrice)/1e6;
     if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget){this.status="budget-paused";return;}

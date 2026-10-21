@@ -1,21 +1,23 @@
 import type {KnowledgeCuration,KnowledgeSettings,KnowledgeSource} from "../knowledge-contract.ts";
-import {KNOWLEDGE_MESSAGE_LABEL} from "./knowledge-evidence.ts";
+import {KNOWLEDGE_MESSAGE_LABEL,genuineUserText} from "./knowledge-evidence.ts";
 import {digest,validatePlan,type KnowledgeStore} from "./knowledge-store.ts";
 import {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 
 function userEvidence(source:KnowledgeSource):string[]{
   if(source.channel==="hub-worker-result"||source.authorRole==="assistant")return [];
-  if(source.spans)return source.spans.filter(s=>s.role==="user").map(s=>s.text);
+  if(source.spans)return source.spans.filter(s=>s.role==="user").map(s=>s.userText??genuineUserText(s.text));
   const at=source.content.indexOf(KNOWLEDGE_MESSAGE_LABEL);
-  if(at>=0)try{return JSON.parse(source.content.slice(at+KNOWLEDGE_MESSAGE_LABEL.length)).filter((m:any)=>m.role==="user"&&typeof m.text==="string").map((m:any)=>m.text);}catch{return [];}
-  return source.authorRole==="user"?[source.content]:[];
+  if(at>=0)try{return JSON.parse(source.content.slice(at+KNOWLEDGE_MESSAGE_LABEL.length)).filter((m:any)=>m.role==="user"&&typeof m.text==="string").map((m:any)=>genuineUserText(m.text));}catch{return [];}
+  return source.authorRole==="user"?[genuineUserText(source.content)]:[];
 }
 export function validateMemories(value:unknown,source:KnowledgeSource){
   if(value===undefined)return;
   const quotes=userEvidence(source);
   if(!Array.isArray(value)||value.length>4)throw Error("At most four sourced memory excerpts per pass");
   for(const m of value){
-    if(!m||Object.keys(m).some(k=>!["title","category","evidence"].includes(k))||typeof m.title!=="string"||m.title.trim().length<3||m.title.length>120||/[\[\]<>\r\n]/.test(m.title)||!["preferences","decisions","projects","learning"].includes(m.category)||typeof m.evidence!=="string"||m.evidence.trim().length<12||m.evidence.length>1200||!quotes.some(q=>q.includes(m.evidence)))throw Error("Memory must quote a genuine user passage; assistant guesses and background speech are not user facts");
+    const fromAsset=m?.assetId!==undefined;
+    const validAsset=fromAsset&&typeof m.assetId==="string"&&source.assets?.some(a=>a.id===m.assetId)&&source.assetExcerpts?.some(e=>e.assetId===m.assetId&&e.text.includes(m.evidence))&&["learning","projects"].includes(m.category);
+    if(!m||Object.keys(m).some(k=>!["title","category","evidence","assetId"].includes(k))||typeof m.title!=="string"||m.title.trim().length<3||m.title.length>120||/[\[\]<>\r\n]/.test(m.title)||!["preferences","decisions","projects","learning"].includes(m.category)||typeof m.evidence!=="string"||m.evidence.trim().length<12||m.evidence.length>1200||(fromAsset?!validAsset:!quotes.some(q=>q.includes(m.evidence))))throw Error("Memory must quote a genuine user passage or a verified attachment excerpt; document claims and assistant guesses are not user facts");
     if(redactKnowledgeSecrets(m.evidence)!==m.evidence||redactKnowledgeSecrets(m.title)!==m.title||/\[REDACTED[_A-Z]*\]/.test(m.evidence))throw Error("Credentials do not belong in extracted memory notes");
   }
 }
@@ -37,7 +39,7 @@ export async function distillMemories(store:KnowledgeStore,plan:KnowledgeCuratio
     const body=m.evidence.trim(),quote=normalized(body),title=normalized(m.title);
     if(titles.has(title)||quotes.some(q=>q.includes(quote)))continue;
     titles.add(title);quotes.push(quote);
-    changes.push({id:"memory-"+digest(passId+"\0"+quote).slice(0,32),title:m.title.trim(),body,expectedHash:null,category:m.category,links:[]});
+    changes.push({id:"memory-"+digest(passId+"\0"+quote).slice(0,32),title:m.title.trim(),body,expectedHash:null,category:m.category,links:[],...(m.assetId?{media:[{id:m.assetId,caption:source.assets!.find(a=>a.id===m.assetId)!.name}]}:{})});
   }
   const derived={...source,id:"distill-"+digest(passId)};
   // Recovery checks the durable receipt before deduplication, including undo;
@@ -45,7 +47,7 @@ export async function distillMemories(store:KnowledgeStore,plan:KnowledgeCuratio
   const receipt=await store.revisionForSource(derived.id);
   if(receipt)return {revision:receipt.state==="committed"?receipt.id:undefined,count:receipt.state==="committed"?receipt.count:0};
   if(!changes.length)return {count:0};
-  const notePlan={decision:"update-knowledge" as const,reason:"Selected user facts, verbatim from the source conversation.",changes};validatePlan(notePlan);
+  const notePlan={decision:"update-knowledge" as const,reason:plan.reason,changes};validatePlan(notePlan);
   const revision=await store.apply(notePlan,derived);
   return {revision:revision??undefined,count:changes.length};
 }

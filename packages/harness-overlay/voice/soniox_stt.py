@@ -21,8 +21,8 @@ SONIOX_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
 def soniox_config(language):
     config = {'model':'stt-rt-v5', 'audio_format':'pcm_s16le', 'sample_rate':16000,
               'num_channels':1, 'enable_language_identification':True,
-              'enable_endpoint_detection':True, 'endpoint_latency_adjustment_level':1,
-              'max_endpoint_delay_ms':1500}
+              'enable_endpoint_detection':True, 'endpoint_latency_adjustment_level':0,
+              'max_endpoint_delay_ms':2000}
     if language != 'auto':
         config['language_hints'] = ['en','tr'] if language == 'en-tr' else [language]
         config['language_hints_strict'] = True
@@ -168,7 +168,7 @@ class SonioxWakeSTTService(STTService):
                     if generation != self.generation or self.attention.mode != 'active': return
                     if value.get('error_code') or value.get('error_type'):
                         raise PermissionError('Speech service unavailable')
-                    if self.gate.blocked:
+                    if self.gate.input_blocked:
                         self.tokens.clear();self.language_counts.clear()
                         self.health.partial_text = ''
                         await self._turn_stopped()
@@ -190,6 +190,11 @@ class SonioxWakeSTTService(STTService):
             if text == '<end>' and token.get('is_final'):
                 text = ''.join(self.tokens).strip()
                 self.tokens.clear()
+                if text and not self.gate.accepts_transcript(text, final=True):
+                    self.language_counts.clear()
+                    self.health.partial_text = ''
+                    await self._turn_stopped()
+                    continue
                 if text:
                     self.language_code=max(self.language_counts,key=self.language_counts.get) if self.language_counts else None
                     language = Language.TR if self.language_code=='tr' else Language.EN if self.language_code=='en' else None
@@ -218,6 +223,9 @@ class SonioxWakeSTTService(STTService):
         if sum(map(len,self.tokens)) > 12000: raise ValueError('Recognition turn exceeded its bound')
         draft = ''.join(self.tokens+partial).strip()
         if draft:
+            if not self.gate.accepts_transcript(draft):
+                self.health.partial_text = ''
+                return
             await self._turn_started()
             self.health.partial_text = draft[-2000:]
             self.health.partial_at = time.perf_counter()
@@ -232,7 +240,7 @@ class SonioxWakeSTTService(STTService):
         async with self.lock:
             await self._sync_mode()
             if self.closed or self._muted: return
-            if self.gate.blocked:
+            if self.gate.input_blocked:
                 self.preroll.clear()
                 self.tokens.clear()
                 self.wake.reset()
@@ -243,7 +251,8 @@ class SonioxWakeSTTService(STTService):
             if self.gate.generation != self.echo_generation:
                 self.echo_generation = self.gate.generation
                 self.preroll.clear()
-                self.tokens.clear()
+                if self.gate.input_blocked:
+                    self.tokens.clear()
                 self.wake.reset()
             try:
                 if self.attention.mode == 'background':

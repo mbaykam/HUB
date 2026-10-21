@@ -31,6 +31,7 @@
     "src/knowledge-community-contract.ts",
     "src/automation-contract.ts",
     "src/goal-contract.ts",
+    "src/planner-contract.ts",
     "src/agent-browser-contract.ts",
     "src/agent-turn-contract.ts",
     "src/bookmarks-contract.ts",

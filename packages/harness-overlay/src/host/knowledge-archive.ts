@@ -3,7 +3,7 @@ import {join} from "node:path";
 import {randomUUID} from "node:crypto";
 import {atomicJson,digest} from "./knowledge-store.ts";
 import type {KnowledgeConversation,ConversationMessage,KnowledgeSource} from "../knowledge-contract.ts";
-import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
+import {isKnowledgeEvaluation,maskKnowledgeFileData} from "./knowledge-evidence.ts";
 import {operationFailure} from "./operation-failure.ts";
 import {KnowledgeMutationGate} from "./knowledge-mutation-gate.ts";
 
@@ -97,6 +97,6 @@ export function nativeConversation(header:any,events:readonly any[],channel:stri
 /** Chunks are processing units only; one conversation remains one graph node. */
 export function conversationSources(c:KnowledgeConversation):KnowledgeSource[]{
   const sources:KnowledgeSource[]=[];
-  for(const m of c.messages.filter(m=>m.role!=="status"))for(let at=0,part=0;at<m.text.length;at+=14000,part++)sources.push({id:`archive-${digest(c.id+":"+m.id+":"+part).slice(0,40)}`,conversationId:c.id,sessionId:c.sessionId,channel:c.channel,completedAt:m.at,authorRole:m.role==="user"?"user":"assistant",evidenceVersion:2,spans:[{messageId:m.id,start:at,end:Math.min(m.text.length,at+14000),text:m.text.slice(at,at+14000),contentHash:digest(m.text),role:m.role==="status"?"task":m.role,occurredAt:m.at}],content:`Original conversation: ${c.title}\nRole: ${m.role}\nMessage ID: ${m.id}\n${m.text.slice(at,at+14000)}`,assets:m.assets});
+  for(const m of c.messages.filter(m=>m.role!=="status"))for(let at=0,part=0;at<m.text.length;at+=14000,part++)sources.push({id:`archive-${digest(c.id+":"+m.id+":"+part).slice(0,40)}`,conversationId:c.id,sessionId:c.sessionId,channel:c.channel,completedAt:m.at,authorRole:m.role==="user"?"user":"assistant",evidenceVersion:2,spans:[{messageId:m.id,start:at,end:Math.min(m.text.length,at+14000),text:m.text.slice(at,at+14000),...(m.role==="user"?{userText:maskKnowledgeFileData(m.text).slice(at,at+14000)}:{}),contentHash:digest(m.text),role:m.role==="status"?"task":m.role,occurredAt:m.at}],content:`Original conversation: ${c.title}\nRole: ${m.role}\nMessage ID: ${m.id}\n${m.text.slice(at,at+14000)}`,assets:m.assets});
   return sources;
 }

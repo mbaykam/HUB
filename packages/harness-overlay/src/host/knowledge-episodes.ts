@@ -1,7 +1,7 @@
 import { digest } from "./knowledge-store.ts";
 import type { KnowledgeSource } from "../knowledge-contract.ts";
-import { isKnowledgeEvaluation, KNOWLEDGE_MESSAGE_LABEL } from "./knowledge-evidence.ts";
-interface Message { role:"user"|"assistant"|"task"; text:string;id?:string;at?:number;start?:number;contentHash?:string }
+import { isKnowledgeEvaluation, KNOWLEDGE_MESSAGE_LABEL,maskKnowledgeFileData } from "./knowledge-evidence.ts";
+interface Message { role:"user"|"assistant"|"task"; text:string;userText?:string;id?:string;at?:number;start?:number;contentHash?:string }
 /** Typed native events determine authorship. Never split a role label away
  * from a long message, or import a fork's inherited history as new evidence. */
 export function knowledgeTurnSources(header:{id:string;origin?:string;parentSession?:string},snapshot:readonly any[],end:any,inherited=0,forgetBefore=0):KnowledgeSource[]{
@@ -19,7 +19,7 @@ export function knowledgeTurnSources(header:{id:string;origin?:string;parentSess
   if(!current.some(m=>m.role==="assistant")||!worker&&!current.some(m=>m.role==="user"))return [];
   const context=events.slice(0,start).filter(e=>!forgetBefore||Number.isSafeInteger(e.time)&&e.time>forgetBefore).flatMap(e=>{const m=extract(e);return m?[m]:[];}).slice(-4).map(m=>({...m,text:m.text.slice(-500)}));
   const chunks:Message[][]=[];let pending:Message[]=[];
-  for(const m of current)for(let offset=0;offset<m.text.length;offset+=5000){const fragment={...m,text:m.text.slice(offset,offset+5000),start:offset,contentHash:digest(m.text)};if(JSON.stringify([...pending,fragment]).length>13000){chunks.push(pending);pending=[];}pending.push(fragment);}
+  for(const m of current)for(let offset=0;offset<m.text.length;offset+=5000){const masked=m.role==="user"?maskKnowledgeFileData(m.text):m.text,fragment={...m,text:m.text.slice(offset,offset+5000),...(masked!==m.text?{userText:masked.slice(offset,offset+5000)}:{}),start:offset,contentHash:digest(m.text)};if(JSON.stringify([...pending,fragment]).length>20000&&pending.length){chunks.push(pending);pending=[];}pending.push(fragment);}
   if(pending.length)chunks.push(pending);
-  return chunks.map((messages,i)=>({id:`hub-${digest(header.id)}-turn-${turn}-${i}`,sessionId:header.id,evidenceVersion:2 as const,completedAt:end.time,channel:worker?"hub-worker-result":"hub",spans:messages.map(m=>({messageId:m.id!,text:m.text,start:m.start!,end:m.start!+m.text.length,contentHash:m.contentHash!,role:m.role,...(Number.isSafeInteger(m.at)?{occurredAt:m.at}:{} )})),content:`Prior conversation context (not new facts): ${JSON.stringify(context)}\n${KNOWLEDGE_MESSAGE_LABEL}${JSON.stringify(messages.map(({id,at,start,contentHash,...m})=>m))}`}));
+  return chunks.map((messages,i)=>({id:`hub-${digest(header.id)}-turn-${turn}-${i}`,sessionId:header.id,evidenceVersion:2 as const,completedAt:end.time,channel:worker?"hub-worker-result":"hub",spans:messages.map(m=>({messageId:m.id!,text:m.text,...(m.userText!==undefined?{userText:m.userText}:{}),start:m.start!,end:m.start!+m.text.length,contentHash:m.contentHash!,role:m.role,...(Number.isSafeInteger(m.at)?{occurredAt:m.at}:{} )})),content:`Prior conversation context (not new facts): ${JSON.stringify(context)}\n${KNOWLEDGE_MESSAGE_LABEL}${JSON.stringify(messages.map(({id,at,start,contentHash,userText,...m})=>m))}`}));
 }

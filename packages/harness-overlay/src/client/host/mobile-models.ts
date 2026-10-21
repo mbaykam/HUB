@@ -1,6 +1,7 @@
 import { defineOverlayStyle } from "../shared/style-runtime.ts";
 import { installMobileWidgetBack } from "./mobile-widget-back.ts";
 import type { HubModelCatalog, HubCatalogModel } from "../../model-catalog-contract.ts";
+import {catalogOutputLimit} from "../../model-catalog-contract.ts";
 import type {VoiceProfile} from "../../voice-profile-contract.ts";
 import styles from "./mobile-models.css";
 const installStyles = defineOverlayStyle("hub-mobile-models", styles);
@@ -59,7 +60,7 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
     const row = element("article"); row.setAttribute("data-model-id", m.id);
     row.append(element("h3", m.name), element("p", `${m.provider} · ${m.id}`));
     const star=button(m.favorite?"★":"☆",()=>void favorite(m));star.className="hub-model-favorite";star.setAttribute("aria-label",(m.favorite?"Remove favorite ":"Favorite ")+m.name);star.setAttribute("aria-pressed",String(!!m.favorite));row.append(star);
-    const facts = [m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k context` : "", m.tools ? "Tools" : "", m.input.includes("image") ? "Images" : "", m.reasoning ? "Reasoning" : ""].filter(Boolean);
+    const facts = [m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k context` : "", m.tools ? "Tools" : "Chat only · no tools", m.input.includes("image") ? "Images" : "", m.reasoning ? "Reasoning" : "",m.available===false?"Temporarily paused":""].filter(Boolean);
     row.append(element("p", facts.join(" · ")));
     if (m.pricing) row.append(element("p", `$${m.pricing.input.toFixed(3)} input / $${m.pricing.output.toFixed(3)} output per 1M tokens`));
     const effort = element("select"); effort.disabled=!!options?.browseOnly;effort.setAttribute("aria-label", `Reasoning for ${m.name}`);
@@ -67,18 +68,20 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
     for (const e of m.efforts ?? []) { const option = element("option", e.name); option.value = e.id; effort.append(option); }
     const settings=element("details"),d=draft(m);settings.open=d.expanded;settings.append(element("summary","Model options & capabilities"));settings.addEventListener("toggle",()=>d.expanded=settings.open);
     const field=(label:string,input:HTMLElement)=>{const l=element("label");l.append(element("span",label),input);settings.append(l);};
-    if(m.efforts?.length){if(d.effort&&!m.efforts.some(e=>e.id===d.effort)){const old=element("option",d.effort+" · unavailable");old.value=d.effort;old.disabled=true;effort.append(old);}effort.value=d.effort;effort.addEventListener("change",()=>d.effort=effort.value);field("Reasoning effort",effort);settings.append(element("small",`Levels reported by the installed adapter${m.defaultEffort?" · default: "+m.defaultEffort:""}.`));}
+    if(m.efforts?.length){if(d.effort&&!m.efforts.some(e=>e.id===d.effort)){const old=element("option",d.effort+" · unavailable");old.value=d.effort;old.disabled=true;effort.append(old);}effort.value=d.effort;effort.addEventListener("change",()=>d.effort=effort.value);field("Reasoning effort",effort);settings.append(element("small",m.effortNote??`Levels reported by the installed adapter${m.defaultEffort?" · default: "+m.defaultEffort:""}.`));}
     else if(m.reasoning)settings.append(element("p","Reasoning is advertised, but selectable levels are not reported by this adapter. Provider default is used."));
-    const maxTokens=element("input");maxTokens.type="number";maxTokens.disabled=!parameterControls;maxTokens.min="1";maxTokens.max=String(m.maxTokens??m.contextWindow??1000000);maxTokens.placeholder=m.defaults?.max_tokens?"Default: "+m.defaults.max_tokens:"Provider default";maxTokens.value=d.maxTokens;maxTokens.setAttribute("aria-label",`Output tokens for ${m.name}`);maxTokens.addEventListener("input",()=>d.maxTokens=maxTokens.value);field("Maximum output tokens",maxTokens);
+    const maxTokens=element("input");maxTokens.type="number";maxTokens.disabled=!parameterControls;maxTokens.min="1";maxTokens.max=String(catalogOutputLimit(m));maxTokens.placeholder=m.defaults?.max_tokens?"Default: "+m.defaults.max_tokens:"Provider default";maxTokens.value=d.maxTokens;maxTokens.setAttribute("aria-label",`Output tokens for ${m.name}`);maxTokens.addEventListener("input",()=>d.maxTokens=maxTokens.value);field("Maximum output tokens",maxTokens);
     if(m.editableParameters?.includes("temperature")){const temp=element("input");temp.type="number";temp.disabled=!parameterControls;temp.min="0";temp.max="2";temp.step="0.1";temp.value=d.temperature;temp.placeholder=m.defaults?.temperature!=null?"Default: "+m.defaults.temperature:"Provider default";temp.setAttribute("aria-label",`Temperature for ${m.name}`);temp.addEventListener("input",()=>d.temperature=temp.value);field("Temperature",temp);}
     if(m.description)settings.append(element("p",m.description));
     settings.append(element("p",`Input: ${m.input.join(", ")} · Output limit: ${m.maxTokens?.toLocaleString()??"not disclosed"}`));
+    if(m.outputLimitFallback)settings.append(element("small","The provider does not disclose maximum output. HUB starts with an 8,192-token cap; this is an operating limit, not the model’s advertised capacity."));
     if(m.supportedParameters){settings.append(element("small","Provider-advertised parameters: "+(m.supportedParameters.join(", ")||"none disclosed")));const others=m.supportedParameters.filter(p=>!m.editableParameters?.includes(p));if(others.length)settings.append(element("small","Provider capabilities without a per-character control in this adapter: "+others.join(", ")+". Tools and response structure are managed by the harness; these are not editable overrides."));}
     else settings.append(element("small","This provider does not publish a complete parameter schema. Only verified adapter controls are shown."));
     row.append(settings);
-    const select = button(options?.browseOnly?m.enabled?"Available":"Add to available models":m.enabled ? "Use model" : m.provider === "openrouter" ? "Add & use model" : "Adapter update needed", () => void choose(m,d));
+    const canAdd=["openrouter","unlid"].includes(m.provider);
+    const select = button(m.available===false?"Temporarily paused":options?.browseOnly?m.enabled?"Available":"Add to available models":m.enabled ? "Use model" : canAdd ? "Add & use model" : "Adapter update needed", () => void choose(m,d));
     const connected=catalog?.providers.some(p=>p.id===m.provider);if(!connected)select.textContent="Provider adapter unavailable";
-    select.disabled = busy || !connected || (!m.enabled && m.provider !== "openrouter");if(options?.browseOnly&&m.enabled&&connected)row.append(element("small","Available for characters"));else row.append(select);
+    select.disabled = busy || !connected || m.available===false || (!m.enabled && !canAdd);if(options?.browseOnly&&m.enabled&&connected&&m.available!==false)row.append(element("small","Available for characters"));else row.append(select);
     return row;
   }
   async function choose(m: HubCatalogModel, d:{effort:string;temperature:string;maxTokens:string}) {
@@ -86,7 +89,7 @@ export function installMobileModels(container: HTMLElement, root: Document, curr
     const sessionId = currentSession();
     if (!options && scope.value === "select" && !sessionId) { status.textContent = "Open a chat first, or choose New chats only."; return; }
     const effort=d.effort,parameters={...(parameterControls&&d.temperature!==""&&m.editableParameters?.includes("temperature")?{temperature:Number(d.temperature)}:{}),...(parameterControls&&d.maxTokens!==""?{maxTokens:Number(d.maxTokens)}:{})};
-    if(parameters.maxTokens!==undefined&&(!Number.isInteger(parameters.maxTokens)||parameters.maxTokens<1||parameters.maxTokens>(m.maxTokens??m.contextWindow??1000000))||parameters.temperature!==undefined&&(!Number.isFinite(parameters.temperature)||parameters.temperature<0||parameters.temperature>2)){status.textContent="Check output tokens and temperature. Leave a field empty to use its default.";return;}
+    if(parameters.maxTokens!==undefined&&(!Number.isInteger(parameters.maxTokens)||parameters.maxTokens<1||parameters.maxTokens>catalogOutputLimit(m))||parameters.temperature!==undefined&&(!Number.isFinite(parameters.temperature)||parameters.temperature<0||parameters.temperature>2)){status.textContent="Check output tokens and temperature. Leave a field empty to use its default.";return;}
     busy = true; render(); status.textContent = "Saving selection…";
     try { await request({ action: options ? "enable" : scope.value, provider: m.provider, model: m.id, ...(!options && scope.value === "select" ? { sessionId } : {}), ...(!options?.browseOnly&&effort ? { reasoningEffort: effort } : {}),...(!options?.browseOnly?parameters:{}) });
       if (options?.choose) { await options.choose(m, effort,parameters); dismiss(); return; }

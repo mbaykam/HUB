@@ -17,6 +17,7 @@ import {KnowledgeOrganization} from "./knowledge-organization.ts";
 import {KnowledgeMutationGate} from "./knowledge-mutation-gate.ts";
 import {ensureKnowledgeDataset} from "./knowledge-portable.ts";
 import {relationRoots,relationScope} from "./knowledge-relations.ts";
+import {sourceReference} from "./knowledge-provenance.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export async function atomicJson(path: string, value: unknown) {
@@ -41,7 +42,7 @@ interface Stored extends KnowledgeNode { raw: string; body: string; front: strin
 interface ScanCoverage {files:number;noteSize:number;recordSize:number;indexed?:number}
 type SemanticLayout={edges:NonNullable<KnowledgeGraph["similarities"]>;coverage:KnowledgeSimilarityCoverage};
 interface RetiredEvidence {id:string;recordId:string;at:number;sourceHash:string;quoteHash:string}
-interface Journal { id: string; state: "prepared" | "committed" | "undone" | "conflict";forget?:RetiredEvidence; source: KnowledgeSource; changes: { path: string; before: string | null; after: string; id: string;category?:string;beforeCategory?:string }[] }
+interface Journal { id: string; state: "prepared" | "committed" | "undone" | "conflict";forget?:RetiredEvidence;reason?:string; source: KnowledgeSource; changes: { path: string; before: string | null; after: string; id: string;category?:string;beforeCategory?:string;evidence?:KnowledgeEvidence }[] }
 /** Markdown is canonical. Queue, provenance and undo are operational sidecars,
  * kept outside the vault so Obsidian never displays artificial graph nodes. */
 export class KnowledgeStore {
@@ -150,7 +151,7 @@ export class KnowledgeStore {
     for(const note of notes.filter(n=>n.kind!=="conversation"))for(const ref of sourceMetadata[note.id]?.sources??[]){
       const target=ref.conversationId;if(!target||!archived.has(target)||sourceRelations.some(r=>r.sourceId===note.id&&r.targetId===target))continue;
       addEdge({source:note.id,target,label:"source conversation"});
-      sourceRelations.push({id:"source-"+digest(note.id+"\0"+target).slice(0,32),sourceId:note.id,targetId:target,predicate:"derived from conversation",direction:"directed",origin:"document",interpretation:false,evidence:[],createdAt:ref.completedAt,updatedAt:ref.completedAt,status:"active",scope:"archive"});
+      sourceRelations.push({id:"source-"+digest(note.id+"\0"+target).slice(0,32),sourceId:note.id,targetId:target,predicate:"derived from conversation",direction:"directed",origin:"document",interpretation:false,evidence:ref.evidence?[ref.evidence]:[],createdAt:ref.completedAt,updatedAt:ref.completedAt,status:"active",scope:"archive"});
     }
     let similarities:KnowledgeGraph["similarities"],similarityCoverage:KnowledgeSimilarityCoverage|undefined;
     if(this.similarities){
@@ -169,13 +170,16 @@ export class KnowledgeStore {
   async communities(offset=0){if(!Number.isSafeInteger(offset)||offset<0)throw Error("Invalid group page");const snapshot=(await this.graph()).communityCandidates;if(!snapshot)throw Error("Group suggestions are unavailable; original knowledge remains available");return {inputHash:snapshot.inputHash,coverage:snapshot.coverage,algorithm:snapshot.algorithm,total:snapshot.groups.length,groups:snapshot.groups.slice(offset,offset+30).map(({memberIds,...group})=>({...group,count:memberIds.length})),nextOffset:offset+30<snapshot.groups.length?offset+30:null};}
   async community(id:string,version:string,offset=0){if(!Number.isSafeInteger(offset)||offset<0)throw Error("Invalid group page");const graph=await this.graph(),snapshot=graph.communityCandidates;if(!snapshot||version!==snapshot.inputHash)throw Error("The source graph changed; refresh group suggestions");const group=snapshot.groups.find(g=>g.id===id);if(!group)throw Error("Suggested group changed; refresh");const nodes=new Map(graph.nodes.map(n=>[n.id,n]));return {id:group.id,label:group.label,total:group.memberIds.length,nodes:group.memberIds.slice(offset,offset+50).map(id=>nodes.get(id)!),nextOffset:offset+50<group.memberIds.length?offset+50:null,inputHash:snapshot.inputHash};}
   async inspectEvidence(relationId:string,index:number){
-    const graph=await this.graph(),relation=graph.relationships?.find(r=>r.id===relationId);if(!relation||!Number.isInteger(index)||index<0||!relation.evidence[index])throw Error("This relationship or its evidence was retired or changed; refresh");const citation=relation.evidence[index]!,note=(await this.scan()).find(n=>n.id===citation.sourceId);let text:string|undefined,version:"current"|"archived"|"captured-episode"|"quoted-only"="quoted-only";
-    if(citation.messageId&&note?.kind==="conversation"){
+    const graph=await this.graph(),relation=graph.relationships?.find(r=>r.id===relationId);if(!relation||!Number.isInteger(index)||index<0||!relation.evidence[index])throw Error("This relationship or its evidence was retired or changed; refresh");const citation=relation.evidence[index]!,note=(await this.scan()).find(n=>n.id===citation.sourceId);let text:string|undefined,version:"current"|"archived"|"captured-episode"|"quoted-only"="quoted-only",baseOffset=0;
+    if(citation.assetId){
+      try{const asset=await this.assets.get(citation.assetId),original=await this.assets.read(asset.path);if(createHash("sha256").update(original.bytes).digest("hex")===citation.assetId){const extracted=await this.assets.extract(asset);if(digest(extracted)===citation.contentHash){text=extracted;version="current";}}}catch{}
+      if(!text)for(const file of (await readdir(join(this.root,"journal"))).filter(f=>/^[a-f0-9-]{36}\.json$/i.test(f))){const journal=JSON.parse(await readFile(join(this.root,"journal",file),"utf8"));const excerpt=journal.source?.assetExcerpts?.find((e:any)=>e.assetId===citation.assetId&&e.contentHash===citation.contentHash&&e.text.includes(citation.quote));if(excerpt){text=excerpt.text;baseOffset=excerpt.start??0;version="captured-episode";break;}}
+    }else if(citation.messageId&&note?.kind==="conversation"){
       const original=await this.archive.read(note.id),match=original.messages.find(m=>m.id===citation.messageId&&digest(m.text)===citation.contentHash);if(match){text=match.text;version="current";}
       else{const directory=join(this.root,"archive-history",note.id),files=await readdir(directory).catch((e:any)=>{if(e.code!=="ENOENT")throw e;return [] as string[];});for(const file of files.filter(f=>/^[0-9a-f]{64}\.json$/.test(f)).slice(0,500)){const prior=JSON.parse(await readFile(join(directory,file),"utf8")),old=prior.messages?.find((m:any)=>m.id===citation.messageId&&digest(m.text)===citation.contentHash);if(old){text=old.text;version="archived";break;}}}
     }else if(note&&digest(note.body)===citation.contentHash){text=note.body;version="current";}
     if(!text&&citation.locator?.startsWith("episode:")){const source=(await this.organization.state()).revisions.find(r=>r.source.id===citation.locator!.slice(8))?.source;if(source&&digest(source.content)===citation.contentHash){text=source.content;version="captured-episode";}}
-    const start=text?Math.max(0,(citation.start??Math.max(0,text.indexOf(citation.quote)))-250):0,end=text?Math.min(text.length,(citation.end??start+citation.quote.length)+250):0;
+    const start=text?Math.max(0,(citation.start!==undefined?citation.start-baseOffset:Math.max(0,text.indexOf(citation.quote)))-250):0,end=text?Math.min(text.length,(citation.end!==undefined?citation.end-baseOffset:start+citation.quote.length)+250):0;
     return {citation,sourceTitle:note?.title??"Original source",version,...(text?{excerpt:{text:text.slice(start,end),start,end,totalChars:text.length}}:{})};
   }
   async note(id: string): Promise<KnowledgeNote> {
@@ -187,6 +191,11 @@ export class KnowledgeStore {
     return { id, title: found.title, permalink: found.permalink, hash: found.hash, modifiedAt: found.modifiedAt,kind:found.kind,protected:found.protected, content: found.body,
       backlinks: graph.nodes.filter(n => incoming.has(n.id)),
       links: graph.nodes.filter(n => outgoing.has(n.id)), sources: (sourceMap[id]?.sources??[]).map(({conversationId,...ref})=>({...ref,...(conversationId&&graph.nodes.some(n=>n.id===conversationId&&n.kind==="conversation")?{conversationId}:{})})) };
+  }
+  async sourceEpisode(id:string){
+    if(typeof id!=="string"||id.length>200)throw Error("Invalid source");
+    for(const file of (await readdir(join(this.root,"journal"))).filter(f=>/^[a-f0-9-]{36}\.json$/i.test(f))){const journal=JSON.parse(await readFile(join(this.root,"journal",file),"utf8"));if(journal.source?.id===id){await this.admission.assert(journal.source);return journal.source as KnowledgeSource;}}
+    throw Error("Source missing");
   }
   async organizationSource(id:string,offset=0){const source=(await this.scan()).find(n=>n.id===id);if(!source)throw Error("Source is not admitted or available");if(!Number.isSafeInteger(offset)||offset<0||offset>=source.body.length)throw Error("Choose an existing source passage");let start=offset;if(start&&/[\uDC00-\uDFFF]/.test(source.body[start]!))start--;let end=Math.min(source.body.length,start+12000);if(end<source.body.length&&/[\uDC00-\uDFFF]/.test(source.body[end]!))end--;return {nodeId:id,title:source.title,hash:digest(source.body),totalChars:source.body.length,start,end,content:source.body.slice(start,end),nextOffset:end<source.body.length?end:null};}
   async search(query: string, limit = 12,coverage?:ScanCoverage,scope:KnowledgeRecordScope="all") {
@@ -232,7 +241,7 @@ export class KnowledgeStore {
     }
     return Object.fromEntries(Object.entries(meta).map(([id,n])=>[id,{...n,sources:n.sources.map(s=>({...s,conversationId:s.conversationId??this.sourceCache!.sources.get(s.id)}))}]));
   }
-  private async metadata(): Promise<Record<string,{ completedAt: number; sources: { id:string; completedAt:number; channel:string; conversationId?:string }[]; category?:string;deleted?:boolean; title?:string; path?:string; lastHash?:string }>> {
+  private async metadata(): Promise<Record<string,{ completedAt: number; sources: KnowledgeNote["sources"]; category?:string;deleted?:boolean; title?:string; path?:string; lastHash?:string }>> {
     try { return JSON.parse(await readFile(join(this.root,"notes.json"),"utf8")); } catch (e:any) { if (e.code !== "ENOENT") throw e; return {}; }
   }
   async cutoff() {
@@ -282,7 +291,7 @@ export class KnowledgeStore {
         return {change,existing,path,permalink:path.slice(0,-3)};
       });
       if(new Set(reserved.map(n=>n.path.toLowerCase())).size!==reserved.length) throw new Error("Duplicate paths in plan");
-      const journal: Journal={id:randomUUID(),state:"prepared",source,changes:[]};
+      const journal: Journal={id:randomUUID(),state:"prepared",source,reason:plan.reason,changes:[]};
       for(const {change,existing,path} of reserved) {
         let body=change.body.trim();
         for(const item of change.media??[]){
@@ -316,7 +325,7 @@ export class KnowledgeStore {
         }
         if(/^\s*(?:#{1,6}\s*|[-*]\s*)?(?:part_of|related notes|connections|bağlantılar|ilgili notlar)\s*(?:[:\[]|$)/im.test(body) || /<!--|\[\[\s*(?:\||\]\])/i.test(body)) throw new Error("Artificial link or metadata clutter");
         const front=existing?.front || `---\nhub_id: ${JSON.stringify(change.id)}\ntitle: ${JSON.stringify(change.title)}\ntype: hub_knowledge\n${source.id.startsWith("distill-")&&source.conversationId?`hub_memory_source: ${JSON.stringify(source.conversationId)}\n`:""}---\n`;
-        journal.changes.push({id:change.id,path,before:existing?.raw??null,after:front+body+"\n",category:change.category,beforeCategory:meta[change.id]?.category});
+        journal.changes.push({id:change.id,path,before:existing?.raw??null,after:front+body+"\n",category:change.category,beforeCategory:meta[change.id]?.category,...(source.id.startsWith("distill-")?{evidence:sourceReference(source,change.body.trim(),change.media?.[0]?.id)}:{})});
       }
       // Preserve all preexisting human frontmatter and exact before snapshots.
       await atomicJson(join(this.root,"journal",`${journal.id}.json`),journal);
@@ -331,7 +340,7 @@ export class KnowledgeStore {
     if(journal.forget)await this.saveForgetPolicy(journal.forget.at,journal.forget);
     for(const c of journal.changes) { const path=await this.file(c.path);const now=await readFile(path,"utf8").catch((e:any)=>{if(e.code!=="ENOENT")throw e;return null;});if(now!==c.before&&now!==c.after)throw new Error("Concurrent note edit during transaction");await mkdir(resolve(path,".."),{recursive:true}); const tmp=path+`.${journal.id}.tmp`;await writeFile(tmp,c.after,{mode:0o600});await rename(tmp,path); }
     const meta=await this.metadata(),source=journal.source;
-    for(const c of journal.changes)meta[c.id]={completedAt:Math.max(meta[c.id]?.completedAt??0,source.completedAt),sources:[...(meta[c.id]?.sources??[]).filter(s=>s.id!==source.id),{id:source.id,completedAt:source.completedAt,channel:source.channel,...(source.conversationId?{conversationId:source.conversationId}:{})}],category:c.category??meta[c.id]?.category,title:basename(c.path,".md"),path:c.path,lastHash:digest(c.after)};
+    for(const c of journal.changes)meta[c.id]={completedAt:Math.max(meta[c.id]?.completedAt??0,source.completedAt),sources:[...(meta[c.id]?.sources??[]).filter(s=>s.id!==source.id),{id:source.id,completedAt:source.completedAt,channel:source.channel,...(source.conversationId?{conversationId:source.conversationId}:{}),...(journal.reason?{reason:journal.reason}:{}),...(c.evidence?{evidence:c.evidence}:{})}],category:c.category??meta[c.id]?.category,title:basename(c.path,".md"),path:c.path,lastHash:digest(c.after)};
     await atomicJson(join(this.root,"notes.json"),meta);
     journal.state="committed";await atomicJson(join(this.root,"journal",`${journal.id}.json`),journal);
   }

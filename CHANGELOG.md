@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0
+
+- Add the Home Knowledge overview, personal agenda and near/later to-dos, with
+  sidebar access, recoverable removal and conversation-specific agent steps.
+- Discover the complete Unlid model catalogue with truthful capabilities and
+  independent cached refresh; preserve current character selections.
+- Carry chat uploads into Knowledge curation and retain attributed document
+  quotations, source reasons and precise evidence alongside original files.
+- Fix spreadsheet shared-string previews and long-upload evidence boundaries.
+- Allow foreground voice interruption with playback echo filtering and less
+  aggressive Soniox endpoint timing; preserve local background wake behavior.
+
 ## 1.5.0
 
 - Add Unlid account credit and spending trackers and Soniox project cost,

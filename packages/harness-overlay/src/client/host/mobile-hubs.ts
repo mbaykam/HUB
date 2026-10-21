@@ -11,6 +11,10 @@ import { openMobileConversation } from "./mobile-session-navigation.ts";
 import { createMobileBrowserView } from "./mobile-browser-view.ts";
 import { createMobileLiveTranscript } from "./mobile-live-transcript.ts";
 import { readMobileSessionIdentity } from "./mobile-session-identity.ts";
+import {createHomeKnowledge} from "./mobile-home-knowledge.ts";
+import {createMobilePlanner} from "./mobile-planner.ts";
+import dashboardStyles from "./mobile-dashboard.css";
+const installDashboardStyles=defineOverlayStyle("hub-home-dashboard",dashboardStyles);
 
 /** PWA-owned view layer. The native conversation, attachments, approvals and
  * workspace controls stay mounted; the audio owner survives Home/chat changes.
@@ -22,6 +26,10 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const audio = root.createElement("audio"); audio.autoplay = true;
   audio.setAttribute("playsinline", "");
   const removeStyles = installStyles(root);
+  const removeDashboardStyles=installDashboardStyles(root);
+  const knowledge=createHomeKnowledge(root);
+  const planner=createMobilePlanner(root,id=>{void openMobileConversation(ctx.sessions,id).catch(()=>{error.textContent="This conversation could not open. Your call is still connected.";});});
+  const plannerNav=root.createElement("button");plannerNav.type="button";plannerNav.textContent="Agenda & to-dos";plannerNav.setAttribute("data-hub-planner-nav","");plannerNav.addEventListener("click",()=>planner.open());
   const nav = root.createElement("div"); nav.setAttribute("data-hub-home-nav", "");
   const textHeading = root.createElement("div"); textHeading.setAttribute("data-hub-text-heading", "");
   const textLabel = root.createElement("span"); textLabel.textContent = "Write";
@@ -111,6 +119,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     identity.hidden = inHome || identitySession !== ctx.sessions.list.getSnapshot().current;
     if (!inHome && (identitySession !== ctx.sessions.list.getSnapshot().current || Date.now() - identityCheckedAt > 2000)) void checkIdentity();
     const busy = active();
+    knowledge.update(inHome&&!busy);planner.update({visible:inHome,voice:busy,sessionId:voiceSession??ctx.sessions.list.getSnapshot().current});plannerNav.hidden=inHome;
     const viewingCall = busy && !inHome && !!voiceSession && ctx.sessions.list.getSnapshot().current === voiceSession;
     if (inHome && openCall.parentElement !== actions) actions.prepend(openCall);
     else if (!inHome && openCall.parentElement !== nav) nav.insertBefore(openCall, writeHub);
@@ -130,7 +139,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     hub.toggleAttribute("data-idle-bar", inHome && !busy);
     surface.hidden = !inHome;
     if (inHome) {
-      for (const node of [liveVoice, transcript.panel, activity.panel, browser.panel]) if (node.parentElement !== surface) surface.append(node);
+      for (const [index,node] of [knowledge.panel, liveVoice, planner.panel, activity.panel, transcript.panel, browser.panel].entries()) if (surface.children[index]!==node) surface.insertBefore(node,surface.children[index]??null);
     } else {
       if (liveVoice.parentElement !== hub) hub.insertBefore(liveVoice, play);
       if (transcript.panel.parentElement !== hub) hub.insertBefore(transcript.panel, play);
@@ -161,6 +170,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   function reconcile() {
     frame = undefined;
     const mobile = root.querySelector("[data-minke-mobile-web]") !== null;
+    const footer=root.querySelector("[data-hub-mobile-nav-footer]");if(footer&&plannerNav.parentElement!==footer)footer.prepend(plannerNav);
     // A running PWA call must retain End/Mute controls through a resize.
     const next = mobile || active() ? root.querySelector<HTMLElement>('[data-slot="conversation"] [data-phase]') : null;
     const seat = next?.querySelector<HTMLElement>("[data-composer-seat]");
@@ -176,6 +186,8 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     if (nativeBar && textHeading.parentElement !== stack) stack.insertBefore(textHeading, nativeBar);
     const nativeOptions = stack.querySelector('[data-slot="conversation.hero.agentPreset"]')?.parentElement;
     if (nativeOptions && nativeOptions !== stack) nativeOptions.setAttribute("data-hub-chat-options", "");
+    if (knowledge.panel.parentElement!==surface)surface.prepend(knowledge.panel);
+    if(planner.panel.parentElement!==surface)surface.append(planner.panel);
     if (activity.panel.parentElement !== surface) surface.append(activity.panel);
     if (browser.panel.parentElement !== surface) surface.append(browser.panel);
     render();
@@ -322,5 +334,5 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const callPoll = view.setInterval(() => {if(active()||Date.now()-lastStatusAt>=2500)void checkStatus();}, 500);
   const visibleStatus = () => { if (!root.hidden) void checkStatus(); }; root.addEventListener("visibilitychange", visibleStatus);
   void checkStatus();
-  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); audio.remove(); removeStyles(); };
+  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); planner.dispose();knowledge.dispose();plannerNav.remove();audio.remove(); removeStyles();removeDashboardStyles(); };
 }

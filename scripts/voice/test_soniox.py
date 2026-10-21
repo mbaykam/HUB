@@ -177,6 +177,37 @@ class HybridTests(unittest.IsolatedAsyncioTestCase):
             {'text':'İstanbul','is_final':True,'language':'tr'},{'text':'<end>','is_final':True}])
         self.assertEqual(self.health.recognition_language,'en')
 
+    async def test_foreground_barge_in_admits_natural_new_speech_but_not_the_spoken_reply(self):
+        self.gate.barge_in=True
+        self.gate.foreground=lambda:self.attention.mode=='active'
+        self.gate.remember_spoken('The price is changing. Thank you for waiting.')
+        self.gate.speaking=True
+        await self.feed()
+        self.assertEqual(self.sockets[0].sent[-1],self.audio,'AEC microphone audio must keep flowing during playback')
+        await self.emit([{'text':'Thank you for waiting.','is_final':True},{'text':'<end>','is_final':True}])
+        self.assertEqual(self.finals(),[])
+        self.assertEqual(self.proposals,[],'Echo cannot broadcast an interruption proposal')
+        await self.emit([{'text':'Aslında başka bir şey soracağım','is_final':False}])
+        self.assertTrue(self.stt.turn_open,'Natural Turkish speech needs no wake phrase in foreground')
+        await self.emit([{'text':'Aslında başka bir şey soracağım, can we change the topic?','is_final':True,'language':'tr'}, {'text':'<end>','is_final':True}])
+        self.assertEqual([f.text for f in self.finals()],['Aslında başka bir şey soracağım, can we change the topic?'])
+        await self.stt.set_attention('background')
+        self.assertTrue(self.sockets[0].closed)
+        before=self.wake.feeds;await self.feed();self.assertEqual(self.wake.feeds,before,'Playback still cannot wake the assistant in Background')
+
+    async def test_final_suffix_survives_multiple_batches_and_playback_generation_change(self):
+        self.gate.barge_in=True
+        await self.feed()
+        await self.emit([{'text':'Please find the ','is_final':True,'language':'en'},{'text':'late','is_final':False}])
+        self.gate.generation+=1
+        await self.feed()
+        await self.emit([{'text':'latest report, ','is_final':True,'language':'en'},{'text':'son iki sayfası da dahil.','is_final':False}])
+        self.assertEqual(self.finals(),[])
+        await self.emit([{'text':'son iki sayfası da dahil.','is_final':True,'language':'tr'},{'text':'<end>','is_final':True}])
+        self.assertEqual([f.text for f in self.finals()],['Please find the latest report, son iki sayfası da dahil.'])
+        self.assertEqual(soniox_config('en-tr')['endpoint_latency_adjustment_level'],0)
+        self.assertEqual(soniox_config('en-tr')['max_endpoint_delay_ms'],2000)
+
     async def test_connection_loss_after_partial_closes_the_proposed_turn(self):
         await self.feed();await self.emit([{'text':'unfinished','is_final':False}])
         self.assertTrue(self.stt.turn_open)

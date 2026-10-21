@@ -67,7 +67,7 @@ def voice_user_turn_params(cloud=False):
     """Keep a short thinking pause inside the caller's current utterance."""
     return LLMUserAggregatorParams(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(confidence=0.5, start_secs=0.08, stop_secs=0.8, min_volume=0.0)),
-        user_turn_strategies=ExternalUserTurnStrategies(enable_interruptions=False) if cloud else UserTurnStrategies(
+        user_turn_strategies=ExternalUserTurnStrategies(enable_interruptions=True) if cloud else UserTurnStrategies(
             start=[MinWordsUserTurnStartStrategy(min_words=1, use_interim=False)],
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=.2)]),
     )
@@ -92,7 +92,7 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     health = SpeechHealth()
     attention = VoiceAttention(speech.get('attention'))
     health.attention = attention
-    gate = PlaybackGate()
+    gate = PlaybackGate(barge_in=True, foreground=lambda: attention.mode=='active')
     health.playback_gate = gate
     if speech['stt']['engine']=='soniox':
         from soniox_stt import SonioxWakeSTTService
@@ -128,7 +128,7 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
     user, assistant = LLMContextAggregatorPair(
         context, user_params=voice_user_turn_params(speech['stt']['engine']=='soniox'),
     )
-    post_stt_guard = PlaybackInputGuard(gate, mask_audio=False)
+    post_stt_guard = PlaybackInputGuard(gate, mask_audio=False, health=health)
     worker = PipelineWorker(
         Pipeline([transport.input(), SpeechHealthProbe(health), PlaybackInputGuard(gate), stt,
                   post_stt_guard, AttentionInputGate(attention, health), TranscriptionHealthProbe(health), user, llm,

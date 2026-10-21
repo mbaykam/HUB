@@ -48,7 +48,7 @@ class SpeechHealth:
     def snapshot(self):
         now = time.perf_counter()
         gate = self.playback_gate
-        paused = bool(gate and gate.blocked)
+        paused = bool(gate and gate.input_blocked)
         if self.attention:
             self.attention.tick(self.model_active or self.bot_speaking or self.synthesizing or self.user_speaking or self.stage=='transcribing' or paused)
         return {"cloudRecognition":self.cloud_recognition,
@@ -59,7 +59,8 @@ class SpeechHealth:
                 "speechStarts": self.speech_starts, "transcriptions": self.transcriptions,
                 "partialText":self.partial_text if now-self.partial_at<15 and not (self.attention and self.attention.mode=='background') else '',"previewReady":self.preview_ready,
                 "attention": self.attention.snapshot() if self.attention else None,
-                "stage":('speaking' if gate.speaking else 'thinking' if gate.pending_replies else 'echo-tail') if paused else self.stage,
+                "stage":('speaking' if gate.speaking else 'thinking' if gate.pending_replies else 'echo-tail') if gate and gate.blocked else self.stage,
+                "canInterrupt":bool(gate and gate.barge_in and gate.foreground()),
                 "decodeMs":self.decode_ms,"inputPaused":paused,
                 "recognition":{"source":self.recognition_source,"language":self.recognition_language,"audioMs":self.utterance_ms},
                 "inputPauseReason":gate.reason if gate else None,
@@ -91,7 +92,7 @@ class SpeechHealthProbe(FrameProcessor):
             state.level = max(rms, state.level*.85)
             if rms > .0008:
                 state.last_loud_audio = state.last_audio
-                if not state.playback_gate or not state.playback_gate.blocked:
+                if not state.playback_gate or not state.playback_gate.input_blocked:
                     state.last_input_sound = state.last_audio
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             state.speech_starts += 1

@@ -6,6 +6,8 @@ and its short acoustic/network tail are blocked. No audio is retained here.
 """
 import asyncio
 import time
+import re
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
     DataFrame, InputAudioRawFrame, InterimTranscriptionFrame, TranscriptionFrame,
@@ -22,7 +24,7 @@ class SpokenReplyFinishedFrame(DataFrame):
 
 
 class PlaybackGate:
-    def __init__(self, *, tail_seconds=.9, clock=time.perf_counter):
+    def __init__(self, *, tail_seconds=.9, clock=time.perf_counter, barge_in=False, foreground=lambda: True):
         self.tail_seconds = tail_seconds
         self.clock = clock
         self.speaking = False
@@ -30,6 +32,40 @@ class PlaybackGate:
         self.generation = 0
         self.suppressed_frames = 0
         self.pending_replies = set()
+        self.barge_in = barge_in
+        self.foreground = foreground
+        self.spoken_words = []
+        self.spoken_text = ''
+
+    @property
+    def input_blocked(self):
+        return self.blocked and not (self.barge_in and self.foreground())
+
+    def remember_spoken(self, text):
+        # LLM frames may split inside a word. Re-tokenize the assembled text,
+        # rather than treating every streaming chunk as a separate word.
+        self.spoken_text = (self.spoken_text + text)[-20000:]
+        self.spoken_words = re.findall(r"[^\W_]+", self.spoken_text.casefold())[-2000:]
+
+    def accepts_transcript(self, text, *, final=False):
+        if not self.blocked:
+            return True
+        if self.input_blocked:
+            return False
+        words = re.findall(r"[^\W_]+", text.casefold())
+        if not words:
+            return False
+        # AEC on the caller's device remains the first layer. Reject acoustic
+        # leakage of the actual spoken response before it can interrupt itself.
+        spoken = ' '.join(self.spoken_words)
+        candidate = ' '.join(words)
+        if candidate in spoken:
+            return False
+        if len(words) >= 3:
+            match = SequenceMatcher(None, words, self.spoken_words, autojunk=False)
+            if sum(block.size for block in match.get_matching_blocks()) / len(words) >= .82:
+                return False
+        return len(words) >= 2 or final and len(candidate) >= 3
 
     @property
     def blocked(self):
@@ -87,11 +123,15 @@ class SpokenReplyProbe(FrameProcessor):
         if direction == FrameDirection.DOWNSTREAM:
             if isinstance(frame, LLMFullResponseStartFrame):
                 self.reply_id = frame.id
+                self.gate.spoken_words.clear()
+                self.gate.spoken_text = ''
             elif isinstance(frame, LLMTextFrame) and not frame.skip_tts and frame.text.strip():
+                self.gate.remember_spoken(frame.text)
                 if self.reply_id is None:
                     self.reply_id = frame.id
                 self.gate.begin_reply(self.reply_id)
             elif isinstance(frame, TTSSpeakFrame) and frame.text.strip():
+                self.gate.remember_spoken(frame.text)
                 self.gate.begin_reply(frame.id)
                 await self.push_frame(frame, direction)
                 await self.push_frame(SpokenReplyFinishedFrame(frame.id), direction)
@@ -121,14 +161,19 @@ class PlaybackOutputProbe(FrameProcessor):
 
 
 class PlaybackInputGuard(FrameProcessor):
-    def __init__(self, gate, *, mask_audio=True):
+    def __init__(self, gate, *, mask_audio=True, health=None):
         super().__init__()
         self.gate = gate
         self.mask_audio = mask_audio
+        self.health = health
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
-        if self.gate.blocked:
+        if isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame)) and not self.gate.accepts_transcript(frame.text, final=not isinstance(frame, InterimTranscriptionFrame)):
+            if self.health:
+                self.health.partial_text = ''
+            return
+        if self.gate.input_blocked:
             if isinstance(frame, InputAudioRawFrame) and self.mask_audio:
                 self.gate.suppressed_frames += 1
                 # VAD must see silence, rather than retaining the previous
@@ -158,7 +203,7 @@ an in-flight decoder. Cancellation also waits for that bounded decode to finish.
         changed = bool(gate and gate.generation != self._playback_generation)
         if changed:
             self._playback_generation = gate.generation
-        blocked = bool(gate and gate.blocked)
+        blocked = bool(gate and gate.input_blocked)
         if changed or blocked:
             self._audio_buffer.clear()
             self._user_speaking = False

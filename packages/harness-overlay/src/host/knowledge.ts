@@ -73,6 +73,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       if(!assets.some(a=>a.id===asset.id))assets.push(asset);
     }
     for(const e of turn.filter(e=>e.type==="user/message"&&typeof e.data?.source?.rpcId==="string"))for(const asset of await store.assets.forRequest(sessionId,e.data.source.rpcId))if(!assets.some(a=>a.id===asset.id))assets.push(asset);
+    for(const e of turn.filter(e=>e.type==="user/message"&&e.data?.source?.kind==="user"))for(const block of e.data.content??[])if(block.type==="text")for(const asset of await store.assets.uploadedAssets(sessionId,block.text))if(!assets.some(a=>a.id===asset.id))assets.push(asset);
     return {...source,assets,urls:knowledgeUrls(source.content)};
   }
   const pending=new Set<Promise<unknown>>();
@@ -218,7 +219,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
         if(view==="evidence"){send(res,200,await store.inspectEvidence(query.get("relation")??"",Number(query.get("index")??0)));return;}
         if(view==="search"){const q=query.get("q")??"";if(!q.trim()||q.length>200)throw new Error("Invalid search");send(res,200,{nodes:(await store.search(q,100,undefined,query.get("scope")==="brain"?"brain":query.get("scope")==="archive"?"archive":"all")).map(({raw,body,front,path,...n})=>n),page:1,hasMore:false});return;}
         if(view==="note"){send(res,200,await store.note(query.get("id")??""));return;}
-        if(view==="source"){const source=[...curator.jobs.values()].find(j=>j.id===query.get("id"))?.source;if(!source)throw new Error("Source missing");send(res,200,source);return;}
+        if(view==="source"){const source=[...curator.jobs.values()].find(j=>j.id===query.get("id"))?.source??await store.sourceEpisode(query.get("id")??"");send(res,200,source);return;}
         if(view==="assets"){send(res,200,{assets:await store.assets.list()});return;}
         if(view==="asset"){
           const asset=query.get("id")?await store.assets.get(query.get("id")!):undefined;
@@ -297,5 +298,5 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       send(res,200,await curator.snapshot());
     }catch(error){const e=error as {code?:string;message?:string};send(res,409,{error:"knowledge-operation-failed",detail:redactKnowledgeSecrets(String(e.message??"Knowledge operation failed")).slice(0,600),code:String(e.code??"KNOWLEDGE_OPERATION_ERROR").slice(0,80),status:curator.status});}
   }});
-  ctx.effect(()=>async()=>{if(attachmentStore?.saveImages===archiveImages)attachmentStore.saveImages=originalSaveImages;offRoute();offCapture();offResume();offCreated();offDisposed();offRecall();offGoalImports();offGoalImportDispose();for(const off of goalImportMounts.values())off();clearInterval(interval);for(const t of timers.values())clearTimeout(t);for(const off of mounts.values())off();embeddings?.dispose();await curator.dispose();await Promise.allSettled([...pending]);},"hub-knowledge lifetime");
+  ctx.effect(()=>async()=>{if(attachmentStore&&archiveImages&&attachmentStore.saveImages===archiveImages)attachmentStore.saveImages=originalSaveImages;offRoute();offCapture();offResume();offCreated();offDisposed();offRecall();offGoalImports();offGoalImportDispose();for(const off of goalImportMounts.values())off();clearInterval(interval);for(const t of timers.values())clearTimeout(t);for(const off of mounts.values())off();embeddings?.dispose();await curator.dispose();await Promise.allSettled([...pending]);},"hub-knowledge lifetime");
 }

@@ -42,6 +42,22 @@ def test_diagnostics_do_not_advertise_listening_during_playback_or_its_echo_tail
     assert not health.snapshot()['inputPaused']
 
 
+def test_foreground_accepts_new_bilingual_speech_and_rejects_streamed_word_echo_without_opening_background():
+    foreground=[True]
+    gate=PlaybackGate(barge_in=True,foreground=lambda:foreground[0])
+    gate.observe(BotStartedSpeakingFrame())
+    for chunk in ['Mer','haba. Wel','come back. The answer is forty two.']:
+        gate.remember_spoken(chunk)
+    assert not gate.input_blocked
+    assert not gate.accepts_transcript('Welcome back.',final=True)
+    assert not gate.accepts_transcript('The answer is forty two.',final=True)
+    assert gate.accepts_transcript('Başka bir şey soracağım',final=True)
+    assert gate.accepts_transcript('Actually I have a different question')
+    foreground[0]=False
+    assert gate.input_blocked
+    assert not gate.accepts_transcript('Actually I have a different question',final=True)
+
+
 @pytest.mark.asyncio
 async def test_gate_keeps_vad_clock_running_with_silence_and_allows_explicit_interrupt():
     gate = PlaybackGate(); gate.observe(BotStartedSpeakingFrame())
