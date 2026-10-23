@@ -1,5 +1,10 @@
 # DeepSeek Harness runtime patches
 
+`composer-controls.patch` adds stable presentation attributes to the native
+command and access-level triggers. The PWA replaces the former with its Research
+and Commands menu and hides the latter. Native permission state, risk approvals,
+draft ownership and command execution remain unchanged.
+
 Minke keeps `vendor/deepseek-harness` pinned and pristine. Local fixes that cannot be accepted upstream are declared in `config/harness-runtime.json` and applied only to the disposable staged runtime after workspace deployment.
 
 The applicator accepts git unified diffs that modify existing text files below `node_modules/@deepseek-ai/`. It rejects path escapes, file creation/deletion, renames, binary patches, stale hunks, and skipped patches. Patch contents are part of the runtime fingerprint and metadata; validation also reverse-checks that every declared patch is present before publishing or fast refresh.

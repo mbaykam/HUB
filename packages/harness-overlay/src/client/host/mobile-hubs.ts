@@ -4,6 +4,7 @@ import styles from "./mobile-hubs.css";
 const installStyles = defineOverlayStyle("hub-mobile-hubs", styles);
 import type { HarnessClientContext } from "../core/context.ts";
 import {createVoiceCamera} from "./voice-camera.ts";
+import {createCharacterPicker} from "./character-picker.ts";
 import type { createVoiceClient, VoiceState } from "../voice/browser-client.ts";
 import { createMobileActivity, createActivitySignals, type ActivityPendingSource } from "./mobile-activity.ts";
 import {createDurableActivity} from "./mobile-durable-activity.ts";
@@ -94,6 +95,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   };
   let voice: ReturnType<typeof createVoiceClient> | undefined;
   let voiceSession: string | undefined;
+  const characterPicker=createCharacterPicker(root,()=>voiceSession);actions.insertBefore(characterPicker.button,mute);
   let state: VoiceState = "idle", enabled = false, muted = false, loading = false, cancelledLoad = false,audioStage="listening";
   let inputPaused = false;
   let attentionMode="active",wakePhrases=["Vera"];
@@ -163,7 +165,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     attentionButton.disabled=loading||["microphone","starting","connecting","ending"].includes(state)||!cameraCall;
     liveWords.hidden=attentionMode==="background";
     liveVoice.toggleAttribute("data-background",attentionMode==="background");
-    mute.hidden = !!external; openCall.hidden = !voiceSession || viewingCall;
+    characterPicker.button.hidden=!voiceSession;mute.hidden = !!external; openCall.hidden = !voiceSession || viewingCall;
     interrupt.hidden = !busy || audioStage === "echo-tail" || !(state === "speaking" || state === "thinking");
     transcript.panel.hidden = !busy || !inHome;
     conversation?.removeAttribute("data-hub-shared-input");
@@ -343,5 +345,5 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const callPoll = view.setInterval(() => {if(active()||Date.now()-lastStatusAt>=2500)void checkStatus();}, 500);
   const visibleStatus = () => { if (!root.hidden) {void checkStatus();void ctx.sessions.refresh?.().catch(()=>{});} }; root.addEventListener("visibilitychange", visibleStatus);
   void checkStatus();
-  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose();durableActivity.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); planner.dispose();knowledge.dispose();plannerNav.remove();audio.remove(); removeStyles();removeDashboardStyles(); };
+  return () => { lifetime.abort(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose();durableActivity.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); characterPicker.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); planner.dispose();knowledge.dispose();plannerNav.remove();audio.remove(); removeStyles();removeDashboardStyles(); };
 }

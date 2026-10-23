@@ -110,6 +110,8 @@ const taskFiles = Object.freeze({
     "voice-titles.test.mjs",
     "presentation-ui.test.mjs",
     "goals.test.mjs",
+    "research.test.mjs",
+    "composer-controls.test.mjs",
     "goals-ui.test.mjs",
     "agent-media.test.mjs",
     "automations.test.mjs",
@@ -207,6 +209,7 @@ const taskFiles = Object.freeze({
   ]),
   native: Object.freeze([
     "planner-native.test.mjs",
+    "research-native.test.mjs",
     "characters-native.test.mjs",
     "voice-character-handoff.test.mjs",
     "voice-profiles.test.mjs",

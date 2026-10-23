@@ -1,0 +1,19 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
+--- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
+@@ -15227,6 +15227,7 @@
+ 				anchor: (0, react_jsx_runtime.jsxs)("button", {
+ 					type: "button",
+ 					className: PermissionSelect_module_css_default.trigger,
++					"data-hub-access-level": "",
+ 					"aria-label": t("input.accessMode", { name: currentLabel }),
+ 					title: current?.description,
+ 					disabled: locked || busy,
+@@ -15621,6 +15622,7 @@
+ 											children: (0, react_jsx_runtime.jsx)("button", {
+ 												type: "button",
+ 												className: InputBar_module_css_default.add,
++												"data-hub-native-commands": "",
+ 												"aria-label": t("input.commands"),
+ 												"aria-haspopup": "listbox",
+ 												"aria-expanded": commandMenuOpen,

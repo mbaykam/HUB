@@ -7,6 +7,7 @@ import {defaultAutomation} from "../automation-contract.ts";
 import {type GoalInput,type HubGoal,type GoalRound,type GoalCheckpoint,type GoalEvidence,type GoalApproval,type GoalTrigger} from "../goal-contract.ts";
 import {isQuotaFailure} from "./operation-failure.ts";
 import type {ProviderGate} from "./provider-gate.ts";
+import {validateResearch,RESEARCH_LIMITS} from "../research-contract.ts";
 
 interface State {revision:number;goals:HubGoal[]}
 export interface GoalRoundResult {checkpoint?:GoalCheckpoint;evidence:GoalEvidence[];summary:string;nativeGoal?:GoalRound["nativeGoal"];verified?:boolean;yielded?:boolean}
@@ -210,6 +211,7 @@ export function validatePlan(plan:any):asserts plan is HubGoal["plan"] {
   const visit=(id:string,path:Set<string>)=>{if(path.has(id))throw Error("Milestone dependencies contain a cycle");for(const dep of plan.find(p=>p.id===id)!.dependsOn)visit(dep,new Set([...path,id]));};for(const p of plan)visit(p.id,new Set());
 }
 export function validateGoal(v:any):GoalInput {
+  const research=v?.research?validateResearch(v.research):undefined;
   if(!v||typeof v.title!=="string"||!v.title.trim()||v.title.length>160||typeof v.objective!=="string"||!v.objective.trim()||v.objective.length>12000||!Array.isArray(v.criteria)||!v.criteria.length||v.criteria.length>20||v.criteria.some((c:any)=>typeof c!=="string"||!c.trim()||c.length>2000)||typeof v.characterId!=="string"||!v.characterId||v.characterId.length>100)throw Error("Set the outcome, acceptance criteria and owner character.");
   if(!["quick","balanced","thorough","custom"].includes(v.approach)||typeof v.instructions!=="string"||v.instructions.length>12000||!Array.isArray(v.helpers)||v.helpers.length>5||v.helpers.some((id:any)=>typeof id!=="string"||id.length>100)||v.fallbacks&&(!Array.isArray(v.fallbacks)||v.fallbacks.length>5||v.fallbacks.some((id:any)=>typeof id!=="string"||id.length>100))||v.verifierId&&(typeof v.verifierId!=="string"||v.verifierId.length>100))throw Error("Invalid character or approach settings");
   const r=v.resources,l=v.limits,s=v.schedule;if(!r||!l||!s)throw Error("Resources, work allowance and schedule are required");
@@ -223,5 +225,6 @@ export function validateGoal(v:any):GoalInput {
   if(!["continue","fresh"].includes(s.repeat)||!['skip','catch-up'].includes(s.missed))throw Error("Invalid recurrence policy");
   if(s.trigger?.kind!=="manual")validateAutomation({...defaultAutomation,title:v.title,prompt:v.objective,characterId:v.characterId,trigger:s.trigger});
   if(!["read-only","ask"].includes(v.recovery)||typeof v.humanApproval!=="boolean"||!['pwa','telegram'].includes(v.notification)||v.notification==="telegram"&&!/^minke-im-telegram-[a-f0-9]{32}$/.test(v.sourceSessionId??""))throw Error("Choose recovery, verification and a paired notification destination.");
-  return structuredClone({title:v.title.trim(),objective:v.objective,criteria:v.criteria.map((c:string)=>c.trim()),characterId:v.characterId,approach:v.approach,instructions:v.instructions,helpers:[...new Set(v.helpers)] as string[],fallbacks:[...new Set(v.fallbacks??[])] as string[],verifierId:v.verifierId||undefined,resources:r,limits:l,schedule:s,recovery:v.recovery,humanApproval:v.humanApproval,notification:v.notification,sourceSessionId:v.sourceSessionId});
+  if(research){const cap=RESEARCH_LIMITS[research.depth];if(!r.browser||r.knowledge!== (research.sources==="web+knowledge")||r.knowledgeOutput||r.folders.length||r.files.length||r.writeFolders.length||r.tools.length||v.helpers.length||v.fallbacks?.length||v.verifierId||s.trigger?.kind!=="manual"||s.repeat!=="continue"||l.maxRounds>cap.rounds||l.maxSteps>cap.steps||l.maxOutputTokens>cap.output||l.activeMinutes>cap.minutes)throw Error("Research uses bounded, read-only resources and one configured researcher.");}
+  return structuredClone({...(research?{research}:{}),title:v.title.trim(),objective:v.objective,criteria:v.criteria.map((c:string)=>c.trim()),characterId:v.characterId,approach:v.approach,instructions:v.instructions,helpers:[...new Set(v.helpers)] as string[],fallbacks:[...new Set(v.fallbacks??[])] as string[],verifierId:v.verifierId||undefined,resources:r,limits:l,schedule:s,recovery:v.recovery,humanApproval:v.humanApproval,notification:v.notification,sourceSessionId:v.sourceSessionId});
 }

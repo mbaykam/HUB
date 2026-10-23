@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.0
+
+- Add direct character selection beside attachments and in voice controls, with
+  safe selection for the next reply when one is already running.
+- Put bounded background research and saved reports under the composer **+**.
+  Reuse configured researchers, Camofox/search tools and the Goals runtime;
+  retain source passages and check citation references before completion.
+- Remove the composer access-level button while preserving native permissions.
+  See [Research](docs/research.md) for scope, limits and recovery.
+
 ## 1.7.2
 
 - Switch the active speaker during a live voice call without reconnecting or

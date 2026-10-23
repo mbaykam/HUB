@@ -38,6 +38,8 @@ import {installMobileArtifacts} from "../host/mobile-artifacts.ts";
 import {installConversationChrome} from "../host/conversation-chrome.ts";
 import {installResponseTypography} from "../host/response-typography.ts";
 import { installComposerUploads } from "../host/composer-uploads.tsx";
+import {installComposerCharacterPicker} from "../host/composer-controls.tsx";
+import {installComposerResearch} from "../host/composer-research.tsx";
 import { installMobileSettings } from "../host/mobile-settings.ts";
 import { installMobileConversationVisibility, type NavigationVisibilityPort } from "../host/mobile-conversation-visibility.ts";
 import { VoiceHistoryClient } from "../host/voice-history.ts";
@@ -205,8 +207,10 @@ export function installTabs(
   ctx.effect(()=>installConversationChrome(ctx),"hub: compact conversation header and actions");
   ctx.effect(()=>installResponseTypography(),"hub: readable written replies");
   if (!tabsPort.embeddedWebAvailable) {
+    ctx.effect(()=>installComposerCharacterPicker(ctx),"HUB composer character picker");
     ctx.inject?.(["conversation","inputTriggers"],scope=>{
       scope.effect(()=>installComposerUploads(ctx,scope.get("conversation") as Parameters<typeof installComposerUploads>[1],scope.get("inputTriggers") as Parameters<typeof installComposerUploads>[2]),"HUB PWA photos and files");
+      scope.effect(()=>installComposerResearch(ctx,scope.get("conversation") as Parameters<typeof installComposerResearch>[1]),"HUB PWA research actions");
     });
     const conversationHistory = new VoiceHistoryClient((input, init) => window.fetch(input, init));
     ctx.effect(() => () => conversationHistory.dispose(), "hub: PWA conversation metadata");

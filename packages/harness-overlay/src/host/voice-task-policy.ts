@@ -64,7 +64,7 @@ export function createVoiceTaskPolicies(ctx: TaskPolicyContext, storage: TaskPol
     const offGuard = agent.ctx.tools.guard(exec => {
       if (!settled) return "Task permissions are loading. Retry after initialization.";
       if (failed || (stopped && policy)) return "Task permissions are unavailable. Restart HUB before continuing this task.";
-      return policy?.mode === "allow" && !policy.names.includes(exec.name) ? "This tool is disabled by the task’s voice personality." : undefined;
+      return exec.name!=="hub_research" && policy?.mode === "allow" && !policy.names.includes(exec.name) ? "This tool is disabled by the task’s voice personality." : undefined;
     });
     let offRequest: (() => void) | undefined;
     const priorWrite = pendingById.get(agent.id);

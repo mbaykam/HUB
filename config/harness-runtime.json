@@ -23,7 +23,8 @@
     "patches/deepseek-harness/chat-responsive-stats.patch",
     "patches/deepseek-harness/chat-currency-markdown.patch",
     "patches/deepseek-harness/personal-assistant-context.patch",
-    "patches/deepseek-harness/compaction-cancellation.patch"
+    "patches/deepseek-harness/compaction-cancellation.patch",
+    "patches/deepseek-harness/composer-controls.patch"
   ],
   "productBundle": {
     "packageName": "@lencx/minke-harness-overlay",

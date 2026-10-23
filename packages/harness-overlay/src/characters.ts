@@ -33,8 +33,8 @@ import {installPlanner} from "./host/planner.ts";
 export const name="hub-characters";
 export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments"];
 declare module "@deepseek-ai/cordis" { interface Context { hubCharacters:HubCharacters; } }
-type CharacterAgent={id:string;session:{header:{origin?:string;parentSession?:string};snapshotEvents():readonly {type:string;data?:unknown}[]};ctx:any};
-type Mount={revision:number;fibers:{dispose():Promise<void>}[];names:Map<string,string>;snapshot?:HubCharactersState;turnSnapshot?:HubCharactersState;loading?:Promise<void>;assembled?:{character:HubCharacter;state:HubCharactersState};voiceCharacter?:HubCharacter;nativeRoute?:string};
+type CharacterAgent={id:string;status?:string;session:{header:{origin?:string;parentSession?:string};snapshotEvents():readonly {type:string;data?:unknown}[]};ctx:any};
+type Mount={revision:number;fibers:{dispose():Promise<void>}[];names:Map<string,string>;snapshot?:HubCharactersState;turnSnapshot?:HubCharactersState;loading?:Promise<void>;assembled?:{character:HubCharacter;state:HubCharactersState};voiceCharacter?:HubCharacter;pendingVoiceCharacter?:HubCharacter;nativeRoute?:string};
 type CharacterHost=Context & {
   subprocess: import("./host/voice-sidecar.ts").VoiceSubprocess;
   tools:ToolRuntime;
@@ -112,7 +112,7 @@ export class HubCharacters extends Service {
         // Advertise the same character policy enforced at execution. Keep the
         // Explicit user navigation is available in both text and voice. It
         // changes identity, not the character's saved tool permissions.
-        const tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||tool.name==="hub_switch_character"):assembly.tools;
+        const tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||(tool.name==="hub_switch_character"||tool.name==="hub_research")):assembly.tools;
         return {...assembly,tools,variables:{...assembly.variables,provider:selected.route!.provider,model:selected.route!.model},
           sections:assembly.sections.map((section:any)=>section.name==="hub:character"?{...section,text:characterPrompt(s,selected!)}:section)};
       },{prepend:true});
@@ -128,7 +128,7 @@ export class HubCharacters extends Service {
       },{prepend:true});
       agent.ctx.tools.guard((exec:any)=>{
         if(exec.agent!==agent || this.voiceCalls.has(agent.id) || (this.dispatches.has(exec.callId) && this.dispatches.get(exec.callId)===exec.parent))return;
-        if(exec.name==="hub_switch_character")return; // Explicit user navigation has its own authorization check.
+        if(exec.name==="hub_switch_character"||exec.name==="hub_research")return; // Explicit user navigation has its own authorization check.
         const policy=selected?.tools;
         if(policy?.mode==="allow" && !policy.names.includes(exec.name))return "This tool is disabled for this character.";
         if(coordinatesTelegram(mount.turnSnapshot??this.store.snapshot(),selected)&&!new Set(["hub_present","hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_planner","hub_work_plan","hub_knowledge_write_note","hub_memory_index","hub_skill_read","hub_skill_save","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
@@ -160,7 +160,15 @@ export class HubCharacters extends Service {
     };
     ctx.on("agent/created",({agent})=>attach(agent as any),{global:true,prepend:true});
     ctx.on("agent/disposed",({agent})=>{this.mounts.delete(agent.id);this.voiceCalls.delete(agent.id);},{global:true});
-    ctx.on("session/event",(session:any,event:any)=>{if(event.type!=="turn/start"||this.voiceCalls.has(session.header.id))return;const mount=this.mounts.get(session.header.id);if(mount){try{mount.turnSnapshot=this.store.snapshot();}catch{}}},{global:true});
+    ctx.on("session/event",(session:any,event:any)=>{
+      if(event.type!=="turn/start")return;const mount=this.mounts.get(session.header.id);if(!mount)return;
+      if(this.voiceCalls.has(session.header.id)){
+        if(!mount.pendingVoiceCharacter)return;
+        mount.voiceCharacter=mount.pendingVoiceCharacter;mount.pendingVoiceCharacter=undefined;
+      }
+      mount.assembled=undefined;mount.nativeRoute=undefined;
+      try{mount.turnSnapshot=this.store.snapshot();}catch{}
+    },{global:true});
     for(const agent of ctx.agents.list())attach(agent as any);
     ctx.effect(()=>this.installWeb(),"HUB character management");
     ctx.effect(()=>installDailyUseWeb(ctx),"HUB durable activity and generated applications");
@@ -195,10 +203,28 @@ export class HubCharacters extends Service {
     const mount=this.mounts.get(agent.id)!;
     if((mount.voiceCharacter??this.store.selected(agent.id,s)).id===c.id)return `Already speaking with ${c.name}. Current model: ${c.route.provider}/${c.route.model}. Answer the user directly; do not switch again.`;
     const state=await this.store.change({action:"select",revision:s.revision,id:c.id,sessionId:agent.id},character=>this.validate(character));
-    mount.assembled=undefined;mount.turnSnapshot=state;mount.nativeRoute=undefined;
+    mount.assembled=undefined;mount.turnSnapshot=state;mount.nativeRoute=undefined;mount.pendingVoiceCharacter=undefined;
     if(this.voiceCalls.has(agent.id))mount.voiceCharacter=structuredClone(c);
     await this.syncNativeRoute(agent,c);
     return `Active character switched to ${c.name}. Current model: ${c.route.provider}/${c.route.model}. Continue the same conversation as ${c.name}. No background task was started.`;
+  }
+  /** An authenticated picker is direct human navigation. Keep a running reply's
+   * admitted identity intact; commit the selection for the following turn. */
+  async selectFromUI(command:Extract<import("./character-contract.ts").HubCharacterCommand,{action:"select"}>){
+    if(/^(minke-im-|hub-(memory|character-eval|goal|automation)-)/.test(command.sessionId))throw Error("This conversation uses its assigned character.");
+    const resolved=await this.host.sessionController.resolveAgent(command.sessionId);
+    if("error"in resolved||resolved.agent.session.header.origin==="subagent")throw Error("Choose a top-level conversation.");
+    const agent=resolved.agent,mount=this.mounts.get(agent.id);if(!mount)throw Error("This conversation is not ready yet.");
+    const state=await this.store.change(command,c=>this.validate(c)),c=state.characters.find(c=>c.id===command.id)!;
+    // Recheck after the atomic save: a turn may have started while it awaited IO.
+    const pending=agent.status!==undefined&&agent.status!=="idle";
+    if(pending){if(this.voiceCalls.has(agent.id))mount.pendingVoiceCharacter=structuredClone(c);}
+    else{
+      mount.assembled=undefined;mount.turnSnapshot=state;mount.nativeRoute=undefined;mount.pendingVoiceCharacter=undefined;
+      if(this.voiceCalls.has(agent.id))mount.voiceCharacter=structuredClone(c);
+      await this.syncNativeRoute(agent,c);
+    }
+    return {state,pending};
   }
   /** Identity admitted for this turn, including a voice override. Unmounted
    * managed/delegated workers fail closed instead of inheriting the main bot. */
@@ -208,6 +234,9 @@ export class HubCharacters extends Service {
     const mount=this.mounts.get(agent.id);if(!mount)return;
     if(mount.loading){await mount.loading;if(mount.revision===s.revision)return;}
     if(mount.revision===s.revision)return;
+    // Selecting a speaker changes the binding revision, not the worker roster.
+    // Reuse continuations so navigation cannot dispose a running specialist.
+    if(mount.snapshot&&JSON.stringify(mount.snapshot.characters)===JSON.stringify(s.characters)){mount.snapshot=s;mount.revision=s.revision;return;}
     mount.loading=(async()=>{
       const providers=this.host.subagents.list();
       const provider=[...providers.filter(n=>n==="hub-character-spawn"),...providers.filter(n=>n!=="hub-character-spawn")].find(n=>{const p=this.host.subagents.getProvider(n)!;return p.prepareContinuable && p.capabilities.agentOptions && p.capabilities.persona && p.capabilities.toolFilter;});
@@ -232,7 +261,7 @@ export class HubCharacters extends Service {
     if(mount){mount.assembled=undefined;mount.voiceCharacter=c;mount.turnSnapshot=s;mount.nativeRoute=undefined;}
     const target=()=>{const current=this.voiceTarget(agent.id);return {toolName:current?.route?mount?.names.get(current.id):undefined,targetName:current?.name};};
     return {...target(),target,currentProfile:():VoiceProfile=>{const current=mount?.voiceCharacter;if(!current?.route)throw new Error("The active voice character is unavailable");return {id:current.id,name:current.name,instructions:current.instructions,route:current.route,tools:current.tools,speech:profile.speech};},
-      release:()=>{this.voiceCalls.delete(agent.id);this.voiceAdmissions.delete(profile.id);if(mount){mount.voiceCharacter=undefined;mount.assembled=undefined;mount.turnSnapshot=undefined;mount.nativeRoute=undefined;}},
+      release:()=>{this.voiceCalls.delete(agent.id);this.voiceAdmissions.delete(profile.id);if(mount){mount.voiceCharacter=undefined;mount.pendingVoiceCharacter=undefined;mount.assembled=undefined;mount.turnSnapshot=undefined;mount.nativeRoute=undefined;}},
       allowNested:(exec:any)=>this.dispatches.has(exec.callId)&&this.dispatches.get(exec.callId)===exec.parent};
   }
   installWeb(){
@@ -243,10 +272,14 @@ export class HubCharacters extends Service {
       try{
         await this.ready;
         if(req.method==="GET"){
-          const sessionId=new URL(req.url??"","http://127.0.0.1").searchParams.get("sessionId");
+          const query=new URL(req.url??"","http://127.0.0.1").searchParams,sessionId=query.get("sessionId");
           if(sessionId){
             if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(sessionId)){send(400,{error:"invalid-session"});return;}
-            const s=this.store.snapshot(),mount=this.mounts.get(sessionId),c=mount?.voiceCharacter??this.store.selected(sessionId,s);
+            const s=this.store.snapshot(),mount=this.mounts.get(sessionId),c=mount?.assembled?.character??mount?.voiceCharacter??this.store.selected(sessionId,mount?.turnSnapshot??s);
+            if(query.get("view")==="picker"){
+              const selected=this.store.selected(sessionId,s),canSelect=!!mount&&!/^(minke-im-|hub-(memory|character-eval|goal|automation)-)/.test(sessionId);
+              send(200,{revision:s.revision,currentId:c.id,selectedId:selected.id,pending:c.id!==selected.id,canSelect,characters:s.characters.map(x=>({id:x.id,name:x.name,avatar:x.avatar,description:x.description,role:x.id===s.mainId?"Main assistant":x.id===s.voiceId?"Voice assistant":"Specialist",model:x.route?x.route.provider+" / "+x.route.model:null}))});return;
+            }
             send(200,{revision:s.revision,character:{id:c.id,name:c.name,route:c.route}});return;
           }
           const scope=await this.host.agentPresets.standingKeyFor();
@@ -262,16 +295,11 @@ export class HubCharacters extends Service {
         if(!/^application\/json(?:;|$)/i.test(String(req.headers["content-type"]??""))){send(415,{error:"json-required"});return;}
         let size=0;const chunks:Buffer[]=[];for await(const chunk of req){size+=chunk.length;if(size>128000){send(413,{error:"body-too-large"});return;}chunks.push(chunk);}
         const command=characterCommandSchema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        if(command.action==="select"){
-          if(command.sessionId.startsWith("minke-im-")||command.sessionId.startsWith("hub-memory-")||command.sessionId.startsWith("hub-character-eval-"))throw new Error("This conversation uses its assigned main assistant");
-          const resolved=await this.host.sessionController.resolveAgent(command.sessionId);
-          if("error"in resolved||resolved.agent.session.header.origin==="subagent")throw new Error("Choose a top-level conversation");
-        }
+        if(command.action==="select"){const {state,pending}=await this.selectFromUI(command);send(200,{...state,pending});return;}
         const result=await this.store.change(command,c=>this.validate(c));
         let warning:string|undefined;
         try{
-          if(command.action==="select"){const c=result.characters.find(c=>c.id===command.id)!;await this.host.sessionController.selectModel({sessionId:command.sessionId,...c.route!});}
-          if(command.action==="main"||command.action==="select"||(command.action==="save"&&command.character.id===result.mainId)){
+          if(command.action==="main"||(command.action==="save"&&command.character.id===result.mainId)){
             const main=result.characters.find(c=>c.id===result.mainId)!;await this.host.agentDefaultModel.saveSelection(main.route!);
           }
         }catch{warning="Character saved. The native model display will refresh after its next reply.";}

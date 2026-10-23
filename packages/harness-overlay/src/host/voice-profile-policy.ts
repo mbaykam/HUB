@@ -23,7 +23,7 @@ export function attachVoiceProfilePolicy(agent: ProfileAgent, value: VoiceProfil
     offGuard = agent.ctx.tools.guard(execution => {
       // Navigation has its own human-turn authorization, like text handoffs.
       // All action tools still follow the selected character's exact policy.
-      if(execution.name==="hub_switch_character"||allowNested?.(execution))return;
+      if(execution.name==="hub_switch_character"||execution.name==="hub_research"||allowNested?.(execution))return;
       const policy=current().tools;
       return policy.mode==="inherit"||policy.names.includes(execution.name)?undefined:"This tool is disabled for the active voice personality.";
     });
