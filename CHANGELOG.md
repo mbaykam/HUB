@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.2
+
+- Open saved HTML apps from Knowledge inside the PWA, preserving original
+  downloads and adding phone game controls.
+- Fix blank shared previews of JavaScript apps with an isolated renderer.
+
 ## 1.8.1
 
 - Fall back to the permitted fetch reader after browser read failures and reject

@@ -26,6 +26,7 @@ import {
   relative,
   resolve,
 } from "node:path";
+import {containedAppDocument} from "./conversation-artifacts.ts";
 
 export const MINKE_REMOTE_PREVIEW_ROUTE = "/minke-preview";
 
@@ -47,18 +48,26 @@ const STORED_PREVIEW_METADATA_BYTES = 4 * 1024;
 
 const PREVIEW_CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  "style-src 'unsafe-inline'",
+  "script-src 'unsafe-inline' 'unsafe-eval' data: blob:",
+  "style-src 'unsafe-inline' data:",
   "img-src data: blob:",
   "font-src data:",
   "connect-src 'none'",
   "media-src data: blob:",
   "object-src 'none'",
-  "frame-src 'none'",
+  "frame-src about:",
   "frame-ancestors 'none'",
   "form-action 'none'",
   "base-uri 'none'",
-  "sandbox",
+  "sandbox allow-scripts",
 ].join("; ");
+
+/** Keep executable app content out of the top-level document. The outer
+ * sandbox has no origin privileges, and only its srcdoc child may navigate
+ * inside the frame; external frame navigations remain blocked by frame-src. */
+export function remotePreviewDocument(snapshot:{title:string;html:string}){
+  return containedAppDocument(snapshot.title,snapshot.html,true);
+}
 
 interface RemotePreviewRoute {
   readonly kind: "prefix";
@@ -583,7 +592,7 @@ export class RemotePreviewRuntime {
       "x-frame-options": "DENY",
     });
     response.end(
-      request.method === "HEAD" ? undefined : snapshot.html,
+      request.method === "HEAD" ? undefined : remotePreviewDocument(snapshot),
     );
   };
 }

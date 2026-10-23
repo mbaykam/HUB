@@ -31,6 +31,14 @@ flight. The Knowledge curator uses its own scoped instructions. The character's
 request inspector shows observed dispatched input when one is available; it does
 not create a request merely to fill the inspector.
 
+Saved self-contained HTML files in Knowledge have **Open app** and **Download**
+actions. **Open app** stays inside the PWA in a full-screen viewer, with **Close**
+and optional **Game controls** for arrow keys and restart. Opening an app reads
+the saved file; it does not call a model or change the original. **Download**
+keeps the original bytes. Existing shared preview links also render local scripts
+inside an isolated frame. App code cannot read HUB cookies or use its tool/API
+connection; external scripts, network services and browser storage are restricted.
+
 ## Gradually connecting personal services
 
 Email and WhatsApp account connections are a later step; this Home update does

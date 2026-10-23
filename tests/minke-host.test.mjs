@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import {JSDOM} from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
 import {
   RemoteError,
 } from "@deepseek-ai/dsh-typert-protocol";
@@ -50,6 +51,7 @@ import {
 import {
   MINKE_REMOTE_PREVIEW_ROUTE,
   RemotePreviewRuntime,
+  remotePreviewDocument,
 } from "@minke/harness-overlay/host/remote-preview.ts";
 
 function memoryStorage() {
@@ -1461,10 +1463,11 @@ test("Remote preview snapshots HTML behind a durable capability route", async (t
     first[0].route,
   );
   assert.equal(served.status, 200);
-  assert.match(served.body, /<h1>HUB<\/h1>/u);
+  const previewDom=new JSDOM(served.body),frame=previewDom.window.document.querySelector('iframe');
+  assert.equal(frame.getAttribute('sandbox'),'allow-scripts');assert.match(frame.srcdoc,/<h1>HUB<\/h1>/u);assert.match(frame.srcdoc,/connect-src 'none'/);assert.equal(previewDom.window.document.querySelectorAll('script').length,1);previewDom.window.close();
   assert.match(
     served.headers["content-security-policy"],
-    /(?:^|;\s*)sandbox(?:;|$)/u,
+    /(?:^|;\s*)sandbox allow-scripts(?:;|$)/u,
   );
   assert.equal(
     served.headers["cache-control"],
@@ -1510,6 +1513,12 @@ test("Remote preview snapshots HTML behind a durable capability route", async (t
   );
   assert.equal(routes[0].kind, "prefix");
   assert.equal(routes[0].path, "/minke-preview");
+});
+
+test('remote executable markup cannot escape the opaque app frame or inject top-level controls',()=>{
+ const original='<!doctype html><html><head><meta http-equiv="refresh" content="0;url=https://example.invalid"></head><body></iframe><script>document.body.textContent="A real app"</script></body></html>';
+ const dom=new JSDOM(remotePreviewDocument({title:'demo"><script>escape()</script>.html',html:original}));
+ try{const document=dom.window.document,frame=document.querySelector('iframe');assert.equal(document.querySelectorAll('iframe').length,1);assert.equal(document.querySelectorAll('script').length,1);assert.equal(document.querySelector('script').textContent.includes('A real app'),false);assert.equal(frame.getAttribute('sandbox'),'allow-scripts');assert.equal(document.title,'demo"><script>escape()</script>.html');assert.ok(frame.srcdoc.includes('document.body.textContent="A real app"'));assert.equal(frame.srcdoc.includes('http-equiv="refresh"'),false);assert.ok(frame.srcdoc.includes("frame-src 'none'"));}finally{dom.window.close();}
 });
 
 test("Remote preview recovers JSON-escaped near-limit snapshots after restart", async (t) => {

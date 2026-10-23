@@ -13,7 +13,7 @@ import { KnowledgeEmbeddings } from "./knowledge-embeddings.ts";
 import { boundedKnowledgeRecall,visibleKnowledgeReflections } from "./knowledge-recall.ts";
 import { knowledgeRecallContext,isKnowledgeEvaluation } from "./knowledge-evidence.ts";
 import {nativeConversation,conversationSources} from "./knowledge-archive.ts";
-import {archiveGeneratedArtifacts} from "./conversation-artifacts.ts";
+import {archiveGeneratedArtifacts,savedAppDocument} from "./conversation-artifacts.ts";
 import {organizationPrompt} from "./knowledge-organization.ts";
 import {currentTurnHasUserRequest} from "./task-turn.ts";
 import {providerGate} from "./provider-gate.ts";
@@ -229,10 +229,11 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
         if(view==="note"){send(res,200,await store.note(query.get("id")??""));return;}
         if(view==="source"){const source=[...curator.jobs.values()].find(j=>j.id===query.get("id"))?.source??await store.sourceEpisode(query.get("id")??"");send(res,200,source);return;}
         if(view==="assets"){send(res,200,{assets:await store.assets.list()});return;}
-        if(view==="asset"){
+        if(view==="asset"||view==="app-document"){
           const asset=query.get("id")?await store.assets.get(query.get("id")!):undefined;
           const file=await store.assets.read(asset?.path??query.get("path")??"");
           const type=asset?.mediaType??file.mediaType;
+          if(view==="app-document"){send(res,200,savedAppDocument({...file,name:asset?.name??file.name,mediaType:type}));return;}
           const inline=/^(image\/(png|jpeg|webp|gif)|application\/pdf|audio\/(mpeg|wav)|video\/mp4)$/.test(type)&&query.get("download")!=="1";
           res.writeHead(200,{"content-type":type,"content-length":file.bytes.length,"cache-control":"private, no-store","x-content-type-options":"nosniff","content-security-policy":"sandbox; default-src 'none'","content-disposition":`${inline?"inline":"attachment"}; filename*=UTF-8''${encodeURIComponent(asset?.name??file.name)}`});res.end(file.bytes);return;
         }

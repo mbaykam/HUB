@@ -124,6 +124,7 @@ const taskFiles = Object.freeze({
     "uploads.test.mjs",
     "knowledge.test.mjs",
     "knowledge-workspace-ui.test.mjs",
+    "knowledge-media-ui.test.mjs",
     "knowledge-layout.test.mjs",
     "knowledge-domain-panel.test.mjs",
     "knowledge-domains.test.mjs",

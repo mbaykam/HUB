@@ -3,13 +3,18 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {conversationArtifacts,archiveGeneratedArtifacts,artifactDocument} from '../packages/harness-overlay/src/host/conversation-artifacts.ts';
+import {conversationArtifacts,archiveGeneratedArtifacts,artifactDocument,savedAppDocument} from '../packages/harness-overlay/src/host/conversation-artifacts.ts';
 import {installDailyUseWeb} from '../packages/harness-overlay/src/host/daily-use-web.ts';
 import {KnowledgeStore,digest} from '../packages/harness-overlay/src/host/knowledge-store.ts';
 import {withKnowledgeAssetExcerpts} from '../packages/harness-overlay/src/host/knowledge-assets.ts';
 import {nativeConversation} from '../packages/harness-overlay/src/host/knowledge-archive.ts';
 import {projectMobileActivity} from '../packages/harness-overlay/src/client/host/mobile-activity.ts';
 const at=Date.now();
+test('saved HTML previews are bounded, keep originals intact, reject non-HTML and invalid UTF-8',()=>{
+ const bytes=Buffer.from('<!doctype html><button>Run</button><script>document.title="Ready"</script>'),before=Buffer.from(bytes);
+ const app=savedAppDocument({bytes,name:'snake.html',mediaType:'text/html'});assert.equal(app.name,'snake.html');assert.match(app.document,/script-src 'unsafe-inline'/);assert.match(app.document,/connect-src 'none'/);assert.deepEqual(bytes,before);
+ for(const file of [{bytes,name:'private.txt',mediaType:'text/plain'},{bytes,name:'game.html',mediaType:'application/octet-stream'},{bytes:Buffer.from([0xff]),name:'bad.html',mediaType:'text/html'},{bytes:Buffer.alloc(3_000_001),name:'large.html',mediaType:'text/html'}])assert.throws(()=>savedAppDocument(file));
+});
 const events=[{type:'turn/start',seq:1,time:at,data:{turn:1}},{type:'user/message',seq:2,time:at,data:{source:{kind:'user'},content:[{type:'text',text:'Create a calculator for my browser.'}]}},
  {type:'tool/call',seq:3,time:at+1,data:{turn:1,name:'write',callId:'write-1',arguments:JSON.stringify({file_path:'C:\\fixture\\calculator.html',content:'<!doctype html><title>Calculator</title><link rel="stylesheet" href="app.css"><button>7</button><script>document.title="Ready"</script>'})}},
  {type:'tool/result',seq:4,time:at+2,data:{message:{content:[{type:'tool-result',toolCallId:'write-1',isError:false}]}}},

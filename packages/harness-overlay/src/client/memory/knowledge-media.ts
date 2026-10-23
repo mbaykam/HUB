@@ -1,5 +1,6 @@
 import type {KnowledgeAsset,KnowledgeNote} from "../../knowledge-contract.ts";
-/** Render only validated vault URLs or ordinary HTTP links; never vault HTML. */
+import {openHtmlAppViewer} from "../host/html-app-viewer.ts";
+/** Only validated vault URLs; HTML enters an opaque viewer, never this DOM. */
 export function createKnowledgeMedia(root:Document){
   const el=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const n=root.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
   const assetUrl=(path:string,download=false)=>`/api/hub/memory?view=asset&path=${encodeURIComponent(path)}${download?"&download=1":""}`;
@@ -23,7 +24,12 @@ export function createKnowledgeMedia(root:Document){
     if(image){const img=el("img");img.src=url;img.alt=label;img.loading="lazy";card.append(img);}
     else if(mediaType?.startsWith("audio/")||/\.(mp3|wav)$/i.test(path)){const audio=el("audio");audio.controls=true;audio.preload="none";audio.src=url;card.append(audio);}
     else if(mediaType==="video/mp4"||/\.mp4$/i.test(path)){const video=el("video");video.controls=true;video.preload="metadata";video.setAttribute("playsinline","");video.src=url;card.append(video);}
-    const caption=el("figcaption",label),open=el("a",image?"Open image":"Open file"),download=el("a","Download");open.href=url;open.target="_blank";open.rel="noopener noreferrer";download.href=assetUrl(path,true);download.download=label;card.append(caption,open,download);parent.append(card);
+    const caption=el("figcaption",label),download=el("a","Download");
+    let open:HTMLElement;
+    if(/\.html?$/i.test(path)){
+      const b=el("button","Open app");b.type="button";b.addEventListener("click",()=>openHtmlAppViewer(root,label,async signal=>{const response=await root.defaultView!.fetch(`/api/hub/memory?view=app-document&path=${encodeURIComponent(path)}`,{credentials:"same-origin",cache:"no-store",redirect:"error",headers:{"x-hub-memory":"1"},signal:AbortSignal.any([signal,AbortSignal.timeout(16000)])});if(!response.ok)throw Error("App unavailable");return response.json();}));open=b;
+    }else{const a=el("a",image?"Open image":"Open file");a.href=url;a.target="_blank";a.rel="noopener noreferrer";open=a;}
+    download.href=assetUrl(path,true);download.download=label;card.append(caption,open,download);parent.append(card);
   }
   function renderBody(container:HTMLElement,note:KnowledgeNote,openNote:(id:string)=>void,nodes:{id:string;title:string;permalink:string}[]){
     container.replaceChildren();let code=false;
