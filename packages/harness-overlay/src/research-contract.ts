@@ -1,4 +1,5 @@
 export type ResearchDepth="quick"|"standard"|"deep";
+export const RESEARCH_RESULT_PLUGIN="hub-research-result";
 export interface ResearchSpec {version:1;requestId:string;requesterId:string;allowedTools:string[];depth:ResearchDepth;sources:"web"|"web+knowledge";freshness:"current"|"year"|"any";asOf:string}
 export const RESEARCH_LIMITS={quick:{rounds:3,minutes:5,steps:8,output:2048,reads:8,attempts:24},standard:{rounds:8,minutes:15,steps:10,output:4096,reads:24,attempts:72},deep:{rounds:16,minutes:35,steps:12,output:6144,reads:48,attempts:144}} as const;
 export function validateResearch(value:any):ResearchSpec{

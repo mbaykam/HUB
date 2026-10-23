@@ -29,6 +29,12 @@ durable work after a host restart, subject to saved limits and permissions. The
 host must be online; research yields to active conversation work. Provider
 exhaustion leaves the checkpoint intact and exposes an explicit retry control.
 
+When the initiating conversation is still loaded, completion queues a brief
+summary in that chat. An active voice call can speak the summary through its
+existing result channel. This notice cannot run tools or authorize more work.
+If the conversation is closed or unloaded, reopen **Research tasks** to read
+the retained report; completion does not reopen a conversation automatically.
+
 The sheet accepts a text question. Files already in the composer remain there;
 send them through ordinary chat or remove them before using the sheet. Web is
 the default; **Web + Knowledge** explicitly allows local Knowledge reads. Do

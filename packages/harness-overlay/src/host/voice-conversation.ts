@@ -2,6 +2,7 @@
  * or task scheduler. Only explicitly correlated human turns may produce audio.
  */
 import { randomUUID } from "node:crypto";
+import {RESEARCH_RESULT_PLUGIN} from "../research-contract.ts";
 import type {ReplyLanguage} from "./voice-reply-language.ts";
 export interface VoiceEvent {
   type: "text" | "tool-start" | "tool-end" | "end";
@@ -86,7 +87,7 @@ export function createVoiceConversation(ports: VoiceConversationPorts) {
       openTurnHasUser = true;
       notice = !closed && shares.has(data.source.rpcId) && openTurn !== undefined ? { turn: openTurn, text: "" } : undefined;
     }
-    if (!closed && !openTurnHasUser && event.type === "user/message" && ["agent-message", "subagent-settled"].includes(data.source?.kind) && openTurn !== undefined) {
+    if (!closed && !openTurnHasUser && event.type === "user/message" && (["agent-message", "subagent-settled"].includes(data.source?.kind) || data.source?.kind === "plugin" && data.source.plugin === RESEARCH_RESULT_PLUGIN) && openTurn !== undefined) {
       // A native child can relay its result before its lifecycle notice, both
       // within the same parent turn. Keep the answer already collected when
       // that later notice arrives, rather than speaking only a closing remark.

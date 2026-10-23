@@ -2,6 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createVoiceConversation } from "@minke/harness-overlay/host/voice-conversation.ts";
 import {randomUUID} from 'node:crypto';
+import {RESEARCH_RESULT_PLUGIN} from '@minke/harness-overlay/research-contract.ts';
+
+test('only the trusted research completion plugin can announce a saved result, and mixed human turns do not replay it',async()=>{
+ const f=fixture();
+ f.emit('turn/start',{turn:1});f.emit('user/message',{source:{kind:'plugin',plugin:'unrelated'}});f.emit('assistant/message',{turn:1,message:{content:[{type:'text',text:'Not a research result.'}]}});f.emit('turn/end',{turn:1,reason:{kind:'completed'}});assert.deepEqual(f.voice.notifications(0),{events:[]});
+ f.emit('turn/start',{turn:2});f.emit('user/message',{source:{kind:'plugin',plugin:RESEARCH_RESULT_PLUGIN}});f.emit('assistant/message',{turn:2,message:{content:[{type:'reasoning',text:'private'},{type:'text',text:'The source-backed report is ready, with a disclosed gap.'}]}});f.emit('turn/end',{turn:2,reason:{kind:'completed'}});assert.deepEqual(f.voice.notifications(0),{events:[{id:1,text:'The source-backed report is ready, with a disclosed gap.'}]});
+ const spoken=f.voice.speak(1,'What did it find?',f.sink);f.claim(3);f.emit('user/message',{source:{kind:'plugin',plugin:RESEARCH_RESULT_PLUGIN}});f.emit('assistant/message',{turn:3,message:{content:[{type:'text',text:'Part of the human reply.'}]}});f.emit('turn/end',{turn:3,reason:{kind:'completed'}});await spoken;assert.deepEqual(f.voice.notifications(1),{events:[]});await f.voice.close();
+});
 
 test('a shared photo queues beside an active spoken turn, speaks only its correlated acknowledgement, and retries once',async()=>{
  const f=fixture(),spoken=f.voice.speak(1,'Keep talking',f.sink);f.claim(1);const id=randomUUID();

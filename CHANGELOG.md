@@ -5,6 +5,9 @@
 - Fall back to the permitted fetch reader after browser read failures and reject
   HTTP error pages as source evidence.
 - Keep research scope and citation checks when saving from the Goals editor.
+- Deliver completed research to a loaded conversation and its active voice
+  result channel, with tools disabled for result-only replies.
+- Render inline report links and emphasis without interpreting raw HTML.
 
 ## 1.8.0
 

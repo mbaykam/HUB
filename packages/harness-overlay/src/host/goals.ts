@@ -19,6 +19,7 @@ import type {HubCharacter} from "../character-contract.ts";
 import {installResearchRound} from "./research-round.ts";
 import {readResearch} from "./research-evidence.ts";
 import {installResearch} from "./research.ts";
+import {createResearchDelivery} from "./research-delivery.ts";
 
 export class GoalAuthority extends Service {
   constructor(ctx:any,readonly goalId:string,readonly allowWriteNote:boolean,readonly character?:HubCharacter,readonly sessionId?:string){super(ctx,"hubGoalAuthority");}
@@ -155,11 +156,12 @@ async function reconcileGoal(ctx:any,g:HubGoal){
 
 function toolView(snapshot:any,id?:string){return {...snapshot,goals:snapshot.goals.filter((g:HubGoal)=>!id||g.id===id).map((g:HubGoal)=>id?{...g,rounds:g.rounds.slice(-10),evidence:g.evidence.slice(-40).map(e=>({...e,detail:e.detail.slice(0,1600)})),history:g.history.slice(-20),planHistory:undefined}:{id:g.id,revision:g.revision,title:g.title,status:g.status,objective:g.objective.slice(0,1200),characterId:g.characterId,reason:g.reason,nextAt:g.nextAt,rounds:g.rounds.length,criteriaEvidenced:g.criteriaEvidence.length})};}
 export function installGoals(ctx:any,characters:any){
+  const researchDelivery=createResearchDelivery(ctx);
   const store:GoalsStore=new GoalsStore(join(characters.store.root,"..","hub-goals"),{
     now:()=>Date.now(),route:async id=>{await characters.ready;const c=characters.store.snapshot().characters.find((c:any)=>c.id===id);if(!c?.route)throw Error("This goal character needs a configured model in Settings → Characters.");await characters.validate(c);return c.route.provider+"/"+c.route.model;},
     read:(url,signal)=>readPublicWatch(url,AbortSignal.any([signal,AbortSignal.timeout(15000)])),admit:()=>characters.background.acquire("goals"),run:(g,r,s)=>executeGoalRound(ctx,characters,store,g,r,s),
     reconcile:g=>reconcileGoal(ctx,g),
-    notify:(g,status,text)=>{if(g.notification!=="telegram")return;const cycle=g.cycles.at(-1);if(!cycle)return;const activity=automationActivity({title:"Goal · "+g.title,sourceSessionId:g.sourceSessionId,resultPanel:"Goals"},{id:cycle.id+":"+g.history.length,sessionId:cycle.sessionId},status,text);if(activity&&process.connected&&process.send)process.send(activity,()=>{});}
+    notify:(g,status,text)=>{if(g.research&&status==="completed")void researchDelivery.notify(g).catch(()=>{});if(g.notification!=="telegram")return;const cycle=g.cycles.at(-1);if(!cycle)return;const activity=automationActivity({title:"Goal · "+g.title,sourceSessionId:g.sourceSessionId,resultPanel:"Goals"},{id:cycle.id+":"+g.history.length,sessionId:cycle.sessionId},status,text);if(activity&&process.connected&&process.send)process.send(activity,()=>{});}
   },characters.quota);characters.goals=store;
   const ready=store.initialize();void ready.catch(()=>{});
   const offResearch=installResearch(ctx,characters,store,ready);
@@ -187,5 +189,5 @@ export function installGoals(ctx:any,characters:any){
   const offEvents=ctx.on("session/event",(session:any,event:any)=>{if(/^hub-(goal|memory|automation)-/.test(session.header.id)||/^hub-(goal|memory|automation)-/.test(session.header.parentSession??"")||isKnowledgeEvaluation(session.header.id))return;if(event.type==="turn/end"&&session.header.origin==="subagent"){const f=operationFailure(event.data?.reason);void ready.then(()=>store.event(f?"task.failed":"task.completed",{sessionId:session.header.id,code:f?.code})).catch(()=>{});}},{global:true});
   const offArchive=ctx.on("hub/knowledge-archived",(data:any)=>{if(/^hub-(goal|memory|automation)-/.test(data.sessionId??"")||isKnowledgeEvaluation(data.sessionId??""))return;void ready.then(()=>store.event("knowledge.archived",data)).catch(()=>{});},{global:true});
   const timer=setInterval(()=>{void ready.then(()=>store.tick()).catch(()=>{});},5000);timer.unref();void ready.then(()=>store.event("host.started",{at:Date.now()})).catch(()=>{});
-  return async()=>{clearInterval(timer);offResearch();offRoute();offCreated();offDisposed();offEvents();offArchive();for(const off of mounts.values())off();await store.dispose();};
+  return async()=>{clearInterval(timer);researchDelivery.dispose();offResearch();offRoute();offCreated();offDisposed();offEvents();offArchive();for(const off of mounts.values())off();await store.dispose();};
 }
