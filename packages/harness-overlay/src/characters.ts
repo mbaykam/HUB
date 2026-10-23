@@ -210,8 +210,9 @@ export class HubCharacters extends Service {
   }
   /** An authenticated picker is direct human navigation. Keep a running reply's
    * admitted identity intact; commit the selection for the following turn. */
+  pickerAllowed(sessionId:string){return !/^hub-(memory|character-eval|goal|automation)-/.test(sessionId)&&(!sessionId.startsWith("minke-im-")||this.voiceCalls.has(sessionId));}
   async selectFromUI(command:Extract<import("./character-contract.ts").HubCharacterCommand,{action:"select"}>){
-    if(/^(minke-im-|hub-(memory|character-eval|goal|automation)-)/.test(command.sessionId))throw Error("This conversation uses its assigned character.");
+    if(!this.pickerAllowed(command.sessionId))throw Error("This conversation uses its assigned character.");
     const resolved=await this.host.sessionController.resolveAgent(command.sessionId);
     if("error"in resolved||resolved.agent.session.header.origin==="subagent")throw Error("Choose a top-level conversation.");
     const agent=resolved.agent,mount=this.mounts.get(agent.id);if(!mount)throw Error("This conversation is not ready yet.");
@@ -277,7 +278,7 @@ export class HubCharacters extends Service {
             if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(sessionId)){send(400,{error:"invalid-session"});return;}
             const s=this.store.snapshot(),mount=this.mounts.get(sessionId),c=mount?.assembled?.character??mount?.voiceCharacter??this.store.selected(sessionId,mount?.turnSnapshot??s);
             if(query.get("view")==="picker"){
-              const selected=this.store.selected(sessionId,s),canSelect=!!mount&&!/^(minke-im-|hub-(memory|character-eval|goal|automation)-)/.test(sessionId);
+              const selected=this.store.selected(sessionId,s),canSelect=!!mount&&this.pickerAllowed(sessionId);
               send(200,{revision:s.revision,currentId:c.id,selectedId:selected.id,pending:c.id!==selected.id,canSelect,characters:s.characters.map(x=>({id:x.id,name:x.name,avatar:x.avatar,description:x.description,role:x.id===s.mainId?"Main assistant":x.id===s.voiceId?"Voice assistant":"Specialist",model:x.route?x.route.provider+" / "+x.route.model:null}))});return;
             }
             send(200,{revision:s.revision,character:{id:c.id,name:c.name,route:c.route}});return;

@@ -47,7 +47,10 @@ The scoped worker uses `hub_research_sources` for search/read/recovery and
 `hub_research_report` for synthesis, then checkpoints through the Goal service.
 Search uses the existing public RSS fallback, with Camofox available for browser
 search; reading uses owned Camofox tabs or an admitted fetch adapter. Tabs close
-after reads. Search snippets remain discovery observations and cannot serve as
+after reads. Failed browser reads can fall back to the permitted fetch adapter;
+workers can request that reader explicitly when a browser page is blocked.
+Failed HTTP responses are not retained as source evidence. Search snippets
+remain discovery observations and cannot serve as
 cited read evidence.
 
 Source observations retain IDs, timestamps, text hashes, tool receipts, bounded
@@ -58,6 +61,10 @@ retained reads. Those deterministic checks do **not** establish that a passage
 semantically supports a claim or that the claim is true. The researcher must
 assess support, compare sources and disclose uncertainty; readers can inspect
 the retained passages. A run with no read-backed claim cannot claim completion.
+
+Editing a research task in Goals retains its captured source scope, limits and
+evidence checks. It cannot silently turn the job into an ordinary unrestricted
+goal. Start a new research task to choose a different depth or source scope.
 
 Read-only research does not expose messaging, purchases, publishing, arbitrary
 filesystem tools or Knowledge writes. Page content is untrusted data, including

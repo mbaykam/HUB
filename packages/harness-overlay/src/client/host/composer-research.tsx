@@ -2,6 +2,7 @@ import {useEffect,useRef} from "react";
 import type {HarnessClientContext} from "../core/context.ts";
 import {anchoredPopover,installComposerControlStyles} from "./character-picker.ts";
 import {openMobileConversation} from "./mobile-session-navigation.ts";
+import {researchParagraph} from "./research-text.ts";
 interface ComposerInput {state:{getSnapshot():{draft:string;draftRev:number;imageIds:readonly string[];occurrences:readonly unknown[]}};setDraft(value:string):void}
 interface Composer {input:{for(scope:unknown):ComposerInput}}
 const statusLabel:Record<string,string>={"waiting-foreground":"Waiting for this conversation","waiting-credit":"Waiting for provider credits or quota","waiting-budget":"Work allowance reached","needs-input":"Needs your input",scheduled:"Queued",planning:"Planning",working:"Researching",verifying:"Checking report",completed:"Report ready",paused:"Paused",stopped:"Stopped"};
@@ -23,7 +24,7 @@ export function installComposerResearch(ctx:HarnessClientContext,conversation:Co
         heading.textContent="Research progress";notice.textContent=`${statusLabel[g.status]??g.status}${g.reason?" · "+g.reason:""}`;body.replaceChildren();footer.replaceChildren();
         body.append(el("h3",g.title),el("p",`${g.rounds} rounds · ${g.ledger.observations.filter((o:any)=>o.kind!=="discovery").length} source reads`));if(g.checkpoint)body.append(el("p",g.checkpoint));
         const report=g.ledger.report;
-        if(report){const article=el("article");for(const claim of report.claims){const p=el("p",(claim.uncertain?"Uncertain: ":"")+claim.text+" ");for(const cite of claim.citations){const source=g.ledger.observations.find((o:any)=>o.id===cite.sourceId);p.append(sourceLink(`[${cite.sourceId}]`,source?.url),root.createTextNode(" "));}article.append(p);}article.append(el("h3","Limits and gaps"),...report.limitations.map((x:string)=>el("p",x)),el("h3","Conflicting evidence"),...report.conflicts.map((x:string)=>el("p",x)));body.append(article,el("p","Source IDs and exact quoted passages were checked. This check does not prove that a claim is true or fully supported."));
+        if(report){const article=el("article");for(const claim of report.claims){const p=researchParagraph(root,(claim.uncertain?"Uncertain: ":"")+claim.text+" ");for(const cite of claim.citations){const source=g.ledger.observations.find((o:any)=>o.id===cite.sourceId);p.append(sourceLink(`[${cite.sourceId}]`,source?.url),root.createTextNode(" "));}article.append(p);}article.append(el("h3","Limits and gaps"),...report.limitations.map((x:string)=>researchParagraph(root,x)),el("h3","Conflicting evidence"),...report.conflicts.map((x:string)=>researchParagraph(root,x)));body.append(article,el("p","Source IDs and exact quoted passages were checked. This check does not prove that a claim is true or fully supported."));
           const download=button("Save report",()=>{const blob=new Blob([report.markdown],{type:"text/markdown;charset=utf-8"}),url=root.defaultView!.URL.createObjectURL(blob),a=el("a");a.href=url;a.download="research-"+g.id+".md";a.click();root.defaultView!.setTimeout(()=>root.defaultView!.URL.revokeObjectURL(url),1000);});body.append(download);
         }
         const sources=el("details"),list=el("div");sources.append(el("summary","Sources and recorded passages"),list);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.1
+
+- Fall back to the permitted fetch reader after browser read failures and reject
+  HTTP error pages as source evidence.
+- Keep research scope and citation checks when saving from the Goals editor.
+
 ## 1.8.0
 
 - Add direct character selection beside attachments and in voice controls, with

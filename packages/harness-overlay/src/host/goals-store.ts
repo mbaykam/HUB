@@ -50,7 +50,7 @@ export class GoalsStore {
     if(existing?command.revision!==existing.revision:command.revision!==this.state.revision)throw Error("This goal changed; reload it before saving. Your unsaved edits are retained.");
     const now=this.ports.now();let g=existing;
     if(command.action==="save"){
-      const input=validateGoal(command.goal);
+      const input=validateGoal({...command.goal,...(g?.research?{research:g.research}:{})});
       if(command.plan!==undefined)validatePlan(command.plan);
       if(!g&&this.state.goals.length>=200)throw Error("Goal limit reached; archive and reuse a saved goal.");
       if(g){
