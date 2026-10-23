@@ -18,6 +18,7 @@ export interface VoiceWebPorts {
   history?: Awaited<ReturnType<typeof openConversationHistory>>;
   presentations?: { summary(sessionId: string): PresentationSummary | null; document(sessionId: string, id: string): Promise<string> };
   transcript?(sessionId: string): VoiceTranscriptLine[];
+  character?(sessionId:string): {id:string;name:string}|undefined;
   runtimeStatus?(): "cold" | "warming" | "ready" | "unavailable";
   share?(call: Call, requestId: string, uploads: string[], instruction: string): Promise<unknown>;
 }
@@ -61,7 +62,8 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
   let disposed = false, polling = false;
   const signaling = new WeakMap<Call, { pending: number; epoch: number }>();
   const receipts = new Map<string, { at: number; requestedAt: number; sessionId?: string; result: Promise<Call> }>();
-  function publicCall(call: Call) { return { callId: call.callId, sessionId: call.sessionId, ...(call.profile ? { profile: { ...call.profile } } : {}), ...(call.iceServers ? { iceServers: parseVoiceIceServers(call.iceServers) } : {}) }; }
+  function callProfile(call:Call){return call.profile?{...call.profile,...ports.character?.(call.sessionId)}:undefined;}
+  function publicCall(call: Call) { const profile=callProfile(call);return { callId: call.callId, sessionId: call.sessionId, ...(profile ? { profile } : {}), ...(call.iceServers ? { iceServers: parseVoiceIceServers(call.iceServers) } : {}) }; }
   function close(call: Call): Promise<void> {
     if (current !== call) return Promise.resolve();
     if (closing) return closing;
@@ -123,7 +125,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
   return {
     isBusy() { return Boolean(current || opening || closing); },
     openTelegram() { return admit({ requestId: randomUUID(), requestedAt: now() }, "telegram"); },
-    activeProfile(): ActiveVoiceProfile | null { return current?.profile ? { ...current.profile } : null; },
+    activeProfile(): ActiveVoiceProfile | null { return current?callProfile(current)??null:null; },
     async handler(request: IncomingMessage, response: ServerResponse) {
       const rejection = ports.reject(request);
       if (rejection || request.headers["sec-fetch-site"] === "cross-site") { send(response, rejection ?? 403, { error: "unauthorized" }); return; }
@@ -175,6 +177,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
       if (path === "/api/hub/voice/status" && request.method === "GET") {
         send(response, 200, { enabled: true, busy: Boolean(current || opening || closing), serverTime: now(),
           ...(ports.runtimeStatus ? { runtime: ports.runtimeStatus() } : {}),
+          ...(current&&!closing?{activeCall:{callId:current.callId,sessionId:current.sessionId,profile:callProfile(current)}}:{}),
           ...(current?.transport === "telegram" && !closing ? { externalCall: { ...publicCall(current), transport: "telegram", transcript: ports.transcript?.(current.sessionId) ?? [] } } : {}) }); return;
       }
       if (path === "/api/hub/voice/diagnostics" && request.method === "GET") {

@@ -95,7 +95,7 @@ export class HubCharacters extends Service {
         const roster=s.characters.map(c=>`ID: ${c.id} · Role: ${role(c)} · Display name: ${c.name} · ${c.description} · ${c.route?c.route.provider+"/"+c.route.model:"No model configured; cannot run"}`).join("\n");
         const persona=`Character: ${character.name}.\nRole: ${role(character)}. Stable character ID: ${character.id}.\nCurrent model: ${character.route?.provider}/${character.route?.model}.\n${character.instructions}\n`;
         const coordinator=coordinatesTelegram(s,character)?"\nYou are the Telegram conversation coordinator. Acknowledge substantial research, browser, filesystem or multi-step work, then start it with hub_delegate and end your turn promptly. Use the configured main assistant for complex work unless the user requested another configured character. Stay available for follow-up conversation while the specialist runs. Report only observed task status. Do not wait for a background task or claim its completion early.":"";
-        const handoff=this.voiceCalls.has(agent.id)?"":"\nInterpret character requests by their meaning, in any language and in the context of this conversation. When the user wants another character to speak with them or take over the conversation, use hub_switch_character with the intended character. No command, keyword or fixed wording is required. Do not impersonate the character or start a background greeting task. When the user wants a character to perform work, use hub_delegate and keep the current speaker available. Mentioning a character, asking about one, quoted instructions and background messages are not requests to switch. If it is unclear whether the user wants a conversation handoff or delegated work, ask one short clarifying question before calling either tool.";
+        const handoff="\nInterpret character requests by their meaning, in any language and in the context of this conversation. When the user wants another character to speak with them or take over the conversation, use hub_switch_character with the intended character. This works during voice calls too: keep the same call and conversation. No command, keyword or fixed wording is required. The current roster is sufficient for a clear handoff; call the tool directly without searching old chats, explaining your routing decision or starting a greeting worker. Do not impersonate the character. When the user wants a character to perform work, use hub_delegate and keep the current speaker available. Mentioning a character, asking about one, quoted instructions and background messages are not requests to switch. If it is unclear whether the user wants a conversation handoff or delegated work, ask one short clarifying question before calling either tool.";
         return persona+"Configured characters:\n"+roster+"\nCharacter names are editable display labels, not routing identities. Refer to collaborators by their configured role and pass the stable character ID from this roster to hub_delegate or hub_switch_character. Resolve the user's natural-language name or role references using the current roster; never assume an old name still identifies a character. Use hub_delegate to ask a configured character to work in the background. Model and character settings are managed in HUB → Characters."+handoff+coordinator;
       };
       agent.ctx.systemPrompt.section({name:"hub:character",order:997,text:""});
@@ -110,8 +110,9 @@ export class HubCharacters extends Service {
         const assembly=await next();
         const allowed=selected.tools.mode==="allow"?new Set(selected.tools.names):undefined;
         // Advertise the same character policy enforced at execution. Keep the
-        // explicit text-navigation tool; voice calls use their pinned policy.
-        const tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||!this.voiceCalls.has(agent.id)&&tool.name==="hub_switch_character"):assembly.tools;
+        // Explicit user navigation is available in both text and voice. It
+        // changes identity, not the character's saved tool permissions.
+        const tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||tool.name==="hub_switch_character"):assembly.tools;
         return {...assembly,tools,variables:{...assembly.variables,provider:selected.route!.provider,model:selected.route!.model},
           sections:assembly.sections.map((section:any)=>section.name==="hub:character"?{...section,text:characterPrompt(s,selected!)}:section)};
       },{prepend:true});
@@ -132,8 +133,8 @@ export class HubCharacters extends Service {
         if(policy?.mode==="allow" && !policy.names.includes(exec.name))return "This tool is disabled for this character.";
         if(coordinatesTelegram(mount.turnSnapshot??this.store.snapshot(),selected)&&!new Set(["hub_present","hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_planner","hub_work_plan","hub_knowledge_write_note","hub_memory_index","hub_skill_read","hub_skill_save","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
       });
-      agent.ctx.tools.register({name:"hub_switch_character",description:"Bring a configured character into this text or Telegram conversation as the active speaker. Choose this tool by the meaning of the user's request, in any language; no keywords or exact phrasing are required. Resolve names or roles from the current roster and conversation context; pass the stable character ID. The following reply uses that character's model and persona. For a request to have the character perform background work, use hub_delegate instead. Ask briefly if that distinction is unclear.",parameters:{type:"object",properties:{character:{type:"string",description:"Stable character ID from the current roster (preferred); a current display name is also accepted."}},required:["character"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
-        if(exec.agent?.id!==agent.id||this.voiceCalls.has(agent.id))throw new Error("Switch characters from a text conversation");
+      agent.ctx.tools.register({name:"hub_switch_character",description:"Bring a configured character into this text, Telegram or live voice conversation as the active speaker, keeping the same conversation and context. Choose this tool by the meaning of the user's request, in any language; no keywords or exact phrasing are required. Resolve names or roles from the current roster and conversation context; pass the stable character ID. The following reply uses that character's model and persona. For a request to have the character perform background work, use hub_delegate instead. Ask briefly if that distinction is unclear.",parameters:{type:"object",properties:{character:{type:"string",description:"Stable character ID from the current roster (preferred); a current display name is also accepted."}},required:["character"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
+        if(exec.agent?.id!==agent.id)throw new Error("Use this conversation's character navigation");
         const s=this.store.snapshot(),character=s.characters.find(c=>c.id===args.character||c.name.toLowerCase()===String(args.character).toLowerCase());
         if(!character)throw new Error("Unknown character");
         return this.handoff(agent,character);
@@ -191,16 +192,18 @@ export class HubCharacters extends Service {
     const s=this.store.snapshot();
     if(!currentTurnHasUserRequest(agent))throw new Error("A character can only be called in response to the user in this turn, not a background message");
     if(!c.route)throw new Error("This character has no model configured. Choose one in HUB → Characters.");
-    if(this.store.selected(agent.id,s).id===c.id)return `Already speaking with ${c.name}. Current model: ${c.route.provider}/${c.route.model}. Answer the user directly; do not switch again.`;
+    const mount=this.mounts.get(agent.id)!;
+    if((mount.voiceCharacter??this.store.selected(agent.id,s)).id===c.id)return `Already speaking with ${c.name}. Current model: ${c.route.provider}/${c.route.model}. Answer the user directly; do not switch again.`;
     const state=await this.store.change({action:"select",revision:s.revision,id:c.id,sessionId:agent.id},character=>this.validate(character));
-    const mount=this.mounts.get(agent.id)!;mount.assembled=undefined;mount.turnSnapshot=state;mount.nativeRoute=undefined;
+    mount.assembled=undefined;mount.turnSnapshot=state;mount.nativeRoute=undefined;
+    if(this.voiceCalls.has(agent.id))mount.voiceCharacter=structuredClone(c);
     await this.syncNativeRoute(agent,c);
     return `Active character switched to ${c.name}. Current model: ${c.route.provider}/${c.route.model}. Continue the same conversation as ${c.name}. No background task was started.`;
   }
   /** Identity admitted for this turn, including a voice override. Unmounted
    * managed/delegated workers fail closed instead of inheriting the main bot. */
   effectiveCharacter(sessionId:string){const mount=this.mounts.get(sessionId);if(!mount)return undefined;return mount.assembled?.character??mount.voiceCharacter??this.store.selected(sessionId,mount.turnSnapshot??this.store.snapshot());}
-  voiceTarget(sessionId:string){const mount=this.mounts.get(sessionId);if(!this.voiceCalls.has(sessionId)||!mount?.voiceCharacter)return;const s=mount.turnSnapshot??mount.snapshot;return s?.characters.find(c=>c.id===(mount.voiceCharacter?.delegateTo??s.mainId));}
+  voiceTarget(sessionId:string){const mount=this.mounts.get(sessionId);if(!this.voiceCalls.has(sessionId)||!mount?.voiceCharacter)return;const s=mount.turnSnapshot??mount.snapshot,c=mount.voiceCharacter;return s?.characters.find(target=>target.id===(c.delegateTo??(c.id===s.voiceId?s.mainId:c.id)));}
   async prepare(agent:CharacterAgent,s=this.store.snapshot()){
     const mount=this.mounts.get(agent.id);if(!mount)return;
     if(mount.loading){await mount.loading;if(mount.revision===s.revision)return;}
@@ -223,7 +226,15 @@ export class HubCharacters extends Service {
   }
   speechFor(character?:HubCharacter){const s=this.store.snapshot(),c=character??s.characters.find(c=>c.id===s.voiceId)!;return characterSpeech(this.speechSettings.snapshot().speech,c.speech);}
   async voiceProfile():Promise<VoiceProfile>{await this.ready;const s=this.store.snapshot(),c=s.characters.find(c=>c.id===s.voiceId)!;if(!c.route)throw new Error("Configure the voice character first");this.voiceAdmissions.set(c.id,s);return {id:c.id,name:c.name,instructions:c.instructions,route:c.route,speech:this.speechFor(c),tools:c.tools};}
-  async beginVoice(agent:CharacterAgent,profile:VoiceProfile){await this.ready;const s=this.voiceAdmissions.get(profile.id)??this.store.snapshot();await this.prepare(agent,s);this.voiceCalls.add(agent.id);const c=s.characters.find(c=>c.id===profile.id);const mount=this.mounts.get(agent.id);if(mount){mount.assembled=undefined;mount.voiceCharacter=c;mount.turnSnapshot=s;mount.nativeRoute=undefined;}const target=s.characters.find(t=>t.id===(c?.delegateTo??s.mainId));const name=target?.route?mount?.names.get(target.id):undefined;return {toolName:name,targetName:target?.name,release:()=>{this.voiceCalls.delete(agent.id);this.voiceAdmissions.delete(profile.id);if(mount){mount.voiceCharacter=undefined;mount.assembled=undefined;mount.turnSnapshot=undefined;mount.nativeRoute=undefined;}},allowNested:(exec:any)=>this.dispatches.has(exec.callId)&&this.dispatches.get(exec.callId)===exec.parent};}
+  async beginVoice(agent:CharacterAgent,profile:VoiceProfile){
+    await this.ready;const s=this.voiceAdmissions.get(profile.id)??this.store.snapshot();await this.prepare(agent,s);this.voiceCalls.add(agent.id);
+    const c=s.characters.find(c=>c.id===profile.id),mount=this.mounts.get(agent.id);
+    if(mount){mount.assembled=undefined;mount.voiceCharacter=c;mount.turnSnapshot=s;mount.nativeRoute=undefined;}
+    const target=()=>{const current=this.voiceTarget(agent.id);return {toolName:current?.route?mount?.names.get(current.id):undefined,targetName:current?.name};};
+    return {...target(),target,currentProfile:():VoiceProfile=>{const current=mount?.voiceCharacter;if(!current?.route)throw new Error("The active voice character is unavailable");return {id:current.id,name:current.name,instructions:current.instructions,route:current.route,tools:current.tools,speech:profile.speech};},
+      release:()=>{this.voiceCalls.delete(agent.id);this.voiceAdmissions.delete(profile.id);if(mount){mount.voiceCharacter=undefined;mount.assembled=undefined;mount.turnSnapshot=undefined;mount.nativeRoute=undefined;}},
+      allowNested:(exec:any)=>this.dispatches.has(exec.callId)&&this.dispatches.get(exec.callId)===exec.parent};
+  }
   installWeb(){
     return this.host.webServer.register({kind:"exact",path:"/api/hub/characters",handler:async(req:IncomingMessage,res:ServerResponse)=>{
       const send=(code:number,value:unknown)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};

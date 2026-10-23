@@ -100,14 +100,15 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
   const offRoute = agent.ctx.on("agent/request", async ({ agent: subject }, next) => {
     const config = await next();
     if (subject.id !== sessionId) return config;
+    const selectedRoute=offTasks?.currentProfile?.().route??route;
     // Route only this voice session; Session Controller's selectModel would
     // also change the user's saved default for unrelated desktop conversations.
     const { reasoningEffort: _reasoning,temperature:_temperature, ...base } = config;
     // Spoken brevity belongs in the persona, not a token cap that also cuts
     // off structured tool arguments (a modest interactive Vega spec can exceed
     // 1024 tokens before its short spoken explanation has even started).
-    return { ...base, provider: route.provider, model: route.model, maxTokens: route.maxTokens??4096,...(route.temperature===undefined?{}:{temperature:route.temperature}),
-      ...route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(route.reasoningEffort) } };
+    return { ...base, provider: selectedRoute.provider, model: selectedRoute.model, maxTokens: selectedRoute.maxTokens??4096,...(selectedRoute.temperature===undefined?{}:{temperature:selectedRoute.temperature}),
+      ...selectedRoute.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(selectedRoute.reasoningEffort) } };
   }, { prepend: true });
   let offPresentation: (() => void) | undefined;
   let offHistory: (() => void) | undefined;
@@ -119,7 +120,7 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
     if (options.tasks) {
       offTasks = await options.tasks(agent);
       if (offTasks) offTaskPrompt = agent.ctx.systemPrompt.section({ name: "hub:voice-tasks", order: 1001,
-        text: "You are the conversation coordinator, not the worker. For any build, filesystem search, browser work or other multi-step task, first acknowledge the request in one spoken sentence, then call hub_task for the configured default specialist and end your turn promptly. If the user explicitly asks for another configured character by name or role, resolve it from the current roster and pass its stable character ID to hub_delegate instead. It starts a native continuable background task using the configured child model. Never wait for completion; stay available for the user's next question. Do not execute the work yourself or use foreground delegation. On a progress question, use list_agents without waiting, report only observed progress, and say if the remaining time is unknown. Do not invent an ETA. A speech interruption must not cancel the child. To show a self-contained interactive example such as a calculator, ask the child to return one complete hub_present payload with kind vega, title and a Vega v6 spec using inline data and signals for buttons/inputs. No arbitrary JavaScript, external resources or filesystem search is needed for this. On its completion notification, call hub_present with the returned payload so the PWA can open it. For a full website/app beyond the canvas, have the child build/test it and open it in HUB's native browser for the user's task browser viewer, not an external desktop window. A spoken claim alone does not show anything on the phone. Confirm only tool results. Supply the child the necessary context without unnecessary private details." });
+        text: "This live call must stay responsive. If the user wants to talk to another configured character, use hub_switch_character directly from the current roster, not hub_task or a greeting worker. The call, audio and context stay connected; the next reply uses the selected character's own model, instructions and permissions. For a build, filesystem search, browser work or other multi-step task, first acknowledge the request in one spoken sentence, then call hub_task for the active character's configured worker and end your turn promptly. The voice assistant normally delegates to the main assistant; a main/custom speaker without another target runs its own worker and keeps ownership of the task. If the user requests work by a different configured character, use hub_delegate with its stable ID. Never wait for completion; stay available for the user's next question. Do not execute the work in the foreground. On a progress question, use list_agents without waiting, report only observed progress, and say if the remaining time is unknown. Do not invent an ETA. A speech interruption must not cancel the child. To show a self-contained interactive example such as a calculator, ask the child to return one complete hub_present payload with kind vega, title and a Vega v6 spec using inline data and signals for buttons/inputs. No arbitrary JavaScript, external resources or filesystem search is needed for this. On its completion notification, call hub_present with the returned payload so the PWA can open it. For a full website/app beyond the canvas, have the child build/test it and open it in HUB's native browser for the user's task browser viewer, not an external desktop window. A spoken claim alone does not show anything on the phone. Confirm only tool results. Supply the child the necessary context without unnecessary private details." });
     }
     if (options.history) {
       if (!agent.ctx.tools) throw new Error("Native history tool registry is unavailable");
@@ -129,8 +130,8 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
       if (!agent.ctx.tools) throw new Error("Native visual tool registry is unavailable");
       offPresentation = options.presentations.attach({ id: agent.id, ctx: { tools: agent.ctx.tools, systemPrompt: agent.ctx.systemPrompt } });
     }
-    if (profile) { offProfile = attachVoiceProfilePolicy(agent, profile,exec=>offTasks?.allowNested?.(exec)??false); offTaskPolicy = await options.taskPolicies?.bind(agent, profile.tools); }
-  } catch (error) { offTaskPolicy?.(); offProfile?.(); offPresentation?.(); offHistory?.(); offTaskPrompt?.(); offRoute(); offPrompt(); await offTasks?.(); throw error; }
+    if (profile) { offProfile = attachVoiceProfilePolicy(agent, profile,exec=>offTasks?.allowNested?.(exec)??false,offTasks?.currentProfile); offTaskPolicy = await options.taskPolicies?.bind(agent, offTasks?.currentProfile?()=>offTasks!.currentProfile!().tools:profile.tools); }
+  } catch (error) { offTaskPolicy?.(); offProfile?.(); offPresentation?.(); offHistory?.(); offTaskPrompt?.(); offRoute(); offPrompt(); await offTasks?.(); offTasks?.releaseIdentity?.();throw error; }
   const replyLanguage=voiceReplyLanguage(agent);
   const automaticOutput=!profile||["supertonic","bilingual"].includes(profile.speech.tts.engine)&&(!("language" in profile.speech.tts)||profile.speech.tts.language===undefined||profile.speech.tts.language==="auto");
   const voice = createVoiceConversation({
@@ -187,6 +188,7 @@ export async function openNativeVoiceSession(ctx: NativeVoiceContext, route: Voi
         const failed = results.find(result => result.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;
         offTaskPolicy?.(); offProfile?.(); offPresentation?.(); offRoute(); offPrompt(); offTaskPrompt?.();
+        offTasks?.releaseIdentity?.();
       })();
       return closing;
     },

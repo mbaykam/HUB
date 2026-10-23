@@ -72,6 +72,17 @@ test("closing retains the profile guard until native idle, including repeated or
   }
 });
 
+test('voice identity stays pinned until native shutdown completes and remains pinned on uncertain cleanup',async()=>{
+ for(const failure of [false,true]){
+  const f=fixture();let finish,released=0,stopped=0;
+  f.agent.whenIdle=()=>new Promise((resolve,reject)=>{finish=()=>failure?reject(Error('uncertain idle')):resolve();});
+  const tasks=Object.assign(async()=>{stopped++;},{releaseIdentity:()=>released++});
+  const voice=await openNativeVoiceSession(f.ctx,route,{...f.options,tasks:async()=>tasks});const closing=voice.close();
+  await new Promise(r=>setImmediate(r));assert.equal(stopped,1);assert.equal(released,0);
+  const result=failure?assert.rejects(closing,/uncertain idle/):closing;finish();await result;assert.equal(released,failure?0:1);
+ }
+});
+
 test("task attachment follows native capability and cleans up when later voice setup fails", async () => {
   const f = fixture();
   const voice = await openNativeVoiceSession(f.ctx, route, { ...f.options, tasks: async () => undefined });

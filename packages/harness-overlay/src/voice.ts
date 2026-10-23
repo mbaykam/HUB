@@ -109,7 +109,7 @@ export function apply(ctx: Context, config: Config): void {
           if (!lease.toolName) throw new Error("Choose a configured delegation target for the voice character");
           const off = await attachNativeVoiceTasks(agent, undefined, lease);
           if (!off) throw new Error("Character background delegation is unavailable");
-          const release=Object.assign(async () => { try { await off(); } finally { lease.release(); } },{allowNested:off.allowNested});
+          const release=Object.assign(async () => {await off();},{allowNested:off.allowNested,currentProfile:lease.currentProfile,releaseIdentity:lease.release});
           return release;
         } catch (error) { lease.release(); throw error; }
       },
@@ -133,6 +133,7 @@ export function apply(ctx: Context, config: Config): void {
       history,
       runtimeStatus: () => preparedRuntime?.status() ?? "cold",
       transcript: sessionId => voiceTranscript(ctx.agents.get(sessionId)?.session.snapshotEvents() ?? []),
+      character: sessionId => {if(!ctx.hubCharacters.voiceCalls.has(sessionId))return;const c=ctx.hubCharacters.effectiveCharacter(sessionId);return c?{id:c.id,name:c.name}:undefined;},
       presentations: {
         summary: sessionId => presentations.summary(sessionId),
         async document(sessionId, id) {

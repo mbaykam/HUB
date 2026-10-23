@@ -14,6 +14,7 @@ async function fixture(overrides = {}, options = {}) {
     history: overrides.history,
     presentations: overrides.presentations,
     runtimeStatus: overrides.runtimeStatus,
+    character: overrides.character,
     share:overrides.share,
     async open(signal, sessionId) { opened++; if (overrides.open) await overrides.open(signal, sessionId); return call; },
     async close(value) { assert.equal(value, call); closed++; if (overrides.close) await overrides.close(); },
@@ -25,6 +26,22 @@ async function fixture(overrides = {}, options = {}) {
   return { web, call, process, requests, post, url, get opened() { return opened; }, get closed() { return closed; }, async dispose() { try { await web.dispose(); } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } } };
 }
 const admission = () => ({ requestId: randomUUID(), requestedAt: Date.now() });
+
+test('PWA and Telegram call identity follows explicit character handoffs without reopening speech',async()=>{
+ let character={id:'voice-fixture',name:'Voice fixture'};
+ const f=await fixture({character:session=>{assert.equal(session,'synthetic-voice-chat');return character;}});
+ try{
+  f.call.profile={id:character.id,name:character.name,revision:7};
+  await f.post('open',admission());
+  const status=()=>fetch(f.url+'status',{headers:{cookie:'synthetic-auth=1'}}).then(r=>r.json());
+  character={id:'specialist-fixture',name:'Renamed specialist'};
+  assert.deepEqual((await status()).activeCall,{callId:f.call.callId,sessionId:f.call.sessionId,profile:{...character,revision:7}});
+  assert.deepEqual(f.web.activeProfile(),{...character,revision:7});
+  f.call.transport='telegram';assert.equal((await status()).externalCall.profile.name,'Renamed specialist');
+  assert.equal(f.opened,1);assert.equal(f.closed,0);assert.equal(f.requests.length,0);
+  await f.post('close',{callId:f.call.callId});assert.equal((await status()).activeCall,undefined);
+ }finally{await f.dispose();}
+});
 test('listening controls require the owned live call and accept only a bounded mode, including Telegram',async()=>{
  const f=await fixture();try{
   const body={callId:f.call.callId,mode:'background'};

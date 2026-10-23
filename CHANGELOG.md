@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.2
+
+- Switch the active speaker during a live voice call without reconnecting or
+  losing context. The next reply uses the selected character's actual model,
+  personality and tool policy; the PWA and Telegram call identity follows it.
+- Keep worker targets consistent after a speaker change and retain existing
+  workers' original permission snapshots. Use the current roster directly for
+  character navigation instead of researching earlier routing conversations.
+
 ## 1.7.1
 
 - PWA Home: larger interactive 2D Knowledge preview with compact statistics,

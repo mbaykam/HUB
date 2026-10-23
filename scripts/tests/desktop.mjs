@@ -208,6 +208,7 @@ const taskFiles = Object.freeze({
   native: Object.freeze([
     "planner-native.test.mjs",
     "characters-native.test.mjs",
+    "voice-character-handoff.test.mjs",
     "voice-profiles.test.mjs",
     "voice-task-continuation.test.mjs",
   ]),

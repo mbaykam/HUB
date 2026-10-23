@@ -302,6 +302,10 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
       const response = await view!.fetch("/api/hub/voice/status", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)]) });
       if (!response.ok) throw new Error();
       const value = await response.json(); enabled = value.enabled === true;
+      const speaker=value.activeCall;
+      if(voiceSession&&speaker?.sessionId===voiceSession&&speaker.callId===cameraCall&&typeof speaker.profile?.name==="string"){
+        hub.setAttribute("data-active-character",speaker.profile.name);transcript.setAssistant(speaker.profile.name);
+      }
       const call = value.externalCall;
       if (call?.transport === "telegram" && typeof call.callId === "string" && typeof call.sessionId === "string") {
         if (!external || external.callId !== call.callId) { transcript.reset(); externalTranscriptKey = ""; }

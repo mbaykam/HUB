@@ -1,16 +1,17 @@
 import type { ToolRunContext,ToolGuard } from "@deepseek-ai/dsh-tools";
 import type { VoiceAgent, VoiceModelRoute } from "./voice-session.ts";
 import { currentTurnHasUserRequest, TASK_NOTIFICATION_RULE } from "./task-turn.ts";
+import type { VoiceProfile } from "../voice-profile-contract.ts";
 
 export const VOICE_TASK_TOOL = "hub_task";
-export type VoiceTaskAttachment = (() => Promise<void>) & { allowNested?: (execution: Parameters<ToolGuard>[0]) => boolean };
+export type VoiceTaskAttachment = (() => Promise<void>) & { allowNested?: (execution: Parameters<ToolGuard>[0]) => boolean; currentProfile?: () => VoiceProfile; releaseIdentity?: () => void };
 
 /** An optionally route-pinned alias of the existing native delegation tool. Never
  * install a new delegation capability: re-enter native dispatch so its preset,
  * allowed-model policy, depth limit, approvals and tool filters remain binding.
  * The alias owns no child agent, scheduler or cancellation lifetime.
  */
-export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceModelRoute, options?: { toolName?: string; targetName?: string; allowNested?: (exec: { callId: unknown; parent?: unknown }) => boolean }): Promise<VoiceTaskAttachment | undefined> {
+export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceModelRoute, options?: { toolName?: string; targetName?: string; target?: () => {toolName?:string;targetName?:string}; allowNested?: (exec: { callId: unknown; parent?: unknown }) => boolean }): Promise<VoiceTaskAttachment | undefined> {
   const tools = agent.ctx.tools;
   const nativeName = options?.toolName ?? "subagent";
   const native = tools?.get?.(nativeName, agent);
@@ -22,8 +23,8 @@ export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceMod
   const selectedRoute = route ? { provider: route.provider, model: route.model,
     ...(route.reasoningEffort ? { reasoning_effort: route.reasoningEffort } : {}) } : {};
   let active = true;
-  const dispatched = new Map<string, unknown>();
-  const foreground = new Set([VOICE_TASK_TOOL, "hub_delegate", "hub_goals_manage", "hub_automation_manage", "hub_planner", "hub_work_plan", "hub_present", "hub_save_conversation", "list_agents", "send_message", "interrupt_agent", "list_subagent_models"]);
+  const dispatched = new Map<string, {name:string;parent:unknown}>();
+  const foreground = new Set([VOICE_TASK_TOOL, "hub_switch_character", "hub_delegate", "hub_goals_manage", "hub_automation_manage", "hub_planner", "hub_work_plan", "hub_present", "hub_save_conversation", "list_agents", "send_message", "interrupt_agent", "list_subagent_models"]);
   const canUseForeground = (name: string) => foreground.has(name) || /^hub_knowledge_(search|read)$/.test(name) || /^mcp__hub_memory__(read_note|write_note|edit_note|build_context|search_notes)$/.test(name);
   // Filter the MODEL's view, rather than restricting inherited execution
   // capabilities that the specialist needs. The native guard below still
@@ -39,13 +40,14 @@ export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceMod
   const offGuard = tools.guard(exec => {
     if (exec.agent !== agent || canUseForeground(exec.name)) return;
     if (options?.allowNested?.(exec)) return;
-    if (exec.name === nativeName && dispatched.has(exec.callId) && dispatched.get(exec.callId) === exec.parent) return;
+    const dispatch=dispatched.get(exec.callId);
+    if (dispatch?.name===exec.name && dispatch.parent===exec.parent) return;
     return currentTurnHasUserRequest(agent) ? "Keep voice responsive: use hub_task for this work, then end your turn. Use list_agents for a non-blocking progress check. This operation was not started." : TASK_NOTIFICATION_RULE;
   });
   let off: () => void;
   try { off = tools.register({
     name: VOICE_TASK_TOOL,
-    description: "Start work in the background and immediately return a task identity so you can keep talking. Uses the native configured child model and permissions. For a self-contained interactive on-screen example, ask the child to return a complete hub_present payload (kind vega, title, Vega v6 spec with inline data and signals) in its final answer; publish that payload using hub_present when its completion notice arrives. For a full web app, have the child open its tested app in HUB's native browser so the user's task browser viewer can show it. Do not wait for the task here or claim success when delegation is refused.",
+    description: "Start work in the background and immediately return a task identity so you can keep talking. Uses the active character's configured delegation target; a main/custom speaker without a target uses its own model and permissions for the worker. To change who is speaking, use hub_switch_character instead. For a self-contained interactive on-screen example, ask the child to return a complete hub_present payload (kind vega, title, Vega v6 spec with inline data and signals) in its final answer; publish that payload using hub_present when its completion notice arrives. For a full web app, have the child open its tested app in HUB's native browser so the user's task browser viewer can show it. Do not wait for the task here or claim success when delegation is refused.",
     parameters: { type: "object", properties: { description: { type: "string" }, prompt: { type: "string" } }, required: ["description", "prompt"], additionalProperties: false },
     output: { schema: { ...native.output.schema }, render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }] },
     async execute(args, context) {
@@ -55,16 +57,22 @@ export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceMod
       exec.signal.throwIfAborted();
       if (!active || exec.agent !== agent || !exec.token || !exec.callId || !exec.deferContext) throw new Error("Tasks require this active voice conversation");
       if (!currentTurnHasUserRequest(agent)) { exec.concludeTurn?.(); throw new Error(TASK_NOTIFICATION_RULE); }
-      if (tools.get?.(nativeName, agent) !== native) throw new Error("Native delegation changed; reopen voice before starting a task");
+      // Resolve once per dispatch. An explicit speaker handoff changes future
+      // tasks, never the identity/permissions of an already-running child.
+      const target=options?.target?.()??{toolName:nativeName,targetName:options?.targetName};
+      const targetName=target.toolName;
+      const selectedNative=targetName?tools.get?.(targetName,agent):undefined;
+      const selectedProperties=selectedNative?.parameters.properties as Record<string,unknown>|undefined;
+      if(!selectedNative || !selectedProperties?.run_in_background || !options?.target && selectedNative!==native)throw new Error("Native delegation changed; reopen voice before starting a task");
       if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Invalid task arguments");
       const input = args as Record<string, unknown>;
       if (Object.keys(input).some(key => key !== "description" && key !== "prompt") || typeof input.description !== "string" || !input.description.trim() || typeof input.prompt !== "string" || !input.prompt.trim()) throw new Error("A task needs a description and prompt");
       const nativeCallId = `${exec.callId}:native-task` as typeof exec.callId;
-      dispatched.set(nativeCallId, exec.token);
+      dispatched.set(nativeCallId, {name:targetName!,parent:exec.token});
       let result;
-      try { result = await executeNative({ name: nativeName, callId: nativeCallId,
+      try { result = await executeNative({ name: targetName!, callId: nativeCallId,
         rootCallId: exec.rootCallId, parent: exec.token, agent: exec.agent, signal: exec.signal,
-        arguments: { ...input, ...(options?.targetName ? { description: `${options.targetName} · ${input.description}` } : {}), ...selectedRoute, run_in_background: true } }); }
+        arguments: { ...input, ...(target.targetName ? { description: `${target.targetName} · ${input.description}` } : {}), ...selectedRoute, run_in_background: true } }); }
       finally { dispatched.delete(nativeCallId); }
       for (const deferred of result.additionalContexts ?? []) exec.deferContext(deferred);
       if (result.isError) throw new Error(result.error.message);
@@ -76,6 +84,6 @@ export async function attachNativeVoiceTasks(agent: VoiceAgent, route?: VoiceMod
   }); } catch (error) { offSchemas?.(); offGuard(); throw error; }
   if (!tools.get?.(VOICE_TASK_TOOL, agent)) { active = false; off(); offGuard(); offSchemas?.(); return; }
   const release:VoiceTaskAttachment=async () => { if (active) { active = false; off(); offGuard(); offSchemas?.(); } };
-  release.allowNested=exec=>active&&exec.agent===agent&&((exec.name===nativeName&&dispatched.has(exec.callId)&&dispatched.get(exec.callId)===exec.parent)||!!options?.allowNested?.(exec));
+  release.allowNested=exec=>{const dispatch=dispatched.get(exec.callId);return active&&exec.agent===agent&&((dispatch?.name===exec.name&&dispatch.parent===exec.parent)||!!options?.allowNested?.(exec));};
   return release;
 }

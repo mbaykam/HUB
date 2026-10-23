@@ -240,3 +240,25 @@ test("native monotonic profile guard blocks global, scoped and nested dispatch w
   assert.equal((await run("shell")).isError, false);
   await scope.dispose();
 });
+
+test('explicit voice handoffs replace the foreground policy while existing children keep their detached policy',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-voice-profile-test-'));let host,policies;const scopes=[];
+ try{
+  host=await storage(root);const ctx=host.ctx;await ctx.plugin(Agents);await ctx.plugin(Sessions);await ctx.plugin(SystemPrompt,{});await ctx.plugin(Tools);
+  policies=createVoiceTaskPolicies(ctx,host.facility);
+  for(const name of ['read','shell'])ctx.tools.register({name,description:name,parameters:{type:'object',properties:{}},output:{schema:{type:'string'},render:()=>[]},execute:async()=>name});
+  async function make(id,parent){const agent={id,status:'idle',session:ctx.sessions.create(id,{meta:{cwd:root,...parent?{origin:'subagent',parentSession:parent.id}:{}}}),inbox:{nextTurn:[],nextStep:[]}};let scope;await ctx.plugin(Object.assign(inner=>{scope=createScope(inner,agent);},{inject:['tools','systemPrompt']}));scopes.push(scope);agent.ctx=scope.ctx;ctx.agents.register(agent);return agent;}
+  const parent=await make('handoff-parent'),run=(agent,name)=>ctx.tools.execute({agent,name,arguments:{},callId:'fixture-'+name,signal:AbortSignal.timeout(1000)});
+  let selected={...initial,id:'e1a5064c-a39f-4b01-95bf-d07c9324f786',name:'First',tools:{mode:'allow',names:['read']}};
+  const offProfile=attachVoiceProfilePolicy(parent,selected,undefined,()=>selected),offTasks=await policies.bind(parent,()=>selected.tools);
+  const first=await make('first-worker',parent);await policies.ready(first);
+  selected={...selected,name:'Second',instructions:'New personality',tools:{mode:'allow',names:['shell']}};
+  assert.equal((await run(parent,'read')).isError,true);assert.equal((await run(parent,'shell')).isError,false);
+  const assembly=await ctx.systemPrompt.assemble({scope:parent});assert.match(assembly.sections.find(s=>s.name==='hub:voice-personality').text,/Second[\s\S]*New personality/);
+  const second=await make('second-worker',parent);await policies.ready(second);
+  assert.equal((await run(first,'read')).isError,false);assert.equal((await run(first,'shell')).isError,true);
+  assert.equal((await run(second,'shell')).isError,false);assert.equal((await run(second,'read')).isError,true);
+  selected.tools.names.push('read');assert.equal((await run(second,'read')).isError,true,'Child policy is captured at delegation, not a live reference');
+  offProfile();offTasks();assert.equal((await run(first,'shell')).isError,true);assert.equal((await run(second,'read')).isError,true);
+ }finally{await policies?.close();for(const scope of scopes)await scope.dispose();await host?.close();await host?.ctx.fiber.dispose();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-voice-profile-test-'));await rm(root,{recursive:true,force:true});}
+});

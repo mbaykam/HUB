@@ -36,7 +36,7 @@ export function intersectVoiceTools(a: VoiceToolPolicy | undefined, b: VoiceTool
  */
 export function createVoiceTaskPolicies(ctx: TaskPolicyContext, storage: TaskPolicyStorage) {
   let stopped = false;
-  const active = new Map<VoiceAgent, VoiceToolPolicy>();
+  const active = new Map<VoiceAgent, () => VoiceToolPolicy>();
   const states = new Map<VoiceAgent, { ready: Promise<VoiceToolPolicy | undefined> }>();
   const writes = new Set<Promise<unknown>>();
   const pendingById = new Map<string, Promise<VoiceToolPolicy | undefined>>();
@@ -45,7 +45,8 @@ export function createVoiceTaskPolicies(ctx: TaskPolicyContext, storage: TaskPol
   const table = domain.then(value => value.table("tasks")); void table.catch(() => {});
   function capture(agent: VoiceAgent | undefined) {
     if (!agent) return Promise.resolve(undefined);
-    const lease = active.get(agent); // Detached at the synchronous delegation boundary.
+    const read = active.get(agent);
+    const lease = read ? voiceToolPolicySchema.parse(read()) : undefined; // Detached at the synchronous delegation boundary.
     const inherited = states.get(agent)?.ready;
     return Promise.resolve(inherited).then(policy => intersectVoiceTools(policy, lease));
   }
@@ -108,11 +109,12 @@ export function createVoiceTaskPolicies(ctx: TaskPolicyContext, storage: TaskPol
   const offDisposed = ctx.on("agent/disposed", ({ agent }) => { states.delete(agent); active.delete(agent); }, { global: true });
   for (const agent of ctx.agents.list()) attach(agent);
   return {
-    async bind(agent: VoiceAgent, value: VoiceToolPolicy) {
+    async bind(agent: VoiceAgent, value: VoiceToolPolicy | (()=>VoiceToolPolicy)) {
       if (stopped || active.has(agent)) throw new Error("Task permissions are not ready for another voice lease");
       attach(agent); await states.get(agent)!.ready;
       if (stopped || active.has(agent)) throw new Error("Task permissions are not ready for another voice lease");
-      const policy = voiceToolPolicySchema.parse(value); active.set(agent, policy);
+      const snapshot=voiceToolPolicySchema.parse(typeof value==="function"?value():value);
+      const policy=typeof value==="function"?value:()=>snapshot;active.set(agent,policy);
       let closed = false;
       return () => { if (!closed) { closed = true; if (active.get(agent) === policy) active.delete(agent); } };
     },
