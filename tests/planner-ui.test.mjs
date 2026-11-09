@@ -25,6 +25,20 @@ test('calendar has an explicit open/close control and switching to voice keeps s
  planner.update({visible:false,voice:true,sessionId:'voice-fixture'});assert.equal(planner.panel.hidden,true);planner.open();assert.equal(root.querySelector('[data-hub-planner-dialog]').open,true);button(root,'Done').click();assert.equal(root.querySelector('[data-hub-planner-dialog]').open,false);
 });
 
+test('planner tabs show one view, keep drafts when switching and support keyboard navigation',async t=>{
+ const {root,view}=await fixture(t),tabs=root.querySelector('[role=tablist]'),[agenda,todos]=tabs.querySelectorAll('[role=tab]'),panes=root.querySelectorAll('[role=tabpanel]'),input=root.querySelector('.hub-todo-quick input');
+ assert.equal(todos.getAttribute('aria-selected'),'true');assert.equal(panes[0].hidden,true);assert.equal(panes[1].hidden,false);assert.equal(root.querySelector('.hub-planner-personal details').hidden,true);
+ input.value='Keep my unfinished task';agenda.click();assert.equal(panes[0].hidden,false);assert.equal(panes[1].hidden,true);
+ tabs.dispatchEvent(new view.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(root.activeElement,todos);assert.equal(panes[1].hidden,false);assert.equal(input.value,'Keep my unfinished task');
+ agenda.click();root.querySelector('.hub-calendar-header button:nth-child(2)').click();const close=button(root,'Close calendar');assert.equal(close.hidden,false);close.click();assert.equal(close.hidden,true);assert.equal(root.querySelector('.hub-calendar').hasAttribute('data-expanded'),false);
+});
+
+test('quick task editor keeps extra fields tucked away and preserves Soon/Later selection',async t=>{
+ const {root,view,store}=await fixture(t),select=root.querySelector('[aria-label="To-do list"]');select.value='later';select.dispatchEvent(new view.Event('change'));
+ root.querySelector('.hub-todo-quick button').click();const editor=root.querySelector('[data-hub-planner-editor]');assert.equal(editor.querySelector('h2').textContent,'New to-do');assert.equal(field(root,'Planning horizon').value,'later');assert.equal(field(root,'Type').closest('details').open,false);assert.equal(field(root,'Details · optional').closest('details').open,false);
+ field(root,'Title').value='A longer-term plan';editor.querySelector('form').dispatchEvent(new view.Event('submit',{cancelable:true}));await setImmediate();await store.drain();await setImmediate();assert.equal(store.snapshot().items[0].horizon,'later');assert.match(root.querySelector('.hub-todo-row').textContent,/longer-term/);
+});
+
 test('failed save preserves an editable draft, then retry succeeds without duplicating items',async t=>{
  const {root,store,view,setFail}=await fixture(t);root.querySelector('[aria-label="Add calendar event"]').click();field(root,'Title').value='Fixture review';setFail(true);root.querySelector('[data-hub-planner-editor] form').dispatchEvent(new view.Event('submit',{cancelable:true}));await setImmediate();await setImmediate();assert.equal(root.querySelector('[data-hub-planner-editor]').open,true);assert.equal(field(root,'Title').value,'Fixture review');assert.match(root.querySelector('[data-hub-planner-editor] [role=status]').textContent,/unchanged draft/);assert.equal(store.snapshot().items.length,0);
  setFail(false);root.querySelector('[data-hub-planner-editor] form').dispatchEvent(new view.Event('submit',{cancelable:true}));await setImmediate();await setImmediate();await store.drain();await setImmediate();assert.equal(store.snapshot().items.length,1);assert.equal(store.snapshot().items[0].kind,'event');assert.equal(root.querySelector('[data-hub-planner-editor]').open,false);

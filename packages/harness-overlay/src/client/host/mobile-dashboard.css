@@ -43,3 +43,41 @@
 [data-hub-planner-nav][hidden],[data-hub-planner] [hidden],[data-hub-planner-editor] [hidden]{display:none!important}
 @media(max-width:600px){.hub-planner-personal{grid-template-columns:1fr;gap:10px}.hub-planner-personal>section+section{border-top:1px solid #a6b8ef16;padding-top:8px}.hub-home-knowledge-stats{padding:8px 14px 0}.hub-home-knowledge-stats dl{gap:3px 10px}.hub-home-knowledge-stats dd{font-size:12px}[data-hub-planner][data-has-work] .hub-planner-personal>section:nth-child(2)>header{align-items:flex-start;flex-direction:column;gap:6px}.hub-work-plans{padding-left:12px}.hub-planner-personal>section:first-child{max-width:100%}}
 @media(prefers-reduced-motion:no-preference){[data-hub-home-knowledge],[data-hub-planner-seat]{animation:hub-dashboard-appear .2s ease-out}@keyframes hub-dashboard-appear{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}}
+
+/* A personal planner: one list at a time, clear actions, generous touch targets. */
+[data-hub-planner]{background:#111827;border-color:#a6b8ef1c;border-radius:20px;box-shadow:none;backdrop-filter:none;padding:12px 14px}
+[data-hub-planner] h2{font-size:16px}[data-hub-planner]>header{margin:0}[data-hub-planner]>header>button{padding:8px 0 8px 12px;font-size:12px;color:#bfc9e3}[data-hub-planner]>header>button::after{content:'↗';margin-left:6px}
+[data-hub-planner] button,[data-hub-planner-editor] button{appearance:none;-webkit-appearance:none;box-shadow:none;min-height:44px}
+[data-hub-planner] .hub-planner-tabs{display:flex;gap:24px;border-bottom:1px solid #a6b8ef20;margin:0 0 12px}
+[data-hub-planner] .hub-planner-tabs button{border-radius:0;padding:8px 0;color:#93a2bd;font-size:14px;font-weight:500;border-bottom:2px solid transparent}
+[data-hub-planner] .hub-planner-tabs button[aria-selected=true]{color:#eef0ff;border-bottom-color:#bfc4f4;background:transparent}
+[data-hub-planner] .hub-planner-tabs button[data-count]:not([data-count=""])::after{content:attr(data-count);margin-left:7px;font-size:11px;opacity:.65}
+[data-hub-planner] select:focus-visible{outline:2px solid #aeb8ff;outline-offset:2px}
+[data-hub-planner] .hub-planner-personal,[data-hub-planner][data-has-work] .hub-planner-personal{display:block}
+[data-hub-planner] .hub-planner-personal>section{border:0;padding:0}[data-hub-planner] .hub-planner-personal>section>header{margin:0 0 8px}
+[data-hub-planner] .hub-planner-personal h3{font-size:13px;color:#a5b3cc;font-weight:500}
+.hub-planner-sr-only{position:absolute!important;width:1px;height:1px;padding:0!important;margin:-1px!important;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+[data-hub-planner] .hub-calendar-header{justify-content:flex-start;flex:none}
+[data-hub-planner] .hub-calendar-header>button:nth-child(2){font-size:14px!important;padding:8px 4px!important}
+[data-hub-planner] .hub-calendar-header>button:nth-child(2)::after{content:'⌄';margin-left:8px;color:#99aac7}
+[data-hub-planner] .hub-calendar-header>button[aria-expanded=true]::after{content:'⌃'}
+[data-hub-planner] .hub-calendar-close{display:block;margin-left:auto;font-size:12px;color:#c5c9f5}
+[data-hub-planner] .hub-calendar>button{min-height:44px;font-size:14px}
+[data-hub-planner] .hub-agenda-event{display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px;align-items:start;padding:12px 0;background:transparent!important;border-bottom:1px solid #a6b8ef14;border-radius:0;font-size:14px!important;line-height:1.5;margin:0}
+[data-hub-planner] .hub-agenda-event small{font-size:12px;margin:2px 0 0;overflow-wrap:anywhere}
+[data-hub-planner] .hub-agenda-event span{min-width:0;overflow-wrap:anywhere}
+[data-hub-planner] .hub-todo-horizons{padding:0;border:0}
+[data-hub-planner] .hub-todo-horizons select{min-height:44px;max-width:140px;border:0;border-radius:8px;background:#192336;color:#d6def0;padding:6px 10px;font:inherit;font-size:13px;color-scheme:dark}
+[data-hub-planner] .hub-todo-quick{border:1px solid #a6b8ef25;border-radius:12px;padding:4px 4px 4px 12px;margin-bottom:8px;align-items:center;background:#0c1220}
+[data-hub-planner] .hub-todo-quick input{min-height:40px;font-size:16px;box-shadow:none;appearance:none}
+[data-hub-planner] .hub-todo-quick button{width:auto;min-width:52px;font-size:13px;padding:8px 12px;background:#c2c7ee;color:#171e32;border-radius:9px;font-weight:600}
+[data-hub-planner] .hub-todo-row{gap:2px}[data-hub-planner] .hub-todo-toggle{display:grid;place-items:center;min-width:44px;min-height:44px;cursor:pointer}
+[data-hub-planner] .hub-todo-toggle>input{width:20px;height:20px;margin:0;accent-color:#c2c7ee;color-scheme:dark}
+[data-hub-planner] .hub-todo-row>button{font-size:14px;line-height:1.5;padding:10px 0}[data-hub-planner] .hub-todo-row small{font-size:12px}
+[data-hub-planner] p{font-size:13px;line-height:1.6}[data-hub-planner][data-has-work] .hub-planner-body{display:block}
+[data-hub-planner] .hub-work-plans{border-left:0;border-top:1px solid #a6b8ef20;padding:14px 0 0;margin-top:16px}
+[data-hub-planner-editor]{background:#121a29;border-radius:20px;padding:18px}[data-hub-planner-editor]>header{margin-bottom:16px}
+[data-hub-planner-editor] label{font-size:13px}[data-hub-planner-editor] details{border-top:1px solid #a6b8ef20;padding-top:4px}
+[data-hub-planner-editor] details>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;justify-content:space-between}
+[data-hub-planner-editor] details>summary::after{content:'+'}[data-hub-planner-editor] details[open]>summary::after{content:'−'}
+[data-hub-planner-editor] details>label{margin-top:14px}[data-hub-planner-editor] button[type=submit]{background:#c2c7ee;color:#171e32;font-weight:600;min-width:112px}

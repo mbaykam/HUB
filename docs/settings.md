@@ -9,6 +9,14 @@ General settings retain language, conversation display and permission defaults.
 The PWA hides inherited deployment-only Models, Plugins and Agent presets pages;
 their underlying host configuration and stored settings remain available.
 
+## Your day
+
+The home planner separates **Agenda** and **To-dos** into tabs. Add a task in one
+line, or choose **Soon** / **Later** to switch lists. Open the date in Agenda to
+show the month; **Close calendar** returns to the day's entries. Extra item fields
+live under **More options**. **Open** shows the full planner. During voice calls,
+the assistant's steps remain separate from your personal commitments.
+
 ## One speech system, individual voices
 
 **Speech** sets the recognition model, recognition language, synthesis engine,
