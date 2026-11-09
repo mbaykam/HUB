@@ -67,4 +67,24 @@ final class HubDeviceStateTests: XCTestCase {
         XCTAssertThrowsError(try state.rememberVoice(HubVoiceCheckpoint(server: foreign, lease: lease(), peerID: nil, savedAt: time)))
         XCTAssertThrowsError(try state.rememberVoice(HubVoiceCheckpoint(server: server, lease: lease(), peerID: nil, savedAt: time.addingTimeInterval(120))))
     }
+    func testAdmissionSurvivesReopenWithOriginalNonceAndIsClearedOnLogout() throws {
+        let server = try HubServer(address: "https://hub.example.com"), store = PrivateFixture()
+        let state = HubDeviceState(server: server, store: store, now: { self.time })
+        let receipt = HubVoiceAdmission(server: server, requestedAt: 1_700_000_000_000, sessionID: "original-chat", savedAt: time)
+        try state.rememberAdmission(receipt)
+        let reopened = HubDeviceState(server: server, store: store, now: { self.time })
+        XCTAssertEqual(try reopened.admission()?.requestID, receipt.requestID)
+        XCTAssertEqual(try reopened.admission()?.requestedAt, receipt.requestedAt)
+        XCTAssertEqual(try reopened.admission()?.sessionID, "original-chat")
+        try reopened.clear()
+        XCTAssertNil(try state.admission())
+    }
+    func testAdmissionRejectsWrongOriginAndExpiresWithoutInventingANewReceipt() throws {
+        let server = try HubServer(address: "https://hub.example.com"), store = PrivateFixture()
+        let state = HubDeviceState(server: server, store: store, now: { self.time })
+        let foreign = try HubServer(address: "https://other.example.com")
+        XCTAssertThrowsError(try state.rememberAdmission(HubVoiceAdmission(server: foreign, requestedAt: 1, savedAt: time)))
+        try state.rememberAdmission(HubVoiceAdmission(server: server, requestedAt: 1, savedAt: time))
+        XCTAssertNil(try HubDeviceState(server: server, store: store, now: { self.time.addingTimeInterval(601) }).admission())
+    }
 }

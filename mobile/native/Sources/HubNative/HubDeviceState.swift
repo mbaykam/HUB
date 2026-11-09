@@ -6,6 +6,20 @@ public protocol HubPrivateStore {
     func remove(_ key: String) throws
 }
 
+/// Persisted before HTTP admission, so process loss can replay exactly one
+/// original receipt instead of creating a second conversation.
+public struct HubVoiceAdmission: Codable {
+    public let origin: String
+    public let requestID: UUID
+    public let requestedAt: Int64
+    public let sessionID: String?
+    public let savedAt: Date
+    public init(server: HubServer, requestedAt: Int64, sessionID: String? = nil, requestID: UUID = UUID(), savedAt: Date = Date()) {
+        origin = server.origin.absoluteString; self.requestedAt = requestedAt
+        self.sessionID = sessionID; self.requestID = requestID; self.savedAt = savedAt
+    }
+}
+
 public struct HubVoiceCheckpoint: Codable {
     public let origin: String
     public let lease: HubVoiceLease
@@ -31,6 +45,7 @@ public final class HubDeviceState {
     private let now: () -> Date
     private var authKey: String { "auth:" + server.origin.absoluteString }
     private var voiceKey: String { "voice:" + server.origin.absoluteString }
+    private var admissionKey: String { "admission:" + server.origin.absoluteString }
 
     public init(server: HubServer, store: HubPrivateStore, now: @escaping () -> Date = Date.init) {
         self.server = server; self.store = store; self.now = now
@@ -84,10 +99,30 @@ public final class HubDeviceState {
         try validate(value)
         return value
     }
+    public func rememberAdmission(_ value: HubVoiceAdmission) throws {
+        try validateAdmission(value)
+        let data = try JSONEncoder().encode(value)
+        guard data.count <= 4096 else { throw StateError.invalidRecord }
+        try store.write(data, for: admissionKey)
+    }
+    public func admission() throws -> HubVoiceAdmission? {
+        guard let data = try store.read(admissionKey) else { return nil }
+        guard data.count <= 4096 else { throw StateError.invalidRecord }
+        let value = try JSONDecoder().decode(HubVoiceAdmission.self, from: data)
+        try validateAdmission(value)
+        return now().timeIntervalSince(value.savedAt) < 600 ? value : nil
+    }
+    private func validateAdmission(_ value: HubVoiceAdmission) throws {
+        guard value.origin == server.origin.absoluteString, value.requestedAt > 0,
+              value.requestedAt <= 9_007_199_254_740_991,
+              value.sessionID.map(HubVoiceAPI.validID) ?? true,
+              now().timeIntervalSince(value.savedAt) >= -60 else { throw StateError.invalidRecord }
+    }
+    public func clearAdmission() throws { try store.remove(admissionKey) }
     private func validate(_ value: HubVoiceCheckpoint) throws {
         guard value.origin == server.origin.absoluteString, HubVoiceAPI.validID(value.lease.callId),
               HubVoiceAPI.validID(value.lease.sessionId), value.peerID.map({ !$0.isEmpty && $0.utf8.count <= 128 && !$0.contains("\n") && !$0.contains("\r") }) ?? true,
               now().timeIntervalSince(value.savedAt) >= -60, now().timeIntervalSince(value.savedAt) < 30 * 86_400 else { throw StateError.invalidRecord }
     }
-    public func clear() throws { try store.remove(authKey); try store.remove(voiceKey) }
+    public func clear() throws { try store.remove(authKey); try store.remove(voiceKey); try clearAdmission() }
 }

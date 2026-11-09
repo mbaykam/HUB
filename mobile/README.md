@@ -60,6 +60,13 @@ screen offers explicit cleanup through **End** before resuming. The microphone
 does not restart merely because you reopen the app. This recovery path still
 needs real-device end-to-end acceptance.
 
+Startup also saves its admission receipt before sending the request. If the app
+closes before receiving the response, Voice offers **Recover startup** and reuses
+that exact receipt. It never silently starts another chat to recover a lost
+response. A confirmed expired/ended receipt clears the recovery prompt; a network
+or sign-in failure leaves it available to retry. Microphone permission delays
+use a refreshed server clock before a new admission.
+
 Transport dependency: WebRTC134.0.0, pinned by exact SwiftPM version and the
 upstream binary checksum. Its BSD notices are included in the app bundle. Native
 HTTP signaling refuses redirects and limits cookies to the selected HTTPS host.

@@ -34,7 +34,7 @@ public struct HubIceServer: Codable {
 }
 
 public enum HubVoiceAPIError: Error, Equatable {
-    case signInRequired, busy, callUnavailable, serviceUnavailable, invalidResponse
+    case signInRequired, busy, callUnavailable, admissionExpired, serviceUnavailable, invalidResponse
 }
 
 private final class HubNoRedirects: NSObject, URLSessionTaskDelegate {
@@ -92,6 +92,9 @@ public final class HubVoiceAPI {
         case 300...399, 401, 403: throw HubVoiceAPIError.signInRequired
         case 409: throw HubVoiceAPIError.busy
         case 410: throw HubVoiceAPIError.callUnavailable
+        case 400:
+            let object = data.count <= 4096 ? (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] : nil
+            throw object?["error"] as? String == "expired-admission" ? HubVoiceAPIError.admissionExpired : HubVoiceAPIError.invalidResponse
         default: throw HubVoiceAPIError.serviceUnavailable
         }
         guard response.mimeType == "application/json", data.count <= 262_144 else { throw HubVoiceAPIError.invalidResponse }
@@ -107,7 +110,7 @@ public final class HubVoiceAPI {
     /// A lost response must reuse the original receipt, never create a second
     /// conversation. The receipt is created before sending and stays stable.
     public func open(serverTime: Int64, sessionId: String? = nil, requestId: UUID = UUID()) async throws -> HubVoiceLease {
-        guard serverTime > 0, sessionId.map(Self.validID) ?? true else { throw HubVoiceAPIError.invalidResponse }
+        guard serverTime > 0, serverTime <= 9_007_199_254_740_991, sessionId.map(Self.validID) ?? true else { throw HubVoiceAPIError.invalidResponse }
         var body: [String: Any] = ["requestId": requestId.uuidString.lowercased(), "requestedAt": serverTime]
         if let sessionId { body["sessionId"] = sessionId }
         let data: Data
@@ -119,6 +122,11 @@ public final class HubVoiceAPI {
         let lease = try JSONDecoder().decode(HubVoiceLease.self, from: data)
         guard Self.validID(lease.callId), Self.validID(lease.sessionId) else { throw HubVoiceAPIError.invalidResponse }
         return lease
+    }
+
+    public func recover(_ admission: HubVoiceAdmission) async throws -> HubVoiceLease {
+        guard admission.origin == server.origin.absoluteString else { throw HubVoiceAPIError.invalidResponse }
+        return try await open(serverTime: admission.requestedAt, sessionId: admission.sessionID, requestId: admission.requestID)
     }
 
     public func close(callId: String) async throws { _ = try await request("close", method: "POST", body: ["callId": callId]) }

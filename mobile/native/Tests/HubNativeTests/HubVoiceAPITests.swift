@@ -32,6 +32,13 @@ private final class VoiceFixture: URLProtocol {
     override func stopLoading() {}
 }
 
+private final class AdmissionPrivateFixture: HubPrivateStore {
+    var data: [String: Data] = [:]
+    func read(_ key: String) -> Data? { data[key] }
+    func write(_ value: Data, for key: String) { data[key] = value }
+    func remove(_ key: String) { data.removeValue(forKey: key) }
+}
+
 final class HubVoiceAPITests: XCTestCase {
     override func setUp() { VoiceFixture.requests = []; VoiceFixture.bodies = [] }
     private func client() throws -> HubVoiceAPI {
@@ -100,5 +107,41 @@ final class HubVoiceAPITests: XCTestCase {
             return (200, "application/json", "{}")
         }
         _ = try await api.offer(callId: "owned-call", payload: ["candidates": []], trickle: true)
+    }
+    func testProcessRestartRecoversTheOriginalAdmissionInsteadOfCreatingAnotherConversation() async throws {
+        let server = try HubServer(address: "https://hub.example.com"), store = AdmissionPrivateFixture()
+        let receipt = HubVoiceAdmission(server: server, requestedAt: 1_700_000_000_000, sessionID: "original-chat")
+        try HubDeviceState(server: server, store: store).rememberAdmission(receipt)
+        var observedIDs = Set<String>()
+        VoiceFixture.respond = { _, index in
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: VoiceFixture.bodies.last!) as? [String: Any])
+            observedIDs.insert(try XCTUnwrap(body["requestId"] as? String))
+            if index <= 2 { throw URLError(.networkConnectionLost) }
+            return (200, "application/json", #"{"callId":"owned-call","sessionId":"original-chat"}"#)
+        }
+        let first = try client()
+        do { _ = try await first.recover(receipt); XCTFail("Both responses were lost") } catch { XCTAssertTrue(error is URLError) }
+        first.invalidate()
+        let reopened = HubDeviceState(server: server, store: store)
+        let recoveredReceipt = try XCTUnwrap(reopened.admission())
+        let second = try client()
+        defer { second.invalidate() }
+        let owned = try await second.recover(recoveredReceipt)
+        XCTAssertEqual(owned.sessionId, "original-chat")
+        XCTAssertEqual(VoiceFixture.requests.count, 3)
+        XCTAssertEqual(Set(VoiceFixture.bodies).count, 1)
+        XCTAssertEqual(observedIDs, [receipt.requestID.uuidString.lowercased()])
+    }
+    func testExpiredAdmissionAndForeignReceiptNeverCreateAnotherRequest() async throws {
+        let api = try client(), server = try HubServer(address: "https://hub.example.com")
+        defer { api.invalidate() }
+        VoiceFixture.respond = { _, _ in (400, "application/json", #"{"error":"expired-admission"}"#) }
+        do { _ = try await api.recover(HubVoiceAdmission(server: server, requestedAt: 1)); XCTFail("Must not mint another receipt") }
+        catch { XCTAssertEqual(error as? HubVoiceAPIError, .admissionExpired) }
+        XCTAssertEqual(VoiceFixture.requests.count, 1)
+        let foreign = try HubServer(address: "https://other.example.com")
+        do { _ = try await api.recover(HubVoiceAdmission(server: foreign, requestedAt: 1)); XCTFail("Wrong authority") }
+        catch { XCTAssertEqual(error as? HubVoiceAPIError, .invalidResponse) }
+        XCTAssertEqual(VoiceFixture.requests.count, 1)
     }
 }

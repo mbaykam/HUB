@@ -164,7 +164,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             message.text = "Complete HUB sign-in before starting voice."
             return
         }
-        if voice?.isActive != true, let saved = try? deviceState.voice() {
+        if voice?.isActive != true, let pending = try? deviceState.admission() {
+            let choices = UIAlertController(title: "Interrupted voice startup", message: "Recover the previous request before starting another conversation.", preferredStyle: .alert)
+            choices.addAction(UIAlertAction(title: "Recover startup", style: .default) { [weak self] _ in
+                self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil, pending: pending)
+            })
+            choices.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            present(choices, animated: true)
+        } else if voice?.isActive != true, let saved = try? deviceState.voice() {
             let choices = UIAlertController(title: "Voice conversation", message: "Continue your last voice conversation, or start a new one.", preferredStyle: .actionSheet)
             choices.addAction(UIAlertAction(title: "Resume last conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: saved) })
             choices.addAction(UIAlertAction(title: "Start new conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) })
@@ -173,8 +180,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             present(choices, animated: true)
         } else { presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) }
     }
-    private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?) {
-        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint)
+    private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil) {
+        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending)
         voice = model
         let sheet = HubVoiceViewController(voice: model)
         present(UINavigationController(rootViewController: sheet), animated: true) { [weak self, weak sheet] in
