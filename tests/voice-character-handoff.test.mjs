@@ -19,6 +19,7 @@ const {createVoiceTaskPolicies}=await import('../packages/harness-overlay/src/ho
 const {TestSessionQuery}=await import('../vendor/deepseek-harness/packages/subagent/subagent/tests/test-session-query.ts');
 const {createUserMessage}=await native('@deepseek-ai/dsh-llm');
 const {default:Projections}=await native('@deepseek-ai/dsh-session-projection');
+const {default:SessionTitles}=await native('@deepseek-ai/dsh-session-title');
 const {default:Persistence}=await native('@deepseek-ai/dsh-session-persistence-jsonl');
 const {default:AgentLoop}=await native('@deepseek-ai/dsh-agent-loop');
 const {default:Subagents}=await native('@deepseek-ai/dsh-subagent');
@@ -46,6 +47,7 @@ test('live voice switches its actual model, persona, tool policy and worker targ
   await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(AgentLoop,{agents:[]});
   await ctx.plugin(TestSessionQuery);await ctx.plugin(Subagents);await ctx.plugin(Spawn,{providerName:'hub-character-spawn'});await ctx.plugin(Storage);
   backend=new JsonStorageBackend(join(root,'domains'));ctx.storage.backend.register('json',backend);facility=new DomainFacility(ctx,{backend:'json'});ctx.storage.mount('domain',facility);
+  await ctx.plugin(SessionTitles,{fallbackMaxWords:5,fallbackMaxBytes:40,maxTitleBytes:80});
   let deployment={provider:'main',model:'mock'},specialistId;const selections=new Map(),children=[];
   ctx.on('agent/created',({agent})=>{if(agent.session.header.origin==='subagent'){children.push(agent);return;}const ref={current:{provider:'main',model:'mock'},assembled:undefined};selections.set(agent.id,ref);installModelSelection(agent.ctx,ref);},{global:true});
   const main=new MockAdapter([textResponse('The main assistant is back.')]);

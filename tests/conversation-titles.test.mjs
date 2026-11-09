@@ -61,6 +61,24 @@ test('manual rename cancels pending native refinement instead of accepting a sta
   assert.equal(ctx.sessionTitle.get(session).title,'Keep this name');
  }finally{await off();await ctx.fiber.dispose();}
 });
+test('native automatic cadence replaces the greeting only after the completed topic turn',async()=>{
+ const ctx=await setup(),off=installConversationTitles(ctx,10),session=ctx.sessions.create(SessionId('hub-eval-topic-automatic'));
+ try{
+  session.append('turn/start',{turn:1});
+  session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Hello'}]}),{surfaceOp:'append'});
+  session.append('request/header',{header:{config:{provider:'fixture',model:'existing'}},reason:'initial'});
+  session.append('turn/end',{turn:1,reason:{kind:'completed'}});await tick(25);
+  assert.equal(ctx.sessionTitle.get(session).title,'Hello');
+  session.append('turn/start',{turn:2});
+  session.append('user/message',createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Demonstrate a pendulum on screen'}]}),{surfaceOp:'append'});
+  session.append('request/header',{header:{config:{provider:'fixture',model:'existing'}},reason:'change'});
+  const events=[];visual(events);for(const e of events)session.append(e.type,e.data,e.type==='tool/result'?{surfaceOp:'append'}:undefined);
+  await tick(25);assert.equal(ctx.sessionTitle.get(session).title,'Hello','Do not refine a still-running turn');
+  session.append('turn/end',{turn:2,reason:{kind:'completed'}});
+  const deadline=Date.now()+1000;while(ctx.sessionTitle.get(session).title!=='Pendulum simulator'){assert.ok(Date.now()<deadline);await tick(10);}
+  assert.equal(ctx.sessionTitle.get(session).source.kind,'provider');
+ }finally{await off();await ctx.fiber.dispose();}
+});
 test('model titles see bounded conversation text, supported low reasoning, no hidden reasoning or injected context',async()=>{
  let provider,options,logged;
  const messages=[{seq:1,text:'Hello'},{seq:2,text:'Compare the two study plans'}],events=[
