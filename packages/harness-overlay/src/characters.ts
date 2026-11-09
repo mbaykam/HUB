@@ -34,7 +34,7 @@ import {installNativePush} from "./host/native-push-install.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
 export const name="hub-characters";
-export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments","credentials"];
+export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments"];
 declare module "@deepseek-ai/cordis" { interface Context { hubCharacters:HubCharacters; } }
 type CharacterAgent={id:string;status?:string;session:{header:{origin?:string;parentSession?:string};snapshotEvents():readonly {type:string;data?:unknown}[]};ctx:any};
 type Mount={revision:number;fibers:{dispose():Promise<void>}[];names:Map<string,string>;snapshot?:HubCharactersState;turnSnapshot?:HubCharactersState;loading?:Promise<void>;assembled?:{character:HubCharacter;state:HubCharactersState};voiceCharacter?:HubCharacter;pendingVoiceCharacter?:HubCharacter;nativeRoute?:string};

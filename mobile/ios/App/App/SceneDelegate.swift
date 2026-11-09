@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import UserNotifications
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
@@ -10,6 +11,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window = UIWindow(windowScene: windowScene)
         window?.rootViewController = UINavigationController(rootViewController: HubConnectionViewController())
         window?.makeKeyAndVisible()
+
+        if let response = connectionOptions.notificationResponse,
+           response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            HubNotifications.shared.receive(response.notification.request.content.userInfo)
+        }
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }

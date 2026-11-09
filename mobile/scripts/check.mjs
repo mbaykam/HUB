@@ -14,6 +14,9 @@ for(const name of ['@capacitor/core','@capacitor/ios','@capacitor/cli']){
 if(!existsSync(join(root,'ios/App/App.xcodeproj/project.pbxproj')))throw Error('Missing iOS project. Run pnpm ios:prepare.');
 if(!existsSync(join(root,'ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme')))throw Error('Commit the shared App scheme for hosted builds.');
 const project=await readFile(join(root,'ios/App/App.xcodeproj/project.pbxproj'),'utf8');
+for(const environment of ['development','production'])if(!project.includes('HUB_PUSH_ENVIRONMENT = '+environment+';'))throw Error('Match Apple push environment to Debug/Release signing.');
+const entitlements=await readFile(join(root,'ios/App/App/App.entitlements'),'utf8');
+if(!entitlements.includes('<key>aps-environment</key><string>$(HUB_PUSH_ENVIRONMENT)</string>'))throw Error('Missing signed push environment entitlement.');
 const spm=await readFile(join(root,'ios/App/CapApp-SPM/Package.swift'),'utf8');
 if(!spm.includes('platforms: [.iOS(.v15)]'))throw Error('Keep the app iOS15 baseline when syncing the newer voice widget.');
 const identifiers=[...project.matchAll(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g)].map(m=>m[1]);

@@ -4,8 +4,11 @@ export function installHubDeepLink(ctx: Pick<HarnessClientContext, "sessions">, 
   const view = root.defaultView!;
   const url = new URL(view.location.href), id = url.searchParams.get("hubSession"), panel = url.searchParams.get("hubPanel");
   const automation=!!id&&/^hub-(?:automation|goal)-[a-f0-9-]{36}-[a-f0-9-]{36}$/.test(id);
-  if (!id || !automation&&!/^minke-im-(telegram|discord)-[a-f0-9]{32}$/.test(id)) return () => {};
-  if(automation)void ctx.sessions.refresh?.();
+  const messenger=!!id&&/^minke-im-(telegram|discord)-[a-f0-9]{32}$/.test(id);
+  if (!id || !/^[A-Za-z0-9._-]{1,200}$/.test(id)) return () => {};
+  // Native notifications may point at an ordinary conversation, but URL input
+  // can never create one: open only IDs in the authenticated server catalog.
+  if(!messenger)void ctx.sessions.refresh?.();
   let complete = false, opened = false, timer: number | undefined;
   const until = Date.now() + 20_000;
   function reconcile() {
@@ -18,7 +21,7 @@ export function installHubDeepLink(ctx: Pick<HarnessClientContext, "sessions">, 
     }
     if (Date.now() >= until) {
       complete = true;
-      const notice = root.createElement("div"); notice.setAttribute("role", "status"); notice.textContent = automation?"This task session is unavailable. Refresh HUB and try again.":"This HUB conversation is not available yet. Send a message to the bot, then reopen the link.";
+      const notice = root.createElement("div"); notice.setAttribute("role", "status"); notice.textContent = automation?"This task session is unavailable. Refresh HUB and try again.":messenger?"This HUB conversation is not available yet. Send a message to the bot, then reopen the link.":"This conversation is unavailable. Refresh HUB and try again.";
       notice.style.cssText = "position:fixed;bottom:16px;left:16px;right:16px;padding:16px;border-radius:14px;background:#202536;color:white;z-index:9999";
       const close = root.createElement("button"); close.type = "button"; close.textContent = "Dismiss"; close.addEventListener("click", () => notice.remove()); notice.append(close); root.body.append(notice); return;
     }

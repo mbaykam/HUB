@@ -117,6 +117,8 @@ const taskFiles = Object.freeze({
     "agent-media.test.mjs",
     "automations.test.mjs",
     "automations-ui.test.mjs",
+    "native-notification-links.test.mjs",
+    "native-push.test.mjs",
     "automations-host.test.mjs",
     "knowledge-originals.test.mjs",
     "knowledge-auto-organization.test.mjs",

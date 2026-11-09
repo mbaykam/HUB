@@ -7,9 +7,16 @@ import {operationFailure} from "./operation-failure.ts";
 /** Opt-in native device delivery is independent from Telegram destinations and
  * never changes a character's tools, prompts, model or external-message policy. */
 export function installNativePush(ctx:any,characters:any){
+  // Apple delivery is optional. Missing credentials must never prevent ordinary
+  // characters, Goals or Automations from mounting.
+  let credentials:any;
+  const credentialScope=ctx.inject(["credentials"],(child:any)=>{
+    const binding=child.credentials;credentials=binding;
+    child.effect(()=>()=>{if(credentials===binding)credentials=undefined;},"native push optional credentials");
+  });
   const readConfig=async():Promise<ApplePushConfig|undefined>=>{
     const refs=["APNS_TEAM_ID","APNS_KEY_ID","APNS_TOPIC","APNS_PRIVATE_KEY_P8"];
-    const values=await Promise.all(refs.map(async ref=>(await ctx.credentials?.resolve(ref))?.value));
+    const values=await Promise.all(refs.map(async ref=>(await credentials?.resolve(ref))?.value));
     if(values.some(v=>typeof v!=="string"||!v))return;
     const [teamId,keyId,topic,privateKey]=values as string[];
     if(!/^[A-Z0-9]{10}$/.test(teamId!)||!/^[A-Z0-9]{10}$/.test(keyId!)||!/^[-A-Za-z0-9]+(?:\.[-A-Za-z0-9]+){2,}$/.test(topic!))return;
@@ -31,5 +38,5 @@ export function installNativePush(ctx:any,characters:any){
     publisher.publish({id:`task:${header.id}:${sequence}`,sessionId:header.parentSession,kind:"task",status:failure?"failed":"completed"});
   },{global:true});
   const timer=setInterval(()=>{void ready.then(()=>store.tick()).catch(()=>{});},30000);timer.unref();
-  return ()=>{clearInterval(timer);offRoute();offEvents();if(characters.nativePush===publisher)characters.nativePush=undefined;};
+  return ()=>{void credentialScope.dispose();clearInterval(timer);offRoute();offEvents();if(characters.nativePush===publisher)characters.nativePush=undefined;};
 }

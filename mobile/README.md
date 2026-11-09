@@ -154,8 +154,26 @@ Apple delivery configuration is host-only: `APNS_TEAM_ID`, `APNS_KEY_ID`,
 store. The Apple signing key never belongs in the iPhone bundle, chat or Git.
 The sender supports development/production Apple endpoints, not arbitrary URLs.
 No configuration, registration or Apple request has been made on your real host.
-The native permission/registration UI and signed-device delivery acceptance are
-still being connected; this backend alone is not a finished notification feature.
+The native connection menu now offers **Notifications**, with Enable/retry,
+Turn off, and a link to iPhone Settings. It checks host support/configuration
+before requesting system permission. A missing host endpoint asks for a host
+update; sign-in, Apple registration and server delivery are separate states.
+Registration is opt-in and tokens are refreshed through Apple's callbacks.
+The device identifier and monotonic registration generation are origin-scoped
+in the private Keychain; the device token is not saved in app preferences.
+
+Turning off or signing out unregisters Apple notifications locally immediately
+and attempts to revoke the host registration. Local sign-out is not blocked by
+an offline server; the screen explicitly reports when server revocation could
+not be confirmed. Re-enable/revoke generations prevent delayed requests undoing
+the newer choice. A tapped alert checks its exact original HUB origin and signs
+in at the root before opening a conversation from the authenticated catalog.
+It never switches servers, starts a microphone or executes a task.
+
+Debug/Release declare development/production push entitlements; actual signing
+must use matching Apple provisioning. Apple push has not been configured or
+tested on your real host/device. Simulator compilation and fake transport tests
+are not signed-device delivery acceptance; notifications remain development-only.
 
 The base app still targets iOS15; Siri recording and the widget require iOS18.
 These are compiled development paths. **Actual Siri invocation while locked,

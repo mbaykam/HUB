@@ -37,7 +37,7 @@ public enum HubVoiceAPIError: Error, Equatable {
     case signInRequired, busy, callUnavailable, admissionExpired, serviceUnavailable, invalidResponse
 }
 
-private final class HubNoRedirects: NSObject, URLSessionTaskDelegate {
+final class HubNoRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
     }

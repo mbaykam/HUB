@@ -44,8 +44,8 @@ public struct HubVoiceCheckpoint: Codable {
 /// address belongs in preferences; cookies and call capabilities never do.
 public final class HubDeviceState {
     public enum StateError: Error { case invalidRecord }
-    private let server: HubServer
-    private let store: HubPrivateStore
+    let server: HubServer
+    let store: HubPrivateStore
     private let now: () -> Date
     private var authKey: String { "auth:" + server.origin.absoluteString }
     private var voiceKey: String { "voice:" + server.origin.absoluteString }
@@ -128,5 +128,8 @@ public final class HubDeviceState {
               HubVoiceAPI.validID(value.lease.sessionId), value.peerID.map({ !$0.isEmpty && $0.utf8.count <= 128 && !$0.contains("\n") && !$0.contains("\r") }) ?? true,
               now().timeIntervalSince(value.savedAt) >= -60, now().timeIntervalSince(value.savedAt) < 30 * 86_400 else { throw StateError.invalidRecord }
     }
-    public func clear() throws { try store.remove(authKey); try store.remove(voiceKey); try clearAdmission() }
+    public func clear() throws {
+        if try pushIdentity() != nil { try advancePush(enabled: false) }
+        try store.remove(authKey); try store.remove(voiceKey); try clearAdmission()
+    }
 }

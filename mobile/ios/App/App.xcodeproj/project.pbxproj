@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A14000000000000000000001 = {isa = PBXBuildFile; fileRef = A14000000000000000000002; };
 		A13000000000000000000001 = {isa = PBXBuildFile; fileRef = A13000000000000000000002; };
 		A13000000000000000000003 = {isa = PBXBuildFile; fileRef = A13000000000000000000004; };
 		A13000000000000000000005 = {isa = PBXBuildFile; fileRef = A13000000000000000000006; };
@@ -31,6 +32,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A14000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubNotifications.swift; sourceTree = "<group>"; };
 		A13000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubAssistantCoordinator.swift; sourceTree = "<group>"; };
 		A13000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceActivity.swift; sourceTree = "<group>"; };
 		A13000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceIntents.swift; sourceTree = "<group>"; };
@@ -101,6 +103,7 @@
 				A11000000000000000000006 /* HubVoiceAPI.swift */,
 				A11000000000000000000002 /* HubServer.swift */,
 				A11000000000000000000004 /* HubConnectionViewController.swift */,
+				A14000000000000000000002,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -221,6 +224,7 @@
 				A12000000000000000000007 /* HubNativeVoice.swift in Sources */,
 				A12000000000000000000009 /* HubVoiceViewController.swift in Sources */,
 				A11000000000000000000003 /* HubConnectionViewController.swift in Sources */,
+				A14000000000000000000001,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 			);
@@ -365,6 +369,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				HUB_PUSH_ENVIRONMENT = development;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -387,6 +393,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				HUB_PUSH_ENVIRONMENT = production;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

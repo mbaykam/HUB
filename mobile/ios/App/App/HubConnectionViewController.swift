@@ -16,6 +16,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var api: HubVoiceAPI?
     private var connectionGeneration = 0
     private var connected = false
+    private var notificationDestination: HubNotificationDestination?
     private var voice: HubNativeVoice? {
         get { HubAssistantCoordinator.shared.voice }
         set { HubAssistantCoordinator.shared.adopt(newValue) }
@@ -60,6 +61,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
+            UIAction(title: "Notifications", image: UIImage(systemName: "bell")) { [weak self] _ in
+                guard let self else { return }; HubNotifications.shared.show(from: self)
+            },
             UIAction(title: "Connection", image: UIImage(systemName: "network")) { [weak self] _ in self?.showConnection() },
             UIAction(title: "Reload", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.reload() },
             UIAction(title: "Sign out on this iPhone", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { [weak self] _ in self?.confirmSignOut() }
@@ -69,6 +73,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             self?.progress.progress = Float(web.estimatedProgress)
             self?.progress.isHidden = web.estimatedProgress >= 1
         }
+        HubNotifications.shared.destinationHandler = { [weak self] destination in self?.openNotification(destination) }
         if let address = UserDefaults.standard.string(forKey: savedOriginKey), let saved = try? HubServer(address: address) {
             connect(saved)
         } else {
@@ -100,6 +105,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func connect(_ value: HubServer) {
+        if let server, server != value { HubNotifications.shared.disable() }
         connectionGeneration += 1
         probe?.cancel()
         connected = false
@@ -127,6 +133,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
 
     private func reload() {
         if server == nil { showConnection(); return }
+        if !connected, let server { webView.load(URLRequest(url: server.origin)); return }
         if let url = webView.url, server?.contains(url) == true { webView.reload() }
         else if let server { webView.load(URLRequest(url: server.origin)) }
     }
@@ -139,8 +146,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             guard let self else { return }
             self.connectionGeneration += 1
             self.probe?.cancel()
+            HubNotifications.shared.disable()
             do { try self.deviceState?.clear() }
             catch { self.message.text = "Sign-out could not clear saved access. Unlock this iPhone and try again."; return }
+            HubNotifications.shared.forgetConnection()
             self.connected = false
             self.webView.stopLoading()
             self.server = nil
@@ -251,6 +260,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 guard !Task.isCancelled, generation == self.connectionGeneration else { return }
                 do { try self.deviceState?.rememberVerifiedSession(cookies) }
                 catch { self.message.text = "Connected. Sign-in could not be saved on this iPhone." }
+                if let state = self.deviceState { HubNotifications.shared.attach(server: expected, state: state) }
+                self.openPendingNotification()
             } catch {
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration else { return }
                 self.connected = false
@@ -259,6 +270,22 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                     : "Connection interrupted. Check Connection or choose Reload."
             }
         }
+    }
+
+    private func openNotification(_ destination: HubNotificationDestination) {
+        notificationDestination = destination
+        if connected { openPendingNotification() }
+        else if let server { webView.load(URLRequest(url: server.origin)) }
+        else { message.text = "Connect to the HUB used by this notification first." }
+    }
+    private func openPendingNotification() {
+        guard connected, let server, let destination = notificationDestination else { return }
+        notificationDestination = nil
+        guard let url = try? destination.url(for: server) else {
+            message.text = "This notification belongs to a different HUB. Your connection was not changed."
+            return
+        }
+        webView.load(URLRequest(url: url))
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showFailure(error) }
