@@ -2,8 +2,9 @@
 
 HUB currently runs through the PWA and Telegram. The separate iOS development
 client is in development. Its initial connection screen uses your existing HTTPS
-sign-in and preserves the app's web session. Native background voice, Siri,
-notifications and phone-data integrations are not yet implemented or released.
+sign-in and preserves the app's web session. A separate native voice path is in
+development and needs physical-iPhone acceptance. Siri, notifications and
+phone-data integrations are not yet implemented or released.
 
 You can prepare its project on Windows and use the manual macOS GitHub Actions
 workflow to compile an unsigned simulator build. A signed iPhone/TestFlight build

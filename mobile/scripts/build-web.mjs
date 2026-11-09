@@ -14,7 +14,11 @@ export async function buildWeb(){
   const svg=await readFile(join(root,'../assets/brand/hub-icon.svg'));
   const icon=await sharp(svg).resize(1024,1024).flatten({background:'#f5f2ea'}).removeAlpha().png().toBuffer();
   await writeFile(join(output,'app-icon.png'),icon);
-  await copyFile(join(root,'node_modules/@capacitor/ios/LICENSE'),join(output,'third-party-notices.txt'));
+  const notices=await Promise.all([
+    readFile(join(root,'node_modules/@capacitor/ios/LICENSE'),'utf8'),
+    readFile(join(root,'third-party-notices/WebRTC.txt'),'utf8'),
+  ]);
+  await writeFile(join(output,'third-party-notices.txt'),notices.join('\n\n'));
   console.log('Built the bundled iOS development page. No host data or credentials copied.');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)await buildWeb();

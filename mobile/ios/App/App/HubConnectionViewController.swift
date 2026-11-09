@@ -1,6 +1,7 @@
 import UIKit
 import WebKit
 import SafariServices
+import HubNative
 
 /// Remote HUB is deliberately a plain, unprivileged web view. No Capacitor
 /// bridge, script message handler, injected cookie, or agent-controlled native API.
@@ -15,12 +16,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var api: HubVoiceAPI?
     private var connectionGeneration = 0
     private var connected = false
+    private var voice: HubNativeVoice?
     deinit { probe?.cancel(); api?.invalidate() }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         title = "HUB"
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Voice", style: .plain, target: self, action: #selector(showVoice))
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.allowsInlineMediaPlayback = true
@@ -70,6 +73,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func showConnection(error: String? = nil, address: String? = nil) {
+        guard voice?.isActive != true else { showEndVoiceFirst(); return }
         let sheet = UIAlertController(title: "Connect to HUB", message: error ?? "Enter your secure HUB address. Sign in on the next screen; your session stays on this iPhone.", preferredStyle: .alert)
         sheet.addTextField { field in
             field.placeholder = "https://hub.example.com"
@@ -118,6 +122,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func confirmSignOut() {
+        guard voice?.isActive != true else { showEndVoiceFirst(); return }
         let alert = UIAlertController(title: "Sign out on this iPhone?", message: "Your conversations, files and settings on HUB will stay intact.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Sign out", style: .destructive) { [weak self] _ in
@@ -141,6 +146,30 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 }
             }
         })
+        present(alert, animated: true)
+    }
+
+    @objc private func showVoice() {
+        guard let api else { showConnection(); return }
+        guard connected || voice?.isActive == true else {
+            message.text = "Complete HUB sign-in before starting voice."
+            return
+        }
+        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api)
+        voice = model
+        let sheet = HubVoiceViewController(voice: model)
+        present(UINavigationController(rootViewController: sheet), animated: true) { [weak self, weak sheet] in
+            model.changed = { [weak self, weak sheet, weak model] in
+                self?.navigationItem.leftBarButtonItem?.title = model?.isActive == true ? "Voice •" : "Voice"
+                self?.navigationItem.leftBarButtonItem?.accessibilityLabel = model?.isActive == true ? "Open active voice conversation" : "Start voice conversation"
+                sheet?.refresh()
+            }
+            if !model.isActive { model.start() }
+        }
+    }
+    private func showEndVoiceFirst() {
+        let alert = UIAlertController(title: "A voice conversation is active", message: "Open Voice and end the conversation before changing the server or signing out.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
 

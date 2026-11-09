@@ -7,8 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A11000000000000000000005 /* HubVoiceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000006 /* HubVoiceAPI.swift */; };
-		A11000000000000000000001 /* HubServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000002 /* HubServer.swift */; };
+		A12000000000000000000001 /* HubNative in Frameworks */ = {isa = PBXBuildFile; productRef = A12000000000000000000002 /* HubNative */; };
+		A12000000000000000000003 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A12000000000000000000004 /* WebRTC */; };
+		A12000000000000000000007 /* HubNativeVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12000000000000000000008 /* HubNativeVoice.swift */; };
+		A12000000000000000000009 /* HubVoiceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1200000000000000000000A /* HubVoiceViewController.swift */; };
 		A11000000000000000000003 /* HubConnectionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000004 /* HubConnectionViewController.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
@@ -22,6 +24,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A12000000000000000000008 /* HubNativeVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubNativeVoice.swift; sourceTree = "<group>"; };
+		A1200000000000000000000A /* HubVoiceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceViewController.swift; sourceTree = "<group>"; };
 		A11000000000000000000006 /* HubVoiceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HubVoiceAPI.swift; path = ../../../native/Sources/HubNative/HubVoiceAPI.swift; sourceTree = "<group>"; };
 		A11000000000000000000002 /* HubServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HubServer.swift; path = ../../../native/Sources/HubNative/HubServer.swift; sourceTree = "<group>"; };
 		A11000000000000000000004 /* HubConnectionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubConnectionViewController.swift; sourceTree = "<group>"; };
@@ -43,6 +47,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A12000000000000000000001 /* HubNative in Frameworks */,
+				A12000000000000000000003 /* WebRTC in Frameworks */,
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -70,6 +76,8 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				A12000000000000000000008 /* HubNativeVoice.swift */,
+				A1200000000000000000000A /* HubVoiceViewController.swift */,
 				A11000000000000000000006 /* HubVoiceAPI.swift */,
 				A11000000000000000000002 /* HubServer.swift */,
 				A11000000000000000000004 /* HubConnectionViewController.swift */,
@@ -103,6 +111,8 @@
 			);
 			name = App;
 			packageProductDependencies = (
+				A12000000000000000000002 /* HubNative */,
+				A12000000000000000000004 /* WebRTC */,
 				4D22ABE82AF431CB00220026 /* CapApp-SPM */,
 			);
 			productName = App;
@@ -135,6 +145,8 @@
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
 			packageReferences = (
+				A12000000000000000000005 /* XCLocalSwiftPackageReference "HubNative" */,
+				A12000000000000000000006 /* XCRemoteSwiftPackageReference "WebRTC" */,
 				D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */,
 			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
@@ -167,8 +179,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A11000000000000000000005 /* HubVoiceAPI.swift in Sources */,
-				A11000000000000000000001 /* HubServer.swift in Sources */,
+				A12000000000000000000007 /* HubNativeVoice.swift in Sources */,
+				A12000000000000000000009 /* HubVoiceViewController.swift in Sources */,
 				A11000000000000000000003 /* HubConnectionViewController.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
@@ -374,13 +386,27 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		A12000000000000000000005 /* XCLocalSwiftPackageReference "HubNative" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../native";
+		};
 		D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "CapApp-SPM";
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A12000000000000000000006 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC.git";
+			requirement = {kind = exactVersion; version = 134.0.0; };
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		A12000000000000000000002 /* HubNative */ = {isa = XCSwiftPackageProductDependency; package = A12000000000000000000005; productName = HubNative; };
+		A12000000000000000000004 /* WebRTC */ = {isa = XCSwiftPackageProductDependency; package = A12000000000000000000006; productName = WebRTC; };
 		4D22ABE82AF431CB00220026 /* CapApp-SPM */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;

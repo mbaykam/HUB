@@ -3,8 +3,9 @@
 This is an isolated iOS development project. Its first connection screen opens
 your existing HTTPS HUB in a persistent, unprivileged WebKit view. Sign in through
 your existing access provider; no server or model-provider key is copied to the
-iPhone. It is not yet a finished daily-use client: native background voice, Siri,
-notifications and system sharing are still being implemented. Windows HUB and
+iPhone. It is not yet a finished daily-use client: native voice is in development
+and requires device acceptance; Siri, notifications and system sharing are still
+being implemented. Windows HUB and
 its PWA continue to use their existing release.
 
 ## Connect a development build
@@ -25,8 +26,37 @@ message and a way back to Connection. Foreground microphone/camera access uses
 system prompts only after you choose those existing PWA features.
 
 This connection slice needs simulator/device acceptance before release. It does
-not make a web voice call survive screen locking; that requires the native audio
-and transport work below. It also does not turn agent HTML into a native plugin.
+not make a web voice call survive screen locking. Use the separate native Voice
+entry below for that development path. Agent HTML has no native plugin access.
+
+## Native voice development path
+
+After the connection is verified, choose **Voice** in the native top bar. It
+requests the microphone, admits one call through the existing HUB control plane,
+and uses native WebRTC audio with the existing SmallWebRTC/RTVI server. The same
+configured voice character, speech providers and saved conversation system stay
+on the server. No extra hosted voice provider or phone-side model key is needed.
+
+The voice sheet has **Mute**, **Interrupt**, **End conversation**, and an overflow
+menu with **Reconnect audio**. **Hide** returns to HUB while keeping the call
+owned by the app. It also remains owned when the app backgrounds; the audio
+session uses voice-chat mode and the declared audio background capability.
+Ending during admission waits for the owned receipt to finish and closes it;
+failed cleanup keeps an explicit retry instead of pretending the call ended.
+Reconnect uses the owned call, without resubmitting a user task or creating a
+second conversation. Existing web/Telegram calls block a second native call.
+
+Transport dependency: WebRTC134.0.0, pinned by exact SwiftPM version and the
+upstream binary checksum. Its BSD notices are included in the app bundle. Native
+HTTP signaling refuses redirects and limits cookies to the selected HTTPS host.
+Web pages cannot invoke these native controls. The data channel uses the public
+[Pipecat SmallWebRTC protocol](https://github.com/pipecat-ai/pipecat-client-ios-small-webrtc).
+
+**Not yet accepted on a physical iPhone:** bidirectional audio, lock-screen
+continuity, route changes, Bluetooth, acoustic echo/interruption, reconnect,
+long conversations and battery behavior. Simulator compilation and fixture
+protocol/control tests do not prove those outcomes. This is development code,
+not a published voice-quality or all-day-background guarantee.
 
 ## Prepare from Windows or macOS
 
