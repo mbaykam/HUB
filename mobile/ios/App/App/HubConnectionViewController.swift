@@ -101,11 +101,16 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         probe?.cancel()
         connected = false
         server = value
-        deviceState = HubDeviceState(server: value, store: HubKeychainStore())
+        let nativeState = HubDeviceState(server: value, store: HubKeychainStore())
+        deviceState = nativeState
         api?.invalidate()
         api = HubVoiceAPI(server: value) { [weak webView] in
             await withCheckedContinuation { continuation in
                 DispatchQueue.main.async {
+                    if UIApplication.shared.applicationState == .background {
+                        continuation.resume(returning: (try? nativeState.cookies()) ?? [])
+                        return
+                    }
                     guard let webView else { continuation.resume(returning: []); return }
                     webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
                 }
