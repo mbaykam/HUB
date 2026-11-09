@@ -18,4 +18,9 @@ final class HubRTVITests: XCTestCase {
         XCTAssertNil(HubRTVI.event(Data(#"{"label":"other","type":"bot-ready"}"#.utf8)))
         XCTAssertNil(HubRTVI.event(Data("not-json".utf8)))
     }
+    func testRecoverableErrorDoesNotBecomeASuccessOrFatalEvent() {
+        let message = Data(#"{"label":"rtvi-ai","type":"error","data":{"fatal":false,"message":"fixture failure"}}"#.utf8)
+        XCTAssertEqual(HubRTVI.event(message)?.type, "error")
+        XCTAssertEqual(HubRTVI.event(message)?.fatal, false)
+    }
 }

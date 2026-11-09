@@ -1,6 +1,6 @@
 import UIKit
 import AVFAudio
-import WebRTC
+@preconcurrency import WebRTC
 import HubNative
 
 /// Audio-only SmallWebRTC/RTVI client. Signaling stays in HubVoiceAPI, so session
@@ -69,29 +69,38 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
 
     private func configureAudio() throws {
         let audio = AVAudioSession.sharedInstance()
-        try audio.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
+        try audio.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .defaultToSpeaker])
         try audio.setActive(true)
         ownsAudio = true
     }
 
     private func connect(_ admitted: HubVoiceLease, restart: Bool) async throws {
-        readyTimeout?.cancel(); ready = false
-        channel?.close(); peer?.close(); input = nil
-        let config = RTCConfiguration()
-        config.sdpSemantics = .unifiedPlan
-        config.iceServers = (admitted.iceServers ?? []).map { RTCIceServer(urlStrings: $0.urls, username: $0.username, credential: $0.credential) }
-        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: ["DtlsSrtpKeyAgreement": "true"])
-        guard let next = factory.peerConnection(with: config, constraints: constraints, delegate: self) else { throw HubVoiceAPIError.serviceUnavailable }
-        peer = next
-        let source = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
-        let track = factory.audioTrack(with: source, trackId: "hub-microphone")
-        track.isEnabled = !muted
-        input = track
-        next.add(track, streamIds: ["hub-native"])
-        channel = next.dataChannel(forLabel: "rtvi-events", configuration: RTCDataChannelConfiguration())
-        channel?.delegate = self
+        readyTimeout?.cancel()
+        let next: RTCPeerConnection
+        if restart {
+            // Closing the existing peer first would tell Pipecat to cancel its
+            // worker. Renegotiate ICE on this same owned connection instead.
+            guard let existing = peer, peerID != nil else { throw HubVoiceAPIError.callUnavailable }
+            next = existing
+        } else {
+            ready = false
+            let config = RTCConfiguration()
+            config.sdpSemantics = .unifiedPlan
+            config.iceServers = (admitted.iceServers ?? []).map { RTCIceServer(urlStrings: $0.urls, username: $0.username, credential: $0.credential) }
+            let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: ["DtlsSrtpKeyAgreement": "true"])
+            guard let created = factory.peerConnection(with: config, constraints: constraints, delegate: self) else { throw HubVoiceAPIError.serviceUnavailable }
+            next = created; peer = created
+            let source = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
+            let track = factory.audioTrack(with: source, trackId: "hub-microphone")
+            track.isEnabled = !muted; input = track
+            next.add(track, streamIds: ["hub-native"])
+            channel = next.dataChannel(forLabel: "rtvi-events", configuration: RTCDataChannelConfiguration())
+            channel?.delegate = self
+        }
+        var offerConstraints = ["OfferToReceiveAudio": "true"]
+        if restart { offerConstraints["IceRestart"] = "true" }
         let offer: RTCSessionDescription = try await withCheckedThrowingContinuation { continuation in
-            next.offer(for: RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true"], optionalConstraints: nil)) { value, error in
+            next.offer(for: RTCMediaConstraints(mandatoryConstraints: offerConstraints, optionalConstraints: nil)) { value, error in
                 if let value { continuation.resume(returning: value) } else { continuation.resume(throwing: error ?? HubVoiceAPIError.invalidResponse) }
             }
         }
@@ -109,7 +118,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         }
         guard !ending, let description = next.localDescription else { throw CancellationError() }
         var payload: [String: Any] = ["sdp": description.sdp, "type": "offer"]
-        if restart, let peerID { payload["pc_id"] = peerID; payload["restart_pc"] = true }
+        if restart, let peerID { payload["pc_id"] = peerID }
         let answer = try await api.offer(callId: admitted.callId, payload: payload)
         guard !ending, peer === next,
               let object = try JSONSerialization.jsonObject(with: answer) as? [String: Any],
@@ -172,17 +181,20 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
 
     private func installAudioObservers() {
         observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
-            guard let self, let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  let type = AVAudioSession.InterruptionType(rawValue: raw), self.isActive, !self.ending else { return }
-            if type == .began { self.input?.isEnabled = false; self.update("Audio interrupted") }
-            else {
-                let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
-                if options.contains(.shouldResume) {
-                    do { try self.configureAudio(); self.input?.isEnabled = !self.muted; self.update("Listening") }
-                    catch { self.update("Audio paused. Choose Reconnect to continue.") }
-                } else { self.update("Audio paused. Choose Reconnect to continue.") }
-            }
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            Task { @MainActor [weak self] in self?.handleInterruption(raw: raw, options: options) }
         })
+    }
+    private func handleInterruption(raw: UInt?, options: UInt) {
+        guard let raw, let type = AVAudioSession.InterruptionType(rawValue: raw), isActive, !ending else { return }
+        if type == .began { input?.isEnabled = false; update("Audio interrupted") }
+        else {
+            if AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume) {
+                do { try configureAudio(); input?.isEnabled = !muted; update("Listening") }
+                catch { update("Audio paused. Choose Reconnect to continue.") }
+            } else { update("Audio paused. Choose Reconnect to continue.") }
+        }
     }
 
     // WebRTC delegates arrive on its own queues. UI and call ownership stay main-thread.
@@ -198,6 +210,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         DispatchQueue.main.async { [weak self] in
             guard let self, self.peer === peerConnection, !self.ending else { return }
             if newState == .failed || newState == .disconnected { self.update("Audio disconnected. Choose Reconnect to resume this conversation.") }
+            else if self.ready && (newState == .connected || newState == .completed) { self.update("Listening") }
         }
     }
     nonisolated func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
@@ -217,6 +230,10 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
             case "bot-stopped-speaking": self.update("Listening")
             case "bot-started-speaking": self.update("Speaking")
             case "bot-llm-started": self.update("Thinking…")
+            case "error":
+                self.update(event.fatal == false
+                    ? "Part of the reply had a problem. You can keep talking; check HUB before repeating a task."
+                    : "Voice service interrupted. End or reconnect; check HUB before repeating a task.")
             case "user-transcription", "bot-tts-text":
                 if let text = event.text, event.final {
                     self.transcript += "\(event.type == "user-transcription" ? "You" : "Assistant"): \(text)\n\n"
