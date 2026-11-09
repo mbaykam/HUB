@@ -7,12 +7,12 @@ test('voice topics ignore greetings and save commands, preserve languages and fi
  const title=voiceTopicTitle(events);assert.match(title.title,/Edinburgh/);assert.match(title.title,/İskoçya/);assert.deepEqual(title.messageSeqs,[2,3]);assert.equal(title.source.kind,'fallback');
  assert.equal(voiceTopicTitle([user(0,'Merhaba!')]),undefined);assert.ok(Buffer.byteLength(voiceTopicTitle([user(0,'界'.repeat(200))]).title)<=76);
 });
-test('native titles follow voice topics after late provider titles but respect human names and ordinary chats',()=>{
+test('voice fallback respects refined topic titles, human names and ordinary chats',()=>{
  let listener,removed=false;const ctx={on:(name,fn)=>{listener=fn;return()=>removed=true;}};
  const events=[user(0,'Solar battery sizing for a small house')],session={header:{id:'voice'},snapshotEvents:()=>events,append:(type,data)=>{events.push({type,data});listener(session,{type,data});}};
  const off=installVoiceTitles(ctx,{view:id=>({kind:id==='voice'?'voice':'chat'})});
  listener(session,{type:'turn/end'});assert.match(events.at(-1).data.title,/Solar battery/);
- events.push({type:'session/title',data:{title:'Greeting',source:{kind:'provider'}}});listener(session,events.at(-1));assert.match(events.at(-1).data.title,/Solar battery/);
+ events.push({type:'session/title',data:{title:'Sizing a home solar battery',source:{kind:'provider'}}});listener(session,events.at(-1));assert.equal(events.at(-1).data.title,'Sizing a home solar battery');
  events.push({type:'session/title',data:{title:'My custom name',source:{kind:'user'}}});listener(session,{type:'turn/end'});assert.equal(events.at(-1).data.title,'My custom name');
  session.header.id='ordinary';const before=events.length;listener(session,{type:'turn/end'});assert.equal(events.length,before);off();assert.equal(removed,true);
 });

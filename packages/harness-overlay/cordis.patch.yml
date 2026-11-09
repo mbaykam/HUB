@@ -14,6 +14,11 @@
 - id: goal-round-driver
   disabled: true
 
+# HUB refines titles only after a completed turn and a quiet pause. The native
+# title service still owns persistence, supersession and manually pinned names.
+- id: session-title-llm
+  disabled: true
+
 # The desktop launcher supplies DSH_HOME, including after a data-home move.
 # Keep this disposable index separate from original chat logs. Opening it on
 # the first search keeps normal startup and the voice path free of index work.

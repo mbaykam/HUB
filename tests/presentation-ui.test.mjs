@@ -19,6 +19,7 @@ test("canvas follows updates, can freeze/reopen, and cannot carry a visual into 
   try {
     canvas.setSession("hub-eval-canvas"); await tick();
     assert.equal(canvas.dialog.open, true); assert.equal(canvas.dialog.hasAttribute("data-expanded"),false); assert.equal(canvas.dialog.querySelector("iframe").title, "First plan");
+    assert.equal(window.getComputedStyle(canvas.dialog).flexShrink,"0","The card must not collapse inside the native flex chat scrollport");
     const originalFrame=canvas.dialog.querySelector("iframe");
     [...canvas.dialog.querySelectorAll("button")].find(b=>b.textContent==="Expand").click();
     assert.equal(canvas.dialog.hasAttribute("data-expanded"),true);assert.equal(canvas.dialog.querySelector("iframe"),originalFrame);

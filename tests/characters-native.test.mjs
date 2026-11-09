@@ -9,7 +9,12 @@ import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 
 
-const { mountAgentLoopTestDependencies } = await import("../vendor/deepseek-harness/packages/test-support/agent-loop-testkit/src/index.ts");
+const { mountAgentLoopTestDependencies: mountLoopDependencies } = await import("../vendor/deepseek-harness/packages/test-support/agent-loop-testkit/src/index.ts");
+const {default:SessionTitles}=await native('@deepseek-ai/dsh-session-title');
+async function mountAgentLoopTestDependencies(ctx,...options){
+ await mountLoopDependencies(ctx,...options);
+ await ctx.plugin(SessionTitles,{fallbackMaxWords:5,fallbackMaxBytes:40,maxTitleBytes:80});
+}
 const { MockAdapter, textResponse, toolCallResponse } = await import("../vendor/deepseek-harness/packages/core/agent-loop/tests/mock-adapter.ts");
 const { TestSessionQuery } = await import("../vendor/deepseek-harness/packages/subagent/subagent/tests/test-session-query.ts");
 

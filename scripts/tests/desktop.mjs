@@ -108,6 +108,7 @@ const taskFiles = Object.freeze({
     "planner-ui.test.mjs",
     "character-request.test.mjs",
     "voice-titles.test.mjs",
+    "conversation-titles.test.mjs",
     "presentation-ui.test.mjs",
     "goals.test.mjs",
     "research.test.mjs",

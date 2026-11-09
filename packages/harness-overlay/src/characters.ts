@@ -29,9 +29,10 @@ import {characterAuthorityPersona} from "./host/knowledge-identity.ts";
 import {installCharacterRequests} from "./host/character-requests.ts";
 import {isLegacyMemoryTool,knowledgeToolChoices} from "./memory-tool-groups.ts";
 import {installPlanner} from "./host/planner.ts";
+import {installConversationTitles} from "./host/conversation-titles.ts";
 
 export const name="hub-characters";
-export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments"];
+export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments"];
 declare module "@deepseek-ai/cordis" { interface Context { hubCharacters:HubCharacters; } }
 type CharacterAgent={id:string;status?:string;session:{header:{origin?:string;parentSession?:string};snapshotEvents():readonly {type:string;data?:unknown}[]};ctx:any};
 type Mount={revision:number;fibers:{dispose():Promise<void>}[];names:Map<string,string>;snapshot?:HubCharactersState;turnSnapshot?:HubCharactersState;loading?:Promise<void>;assembled?:{character:HubCharacter;state:HubCharactersState};voiceCharacter?:HubCharacter;pendingVoiceCharacter?:HubCharacter;nativeRoute?:string};
@@ -172,6 +173,7 @@ export class HubCharacters extends Service {
     for(const agent of ctx.agents.list())attach(agent as any);
     ctx.effect(()=>this.installWeb(),"HUB character management");
     ctx.effect(()=>installDailyUseWeb(ctx),"HUB durable activity and generated applications");
+    ctx.effect(()=>installConversationTitles(ctx),"HUB conversation topic titles");
     ctx.effect(()=>{
       let renderer:Promise<string>|undefined;
       const handler=createPresentationHandler(this.presentations,req=>ctx.connection.requestRejection(req),()=>renderer??=readFile(new URL("./presentation-renderer.js",import.meta.url),"utf8"),async sessionId=>{

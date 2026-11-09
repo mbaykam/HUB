@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.1
+
+- Keep inline visuals at their intended height inside the chat layout.
+- Refine automatic chat titles after a completed reply and a short pause, using
+  the conversation topic while preserving manually named chats.
+- Keep voice title fallbacks from replacing a refined topic title.
+
 ## 1.9.0
 
 - Add an inline conversation canvas for interactive HTML apps, charts and diagrams,

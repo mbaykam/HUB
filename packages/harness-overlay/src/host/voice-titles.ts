@@ -18,7 +18,7 @@ export function installVoiceTitles(ctx:any,history:{view(id:string,origin?:strin
   return ctx.on("session/event",(session:any,event:any)=>{
     if(!["user/message","turn/end","session/title"].includes(event.type)||history.view(session.header.id,session.header.origin).kind!=="voice"||typeof session.append!=="function")return;
     const events=session.snapshotEvents(),current=events.findLast((e:any)=>e.type==="session/title");
-    if(current?.data?.source?.kind==="user")return;
+    if(["user","provider"].includes(current?.data?.source?.kind))return;
     const next=voiceTopicTitle(events);if(next&&next.title!==current?.data?.title)session.append("session/title",next);
   },{global:true});
 }
