@@ -67,6 +67,8 @@ jobs:
         run: pnpm ios:prepare
       - name: Check native configuration and bridge boundary
         run: pnpm check
+      - name: Test HTTPS authority and native cookie isolation
+        run: swift test --package-path native
       - name: Compile for iOS Simulator without Apple credentials
         run: pnpm ios:build:simulator
       - name: Save simulator build

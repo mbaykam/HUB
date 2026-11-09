@@ -1,9 +1,32 @@
 # HUB iPhone development foundation
 
-This is an isolated Capacitor iOS project, ready for native development. It is
-not a replacement for the current PWA and is not a finished iPhone client.
-Its bundled development page makes no host connection and requests no phone
-permissions. Windows HUB and its PWA continue to use their existing release.
+This is an isolated iOS development project. Its first connection screen opens
+your existing HTTPS HUB in a persistent, unprivileged WebKit view. Sign in through
+your existing access provider; no server or model-provider key is copied to the
+iPhone. It is not yet a finished daily-use client: native background voice, Siri,
+notifications and system sharing are still being implemented. Windows HUB and
+its PWA continue to use their existing release.
+
+## Connect a development build
+
+Enter the root HTTPS address of your HUB, without a login token or extra path.
+Complete the existing sign-in screen. The app checks the authenticated HUB voice
+status endpoint and shows **Connected** only after receiving its expected response.
+An Access login page or an HTTP200 HTML response does not count as a connection.
+Your sign-in cookies stay in this app's persistent WebKit store. Reopening the app
+uses the saved server address and existing web state; expired sessions still need
+sign-in. Server passwords and cookies are never stored in app preferences.
+
+The top-right connection menu offers **Connection**, **Reload**, and **Sign out on
+this iPhone**. Signing out clears the app's web sign-in cookies and closes its web
+view, without deleting anything on the HUB server. External links open in a
+separate browser sheet. Offline/TLS/login failures leave an explicit recovery
+message and a way back to Connection. Foreground microphone/camera access uses
+system prompts only after you choose those existing PWA features.
+
+This connection slice needs simulator/device acceptance before release. It does
+not make a web voice call survive screen locking; that requires the native audio
+and transport work below. It also does not turn agent HTML into a native plugin.
 
 ## Prepare from Windows or macOS
 
@@ -85,7 +108,9 @@ build is not evidence of iPhone, background audio or distribution acceptance.
    denial, phone calls, closing/reopening, task continuity, data preservation,
    privacy and power use before calling this a daily-use iPhone client.
 
-The native bridge is restricted to bundled trusted content: no `server.url`,
+The remote HUB view is a plain `WKWebView`, with no Capacitor bridge or script
+message handlers. The unused bundled bridge configuration remains restricted to
+bundled trusted content: no `server.url`,
 cleartext remote connection or broad navigation allowlist. Do not turn the
 remote PWA or agent-created HTML into a privileged native bridge page. Generated
 visuals need a separate sandbox; device access must remain explicit and scoped.
