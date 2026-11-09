@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A11000000000000000000005 /* HubVoiceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000006 /* HubVoiceAPI.swift */; };
 		A11000000000000000000001 /* HubServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000002 /* HubServer.swift */; };
 		A11000000000000000000003 /* HubConnectionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000004 /* HubConnectionViewController.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
@@ -21,6 +22,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A11000000000000000000006 /* HubVoiceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HubVoiceAPI.swift; path = ../../../native/Sources/HubNative/HubVoiceAPI.swift; sourceTree = "<group>"; };
 		A11000000000000000000002 /* HubServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HubServer.swift; path = ../../../native/Sources/HubNative/HubServer.swift; sourceTree = "<group>"; };
 		A11000000000000000000004 /* HubConnectionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubConnectionViewController.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
@@ -68,6 +70,7 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				A11000000000000000000006 /* HubVoiceAPI.swift */,
 				A11000000000000000000002 /* HubServer.swift */,
 				A11000000000000000000004 /* HubConnectionViewController.swift */,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
@@ -164,6 +167,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11000000000000000000005 /* HubVoiceAPI.swift in Sources */,
 				A11000000000000000000001 /* HubServer.swift in Sources */,
 				A11000000000000000000003 /* HubConnectionViewController.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,

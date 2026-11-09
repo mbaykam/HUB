@@ -4,24 +4,18 @@ import SafariServices
 
 /// Remote HUB is deliberately a plain, unprivileged web view. No Capacitor
 /// bridge, script message handler, injected cookie, or agent-controlled native API.
-final class HubConnectionViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, URLSessionTaskDelegate {
+final class HubConnectionViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     private let savedOriginKey = "hub.ios.server-origin.v1"
     private var server: HubServer?
     private var webView: WKWebView!
     private let message = UILabel()
     private let progress = UIProgressView(progressViewStyle: .bar)
     private var progressObservation: NSKeyValueObservation?
-    private var probe: URLSessionDataTask?
+    private var probe: Task<Void, Never>?
+    private var api: HubVoiceAPI?
     private var connectionGeneration = 0
     private var connected = false
-    private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.httpShouldSetCookies = false
-        config.httpCookieStorage = nil
-        config.urlCache = nil
-        config.timeoutIntervalForRequest = 15
-        return URLSession(configuration: config, delegate: self, delegateQueue: .main)
-    }()
+    deinit { probe?.cancel(); api?.invalidate() }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -102,6 +96,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         probe?.cancel()
         connected = false
         server = value
+        api?.invalidate()
+        api = HubVoiceAPI(server: value) { [weak webView] in
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async {
+                    guard let webView else { continuation.resume(returning: []); return }
+                    webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
+                }
+            }
+        }
         // Only a canonical origin is saved. The web data store owns HttpOnly cookies.
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         message.text = "Connecting to \(value.origin.host ?? "HUB")…"
@@ -133,7 +136,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                     // Destroy the old web view, including its active sockets and
                     // media, instead of merely hiding a still-running signed-in page.
                     self.progressObservation?.invalidate()
-                    self.session.invalidateAndCancel()
+                    self.api?.invalidate()
                     self.view.window?.rootViewController = UINavigationController(rootViewController: HubConnectionViewController())
                 }
             }
@@ -176,35 +179,23 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func checkConnection(_ expected: HubServer) {
         let generation = connectionGeneration
         probe?.cancel()
-        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-            guard let self, generation == self.connectionGeneration, self.server == expected else { return }
-            var request = URLRequest(url: expected.statusURL, cachePolicy: .reloadIgnoringLocalCacheData)
-            request.allHTTPHeaderFields = HTTPCookie.requestHeaderFields(with: expected.cookies(cookies, for: expected.statusURL))
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            self.probe = self.session.dataTask(with: request) { [weak self] data, response, error in
-                DispatchQueue.main.async {
-                    guard let self, generation == self.connectionGeneration, self.server == expected,
-                          let currentURL = self.webView.url, expected.contains(currentURL) else { return }
-                    let status = (response as? HTTPURLResponse)?.statusCode
-                    let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
-                    if status == 200, json?["serverTime"] is NSNumber, json?["enabled"] is Bool {
-                        self.connected = true
-                        self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
-                    } else if status == 401 || status == 403 || (status.map { (300...399).contains($0) } ?? false) {
-                        self.connected = false
-                        self.message.text = "Sign in to HUB, then choose Reload."
-                    } else {
-                        self.connected = false
-                        self.message.text = error == nil ? "HUB could not be verified. Check Connection or Reload." : "Connection interrupted. Choose Reload to reconnect."
-                    }
-                }
+        guard let api else { return }
+        probe = Task { [weak self] in
+            do {
+                _ = try await api.status()
+                guard let self, !Task.isCancelled, generation == self.connectionGeneration,
+                      let url = self.webView.url, expected.contains(url) else { return }
+                self.connected = true
+                self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
+            } catch {
+                guard let self, !Task.isCancelled, generation == self.connectionGeneration else { return }
+                self.connected = false
+                self.message.text = error as? HubVoiceAPIError == .signInRequired
+                    ? "Sign in to HUB, then choose Reload."
+                    : "Connection interrupted. Check Connection or choose Reload."
             }
-            self.probe?.resume()
         }
     }
-
-    // A redirect must never forward native cookies to another server or login page.
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showFailure(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showFailure(error) }
