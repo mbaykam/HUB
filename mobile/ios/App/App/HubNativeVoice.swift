@@ -14,6 +14,9 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private(set) var isActive = false
     private(set) var muted = false
     private let api: HubVoiceAPI
+    private let server: HubServer
+    private let deviceState: HubDeviceState
+    private let resume: HubVoiceCheckpoint?
     private static let sharedFactory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
         return RTCPeerConnectionFactory()
@@ -31,33 +34,60 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private var ready = false
     private var ownsAudio = false
 
-    init(api: HubVoiceAPI) { self.api = api; super.init() }
+    init(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, resume: HubVoiceCheckpoint? = nil) {
+        self.api = api; self.server = server; self.deviceState = deviceState; self.resume = resume
+        super.init()
+    }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
     private func update(_ value: String) { status = value; changed?() }
 
     func start() {
         guard !isActive, starting == nil, lease == nil else { return }
         ending = false; isActive = true; transcript = ""; muted = false
-        update("Allow microphone access to start")
+        update("Connecting…")
         starting = Task {
             defer { starting = nil }
-            let permitted = await withCheckedContinuation { continuation in
-                AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
-            }
-            guard !ending else { return }
-            guard permitted else { isActive = false; update("Microphone access is off. Enable it in iPhone Settings."); return }
             do {
-                update("Connecting…")
                 let state = try await api.status()
                 guard !ending else { return }
-                guard state.enabled, !state.busy else { throw HubVoiceAPIError.busy }
+                guard state.enabled else { throw HubVoiceAPIError.serviceUnavailable }
+                let recovery = resume?.recovery(status: state)
+                if recovery == .anotherCall || (resume == nil && state.busy) { throw HubVoiceAPIError.busy }
+                if recovery == .missingPeer, let resume {
+                    lease = resume.lease
+                    update("The interrupted call needs cleanup. Tap End, then resume the conversation.")
+                    return
+                }
+                update("Allow microphone access to start")
+                let permitted = await withCheckedContinuation { continuation in
+                    AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
+                }
+                guard !ending else { return }
+                guard permitted else { isActive = false; update("Microphone access is off. Enable it in iPhone Settings."); return }
+                update("Connecting audio…")
                 // Don't cancel this admission on End: recover the owned lease,
                 // then close it even if the user ended during server startup.
-                let admitted = try await api.open(serverTime: state.serverTime)
+                let admitted: HubVoiceLease
+                var recoveredPeer: String?
+                if let resume {
+                    switch resume.recovery(status: state) {
+                    case .anotherCall: throw HubVoiceAPIError.busy
+                    case .missingPeer:
+                        lease = resume.lease
+                        update("The interrupted call needs cleanup. Tap End, then resume the conversation.")
+                        return
+                    case .rejoinOwnedCall: admitted = resume.lease; recoveredPeer = resume.peerID
+                    case .resumeEndedConversation: admitted = try await api.open(serverTime: state.serverTime, sessionId: resume.lease.sessionId)
+                    }
+                } else {
+                    guard !state.busy else { throw HubVoiceAPIError.busy }
+                    admitted = try await api.open(serverTime: state.serverTime)
+                }
                 lease = admitted
+                try deviceState.rememberVoice(HubVoiceCheckpoint(server: server, lease: admitted, peerID: recoveredPeer))
                 guard !ending else { return }
                 try configureAudio()
-                try await connect(admitted, restart: false)
+                try await connect(admitted, restart: false, recoveredPeer: recoveredPeer)
                 installAudioObservers()
             } catch {
                 guard !ending else { return }
@@ -74,7 +104,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         ownsAudio = true
     }
 
-    private func connect(_ admitted: HubVoiceLease, restart: Bool) async throws {
+    private func connect(_ admitted: HubVoiceLease, restart: Bool, recoveredPeer: String? = nil) async throws {
         readyTimeout?.cancel()
         let next: RTCPeerConnection
         if restart {
@@ -119,11 +149,13 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         guard !ending, let description = next.localDescription else { throw CancellationError() }
         var payload: [String: Any] = ["sdp": description.sdp, "type": "offer"]
         if restart, let peerID { payload["pc_id"] = peerID }
+        if let recoveredPeer { payload["pc_id"] = recoveredPeer; payload["restart_pc"] = true }
         let answer = try await api.offer(callId: admitted.callId, payload: payload)
         guard !ending, peer === next,
               let object = try JSONSerialization.jsonObject(with: answer) as? [String: Any],
               object["type"] as? String == "answer", let sdp = object["sdp"] as? String else { throw HubVoiceAPIError.invalidResponse }
         peerID = object["pc_id"] as? String
+        try deviceState.rememberVoice(HubVoiceCheckpoint(server: server, lease: admitted, peerID: peerID))
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             next.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { error in
                 if let error { continuation.resume(throwing: error) } else { continuation.resume() }

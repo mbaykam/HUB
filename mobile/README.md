@@ -14,12 +14,16 @@ Enter the root HTTPS address of your HUB, without a login token or extra path.
 Complete the existing sign-in screen. The app checks the authenticated HUB voice
 status endpoint and shows **Connected** only after receiving its expected response.
 An Access login page or an HTTP200 HTML response does not count as a connection.
-Your sign-in cookies stay in this app's persistent WebKit store. Reopening the app
-uses the saved server address and existing web state; expired sessions still need
-sign-in. Server passwords and cookies are never stored in app preferences.
+Your sign-in cookies stay app-private. WebKit keeps the web session; after HUB
+verifies the connection, its origin-scoped authentication cookies are also saved
+in this iPhone's Keychain for native background actions. This device-only copy
+does not sync, respects cookie expiry, and expires after at most24hours without
+a fresh verified session. After reboot it is unavailable until the first unlock.
+Reopening uses the saved server address and existing web state; expired sessions
+still need sign-in. Passwords and cookies are never stored in app preferences.
 
 The top-right connection menu offers **Connection**, **Reload**, and **Sign out on
-this iPhone**. Signing out clears the app's web sign-in cookies and closes its web
+this iPhone**. Signing out clears native saved access and web sign-in cookies, and closes its web
 view, without deleting anything on the HUB server. External links open in a
 separate browser sheet. Offline/TLS/login failures leave an explicit recovery
 message and a way back to Connection. Foreground microphone/camera access uses
@@ -45,6 +49,16 @@ Ending during admission waits for the owned receipt to finish and closes it;
 failed cleanup keeps an explicit retry instead of pretending the call ended.
 Reconnect uses the owned call, without resubmitting a user task or creating a
 second conversation. Existing web/Telegram calls block a second native call.
+
+After an interrupted app process, **Voice** offers **Resume last conversation**
+or **Start new conversation**. A device-only Keychain receipt identifies the
+original conversation and owned call. Rejoining requires the current server call
+to match both IDs; another phone/browser's call is never adopted or ended. If
+the old call has ended, resume opens a new audio connection to the same saved
+conversation. If startup was interrupted before a peer ID was received, the
+screen offers explicit cleanup through **End** before resuming. The microphone
+does not restart merely because you reopen the app. This recovery path still
+needs real-device end-to-end acceptance.
 
 Transport dependency: WebRTC134.0.0, pinned by exact SwiftPM version and the
 upstream binary checksum. Its BSD notices are included in the app bundle. Native
@@ -125,15 +139,14 @@ build is not evidence of iPhone, background audio or distribution acceptance.
 
 ## Native work to start next
 
-1. Implement authenticated connection and session restoration to the existing HUB
-   host. Preserve its authentication and add explicit client/server compatibility
-   handling. Reuse the PWA screens through a deliberate trusted-client integration.
-2. Implement native audio capture/playback, echo control, Bluetooth routing,
-   interruptions, screen locking and reconnecting. Continue using the selected
-   providers; moving to native does not itself change speech recognition accuracy.
-3. Add native push registration/delivery and task/chat deep links. Then camera,
-   photo/file selection and the iOS Share extension, with permissions requested
-   only when their implemented feature is used.
+1. Validate authenticated connection/session restoration and client compatibility,
+   including expired access and interrupted admission. Keep existing auth gates.
+2. Accept native audio, same-conversation recovery, echo control, Bluetooth,
+   interruptions and screen locking on an actual iPhone. Continue using selected
+   providers; native alone does not improve the speech model's recognition.
+3. Add Siri/App Intents with correct lock/microphone policy, then native push
+   delivery and task/chat links. Finish native file/Share and screen sharing,
+   requesting permissions only when their actual feature is used.
 4. Test physical-device lifecycle, weak/offline connections, microphone/camera
    denial, phone calls, closing/reopening, task continuity, data preservation,
    privacy and power use before calling this a daily-use iPhone client.
@@ -144,8 +157,8 @@ bundled trusted content: no `server.url`,
 cleartext remote connection or broad navigation allowlist. Do not turn the
 remote PWA or agent-created HTML into a privileged native bridge page. Generated
 visuals need a separate sandbox; device access must remain explicit and scoped.
-The development page's CSP denies network connections until the authenticated
-connection is implemented and its allowed origins are deliberately configured.
+The dormant bundled development page remains offline. Connected HUB screens use
+the separate unprivileged HTTPS web view and the normal server access gate.
 
 Use the [Capacitor iOS](https://capacitorjs.com/docs/ios) and
 [Swift Package Manager](https://capacitorjs.com/docs/ios/spm) guidance when

@@ -4,15 +4,21 @@ public struct HubVoiceStatus: Decodable {
     public let enabled: Bool
     public let busy: Bool
     public let serverTime: Int64
+    public let activeCall: HubActiveVoiceCall?
 }
 
-public struct HubVoiceLease: Decodable {
+public struct HubActiveVoiceCall: Decodable {
+    public let callId: String
+    public let sessionId: String
+}
+
+public struct HubVoiceLease: Codable {
     public let callId: String
     public let sessionId: String
     public let iceServers: [HubIceServer]?
 }
 
-public struct HubIceServer: Decodable {
+public struct HubIceServer: Codable {
     public let urls: [String]
     public let username: String?
     public let credential: String?
@@ -58,7 +64,7 @@ public final class HubVoiceAPI {
     deinit { session.invalidateAndCancel() }
     public func invalidate() { session.invalidateAndCancel() }
 
-    private static func validID(_ value: String) -> Bool {
+    static func validID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 200 && value.utf8.allSatisfy {
             (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 95].contains($0)
         }

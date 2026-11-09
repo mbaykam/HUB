@@ -17,6 +17,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var connectionGeneration = 0
     private var connected = false
     private var voice: HubNativeVoice?
+    private var deviceState: HubDeviceState?
     deinit { probe?.cancel(); api?.invalidate() }
 
     override func viewDidLoad() {
@@ -100,6 +101,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         probe?.cancel()
         connected = false
         server = value
+        deviceState = HubDeviceState(server: value, store: HubKeychainStore())
         api?.invalidate()
         api = HubVoiceAPI(server: value) { [weak webView] in
             await withCheckedContinuation { continuation in
@@ -129,6 +131,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             guard let self else { return }
             self.connectionGeneration += 1
             self.probe?.cancel()
+            do { try self.deviceState?.clear() }
+            catch { self.message.text = "Sign-out could not clear saved access. Unlock this iPhone and try again."; return }
             self.connected = false
             self.webView.stopLoading()
             self.server = nil
@@ -150,12 +154,22 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     @objc private func showVoice() {
-        guard let api else { showConnection(); return }
+        guard let api, let server, let deviceState else { showConnection(); return }
         guard connected || voice?.isActive == true else {
             message.text = "Complete HUB sign-in before starting voice."
             return
         }
-        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api)
+        if voice?.isActive != true, let saved = try? deviceState.voice() {
+            let choices = UIAlertController(title: "Voice conversation", message: "Continue your last voice conversation, or start a new one.", preferredStyle: .actionSheet)
+            choices.addAction(UIAlertAction(title: "Resume last conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: saved) })
+            choices.addAction(UIAlertAction(title: "Start new conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) })
+            choices.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            choices.popoverPresentationController?.barButtonItem = navigationItem.leftBarButtonItem
+            present(choices, animated: true)
+        } else { presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) }
+    }
+    private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?) {
+        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint)
         voice = model
         let sheet = HubVoiceViewController(voice: model)
         present(UINavigationController(rootViewController: sheet), animated: true) { [weak self, weak sheet] in
@@ -216,6 +230,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                       let url = self.webView.url, expected.contains(url) else { return }
                 self.connected = true
                 self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
+                let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+                    self.webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
+                }
+                guard !Task.isCancelled, generation == self.connectionGeneration else { return }
+                do { try self.deviceState?.rememberVerifiedSession(cookies) }
+                catch { self.message.text = "Connected. Sign-in could not be saved on this iPhone." }
             } catch {
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration else { return }
                 self.connected = false
