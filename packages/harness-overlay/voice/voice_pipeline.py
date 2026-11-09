@@ -129,8 +129,10 @@ def build_voice_worker(connection, bridge: HubBridgeClient, speech=None, *, tran
         context, user_params=voice_user_turn_params(speech['stt']['engine']=='soniox'),
     )
     post_stt_guard = PlaybackInputGuard(gate, mask_audio=False, health=health)
+    echo_vad=SileroVADAnalyzer(params=VADParams(confidence=.6,start_secs=.12,stop_secs=.2,min_volume=0.0))
+    echo_vad.set_sample_rate(16000)
     worker = PipelineWorker(
-        Pipeline([transport.input(), SpeechHealthProbe(health), PlaybackInputGuard(gate), stt,
+        Pipeline([transport.input(), SpeechHealthProbe(health), PlaybackInputGuard(gate,speech_vad=echo_vad), stt,
                   post_stt_guard, AttentionInputGate(attention, health), TranscriptionHealthProbe(health), user, llm,
                   SpokenReplyProbe(gate), tts,
                   transport.output(), PlaybackOutputProbe(gate), assistant]),

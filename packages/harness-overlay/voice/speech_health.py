@@ -56,6 +56,7 @@ class SpeechHealth:
         if self.attention:
             self.attention.tick(self.model_active or self.bot_speaking or self.synthesizing or self.user_speaking or self.stage=='transcribing' or paused)
         return {"cloudRecognition":self.cloud_recognition,
+                "echoVerification":gate.acoustic.snapshot() if gate and hasattr(gate,'acoustic') else None,
                 "inputFrames": self.frames, "sampleRate": self.sample_rate, "channels": self.channels,
                 "inputLevel": round(self.level if now-self.last_audio < 2 else 0, 4),
                 "receivingAudio": bool(self.frames and now-self.last_audio < 2),

@@ -13,7 +13,7 @@ export function attachVoiceHistoryTool(agent: PresentationAgent, history: VoiceH
   let active = true;
   const off = agent.ctx.tools.register({
     name: SAVE_VOICE_CONVERSATION_TOOL,
-    description: "Save this whole voice conversation to the user's normal chats/Recents, but ONLY when the user explicitly asks to save or keep this conversation as a chat. Do not use for remembering a fact, bookmarking a task, or routinely at call end. Original transcripts already live in Voice History. This cannot save another session. Confirm success only after the tool returns saved or already-saved.",
+    description: "New voice conversations appear in normal chats/Recents automatically; do not call this routinely at call end. This tool can add an older hidden voice conversation to Recents, but ONLY when the user explicitly asks to save or keep this conversation as a chat. Do not use for remembering a fact or bookmarking a task. Original transcripts already live in Voice History. This cannot save another session. Confirm success only after the tool returns saved or already-saved.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     output: {
       schema: { type: "object", properties: { sessionId: { type: "string" }, saved: { type: "boolean", const: true }, status: { type: "string", enum: ["saved", "already-saved"] } }, required: ["sessionId", "saved", "status"], additionalProperties: false },

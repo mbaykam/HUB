@@ -18,7 +18,7 @@ rendererHook.deregister();
 
 const noteId='00000000-0000-4000-8000-000000000001';
 const graph={nodes:[{id:noteId,title:'Reading list',permalink:'Notes/Reading list'}],edges:[]};
-const button=(root,label)=>[...root.querySelectorAll('button')].find(node=>node.textContent===label);
+const button=(root,label)=>[...root.querySelectorAll('button')].find(node=>node.textContent===label||(label==='Home'&&node.getAttribute('aria-label')==='Back home'));
 async function fixture(t,options={}){
   const displayedGraph=options.graph??graph;
   const dom=new JSDOM('<main></main>',{url:'https://hub.test/',pretendToBeVisual:true});
@@ -142,6 +142,19 @@ const sparseGraph={nodes:Array.from({length:98},(_,i)=>({id:'fixture-source-'+i,
 const frames=view=>new Promise(resolve=>view.requestAnimationFrame(()=>view.requestAnimationFrame(resolve)));
 function measurableCanvas(root){const canvas=root.querySelector('[data-graph-canvas]');Object.defineProperties(canvas,{clientWidth:{get:()=>canvas.hidden?0:360},clientHeight:{get:()=>canvas.hidden?0:612}});return canvas;}
 
+test('compact Knowledge header keeps counts in a menu and domain focus has an obvious return',async t=>{
+ const g={nodes:[{id:'learn',title:'Language practice',permalink:'Notes/Language'},{id:'project',title:'Personal assistant',permalink:'Notes/Assistant'},sourceChat],edges:[],domains:[{id:'learning',title:'Learning',status:'active'},{id:'projects',title:'Projects',status:'active'}],memberships:[{nodeId:'learn',domainId:'learning'},{nodeId:'project',domainId:'projects'}]};
+ const {root,view,requests}=await fixture(t,{graph:g,openNote:false});measurableCanvas(root);await frames(view);
+ const header=root.querySelector('dialog>header'),menu=header.querySelector('[data-knowledge-menu]');
+ assert.ok(header.querySelector('[aria-label="Knowledge view"]'));assert.equal(menu.open,false);assert.ok(menu.querySelector('p').textContent.includes('2 brain notes'));
+ const labels=[...root.querySelectorAll('[data-knowledge-domain-label]')].filter(b=>!b.hidden);
+ assert.deepEqual(labels.map(b=>b.dataset.knowledgeDomainLabel).sort(),['hub:chat-archive','learning','projects']);
+ assert.equal(root.querySelector('[data-knowledge-graph-trail] button').hidden,true);
+ labels.find(b=>b.dataset.knowledgeDomainLabel==='learning').click();await frames(view);
+ const back=root.querySelector('[data-knowledge-graph-trail] button');assert.equal(back.hidden,false);back.click();await frames(view);assert.equal(back.hidden,true);
+ assert.ok(requests.every(r=>r.method==='GET'),'View navigation must not organize or rewrite knowledge');
+});
+
 test('98 sparse records have a two-dimensional layout and their own working zoom controls',async t=>{
   const {view,root}=await fixture(t,{graph:sparseGraph,openNote:false}),canvas=measurableCanvas(root),cy=canvas.fixtureCy;
   assert.equal(canvas.hidden,false);
@@ -164,16 +177,16 @@ test('2D source positions survive manual dragging, note navigation and reopening
   const {view,root,requests}=await fixture(t,{graph:sparseGraph,openNote:false}),canvas=measurableCanvas(root),cy=canvas.fixtureCy;
   await frames(view);
   const node=cy.getElementById('fixture-source-5');node.position({x:777,y:888});node.emit('dragfree');
-  const saved=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'));saved['other-dataset-source']={x:12,y:34};view.localStorage.setItem('hub-knowledge-positions-v1',JSON.stringify(saved));
+  const saved=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v2'));saved['other-dataset-source']={x:12,y:34};view.localStorage.setItem('hub-knowledge-positions-v2',JSON.stringify(saved));
   button(root,'Notes').click();button(root,'Graph').click();await frames(view);
   assert.deepEqual(node.position(),{x:777,y:888});
-  assert.deepEqual(JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'))['fixture-source-5'],{x:777,y:888});
+  assert.deepEqual(JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v2'))['fixture-source-5'],{x:777,y:888});
   button(root,'Home').click();const dispose=openKnowledgeWorkspace(root.querySelector('main'),root,sparseGraph,()=>{});t.after(dispose);
   const reopened=measurableCanvas(root);await frames(view);
   assert.deepEqual(reopened.fixtureCy.getElementById('fixture-source-5').position(),{x:777,y:888});
   button(root,'Reset 2D layout').click();await frames(view);
   assert.notDeepEqual(reopened.fixtureCy.getElementById('fixture-source-5').position(),{x:777,y:888});
-  const reset=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v1'));
+  const reset=JSON.parse(view.localStorage.getItem('hub-knowledge-positions-v2'));
   assert.equal(reset['fixture-source-5'],undefined);assert.deepEqual(reset['other-dataset-source'],{x:12,y:34});
   assert.equal(reopened.fixtureCy.nodes().length,98);assert.ok(requests.every(r=>r.method==='GET'));
 });
@@ -183,7 +196,8 @@ const brainRecord={...graph.nodes[0],kind:'note'};
 const mixedGraph={nodes:[brainRecord,sourceChat],edges:[{source:noteId,target:sourceChat.id}]};
 test('Notes and Chat archive expose separate searchable lists in the same Knowledge window',async t=>{
  const {root,view,requests}=await fixture(t,{graph:mixedGraph,openNote:false});
- assert.match(root.querySelector('[role=status]').textContent,/1 brain notes · 1 chats/);
+ assert.match(root.querySelector('[data-knowledge-menu] p').textContent,/1 brain notes · 1 chats/);
+ assert.equal(root.querySelector('[role=status]').textContent,'','Ordinary counts must not consume a separate header row');
  button(root,'Notes').click();assert.equal(root.querySelector('[aria-label="Record collection"]').value,'brain');assert.ok(button(root,'Reading list'));assert.equal(button(root,sourceChat.title),undefined);
  button(root,'Chat archive').click();assert.equal(root.querySelector('[aria-label="Record collection"]').value,'archive');assert.ok(button(root,sourceChat.title));assert.equal(button(root,'Reading list'),undefined);
  const search=root.querySelector('[aria-label="Search knowledge"]');search.value='bilingual';search.dispatchEvent(new view.Event('input'));await new Promise(resolve=>view.setTimeout(resolve,280));

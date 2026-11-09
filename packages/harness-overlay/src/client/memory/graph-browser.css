@@ -69,3 +69,29 @@
 [data-knowledge-workspace] aside>[aria-label="Record collection"]{box-sizing:border-box;width:100%;min-height:44px;margin-bottom:10px;padding:10px 12px;border:1px solid #a2aaca40;border-radius:12px;background:#151c2b;color:inherit;font:inherit;font-size:16px}
 [data-knowledge-source-trail]{margin:12px 0 20px;padding:12px 14px;border:1px solid #83c8dc35;border-radius:14px;background:linear-gradient(120deg,#69bad011,#9a98e709)}[data-knowledge-source-trail] small{color:#99ccdb}[data-knowledge-source-trail] h4{margin:12px 0 4px;font-size:14px}[data-knowledge-source-trail] button{margin:4px 4px 0 0;text-align:left;overflow-wrap:anywhere}
 [data-chat-archive-label]{position:absolute;transform:translateX(-50%);max-width:180px;min-height:32px!important;padding:5px 10px!important;font-size:12px!important;border:1px dashed #83c8dc70!important;border-radius:12px;background:#152131e8;color:#a3d9e5;backdrop-filter:blur(12px);z-index:1}
+
+/* One navigation row; the graph gets the remaining viewport. */
+[data-knowledge-workspace]{gap:4px;padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+[data-knowledge-workspace]>header{flex:none;min-height:44px;gap:6px}
+[data-knowledge-workspace]>header h2{font-size:16px;letter-spacing:-.02em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+[data-knowledge-workspace]>header>button{min-width:44px;padding:0;border:0;background:transparent;font-size:24px}
+[data-knowledge-workspace]>header>[data-knowledge-view-select]{width:112px;min-width:0;flex:none;min-height:44px;padding:6px 8px;font:inherit;font-size:14px;background:transparent;color:inherit;border:0;border-radius:10px}
+[data-knowledge-workspace]>p[role=status]:empty{display:none}
+[data-knowledge-menu]{position:relative;flex:none;z-index:10}
+[data-knowledge-menu]>summary{list-style:none;display:flex;align-items:center;justify-content:center;width:44px;min-height:44px;font-size:22px;border-radius:10px;cursor:pointer}
+[data-knowledge-menu]>summary::-webkit-details-marker{display:none}
+[data-knowledge-menu]>div{position:absolute;right:0;top:48px;box-sizing:border-box;width:min(280px,calc(100vw - 24px));padding:14px;border:1px solid #8ca3ca40;border-radius:14px;background:#172033;box-shadow:0 12px 36px #0005}
+[data-knowledge-menu] p{margin:0 0 8px;font-size:12px;line-height:1.5}
+[data-knowledge-menu] button{width:100%;text-align:left}
+[data-knowledge-workspace][data-knowledge-theme=light] [data-knowledge-menu]>div{background:#fff}
+[data-knowledge-regions],[data-knowledge-domain-labels]{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+[data-knowledge-domain-labels]{z-index:2}
+[data-knowledge-workspace] [data-knowledge-domain-label]{position:absolute;transform:translateX(-50%);box-sizing:border-box;max-width:164px;min-height:44px!important;padding:7px 10px!important;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px!important;color:var(--domain-color);border:1px solid color-mix(in srgb,var(--domain-color) 45%,transparent)!important;background:#131c2deb;backdrop-filter:blur(12px);pointer-events:auto;touch-action:manipulation}
+[data-knowledge-workspace][data-knowledge-theme=light] [data-knowledge-domain-label]{background:#f9fbfff0;color:#344663}
+[data-knowledge-workspace] .knowledge-brain-controls{top:auto;left:auto;right:12px;bottom:12px;flex-wrap:nowrap;z-index:4}
+[data-knowledge-workspace] .knowledge-brain-controls button{min-width:44px;min-height:44px;padding:8px 10px}
+[data-knowledge-workspace] [data-knowledge-graph-trail]{top:8px;left:8px;right:auto;z-index:3}
+[data-knowledge-workspace] .knowledge-graph-options{left:12px;bottom:12px;padding:0;max-width:calc(100% - 24px);z-index:5}
+[data-knowledge-workspace] .knowledge-graph-options>summary{min-height:44px;padding:0 12px}
+[data-knowledge-workspace] .knowledge-graph-options[open]{padding:6px 12px 12px;box-shadow:0 8px 24px #0003}
+[data-knowledge-workspace] .knowledge-graph-options span{display:block;font-size:12px;padding:8px 4px 0}

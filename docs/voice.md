@@ -10,6 +10,11 @@ text reaches TTS incrementally; tool arguments and hidden reasoning are not
 spoken. A stronger HUB character can handle delegated tasks and return their
 results to the active call.
 
+New voice conversations appear automatically in the left **Recents** panel,
+alongside written chats. They stay there after the call ends and after reopening
+the PWA; no separate Save request is needed. Older hidden voice conversations
+remain available under Voice History and can still be added individually.
+
 ## Soniox streaming recognition
 
 Open **Settings → HUB → Speech → Soniox connection** and enter your Soniox API
@@ -127,12 +132,19 @@ plays their PCM chunks. Long sentences can start with a shorter phrase at a word
 boundary, preserving numbers and URLs. This is not fully token-by-token audio
 generation. Interrupting drops the old response's PCM before the next synthesis.
 
-The playback guard pauses recognition from the first spoken reply text through
-the end of playback and its echo tail, including gaps while the next sentence
-is synthesized. It resumes automatically after the reply finishes.
-Use **Interrupt** to stop a reply and speak again. This is a practical guard,
-not full acoustic echo cancellation or unrestricted voice barge-in. Mute is
-preserved across interruption. Missing input and runtime errors remain visible.
+In foreground mode, microphone capture stays open while the assistant speaks.
+A local guard buffers 320 ms of candidate audio and compares it with a bounded
+four-second RAM reference of audio sent to playback. Delay, level and short
+speaker/room filtering are considered; matching recognized words is not required.
+Confident echo is discarded before recognition, while accepted speech is replayed
+to recognition with its buffered beginning intact. No separate model request or
+persisted audio reference is created. This is echo protection, not biometric
+speaker identification; actual phone-speaker quality requires a device test.
+
+Use **Interrupt** to stop a reply explicitly. Background mode continues to wait
+for the configured wake phrase and does not admit ordinary interruptions during
+assistant playback. Mute is preserved across interruption. Missing input and
+runtime errors remain visible.
 
 ## Delegation and live views
 

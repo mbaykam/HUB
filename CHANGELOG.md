@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.2
+
+- Add new voice conversations to normal Recents automatically, without a
+  separate Save request, and retain their visibility after reopening the PWA.
+- Verify foreground interruption against a bounded playback-audio reference
+  before admitting speech; keep capture open and preserve buffered first sounds.
+- Compact Knowledge navigation and controls, show domain labels at overview
+  scale, and separate 2D domain groups from the original chat archive.
+
 ## 1.9.1
 
 - Keep inline visuals at their intended height inside the chat layout.

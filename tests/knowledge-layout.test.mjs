@@ -2,7 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {knowledgeLayout,projectKnowledgePreview} from '../packages/harness-overlay/src/client/memory/knowledge-layout.ts';
 import {knowledgeLabelStyle} from '../packages/harness-overlay/src/client/memory/knowledge-labels.ts';
+import {knowledgeMap2D} from '../packages/harness-overlay/src/client/memory/knowledge-map-2d.ts';
 const graph=(count=98)=>({nodes:Array.from({length:count},(_,i)=>({id:'record-'+i,title:'Record '+i})),edges:[]});
+test('2D gives small domains room alongside the archive while retaining hierarchy and original data',()=>{
+ const g=graph(105);g.nodes[0].kind='conversation';g.domains=[{id:'learning',title:'Learning',status:'active'},{id:'projects',title:'Projects',status:'active'},{id:'apps',title:'Apps',parentId:'projects',status:'active'}];g.memberships=[{nodeId:'record-1',domainId:'learning'},{nodeId:'record-2',domainId:'apps'}];
+ const before=JSON.stringify(g),result=knowledgeMap2D(g,.55),groups=result.groups;
+ assert.equal(JSON.stringify(g),before);assert.equal(result.points.length,105);assert.ok(result.points.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.z===0));
+ const roots=groups.filter(g=>!g.parentId);assert.equal(roots.length,4);assert.ok(new Set(roots.map(g=>g.x)).size>=2);assert.ok(new Set(roots.map(g=>g.y)).size>=2);
+ assert.equal(groups.find(g=>g.id==='apps').parentId,'projects');assert.ok(groups.find(g=>g.id==='projects').members.includes('record-2'));
+ assert.equal(result.points.find(p=>p.id==='record-0').domainId,'hub:chat-archive');
+ assert.deepEqual(knowledgeMap2D({...g,nodes:[...g.nodes].reverse()},.55),result);
+ assert.deepEqual(knowledgeMap2D(graph(0)),{points:[],groups:[]});
+});
 test('unlinked records occupy a filled 3D cloud, not a ring or one invented domain per record',()=>{
  const result=knowledgeLayout(graph());assert.equal(result.groups.length,1);assert.equal(result.groups[0].name,'Unassigned');
  for(const axis of ['x','y','z'])assert.ok(new Set(result.points.map(p=>Math.round(p[axis]/10))).size>10);

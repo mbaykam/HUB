@@ -44,8 +44,10 @@ export async function openConversationHistory(storage: ConversationStorage) {
       if (session.header.origin === "subagent" || session.inheritedEventCount !== 0 || session.snapshotEvents().some(event => event.type === "user/message")) throw new Error("Only a new empty coordinator may enter Voice History");
       if (table.get(session.id)) return;
       if (table.size >= 20_000) throw new Error("Voice History metadata is full");
-      // Native writes resolve only after durability. No ready call/audio first.
-      await table.put(session.id, { saved: false, createdAt: Date.now() });
+      // New voice conversations belong in normal Recents immediately, just like
+      // written chats. Commit visibility before the call can become ready.
+      // Existing records keep their visibility; this is not a migration.
+      await table.put(session.id, { saved: true, createdAt: Date.now() });
     },
     async save(sessionId: string): Promise<ConversationView> {
       // Only IDs admitted as empty voice coordinators exist in this table.

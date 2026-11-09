@@ -1,16 +1,19 @@
 """Per-call speakerphone protection through synthesis, playback and its tail.
 
-Browser/Telegram echo cancellation is best effort. Do not turn returned speaker
-audio into a new user command. Keep silence flowing through VAD while playback
-and its short acoustic/network tail are blocked. No audio is retained here.
+Browser/Telegram echo cancellation is best effort. Verify foreground microphone
+candidates against a bounded RAM-only reference of sent audio before admitting
+an interruption. Capture stays open; discarded candidates become silence in the
+downstream STT/VAD clock. No audio is written or sent to a separate model.
 """
 import asyncio
 import time
 import re
 from difflib import SequenceMatcher
 from dataclasses import dataclass
+from dataclasses import replace
+from echo_audio import EchoAudioVerifier
 from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
-    DataFrame, InputAudioRawFrame, InterimTranscriptionFrame, TranscriptionFrame,
+    DataFrame, InputAudioRawFrame, OutputAudioRawFrame, InterimTranscriptionFrame, TranscriptionFrame,
     InterruptionFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame,
     LLMTextFrame, TTSSpeakFrame,
     VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)
@@ -36,6 +39,7 @@ class PlaybackGate:
         self.foreground = foreground
         self.spoken_words = []
         self.spoken_text = ''
+        self.acoustic = EchoAudioVerifier(clock)
 
     @property
     def input_blocked(self):
@@ -48,10 +52,14 @@ class PlaybackGate:
         self.spoken_words = re.findall(r"[^\W_]+", self.spoken_text.casefold())[-2000:]
 
     def accepts_transcript(self, text, *, final=False):
-        if not self.blocked:
-            return True
         if self.input_blocked:
             return False
+        # PCM admission precedes ASR. Wrong words in a returned-speaker draft
+        # cannot bypass this check, and verified users may repeat our own words.
+        if self.barge_in and self.foreground() and self.acoustic.watching:
+            return self.acoustic.human and bool(text.strip())
+        if not self.blocked:
+            return True
         words = re.findall(r"[^\W_]+", text.casefold())
         if not words:
             return False
@@ -81,6 +89,7 @@ class PlaybackGate:
             self.pending_replies.add(reply_id)
             # Invalidate a decode that began before the response was queued.
             self.generation += 1
+            self.acoustic.reset_admission()
 
     def finish_reply(self, reply_id):
         if reply_id in self.pending_replies:
@@ -157,15 +166,69 @@ class PlaybackOutputProbe(FrameProcessor):
                 self.gate.finish_reply(frame.reply_id)
             return
         self.gate.observe(frame)
+        if self.gate.barge_in and direction == FrameDirection.DOWNSTREAM and isinstance(frame, OutputAudioRawFrame):
+            self.gate.acoustic.render(frame.audio,frame.sample_rate,frame.num_channels)
         await self.push_frame(frame, direction)
 
 
 class PlaybackInputGuard(FrameProcessor):
-    def __init__(self, gate, *, mask_audio=True, health=None):
+    def __init__(self, gate, *, mask_audio=True, health=None, speech_vad=None):
         super().__init__()
         self.gate = gate
         self.mask_audio = mask_audio
         self.health = health
+        self.speech_vad = speech_vad
+        self.pending_audio = []
+        self.pending_seconds = self.voiced_seconds = 0
+        self.tail_frames = 0
+        self.vad_failed = False
+
+    def clear_pending(self):
+        self.pending_audio.clear()
+        self.pending_seconds = self.voiced_seconds = 0
+        self.tail_frames = 0
+
+    async def verify_audio(self, frame, direction):
+        evidence=self.gate.acoustic
+        if evidence.watching and not evidence.human:
+            evidence.verdict='checking'
+            duration=len(frame.audio)/max(1,frame.sample_rate*frame.num_channels*2)
+            self.pending_audio.append(frame);self.pending_seconds+=duration
+            if self.speech_vad and not self.vad_failed:
+                try:
+                    from pipecat.audio.vad.vad_analyzer import VADState
+                    state=await self.speech_vad.analyze_audio(frame.audio)
+                    if state in (VADState.STARTING,VADState.SPEAKING):self.voiced_seconds+=duration
+                except Exception:
+                    # A secondary detector failure must not disable speaking.
+                    self.vad_failed=True;self.voiced_seconds+=duration
+            else:self.voiced_seconds+=duration
+            # Capture remains active; preserve VAD/STT clocks while the actual
+            # candidate stays in bounded RAM. It is replayed only if accepted.
+            await self.push_frame(replace(frame,audio=bytes(len(frame.audio))),direction)
+            if self.pending_seconds>=evidence.window_seconds:
+                pcm=b''.join(f.audio for f in self.pending_audio)
+                if evidence.decide(pcm,frame.sample_rate,frame.num_channels,speech=self.voiced_seconds>=.08):
+                    for buffered in self.pending_audio:await self.push_frame(buffered,direction)
+                    self.clear_pending()
+                else:
+                    if self.health:self.health.partial_text=''
+                    # Keep a short overlap so a quiet first syllable near the
+                    # decision boundary can be verified with the next window.
+                    tail=[];seconds=0
+                    for buffered in reversed(self.pending_audio):
+                        seconds+=len(buffered.audio)/(buffered.sample_rate*buffered.num_channels*2)
+                        if seconds>.12+1e-6:break
+                        tail.insert(0,buffered)
+                    voiced=min(self.voiced_seconds,.12);self.clear_pending()
+                    self.pending_audio=tail;self.tail_frames=len(tail)
+                    self.pending_seconds=sum(len(f.audio)/(f.sample_rate*f.num_channels*2) for f in tail)
+                    self.voiced_seconds=voiced
+            return True
+        if self.pending_audio:
+            for buffered in self.pending_audio[self.tail_frames:]:await self.push_frame(buffered,direction)
+            self.clear_pending()
+        return False
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -174,6 +237,7 @@ class PlaybackInputGuard(FrameProcessor):
                 self.health.partial_text = ''
             return
         if self.gate.input_blocked:
+            self.clear_pending()
             if isinstance(frame, InputAudioRawFrame) and self.mask_audio:
                 self.gate.suppressed_frames += 1
                 # VAD must see silence, rather than retaining the previous
@@ -182,7 +246,15 @@ class PlaybackInputGuard(FrameProcessor):
             elif isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame,
                                     VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)):
                 return
+        elif self.mask_audio and isinstance(frame,InputAudioRawFrame) and self.gate.barge_in and self.gate.foreground():
+            if await self.verify_audio(frame,direction):return
         await self.push_frame(frame, direction)
+
+    async def cleanup(self):
+        self.clear_pending()
+        if self.mask_audio:self.gate.acoustic.clear()
+        if self.speech_vad and hasattr(self.speech_vad,'cleanup'):await self.speech_vad.cleanup()
+        await super().cleanup()
 
 
 class EchoProtectedSTTMixin:
