@@ -30,9 +30,11 @@ import {installCharacterRequests} from "./host/character-requests.ts";
 import {isLegacyMemoryTool,knowledgeToolChoices} from "./memory-tool-groups.ts";
 import {installPlanner} from "./host/planner.ts";
 import {installConversationTitles} from "./host/conversation-titles.ts";
+import {installNativePush} from "./host/native-push-install.ts";
+import type {NativePushEvent} from "./host/native-push.ts";
 
 export const name="hub-characters";
-export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments"];
+export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments","credentials"];
 declare module "@deepseek-ai/cordis" { interface Context { hubCharacters:HubCharacters; } }
 type CharacterAgent={id:string;status?:string;session:{header:{origin?:string;parentSession?:string};snapshotEvents():readonly {type:string;data?:unknown}[]};ctx:any};
 type Mount={revision:number;fibers:{dispose():Promise<void>}[];names:Map<string,string>;snapshot?:HubCharactersState;turnSnapshot?:HubCharactersState;loading?:Promise<void>;assembled?:{character:HubCharacter;state:HubCharactersState};voiceCharacter?:HubCharacter;pendingVoiceCharacter?:HubCharacter;nativeRoute?:string};
@@ -59,6 +61,7 @@ export class HubCharacters extends Service {
   readonly quota:ProviderGate;
   readonly background:BackgroundAdmission;
   goals?:GoalsStore;
+  nativePush?:{publish(event:NativePushEvent):void};
   readonly voiceCalls=new Set<string>();
   readonly voiceAdmissions=new Map<string,HubCharactersState>();
   readonly mounts=new Map<string,Mount>();
@@ -185,6 +188,7 @@ export class HubCharacters extends Service {
     },"HUB conversation visuals");
     ctx.effect(()=>installInstructionFiles(ctx,this,this.instructions),"HUB editable instruction files");
     ctx.effect(()=>installToolCatalog(ctx,this,()=>camofox.status()),"HUB read-only tool inventory");
+    ctx.effect(()=>installNativePush(ctx,this),"HUB opt-in native notifications");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
     ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");
   }

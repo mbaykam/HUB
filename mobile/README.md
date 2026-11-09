@@ -141,6 +141,22 @@ it does not silently create another activity. Apple limits one Live Activity to
 eight active hours, so this path is not an unlimited all-day-session guarantee.
 An explicit new voice/Siri action can resume the saved conversation.
 
+### Notification backend development
+
+The host now has an opt-in native device registry and durable Apple notification
+queue. It emits generic task/goal/automation completion or failure alerts with
+an origin-bound conversation destination, without sending result text to the
+Lock Screen. Retries retain the same Apple notification ID; versioned device
+registration prevents a late request from undoing a sign-out or newer choice.
+
+Apple delivery configuration is host-only: `APNS_TEAM_ID`, `APNS_KEY_ID`,
+`APNS_TOPIC`, and `APNS_PRIVATE_KEY_P8` are resolved through the native credential
+store. The Apple signing key never belongs in the iPhone bundle, chat or Git.
+The sender supports development/production Apple endpoints, not arbitrary URLs.
+No configuration, registration or Apple request has been made on your real host.
+The native permission/registration UI and signed-device delivery acceptance are
+still being connected; this backend alone is not a finished notification feature.
+
 The base app still targets iOS15; Siri recording and the widget require iOS18.
 These are compiled development paths. **Actual Siri invocation while locked,
 Live Activity lifetime, system interruptions and physical audio are unverified.**
