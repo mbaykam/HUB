@@ -25,7 +25,7 @@ export function createMobilePresentation(root: Document) {
   }
   function setExpanded(next:boolean){
     if(!dialog.open)return;
-    closeInternally();expanded=next;dialog.toggleAttribute("data-expanded",next);expand.textContent=next?"Back to chat":"Expand";if(next){dialog.showModal();expand.focus();}else dialog.show();
+    closeInternally();expanded=next;dialog.toggleAttribute("data-expanded",next);expand.textContent=next?"Back to chat":"Expand";if(next){dialog.showModal();expand.focus();}else dialog.setAttribute("open","");
   }
   // Browsers dispatch close asynchronously. A temporary flag would mistake a
   // queued internal close for Escape and immediately collapse full-screen.
@@ -33,7 +33,7 @@ export function createMobilePresentation(root: Document) {
   async function open(){
     if(!owner||!latest||opening||disposed)return;
     const identity=owner,item=latest,version=epoch;opening=true;seen.add(item.id);if(seen.size>128)seen.delete(seen.values().next().value!);
-    title.textContent=item.title;status.textContent="Opening visual…";if(!dialog.open)dialog.show();
+    title.textContent=item.title;status.textContent="Opening visual…";if(!dialog.open)dialog.setAttribute("open","");
     documentLoad?.abort();const pending=new AbortController();documentLoad=pending;
     try{
       const result=await request("presentation-document",identity,pending.signal,item.id);
@@ -60,7 +60,7 @@ export function createMobilePresentation(root: Document) {
   hide.addEventListener("click",()=>dismiss());expand.addEventListener("click",()=>setExpanded(!expanded));button.addEventListener("click",()=>void open());
   follow.addEventListener("click",()=>{following=!following;follow.setAttribute("aria-pressed",String(following));if(following&&latest?.id!==showing)void open();});update.addEventListener("click",()=>void open());
   reset.addEventListener("click",()=>{const frame=stage.querySelector("iframe");if(frame)frame.srcdoc=frame.srcdoc;options.open=false;});
-  dialog.addEventListener("close",()=>{if(ignoredCloses){ignoredCloses--;return;}if(disposed)return;if(expanded){expanded=false;dialog.removeAttribute("data-expanded");expand.textContent="Expand";dialog.show();}else{documentLoad?.abort();opening=false;stage.replaceChildren();showing=undefined;}});
+  dialog.addEventListener("close",()=>{if(ignoredCloses){ignoredCloses--;return;}if(disposed)return;if(expanded){expanded=false;dialog.removeAttribute("data-expanded");expand.textContent="Expand";dialog.setAttribute("open","");}else{documentLoad?.abort();opening=false;stage.replaceChildren();showing=undefined;}});
   const visibility=()=>{if(root.hidden){clearTimeout(timer);controller?.abort();}else schedule(0);};root.addEventListener("visibilitychange",visibility);
   function selectOwner(){
     const next=selectedCall?"voice:"+selectedCall:sessionId?"session:"+sessionId:undefined;if(next===owner)return;

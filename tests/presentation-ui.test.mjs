@@ -59,7 +59,7 @@ test("visual launcher follows native header replacement and voice Home without c
 
 test('queued native close events preserve expansion, frame state and the composer focus',async()=>{
  const dom=new JSDOM('<textarea aria-label="Message"></textarea>',{url:'http://localhost',pretendToBeVisual:true}),w=dom.window,doc=w.document,prior=globalThis.Event;globalThis.Event=w.Event;
- w.HTMLDialogElement.prototype.show=function(){this.open=true;};w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){if(!this.open)return;this.open=false;setTimeout(()=>this.dispatchEvent(new w.Event('close')),0);};
+ w.HTMLDialogElement.prototype.show=function(){this.open=true;this.querySelector("button")?.focus();};w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){if(!this.open)return;this.open=false;setTimeout(()=>this.dispatchEvent(new w.Event('close')),0);};
  let finish;const item={id:randomUUID(),title:'Interactive lesson',kind:'app',createdAt:1};w.fetch=async url=>url.endsWith('presentation-document')?new Promise(r=>finish=r):Response.json({presentation:item});
  const canvas=createMobilePresentation(doc);doc.body.append(canvas.button);doc.querySelector('textarea').focus();
  try{canvas.setSession('hub-eval-canvas');await tick();assert.equal(doc.activeElement,doc.querySelector('textarea'));finish(Response.json({document:'<input value="local">'}));await tick();const iframe=canvas.dialog.querySelector('iframe');
