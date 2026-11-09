@@ -1,0 +1,6 @@
+packages:
+  - .
+
+# Keep the iOS toolchain independent of the installed Windows host.
+nodeLinker: hoisted
+allowBuilds: {}

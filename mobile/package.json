@@ -1,0 +1,19 @@
+{
+  "name": "@hub/ios-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "check": "node scripts/check.mjs && node --test test/foundation.test.mjs",
+    "web:build": "node scripts/build-web.mjs",
+    "ios:prepare": "node scripts/prepare-ios.mjs",
+    "ios:build:simulator": "node scripts/build-simulator.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.0",
+    "@capacitor/ios": "8.6.0"
+  },
+  "devDependencies": { "@capacitor/cli": "8.6.0", "sharp": "0.35.5" }
+}

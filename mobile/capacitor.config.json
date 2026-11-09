@@ -1,0 +1,8 @@
+{
+  "appId": "com.mbaykam.hub",
+  "appName": "HUB",
+  "webDir": "www",
+  "loggingBehavior": "debug",
+  "server": { "cleartext": false },
+  "ios": { "contentInset": "automatic", "preferredContentMode": "mobile" }
+}

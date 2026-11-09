@@ -16,6 +16,7 @@ Windows-first; optional voice/knowledge/calling require additional configuration
 | Configure optional browser capabilities and visual results | [Browsing](browsing.md) |
 | Understand project/component credits | [Sources](sources.md) |
 | Apply a compatible PWA interface update | [UI updates](../HUB_UI_UPDATES.md) |
+| Prepare the future iPhone client and a hosted Mac build | [iPhone development](ios.md) |
 | Read product status and contribute | [Changelog](../CHANGELOG.md) · [Contributing](../CONTRIBUTING.md) |
 
 [English overview](../README.md) · [Türkçe](../README.tr.md) ·

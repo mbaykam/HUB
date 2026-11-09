@@ -1,0 +1,17 @@
+node_modules/
+www/
+build/
+.env
+.env.*
+*.p8
+*.p12
+*.mobileprovision
+*.ipa
+*.xcarchive/
+*.xcresult/
+**/xcuserdata/
+**/.swiftpm/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/capacitor-cordova-ios-plugins/
