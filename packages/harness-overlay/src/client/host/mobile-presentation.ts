@@ -25,15 +25,18 @@ export function createMobilePresentation(root: Document) {
   }
   function setExpanded(next:boolean){
     if(!dialog.open)return;
-    closeInternally();expanded=next;dialog.toggleAttribute("data-expanded",next);expand.textContent=next?"Back to chat":"Expand";if(next){dialog.showModal();expand.focus();}else dialog.setAttribute("open","");
+    closeInternally();expanded=next;dialog.toggleAttribute("data-expanded",next);expand.textContent=next?"Back to chat":"Expand";if(next){dialog.showModal();expand.focus();}else{dialog.setAttribute("open","");reveal();}
   }
+  function reveal(){view.requestAnimationFrame(()=>{if(!disposed&&dialog.open&&!expanded)dialog.scrollIntoView?.({block:"start",behavior:"smooth"});});}
   // Browsers dispatch close asynchronously. A temporary flag would mistake a
   // queued internal close for Escape and immediately collapse full-screen.
   function closeInternally(){if(dialog.open){ignoredCloses++;dialog.close();}}
-  async function open(){
+  async function open(bringIntoView=false){
     if(!owner||!latest||opening||disposed)return;
+    // Reopening a visible canvas is navigation, not a reset of its local inputs.
+    if(dialog.open&&showing===latest.id){if(bringIntoView)reveal();return;}
     const identity=owner,item=latest,version=epoch;opening=true;seen.add(item.id);if(seen.size>128)seen.delete(seen.values().next().value!);
-    title.textContent=item.title;status.textContent="Opening visual…";if(!dialog.open)dialog.setAttribute("open","");
+    title.textContent=item.title;status.textContent="Opening visual…";if(!dialog.open)dialog.setAttribute("open","");if(bringIntoView)reveal();
     documentLoad?.abort();const pending=new AbortController();documentLoad=pending;
     try{
       const result=await request("presentation-document",identity,pending.signal,item.id);
@@ -51,13 +54,13 @@ export function createMobilePresentation(root: Document) {
       latest=result.presentation===null?undefined:parsePresentationSummary(result.presentation);button.hidden=!latest;
       if(latest){button.setAttribute("aria-label",`Open canvas · ${latest.title}`);button.title=latest.title;update.hidden=!dialog.open||showing===latest.id;
         if(dialog.open&&showing!==latest.id&&following&&!opening)void open();
-        if(!seen.has(latest.id)&&!dialog.open&&!root.querySelector("dialog[open][data-expanded]"))void open();
+        if(!seen.has(latest.id)&&!dialog.open&&!root.querySelector("dialog[open][data-expanded]"))void open(true);
       }
     }catch{/* Canvas availability must never interrupt chat, tools or audio. */}
     finally{busy=false;controller=undefined;schedule();}
   }
   function dismiss(restoreFocus=true){documentLoad?.abort();opening=false;closeInternally();expanded=false;dialog.removeAttribute("data-expanded");expand.textContent="Expand";stage.replaceChildren();showing=undefined;if(restoreFocus)button.focus();}
-  hide.addEventListener("click",()=>dismiss());expand.addEventListener("click",()=>setExpanded(!expanded));button.addEventListener("click",()=>void open());
+  hide.addEventListener("click",()=>dismiss());expand.addEventListener("click",()=>setExpanded(!expanded));button.addEventListener("click",()=>void open(true));
   follow.addEventListener("click",()=>{following=!following;follow.setAttribute("aria-pressed",String(following));if(following&&latest?.id!==showing)void open();});update.addEventListener("click",()=>void open());
   reset.addEventListener("click",()=>{const frame=stage.querySelector("iframe");if(frame)frame.srcdoc=frame.srcdoc;options.open=false;});
   dialog.addEventListener("close",()=>{if(ignoredCloses){ignoredCloses--;return;}if(disposed)return;if(expanded){expanded=false;dialog.removeAttribute("data-expanded");expand.textContent="Expand";dialog.setAttribute("open","");}else{documentLoad?.abort();opening=false;stage.replaceChildren();showing=undefined;}});

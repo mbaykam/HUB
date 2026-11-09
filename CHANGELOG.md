@@ -3,6 +3,8 @@
 ## 1.9.1
 
 - Keep inline visuals at their intended height inside the chat layout.
+- Bring the canvas into view when opening it or returning from full screen,
+  preserving local inputs when using its navigation button.
 - Refine automatic chat titles after a completed reply and a short pause, using
   the conversation topic while preserving manually named chats.
 - Keep voice title fallbacks from replacing a refined topic title.

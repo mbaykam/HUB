@@ -13,7 +13,8 @@ test("canvas follows updates, can freeze/reopen, and cannot carry a visual into 
   window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   window.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); this.dispatchEvent(new window.Event("close")); };
   let latest = { id: randomUUID(), title: "First plan", kind: "html", createdAt: 1 };
-  const requests = [];
+  const requests = [];let revealed=0;
+  window.HTMLElement.prototype.scrollIntoView=function(){revealed++;};
   window.fetch = async (url, init) => { requests.push({ url, headers: init.headers }); return Response.json(url.endsWith("presentation-document") ? { document: "<p>Fixture visual</p>" } : { presentation: init.headers["x-hub-session"] === "other" ? null : latest }); };
   const canvas = createMobilePresentation(doc); doc.body.append(canvas.button);
   try {
@@ -21,6 +22,9 @@ test("canvas follows updates, can freeze/reopen, and cannot carry a visual into 
     assert.equal(canvas.dialog.open, true); assert.equal(canvas.dialog.hasAttribute("data-expanded"),false); assert.equal(canvas.dialog.querySelector("iframe").title, "First plan");
     assert.equal(window.getComputedStyle(canvas.dialog).flexShrink,"0","The card must not collapse inside the native flex chat scrollport");
     const originalFrame=canvas.dialog.querySelector("iframe");
+    await tick();assert.ok(revealed>0,"A newly published canvas must enter the visible chat area");
+    const beforeReveal=revealed,documentRequests=requests.filter(r=>r.url.endsWith('presentation-document')).length;
+    canvas.button.click();await tick();assert.ok(revealed>beforeReveal);assert.equal(canvas.dialog.querySelector('iframe'),originalFrame);assert.equal(requests.filter(r=>r.url.endsWith('presentation-document')).length,documentRequests,'Canvas navigation must preserve interactive input state');
     [...canvas.dialog.querySelectorAll("button")].find(b=>b.textContent==="Expand").click();
     assert.equal(canvas.dialog.hasAttribute("data-expanded"),true);assert.equal(canvas.dialog.querySelector("iframe"),originalFrame);
     [...canvas.dialog.querySelectorAll("button")].find(b=>b.textContent==="Back to chat").click();
