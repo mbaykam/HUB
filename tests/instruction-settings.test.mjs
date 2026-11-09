@@ -9,7 +9,7 @@ function fixture({curatorAvailable = true} = {}) {
   const dom = new JSDOM('<main/>', {url: 'https://hub.test/'}), root = dom.window.document, calls = [];
   const source = (id, content = '') => ({id, name: id, path: 'private/' + id, content, hash: id + '-hash', editable: true});
   const characters = ['HUB', 'Mira'].map(name => ({id: name.toLowerCase(), name, role: name === 'HUB' ? 'Main' : 'Voice', route: {provider: 'openai-codex', model: 'gpt-6-luna'}, instructions: source('character:' + name.toLowerCase(), name + ' original instructions')}));
-  const data = {shared: [source('SOUL.md'), source('USER.md'), {...source('native-agents', 'Workspace rules'), editable: false}], characters};
+  const data = {shared: [source('SOUL.md'), source('USER.md'), {...source('native-agents', 'Workspace rules'), editable: false}, {...source('canvas.md', 'Use hub_present proactively; choose html, vega or app.'), editable: false}], characters};
   const curator = {provider: 'openai-codex', model: 'gpt-6-luna', reasoningEffort: 'minimal', path: 'settings.json', instructions: 'Curator rules', hash: 'curator-hash', builtIn: '<script>this is literal text</script>'};
   dom.window.fetch = async (url, options) => {
     calls.push({url, options});
@@ -53,6 +53,7 @@ test('optional empty fields explain their audience and examples without activati
     assert.equal(f.data.shared[0].content, '');
     assert.equal(f.root.querySelector('script'), null);
     assert.match(f.root.querySelector('.instruction-advanced').textContent, /<script>/);
+    assert.match(f.root.querySelector('.instruction-advanced').textContent, /Use hub_present proactively/);
   } finally {f.close();}
 });
 

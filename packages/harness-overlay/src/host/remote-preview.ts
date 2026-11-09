@@ -66,7 +66,7 @@ const PREVIEW_CONTENT_SECURITY_POLICY = [
  * sandbox has no origin privileges, and only its srcdoc child may navigate
  * inside the frame; external frame navigations remain blocked by frame-src. */
 export function remotePreviewDocument(snapshot:{title:string;html:string}){
-  return containedAppDocument(snapshot.title,snapshot.html,true);
+  return containedAppDocument(snapshot.title,snapshot.html);
 }
 
 interface RemotePreviewRoute {

@@ -21,7 +21,7 @@ async function render() {
       FORBID_ATTR: ["href", "xlink:href", "srcset", "action", "formaction", "target", "ping", "autofocus"],
       ALLOW_DATA_ATTR: false,
     }));
-  } else {
+  } else if(content.kind==="vega") {
     const loader = createLoader();
     loader.load = async () => { throw new Error("External data is disabled"); };
     loader.sanitize = async () => { throw new Error("External resources are disabled"); };
@@ -29,7 +29,7 @@ async function render() {
     const spec = { ...content.spec, padding: 12, width: fittedWidth() } as Spec;
     chart = new View(parse(spec, undefined, { ast: true }), { expr: expressionInterpreter, renderer: "svg", container: surface, hover: true, loader });
     await chart.runAsync();
-  }
+  } else throw Error("Interactive apps use the isolated app renderer");
   document.body.dataset.ready = "true";
 }
 // No links, form submission or context escape, including generated SVG links.

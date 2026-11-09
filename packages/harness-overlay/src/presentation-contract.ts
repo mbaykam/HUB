@@ -1,20 +1,20 @@
 export const PRESENTATION_TOOL = "hub_present";
-export type PresentationInput = { title: string; kind: "html"; html: string } | { title: string; kind: "vega"; spec: Record<string, unknown> };
-export interface PresentationSummary { id: string; title: string; kind: "html" | "vega"; createdAt: number }
+export type PresentationInput = { title: string; kind: "html" | "app"; html: string } | { title: string; kind: "vega"; spec: Record<string, unknown> };
+export interface PresentationSummary { id: string; title: string; kind: "html" | "vega" | "app"; createdAt: number }
 export type Presentation = PresentationInput & PresentationSummary;
 
-/** Bounded, offline, data-only visuals. JavaScript is supplied only by HUB's
- * pinned renderer, not by model strings. Vega expressions use its interpreter. */
+/** Bounded offline visuals. Static markup is sanitized, Vega is interpreted,
+ * and scripted apps run only inside the separately isolated app container. */
 export function parsePresentation(value: unknown): PresentationInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Expected a visual explanation");
   const input = value as Record<string, unknown>;
   if (typeof input.title !== "string" || !input.title.trim() || input.title.length > 120) throw new TypeError("Use a title of 1–120 characters");
   const title = input.title.trim();
-  if (input.kind === "html") {
-    if (typeof input.html !== "string" || !input.html.trim() || input.html.length > 128_000) throw new TypeError("Use up to 128,000 characters of passive HTML/SVG");
-    return { title, kind: "html", html: input.html };
+  if (input.kind === "html" || input.kind === "app") {
+    if (typeof input.html !== "string" || !input.html.trim() || input.html.length > 128_000) throw new TypeError("Use up to 128,000 characters of self-contained HTML");
+    return { title, kind: input.kind, html: input.html };
   }
-  if (input.kind !== "vega" || !input.spec || typeof input.spec !== "object" || Array.isArray(input.spec)) throw new TypeError("Use kind html or vega with its content");
+  if (input.kind !== "vega" || !input.spec || typeof input.spec !== "object" || Array.isArray(input.spec)) throw new TypeError("Use kind html, app or vega with its content");
   const source = JSON.stringify(input.spec);
   if (source.length > 128_000) throw new TypeError("Vega specification is too large");
   const spec = input.spec as Record<string, unknown>;
@@ -46,6 +46,6 @@ export function parsePresentation(value: unknown): PresentationInput {
 export function parsePresentationSummary(value: unknown): PresentationSummary {
   if (!value || typeof value !== "object") throw new TypeError("Invalid presentation");
   const item = value as PresentationSummary;
-  if (typeof item.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id) || typeof item.title !== "string" || !item.title.trim() || item.title.length > 120 || !["html", "vega"].includes(item.kind) || !Number.isSafeInteger(item.createdAt) || item.createdAt < 0) throw new TypeError("Invalid presentation");
+  if (typeof item.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id) || typeof item.title !== "string" || !item.title.trim() || item.title.length > 120 || !["html", "vega", "app"].includes(item.kind) || !Number.isSafeInteger(item.createdAt) || item.createdAt < 0) throw new TypeError("Invalid presentation");
   return { id: item.id, title: item.title, kind: item.kind, createdAt: item.createdAt };
 }

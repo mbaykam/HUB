@@ -174,7 +174,10 @@ export class HubCharacters extends Service {
     ctx.effect(()=>installDailyUseWeb(ctx),"HUB durable activity and generated applications");
     ctx.effect(()=>{
       let renderer:Promise<string>|undefined;
-      const handler=createPresentationHandler(this.presentations,req=>ctx.connection.requestRejection(req),()=>renderer??=readFile(new URL("./presentation-renderer.js",import.meta.url),"utf8"));
+      const handler=createPresentationHandler(this.presentations,req=>ctx.connection.requestRejection(req),()=>renderer??=readFile(new URL("./presentation-renderer.js",import.meta.url),"utf8"),async sessionId=>{
+        const query=ctx.get("sessionQuery"),observation=await query.observeSession(sessionId,{signal:AbortSignal.timeout(10000),projectionMode:"none"});
+        try{return [...observation.events];}finally{observation[Symbol.dispose]();}
+      });
       const off=["presentation","presentation-document"].map(action=>ctx.webServer.register({kind:"exact",path:`/api/hub/${action}`,handler}));
       return ()=>off.forEach(remove=>remove());
     },"HUB conversation visuals");
@@ -289,7 +292,7 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_delegate"))tools.push({name:"hub_delegate",description:"Delegate to a configured character from a text or voice conversation."});
           if(!tools.some(t=>t.name==="hub_switch_character"))tools.push({name:"hub_switch_character",description:"Switch the active speaker after an explicit request to speak to that character."});
           if(!tools.some(t=>t.name==="hub_task"))tools.push({name:"hub_task",description:"Start background work with the voice character’s default specialist. Available during a voice call."});
-          if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's sandboxed diagram or interactive chart in HUB."});
+          if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's diagram, chart, simulation or interactive HTML app; see canvas.md."});
           send(200,{...this.store.snapshot(),tools,sharedSpeech:this.speechSettings.snapshot()});return;
         }
         if(req.method!=="POST"){send(405,{error:"method-not-allowed"});return;}

@@ -23,7 +23,7 @@ test('only successful writes create durable app snapshots, preserving paths and 
  assert.equal(conversationArtifacts(events.slice(0,3)).length,0);
  const failed=structuredClone(events);failed[3].data.message.content[0].isError=true;assert.equal(conversationArtifacts(failed).length,0);
  const [file]=conversationArtifacts(events);assert.equal(file.name,'calculator.html');assert.equal(file.path,'C:/fixture/calculator.html');assert.equal(file.at,at+2);
- const css={...file,path:'C:/fixture/app.css',name:'app.css',content:'button{color:green}'};const html=artifactDocument(file,[file,css]);assert.match(html,/^<!doctype html>/i);assert.match(html,/data:text\/css;base64/);assert.match(html,/connect-src 'none'/);assert.match(html,/form-action 'none'/);assert.match(html,/hubArtifactKey/);assert.equal(file.content,JSON.parse(events[2].data.arguments).content);
+ const css={...file,path:'C:/fixture/app.css',name:'app.css',content:'button{color:green}'};const html=artifactDocument(file,[file,css]);assert.match(html,/^<!doctype html>/i);assert.match(html,/data:text\/css;base64/);assert.match(html,/connect-src 'none'/);assert.match(html,/form-action 'none'/);assert.doesNotMatch(html,/hubArtifactKey|Game controls/);assert.equal(file.content,JSON.parse(events[2].data.arguments).content);
 });
 test('native app originals, excerpts, conversation provenance and domain/subdomain survive a fresh store',async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-eval-artifact-knowledge-')),store=new KnowledgeStore(join(root,'vault'),join(root,'state'));

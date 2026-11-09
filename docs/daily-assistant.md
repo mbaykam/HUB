@@ -33,11 +33,15 @@ not create a request merely to fill the inspector.
 
 Saved self-contained HTML files in Knowledge have **Open app** and **Download**
 actions. **Open app** stays inside the PWA in a full-screen viewer, with **Close**
-and optional **Game controls** for arrow keys and restart. Opening an app reads
+and the app’s own controls. Opening an app reads
 the saved file; it does not call a model or change the original. **Download**
 keeps the original bytes. Existing shared preview links also render local scripts
 inside an isolated frame. App code cannot read HUB cookies or use its tool/API
 connection; external scripts, network services and browser storage are restricted.
+
+For agent-created diagrams, charts, simulations and small tools, see the
+[interactive canvas](interactive-canvas.md). These appear inside chat, with
+optional full-screen expansion and no game-specific controls.
 
 ## Gradually connecting personal services
 

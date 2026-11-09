@@ -106,3 +106,32 @@ test("conversation visual HTTP access requires authentication and exact session/
     assert.equal((await fetch(url + "presentation-document", { headers })).status, 404);
   } finally { off(); await new Promise(resolve => server.close(resolve)); }
 });
+
+// A scripted utility is intentionally broader than a game or chart preset.
+test('app payload supports local utilities without game-specific controls or a host bridge', async()=>{
+ const {JSDOM}=await import('../vendor/deepseek-harness/node_modules/jsdom/lib/api.js');
+ const {recordedPresentation}=await import('@minke/harness-overlay/host/presentation.ts');
+ const payload={title:'Unit converter',kind:'app',html:`<!doctype html><html><head><style>body{color:white;background:#111}</style></head><body><label>Centimetres <input id="cm" type="number" value="10"></label><output id="out"></output><script>const cm=document.getElementById('cm'),out=document.getElementById('out');function update(){out.textContent=(Number(cm.value)/2.54).toFixed(2)+' inches'}cm.addEventListener('input',update);update();</script></body></html>`};
+ assert.deepEqual(parsePresentation(payload),payload);
+ const id=randomUUID(),document=presentationDocument({...payload,id,createdAt:1},'');
+ const outer=new JSDOM(document),frame=outer.window.document.querySelector('iframe');
+ assert.equal(outer.window.document.querySelectorAll('button,script').length,0);
+ assert.equal(frame.getAttribute('sandbox'),'allow-scripts');assert.match(frame.srcdoc,/connect-src 'none'/);assert.doesNotMatch(document,/Game controls|hubArtifactKey|allow-same-origin/);
+ // DOM execution is a simulation; browser sandbox enforcement is a separate acceptance check.
+ const app=new JSDOM(frame.srcdoc,{runScripts:'dangerously'});
+ try{const input=app.window.document.getElementById('cm');assert.equal(app.window.document.getElementById('out').textContent,'3.94 inches');input.value='25.4';input.dispatchEvent(new app.window.Event('input'));assert.equal(app.window.document.getElementById('out').textContent,'10.00 inches');}finally{app.window.close();outer.window.close();}
+ const call={type:'tool/call',data:{callId:'app-call',name:'hub_present',arguments:JSON.stringify(payload)}};
+ const receipt={type:'tool/result',time:123,data:{message:{content:[{type:'tool-result',toolCallId:'app-call',isError:false,content:[{type:'text',text:JSON.stringify({id,title:payload.title,status:'available'})}]}]}}};
+ const recorded=recordedPresentation([call,receipt]);assert.equal(recorded.id,id);assert.equal(recorded.html,payload.html);
+ assert.equal(recordedPresentation([call]),undefined);assert.equal(recordedPresentation([receipt]),undefined);
+ assert.equal(recordedPresentation([call,{...receipt,data:{message:{content:[{...receipt.data.message.content[0],isError:true}]}}}]),undefined);
+ const cold=new PresentationRuntime();cold.recover('saved-chat',[call,receipt]);assert.equal(cold.summary('saved-chat').id,id);assert.equal(cold.summary('other-chat'),null);assert.match(cold.document('saved-chat',id,''),/Unit converter/);
+});
+
+test('cold conversation canvas restores only through authenticated read-only session history',async()=>{
+ const runtime=new PresentationRuntime(),id=randomUUID(),payload={title:'Saved explanation',kind:'app',html:'<button>Local</button>'};let reads=0;
+ const events=[{type:'tool/call',data:{callId:'one',name:'hub_present',arguments:payload}},{type:'tool/result',time:10,data:{message:{content:[{type:'tool-result',toolCallId:'one',isError:false,content:[{type:'text',text:JSON.stringify({id,title:payload.title,status:'available'})}]}]}}}];
+ const handler=createPresentationHandler(runtime,r=>r.headers.cookie==='fixture=1'?undefined:401,async()=>'',async session=>{reads++;assert.equal(session,'saved-chat');return events;});
+ const server=createServer(handler);await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}/api/hub/`;
+ try{assert.equal((await fetch(base+'presentation',{headers:{'x-hub-session':'saved-chat'}})).status,401);assert.equal(reads,0);const headers={cookie:'fixture=1','x-hub-session':'saved-chat','x-hub-presentation':id};assert.equal((await(await fetch(base+'presentation',{headers})).json()).presentation.id,id);assert.match((await(await fetch(base+'presentation-document',{headers})).json()).document,/Local/);assert.equal(reads,1);}finally{await new Promise(r=>server.close(r));}
+});

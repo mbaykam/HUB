@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0
+
+- Add an inline conversation canvas for interactive HTML apps, charts and diagrams,
+  with full-screen expansion, reset, live updates and saved-chat recovery.
+- Share inspectable canvas.md instructions with conversation characters, covering
+  when and how to use visuals without changing personality or tool permissions.
+- Remove game-specific controls from general HTML previews.
+
 ## 1.8.2
 
 - Open saved HTML apps from Knowledge inside the PWA, preserving original

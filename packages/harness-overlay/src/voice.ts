@@ -204,7 +204,7 @@ export function apply(ctx: Context, config: Config): void {
         const key = await ctx.agentPresets.standingKeyFor();
         const tools = ctx.tools.schemas(key).map(tool => ({ name: tool.name, description: tool.description.slice(0, 300) }));
         for (const tool of [
-          { name: "hub_present", description: "Show visual explanations during voice." },
+          { name: "hub_present", description: "Show diagrams, charts or interactive apps during voice; see canvas.md." },
           { name: "hub_save_conversation", description: "Save this voice conversation to Recents when requested." },
           ...(tools.some(tool => tool.name === "subagent") ? [{ name: "hub_task", description: "Delegate work in the background. Also requires the native subagent tool." }] : []),
         ]) if (!tools.some(item => item.name === tool.name)) tools.push(tool);

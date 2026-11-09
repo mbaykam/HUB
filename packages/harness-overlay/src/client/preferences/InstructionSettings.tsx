@@ -77,7 +77,9 @@ export function installInstructionEditor(container: HTMLElement, root: Document,
   last.append(el("summary", "Bu sohbette son gönderilen talimatlar"), lastText);
   memory.setAttribute("data-instruction-memory", "");
   memory.append(el("summary", "memory.md · Knowledge navigation (automatic)"), el("p", "A small map of domains, source retrieval and skills. HUB updates it automatically before model requests and while idle. Edit your Knowledge domains or saved skills to change this index."), memoryText);
-  advanced.append(matrixDetails, memory, native, builtIn, last);
+  const canvas=el("details"),canvasText=el("pre");
+  canvas.append(el("summary","canvas.md · Interactive visuals"),el("p","Shared guidance for every conversation character: when to create a visual, choosing diagrams, charts or interactive apps, and updating the canvas. Managed by HUB; your personality instructions stay separate."),canvasText);
+  advanced.append(matrixDetails, memory, canvas, native, builtIn, last);
   container.append(el("h2", "AI talimatları"), el("p", "Neyi değiştirmek istediğini seç. Her bölüm, yazdıklarının hangi asistanı etkilediğini açıklar."), navigation, panel, advanced);
 
   let section: Section = "shared", sources: Source[] = [], characters: Character[] = [], selected: Source | undefined, characterId = "", curator: Curator | undefined;
@@ -184,7 +186,7 @@ export function installInstructionEditor(container: HTMLElement, root: Document,
       matrix.replaceChildren();
       for (const character of characters) {
         const card = el("article"), role = character.role === "Main" ? "Ana asistan" : character.role === "Voice" ? "Sesli asistan" : "Uzman";
-        card.append(el("strong", character.name + " · " + role), el("p", character.route ? character.route.provider + " / " + character.route.model + (character.route.reasoningEffort ? " · " + character.route.reasoningEffort : "") : "Model seçilmedi"), el("small", "Ortak: SOUL.md, USER.md ve AGENTS.md · memory.md: Knowledge erişimi olan karakterler · Özel: " + character.name + " talimatları"));
+        card.append(el("strong", character.name + " · " + role), el("p", character.route ? character.route.provider + " / " + character.route.model + (character.route.reasoningEffort ? " · " + character.route.reasoningEffort : "") : "Model seçilmedi"), el("small", "Ortak: SOUL.md, USER.md, canvas.md ve AGENTS.md · memory.md: Knowledge erişimi olan karakterler · Özel: " + character.name + " talimatları"));
         matrix.append(card);
       }
       if (curator) {
@@ -194,6 +196,7 @@ export function installInstructionEditor(container: HTMLElement, root: Document,
       }
       const nativeSource = sources.find(source => source.id === "native-agents");
       const memorySource = sources.find(source => source.id === "memory.md");
+      const canvasSource=sources.find(source=>source.id==="canvas.md");canvas.hidden=!canvasSource;canvasText.textContent=canvasSource?canvasSource.path+"\n\n"+canvasSource.content:"";
       memory.hidden = !memorySource;
       memoryText.textContent = memorySource ? memorySource.path + "\n\n" + memorySource.content : "";
       native.hidden = !nativeSource;

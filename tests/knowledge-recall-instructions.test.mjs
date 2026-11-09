@@ -76,3 +76,10 @@ test('older failed jobs stay visible after many later skips',async t=>{
  for(let i=0;i<75;i++)curator.jobs.set('skip-'+i,{id:'skip-'+i,source,status:'done',outcome:'skipped',attempts:1,updatedAt:100+i,queuedAt:1});
  const state=await curator.snapshot();assert.equal(state.jobs[0].id,'old-error');assert.equal(state.jobs.length,60);
 });
+
+test('shared canvas guide is a real managed file and survives character renaming without changing personality files',async t=>{
+ const {CANVAS_GUIDE}=await import('../packages/harness-overlay/src/host/canvas-guide.ts');const {root}=await fixture(t),files=new InstructionFiles(join(root,'canvas-instructions'));
+ files.registerManaged('canvas.md',async()=>CANVAS_GUIDE);await files.load();const guide=files.files().find(f=>f.name==='canvas.md');assert.equal(guide.generated,true);assert.equal(guide.editable,false);assert.equal(await readFile(guide.path,'utf8'),CANVAS_GUIDE);
+ assert.match(CANVAS_GUIDE,/proactively/);assert.match(CANVAS_GUIDE,/kind app/);assert.match(CANVAS_GUIDE,/kind vega/);assert.match(CANVAS_GUIDE,/complete revised content/);assert.match(CANVAS_GUIDE,/no model request/);assert.doesNotMatch(CANVAS_GUIDE,/Mira|Vera|B4D|Snake/);
+ await assert.rejects(files.save('canvas.md',guide.hash,'Override'));assert.equal(files.text('SOUL.md'),'');assert.equal(files.text('USER.md'),'');
+});

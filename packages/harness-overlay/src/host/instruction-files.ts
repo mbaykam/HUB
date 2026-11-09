@@ -5,6 +5,7 @@ import type {IncomingMessage,ServerResponse} from "node:http";
 import type {HubCharacters} from "../characters.ts";
 import {digest} from "./knowledge-store.ts";
 import {redactKnowledgeSecrets} from "./knowledge-curator.ts";
+import {CANVAS_GUIDE} from "./canvas-guide.ts";
 
 /** Operator-owned Markdown files are shared by conversational characters.
  * Existing character instructions retain their one authoritative JSON store. */
@@ -24,7 +25,7 @@ export class InstructionFiles {
     }
     await this.refresh();
   }
-  registerManaged(name:"memory.md",generate:()=>Promise<string>,visible?:(context:any)=>boolean){
+  registerManaged(name:"memory.md"|"canvas.md",generate:()=>Promise<string>,visible?:(context:any)=>boolean){
     const registration={generate,visible};this.managed.set(name,registration);
     return ()=>{if(this.managed.get(name)===registration){this.managed.delete(name);delete this.texts[name];}};
   }
@@ -58,10 +59,11 @@ export class InstructionFiles {
 
 /** Exposes only known instruction sources; never arbitrary paths or credentials. */
 export function installInstructionFiles(ctx:any,characters:HubCharacters,files=new InstructionFiles(join(characters.store.root,"instructions"))){
+  const offCanvas=files.registerManaged("canvas.md",async()=>CANVAS_GUIDE);
   const ready=files.load();void ready.catch(()=>{});
-  const sharedText=(name:string,context:any)=>context.scope?.id?.startsWith("hub-memory-")||!files.visible(name,context)?"":files.text(name)?`${name==="memory.md"?"Generated Knowledge navigation":"Operator "+name+" instructions"} (current version):\n${files.text(name)}`:"";
+  const sharedText=(name:string,context:any)=>context.scope?.id?.startsWith("hub-memory-")||!files.visible(name,context)?"":files.text(name)?`${name==="memory.md"?"Generated Knowledge navigation":name==="canvas.md"?"Shared canvas instructions":"Operator "+name+" instructions"} (current version):\n${files.text(name)}`:"";
   const offRefresh=ctx.on("system-prompt/assemble",async(_assembly:any,context:any,next:()=>Promise<any>)=>{await ready;await files.refresh();const assembled=await next();return {...assembled,sections:assembled.sections.map((section:any)=>section.name.startsWith("hub:instructions:")?{...section,text:sharedText(section.name.slice("hub:instructions:".length),context)}:section)};},{global:true,prepend:true});
-  const offs=["SOUL.md","USER.md","memory.md"].map((name,i)=>ctx.systemPrompt.section({name:"hub:instructions:"+name,order:993+i,text:(context:any)=>sharedText(name,context)}));
+  const offs=["SOUL.md","USER.md","memory.md","canvas.md"].map((name,i)=>ctx.systemPrompt.section({name:"hub:instructions:"+name,order:993+i,text:(context:any)=>sharedText(name,context)}));
   const send=(res:ServerResponse,code:number,value:unknown)=>{res.writeHead(code,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});res.end(JSON.stringify(value));};
   const offRoute=ctx.webServer.register({kind:"exact",path:"/api/hub/instructions",async handler(req:IncomingMessage,res:ServerResponse){
     const rejection=ctx.connection.requestRejection(req);if(rejection||req.headers["sec-fetch-site"]==="cross-site"){send(res,rejection??403,{error:"unauthorized"});return;}
@@ -86,5 +88,5 @@ export function installInstructionFiles(ctx:any,characters:HubCharacters,files=n
       send(res,200,{shared:[...files.files(),{id:"native-agents",name:"AGENTS.md",path:nativePath,content:nativeText,editable:false,scope:"Native global workspace instructions; project files may add further rules"}],characters:state.characters.map(c=>({id:c.id,name:c.name,role:c.id===state.mainId?"Main":c.id===state.voiceId?"Voice":"Specialist",route:c.route,instructions:{id:"character:"+c.id,name:c.name+" instructions",path:join(characters.store.root,"characters.json")+" → instructions",content:c.instructions,hash:digest(c.instructions),editable:true,scope:c.name+" only; follows this character across model changes"}})),lastRequest});
     }catch(error){send(res,409,{error:"instructions-operation-failed",detail:redactKnowledgeSecrets((error as Error).message).slice(0,600)});}
   }});
-  return ()=>{offRoute();offRefresh();for(const off of offs)off();};
+  return ()=>{offRoute();offRefresh();offCanvas();for(const off of offs)off();};
 }
