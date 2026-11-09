@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A13000000000000000000001 = {isa = PBXBuildFile; fileRef = A13000000000000000000002; };
+		A13000000000000000000003 = {isa = PBXBuildFile; fileRef = A13000000000000000000004; };
+		A13000000000000000000005 = {isa = PBXBuildFile; fileRef = A13000000000000000000006; };
+		A13000000000000000000007 = {isa = PBXBuildFile; fileRef = A13000000000000000000008; };
+		A13000000000000000000009 = {isa = PBXBuildFile; fileRef = A13000000000000000000008; };
+		A1300000000000000000000A = {isa = PBXBuildFile; fileRef = A1300000000000000000000B; };
+		A1300000000000000000000C = {isa = PBXBuildFile; fileRef = A1300000000000000000000D; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A12000000000000000000001 /* HubNative in Frameworks */ = {isa = PBXBuildFile; productRef = A12000000000000000000002 /* HubNative */; };
 		A12000000000000000000003 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A12000000000000000000004 /* WebRTC */; };
 		A12000000000000000000007 /* HubNativeVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12000000000000000000008 /* HubNativeVoice.swift */; };
@@ -24,6 +31,12 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A13000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubAssistantCoordinator.swift; sourceTree = "<group>"; };
+		A13000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceActivity.swift; sourceTree = "<group>"; };
+		A13000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceIntents.swift; sourceTree = "<group>"; };
+		A13000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/HubVoiceActivityAttributes.swift; sourceTree = "<group>"; };
+		A1300000000000000000000B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceWidget/HubVoiceWidget.swift; sourceTree = SOURCE_ROOT; };
+		A1300000000000000000000D = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = HubVoiceWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A12000000000000000000008 /* HubNativeVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubNativeVoice.swift; sourceTree = "<group>"; };
 		A1200000000000000000000A /* HubVoiceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceViewController.swift; sourceTree = "<group>"; };
 		A11000000000000000000006 /* HubVoiceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HubVoiceAPI.swift; path = ../../../native/Sources/HubNative/HubVoiceAPI.swift; sourceTree = "<group>"; };
@@ -43,6 +56,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A13000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3011FED79650016851F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -68,6 +82,7 @@
 		504EC3051FED79650016851F /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				A1300000000000000000000D,
 				504EC3041FED79650016851F /* App.app */,
 			);
 			name = Products;
@@ -76,6 +91,11 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				A13000000000000000000002,
+				A13000000000000000000004,
+				A13000000000000000000006,
+				A13000000000000000000008,
+				A1300000000000000000000B,
 				A12000000000000000000008 /* HubNativeVoice.swift */,
 				A1200000000000000000000A /* HubVoiceViewController.swift */,
 				A11000000000000000000006 /* HubVoiceAPI.swift */,
@@ -97,6 +117,16 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A13000000000000000000010 /* HubVoiceWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A13000000000000000000014;
+			buildPhases = (A13000000000000000000011, A13000000000000000000012, A13000000000000000000013, );
+			buildRules = (); dependencies = ();
+			name = HubVoiceWidget;
+			productName = HubVoiceWidget;
+			productReference = A1300000000000000000000D;
+			productType = "com.apple.product-type.app-extension";
+		};
 		504EC3031FED79650016851F /* App */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
@@ -104,10 +134,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				A13000000000000000000017 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A13000000000000000000018,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -154,11 +186,13 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				A13000000000000000000010 /* HubVoiceWidget */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A13000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3021FED79650016851F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -175,10 +209,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A13000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A13000000000000000000009, A1300000000000000000000A, ); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A13000000000000000000001,
+				A13000000000000000000003,
+				A13000000000000000000005,
+				A13000000000000000000007,
 				A12000000000000000000007 /* HubNativeVoice.swift in Sources */,
 				A12000000000000000000009 /* HubVoiceViewController.swift in Sources */,
 				A11000000000000000000003 /* HubConnectionViewController.swift in Sources */,
@@ -362,9 +401,36 @@
 			};
 			name = Release;
 		};
+		A13000000000000000000015 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HubVoiceWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.voice-widget;
+				PRODUCT_NAME = HubVoiceWidget; SDKROOT = iphoneos; SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
+			};
+			name = Debug;
+		};
+		A13000000000000000000016 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HubVoiceWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.voice-widget;
+				PRODUCT_NAME = HubVoiceWidget; SDKROOT = iphoneos; SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A13000000000000000000014 = {isa = XCConfigurationList; buildConfigurations = (A13000000000000000000015, A13000000000000000000016, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -413,6 +479,16 @@
 			productName = "CapApp-SPM";
 		};
 /* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		A13000000000000000000019 = {isa = PBXContainerItemProxy; containerPortal = 504EC2FC1FED79650016851F; proxyType = 1; remoteGlobalIDString = A13000000000000000000010; remoteInfo = HubVoiceWidget; };
+/* End PBXContainerItemProxy section */
+/* Begin PBXTargetDependency section */
+		A13000000000000000000018 = {isa = PBXTargetDependency; target = A13000000000000000000010; targetProxy = A13000000000000000000019; };
+/* End PBXTargetDependency section */
+/* Begin PBXCopyFilesBuildPhase section */
+		A13000000000000000000017 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (A1300000000000000000000C, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
 	};
 	rootObject = 504EC2FC1FED79650016851F /* Project object */;
 }

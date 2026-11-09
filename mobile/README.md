@@ -4,8 +4,8 @@ This is an isolated iOS development project. Its first connection screen opens
 your existing HTTPS HUB in a persistent, unprivileged WebKit view. Sign in through
 your existing access provider; no server or model-provider key is copied to the
 iPhone. It is not yet a finished daily-use client: native voice is in development
-and requires device acceptance; Siri, notifications and system sharing are still
-being implemented. Windows HUB and
+and requires device acceptance; Siri/Live Activities are also development-only,
+and notifications and system sharing are still being implemented. Windows HUB and
 its PWA continue to use their existing release.
 
 ## Connect a development build
@@ -124,13 +124,36 @@ see the [official environment setup](https://capacitorjs.com/docs/getting-starte
 
 ## Before the first iPhone / TestFlight build
 
+### Siri and the Lock Screen in development
+
+On iOS18 or later, the app declares **Talk to HUB** and **End HUB voice** Siri/App
+Shortcuts. First open HUB, connect, and start native Voice once to grant microphone
+permission. Siri uses device-only verified access without opening remote web UI;
+it cannot prompt for first-time microphone permission while locked. Rebooting
+requires the first device unlock before saved access becomes available.
+
+Siri recording requires Live Activities enabled. A WidgetKit extension shows
+generic voice/mute status on the Lock Screen and Dynamic Island, without your
+transcript, server address or conversation contents. Ending voice removes it.
+The system's recording intent requires this activity to remain active. If iOS
+ends or dismisses it, a Siri-started call stops and retains conversation history;
+it does not silently create another activity. Apple limits one Live Activity to
+eight active hours, so this path is not an unlimited all-day-session guarantee.
+An explicit new voice/Siri action can resume the saved conversation.
+
+The base app still targets iOS15; Siri recording and the widget require iOS18.
+These are compiled development paths. **Actual Siri invocation while locked,
+Live Activity lifetime, system interruptions and physical audio are unverified.**
+No signed iPhone build or App Store availability is implied.
+
 The account owner completes these steps in Apple Developer / App Store Connect:
 
 1. Enroll in the Apple Developer Program and select the intended team.
 2. Confirm the bundle identifier. `com.mbaykam.hub` is provisional; its availability
    and registration have not been checked. Register the final explicit App ID.
-   If it changes, update `capacitor.config.json` and both Xcode target build
-   configurations together; `pnpm check` detects a mismatch.
+   Also register the extension identifier `com.mbaykam.hub.voice-widget`. If the
+   app ID changes, update `capacitor.config.json` and both configurations of the
+   app and widget targets together; `pnpm check` detects a mismatch.
 3. Create the App Store Connect app record and configure signing/provisioning for
    that identifier. Use a Mac/Xcode or a chosen hosted signing workflow.
 4. If automated upload is wanted, authorize a suitably scoped App Store Connect

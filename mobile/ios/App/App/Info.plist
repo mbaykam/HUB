@@ -28,6 +28,8 @@
 	<string>Use your microphone for voice conversations you start in HUB.</string>
 	<key>UIBackgroundModes</key>
 	<array><string>audio</string></array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Share a camera image with your assistant when you choose to.</string>
 	<key>UIApplicationSceneManifest</key>

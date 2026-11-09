@@ -6,7 +6,7 @@ import HubNative
 /// Remote HUB is deliberately a plain, unprivileged web view. No Capacitor
 /// bridge, script message handler, injected cookie, or agent-controlled native API.
 final class HubConnectionViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
-    private let savedOriginKey = "hub.ios.server-origin.v1"
+    private let savedOriginKey = HubClientConfiguration.serverPreferenceKey
     private var server: HubServer?
     private var webView: WKWebView!
     private let message = UILabel()
@@ -16,7 +16,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var api: HubVoiceAPI?
     private var connectionGeneration = 0
     private var connected = false
-    private var voice: HubNativeVoice?
+    private var voice: HubNativeVoice? {
+        get { HubAssistantCoordinator.shared.voice }
+        set { HubAssistantCoordinator.shared.adopt(newValue) }
+    }
     private var deviceState: HubDeviceState?
     deinit { probe?.cancel(); api?.invalidate() }
 

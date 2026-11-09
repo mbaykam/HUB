@@ -9,6 +9,7 @@ import HubNative
 @MainActor
 final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate {
     var changed: (() -> Void)?
+    var lifecycleChanged: (() -> Void)?
     private(set) var status = "Ready"
     private(set) var transcript = ""
     private(set) var isActive = false
@@ -41,7 +42,9 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         super.init()
     }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
-    private func update(_ value: String) { status = value; changed?() }
+    private func notify() { changed?(); lifecycleChanged?() }
+    private func update(_ value: String) { status = value; notify() }
+    func waitForStartup() async -> Bool { await starting?.value; return isActive && lease != nil && peer != nil }
 
     func start() {
         guard !isActive, starting == nil, lease == nil else { return }
@@ -72,7 +75,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
                     }
                 }
                 if pendingAdmission == nil && (recovery == .anotherCall || (resume == nil && state.busy)) { throw HubVoiceAPIError.busy }
-                if recovery == .missingPeer, let resume {
+                if pendingAdmission == nil, recovery == .missingPeer, let resume {
                     lease = resume.lease
                     update("The interrupted call needs cleanup. Tap End, then resume the conversation.")
                     return
@@ -230,9 +233,9 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         ending = false
         if status == "Ending…" {
             update((try? deviceState.admission()) != nil ? "Audio stopped. Reopen Voice to recover the interrupted startup." : "Conversation ended")
-        } else { changed?() }
+        } else { notify() }
     }
-    func toggleMute() { muted.toggle(); input?.isEnabled = !muted; changed?() }
+    func toggleMute() { muted.toggle(); input?.isEnabled = !muted; notify() }
     func interrupt() {
         guard let lease, !ending else { return }
         Task { do { try await api.interrupt(callId: lease.callId) } catch { update("Could not interrupt. Check the connection.") } }
@@ -305,7 +308,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
             case "user-transcription", "bot-tts-text":
                 if let text = event.text, event.final {
                     self.transcript += "\(event.type == "user-transcription" ? "You" : "Assistant"): \(text)\n\n"
-                    self.transcript = String(self.transcript.suffix(24_000)); self.changed?()
+                    self.transcript = String(self.transcript.suffix(24_000)); self.notify()
                 }
             default: break
             }

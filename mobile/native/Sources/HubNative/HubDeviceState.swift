@@ -1,5 +1,9 @@
 import Foundation
 
+public enum HubClientConfiguration {
+    public static let serverPreferenceKey = "hub.ios.server-origin.v1"
+}
+
 public protocol HubPrivateStore {
     func read(_ key: String) throws -> Data?
     func write(_ data: Data, for key: String) throws
