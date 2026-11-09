@@ -34,6 +34,18 @@ def test_independent_overlapping_voice_is_not_rejected_even_while_echo_is_presen
     assert v.decide(pcm(echo+human),16000,speech=True)
     assert v.human and v.verdict=='human'
 
+def test_reflected_echo_at_a_word_boundary_is_not_mistaken_for_a_caller():
+    v=EchoAudioVerifier();source=voice(1);source[18560:]=0
+    v.render(pcm(source),16000)
+    kernel=np.zeros(481);kernel[0]=.42;kernel[80]=.13;kernel[240]=-.035;kernel[480]=.018
+    room=np.convolve(source,kernel,mode='full')[:len(source)]
+    room+=np.random.default_rng(9).normal(0,.00015,len(room))
+    # Speech ends halfway through the window. Train/validation must both see
+    # voiced audio rather than judging the whole match by the quiet second half.
+    candidate=room[16000:21120]
+    assert not v.decide(pcm(candidate),16000,speech=True)
+    assert v.verdict=='echo'
+
 def test_reference_is_bounded_and_idle_silence_does_not_keep_verification_active():
     now=[10.];v=EchoAudioVerifier(clock=lambda:now[0]);v.render(pcm(np.zeros(16000)),16000);assert not v.watching
     v.render(pcm(voice(1,seconds=10)),16000);assert len(v.reference)<=4*v.rate

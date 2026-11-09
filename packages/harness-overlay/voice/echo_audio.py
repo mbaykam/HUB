@@ -50,7 +50,7 @@ class EchoAudioVerifier:
         self.verdict = 'checking' if self.watching else 'idle'
 
     def echo_score(self, candidate):
-        """Predict an independent held-out half, not just a shared loudness level."""
+        """Predict held-out time blocks, not just a shared loudness level."""
         y = np.asarray(candidate,dtype=np.float64)
         if len(y)<self.rate*.12 or len(self.reference)<len(y): return 0.0
         y = y-y.mean()
@@ -66,18 +66,21 @@ class EchoAudioVerifier:
         lag = int(np.argmax(similarities)); direct = min(1.,float(similarities[lag]))
         if direct >= .95: return direct*direct
         if direct < .4: return 0.0
-        # A short FIR accommodates phase/EQ/early reflections. Fit and validate
-        # on different audio so unrelated speech cannot be explained by overfit.
-        taps = 32
+        # A causal FIR accommodates phase/EQ and early room reflections. Leave
+        # 4 ms ahead of the correlation peak for fractional/codec alignment.
+        # Alternating 40 ms blocks put speech in both fit and validation sets;
+        # splitting in halves would reject a genuine echo whose word ends in
+        # the first half and whose second half is mostly microphone noise.
+        taps = 96
         if len(reference)<len(y)+taps: return direct*direct
-        start = max(0,min(lag-taps//2,len(reference)-len(y)-taps))
+        start = max(0,min(lag-taps+16,len(reference)-len(y)-taps))
         segment = reference[start:start+len(y)+taps-1]
         x = np.lib.stride_tricks.sliding_window_view(segment,taps)
-        half = len(y)//2
-        coefficients = np.linalg.lstsq(x[:half],y[:half],rcond=1e-4)[0]
+        train = (np.arange(len(y))//160)%2==0
+        coefficients = np.linalg.lstsq(x[train],y[train],rcond=1e-4)[0]
         prediction = x@coefficients
         scores=[]
-        for part in (slice(None,half),slice(half,None)):
+        for part in (train,~train):
             target=y[part];residual=target-prediction[part]
             scores.append(1-float(residual@residual)/max(1e-12,float(target@target)))
         return max(0.,min(1.,min(scores)))
