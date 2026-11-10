@@ -47,18 +47,20 @@ import HubNative
         mode.addAction(UIAction { [weak self] _ in
             guard let self else { return }; self.stopSharing(); self.frame = nil; self.preview.image = nil
             let reviewing = self.mode.selectedSegmentIndex == 0
-            self.preview.isHidden = !reviewing; self.send.isHidden = !reviewing; freeze.isEnabled = reviewing
+            self.preview.isHidden = !reviewing; self.send.isHidden = !reviewing; freeze.isHidden = !reviewing
             self.message.text = reviewing ? "Choose content, then freeze a recent frame to review before sending." : "Choose screen to start live sharing. HUB keeps only a recent frame briefly; no automatic analysis runs."
         }, for: .valueChanged)
         let stack = UIStackView(arrangedSubviews: [mode, message, preview, actions, send, stop]); stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll); scroll.addSubview(stack)
+        let previewHeight = preview.heightAnchor.constraint(equalToConstant: 240)
+        previewHeight.priority = .defaultHigh // Stack hiding must be able to collapse the Live layout.
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor), scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -16),
             stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 20), stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -20),
-            stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40), preview.heightAnchor.constraint(equalToConstant: 240),
+            stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40), previewHeight,
             start.heightAnchor.constraint(greaterThanOrEqualToConstant: 48), freeze.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
             send.heightAnchor.constraint(greaterThanOrEqualToConstant: 48), stop.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
         ])

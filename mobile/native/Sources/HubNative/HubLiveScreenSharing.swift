@@ -69,7 +69,7 @@ public struct HubScreenStatus: Decodable {
                 try await self.upload(id, sequence, frame)
                 guard self.id == id, self.owned(), !Task.isCancelled else { return }
                 self.failures = 0; self.operation = nil
-                self.update("Live sharing is on. Recent frame available to HUB.")
+                self.update("Live sharing is on. HUB keeps each recent frame only briefly.")
             } catch {
                 guard self.id == id else { return }
                 self.operation = nil; self.failures += 1
