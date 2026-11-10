@@ -327,8 +327,9 @@ build is not evidence of iPhone, background audio or distribution acceptance.
    interruptions and screen locking on an actual iPhone. Continue using selected
    providers; native alone does not improve the speech model's recognition.
 3. Accept the implemented Siri/App Intents, native push/task links and file/Share
-   paths on a signed iPhone build. Screen content currently uses reviewed
-   snapshots, not continuous remote viewing. Request permissions only when the
+   paths on a signed iPhone build. Accept both reviewed snapshots and explicit
+   Live delivery/asked-for analysis; compiler evidence is not remote-viewing
+   acceptance. Request permissions only when the
    actual feature is used.
 4. Test physical-device lifecycle, weak/offline connections, microphone/camera
    denial, phone calls, closing/reopening, task continuity, data preservation,
@@ -410,6 +411,13 @@ is saved just because another frame arrived. Tool guidance is attached to the
 active voice agent and eligible worker; user personality files are preserved.
 This remains development code requiring actual capture-device acceptance. See
 [acceptance gates](ACCEPTANCE.md).
+
+Older hosts can still serve normal PWA/voice while lacking these newer native
+routes. Live refuses missing routes or an HTML login/PWA fallback and offers
+sign-in/update guidance; it never counts that response as accepted sharing.
+Before iPhone rollout, deliver the matching host and PWA through the supported
+update with a backup, no active user work, version/file checks and final health.
+Do not copy only loose backend files into an older installed release.
 
 On an iOS27 development build compiled with the newer SDK, native **Voice options
 → Share screen** opens capture and review. Choose content in Apple's system

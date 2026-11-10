@@ -78,6 +78,14 @@ final class HubVoiceAPITests: XCTestCase {
         do { try await api.screenFrame(callId:"owned-call",shareID:id,sequence:8,frame:HubScreenFrame(id:UUID(),jpeg:bytes,capturedAt:Date().addingTimeInterval(-6),width:1,height:1)); XCTFail("Stale frame") } catch {}
         XCTAssertEqual(VoiceFixture.requests.count,3)
     }
+    func testOlderHostAndHTMLCannotMasqueradeAsLiveSharingAndAuthRemainsRequired() async throws {
+        let api = try client(); defer { api.invalidate() }
+        for (code, type, expected) in [(404,"application/json",HubVoiceAPIError.updateHost),(405,"application/json",.updateHost),(200,"text/html",.updateHost),(401,"application/json",.signInRequired),(302,"text/html",.signInRequired)] {
+            VoiceFixture.respond = { _, _ in (code,type,type == "text/html" ? "<html>Fixture login or older PWA fallback</html>" : "{}") }
+            do { try await api.screenConsent(callId:"owned-call",shareID:UUID(),start:true);XCTFail("Unsupported screen response") }
+            catch { XCTAssertEqual(error as? HubVoiceAPIError,expected) }
+        }
+    }
     func testOwnedHealthAndAttentionKeepExactCallAndConfiguredWakePhrase() async throws {
         let api = try client(); defer { api.invalidate() }
         VoiceFixture.respond = { request, _ in

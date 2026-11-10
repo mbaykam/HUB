@@ -47,7 +47,7 @@ public struct HubIceServer: Codable {
 }
 
 public enum HubVoiceAPIError: Error, Equatable {
-    case signInRequired, busy, callUnavailable, admissionExpired, serviceUnavailable, invalidResponse
+    case signInRequired, busy, callUnavailable, admissionExpired, serviceUnavailable, invalidResponse, updateHost
 }
 
 final class HubNoRedirects: NSObject, URLSessionTaskDelegate {
@@ -119,6 +119,7 @@ public final class HubVoiceAPI {
         switch response.statusCode {
         case 200: break
         case 300...399, 401, 403: throw HubVoiceAPIError.signInRequired
+        case 404, 405: throw action == "screen" ? HubVoiceAPIError.updateHost : HubVoiceAPIError.serviceUnavailable
         case 409: throw HubVoiceAPIError.busy
         case 410: throw HubVoiceAPIError.callUnavailable
         case 400:
@@ -126,7 +127,7 @@ public final class HubVoiceAPI {
             throw object?["error"] as? String == "expired-admission" ? HubVoiceAPIError.admissionExpired : HubVoiceAPIError.invalidResponse
         default: throw HubVoiceAPIError.serviceUnavailable
         }
-        guard response.mimeType == "application/json", data.count <= 262_144 else { throw HubVoiceAPIError.invalidResponse }
+        guard response.mimeType == "application/json", data.count <= 262_144 else { throw action == "screen" ? HubVoiceAPIError.updateHost : HubVoiceAPIError.invalidResponse }
         return data
     }
 

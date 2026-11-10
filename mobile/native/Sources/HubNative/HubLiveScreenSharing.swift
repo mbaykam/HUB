@@ -53,7 +53,7 @@ public struct HubScreenStatus: Decodable {
                 self.update("Live sharing is on. Only a recent frame is kept on HUB; no automatic analysis runs.")
             } catch {
                 guard self.id == shareID else { return }
-                self.stop(); self.update("Live sharing could not connect. Stop and choose Live again; voice can continue.")
+                self.stop(); self.update(error as? HubVoiceAPIError == .updateHost ? "Live sharing could not be verified. Sign in again or update HUB on your computer before trying Live again. Voice can continue." : "Live sharing could not connect. Stop and choose Live again; voice can continue.")
             }
         }
     }
@@ -73,8 +73,8 @@ public struct HubScreenStatus: Decodable {
             } catch {
                 guard self.id == id else { return }
                 self.operation = nil; self.failures += 1
-                if self.failures >= 3 || error as? HubVoiceAPIError == .callUnavailable || error as? HubVoiceAPIError == .signInRequired {
-                    self.stop(); self.update("Live sharing stopped after a connection problem. Choose Live again when ready.")
+                if self.failures >= 3 || error as? HubVoiceAPIError == .callUnavailable || error as? HubVoiceAPIError == .signInRequired || error as? HubVoiceAPIError == .updateHost {
+                    self.stop(); self.update(error as? HubVoiceAPIError == .updateHost ? "Live sharing stopped. Sign in again or update HUB on your computer before trying Live again." : "Live sharing stopped after a connection problem. Choose Live again when ready.")
                 } else { self.update("Waiting for the next fresh frame; nothing is queued or saved.") }
             }
         }

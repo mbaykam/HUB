@@ -78,6 +78,38 @@ const { installModelSelection } = await import('../vendor/deepseek-harness/packa
 const {Readable}=await import('node:stream');
 const {installKnowledgeToolPolicy}=await import('../packages/harness-overlay/src/host/knowledge-tool-policy.ts');
 
+test('native screen tool reaches the vision request and durable transcript while native permission denial still wins',{timeout:15000},async()=>{
+ const {installVoiceScreenTools,SCREEN_VIEW_TOOL}=await import('../packages/harness-overlay/src/host/voice-screen-tool.ts');
+ const {LocalAttachmentStore}=await import('../vendor/deepseek-harness/packages/attachment/attachment-local/src/index.ts');
+ const {createRequire}=await import('node:module');
+ const sharp=createRequire(new URL('../vendor/deepseek-harness/packages/attachment/attachment-local/package.json',import.meta.url))('sharp');
+ const jpeg=await sharp({create:{width:12,height:8,channels:3,background:'#437f82'}}).jpeg().toBuffer();
+ const root=await mkdtemp(join(tmpdir(),'hub-eval-native-screen-')),ctx=new Context();let screens,detach,deny;
+ const images=blocks=>blocks.flatMap(b=>b.type==='image'?[b]:b.type==='tool-result'?images(b.content):[]);
+ try{
+  await mountAgentLoopTestDependencies(ctx);await ctx.plugin(Projections);await ctx.plugin(Persistence,{root:join(root,'sessions')});await ctx.plugin(LocalAttachmentStore,{dshHome:root});await ctx.plugin(AgentLoop,{agents:[]});
+  class Vision extends MockAdapter{async resolveModel(provider,model){return{...await super.resolveModel(provider,model),inputModalities:['text','image']};}}
+  const adapter=new Vision([toolCallResponse('read-screen',SCREEN_VIEW_TOOL,{}),textResponse('The requested frame reached the vision model.'),toolCallResponse('denied-screen',SCREEN_VIEW_TOOL,{}),textResponse('Screen reading is disabled.')]);
+  ctx.llm.registerAdapter(['fixture-screen'],adapter);
+  const id='hub-eval-native-screen';let writes=0;
+  const save=ctx.attachments.saveImage.bind(ctx.attachments);ctx.attachments.saveImage=async input=>{writes++;return save(input);};
+  screens=installVoiceScreenTools(ctx,{current:session=>session===id?{callId:'fixture-call',sessionId:id}:undefined,frame:()=>({bytes:jpeg,shareId:'fixture-consent',sequence:1,remainingMs:5000})});
+  const owner=ctx.agentLoop.create(id,{provider:'fixture-screen',model:'mock'});detach=screens.attachVoice(owner);
+  owner.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Please inspect the phone screen I shared.'}]}));await owner.whenIdle();
+  assert.equal(adapter.requests.length,2);assert.equal(writes,1);
+  const delivered=adapter.requests[1].messages.flatMap(m=>images(m.content));assert.equal(delivered.length,1);assert.match(delivered[0].attachment.attachmentId,/^sha256:[0-9a-f]{64}$/);
+  const stored=await ctx.attachments.readImage(delivered[0].attachment);assert.equal(stored.ref.width,12);assert.equal(stored.ref.height,8);
+  const firstResult=owner.session.snapshotEvents().find(e=>e.type==='tool/result');assert.equal(images(firstResult.data.message.content).length,1);
+  const deadline=Date.now()+2000;let raw;
+  do { raw=await ctx.sessionPersistence.readRaw(owner.id);if(raw?.content.includes(delivered[0].attachment.attachmentId))break;assert.ok(Date.now()<deadline,'Screen image reference was not durably logged');await new Promise(r=>setTimeout(r,10)); } while(true);
+  assert.match(raw.content,new RegExp(delivered[0].attachment.attachmentId));
+  deny=owner.ctx.tools.guard(exec=>exec.name===SCREEN_VIEW_TOOL?'Disabled by the existing native permission policy':undefined);
+  owner.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Try reading once more under the restricted policy.'}]}));await owner.whenIdle();
+  assert.equal(writes,1);assert.equal(adapter.requests.length,4);
+  const lastResult=owner.session.snapshotEvents().filter(e=>e.type==='tool/result').at(-1);assert.equal(images(lastResult.data.message.content).length,0);assert.match(JSON.stringify(lastResult),/Disabled by the existing native permission policy/);
+ }finally{deny?.();detach?.();screens?.dispose();await ctx.fiber.dispose();assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-eval-native-screen-'));await rm(root,{recursive:true,force:true});}
+});
+
 test('native voice language context follows each correlated user turn, is logged, and never rewrites their words',async()=>{
  const {voiceReplyLanguage}=await import('../packages/harness-overlay/src/host/voice-reply-language.ts');
  const root=await mkdtemp(join(tmpdir(),'hub-eval-voice-language-')),ctx=new Context();let hints;

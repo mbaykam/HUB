@@ -66,4 +66,10 @@ import XCTest
         for _ in 0..<10 { await Task.yield() }; XCTAssertEqual(starts, [first])
         finish?.resume(); await wait { starts == [first,next] }; sharing.stop()
     }
+    func testUnsupportedHostStopsWithAnUpdateHintWithoutRestartingConsent() async {
+        var starts = 0
+        let sharing = HubLiveScreenSharing(consent: { _, start in if start { starts += 1; throw HubVoiceAPIError.updateHost } }, upload: { _, _, _ in XCTFail("Unsupported host must not receive images") }, owned: { true })
+        sharing.beginAfterSystemConsent(UUID()); await wait { starts == 1 && !sharing.active }
+        XCTAssertTrue(sharing.status.contains("update HUB"));XCTAssertTrue(sharing.status.contains("Sign in"));XCTAssertEqual(starts,1)
+    }
 }
