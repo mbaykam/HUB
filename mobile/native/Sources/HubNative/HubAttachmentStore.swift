@@ -45,7 +45,11 @@ public actor HubAttachmentStore {
         try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.map { url in
                 let value = try JSONDecoder().decode(HubAttachmentDraft.self, from: readRegular(url, maximum: 4096))
-                guard file(value.id, ".json") == url, value.bytes > 0, value.bytes <= Self.maximumBytes,
+                // Directory enumeration may standardize the URL differently
+                // from appendingPathComponent (notably /var on Apple hosts).
+                // The enumerated direct child and its opaque filename bind the
+                // manifest; readRegular separately rejects symlinks.
+                guard value.id.uuidString.lowercased() + ".json" == url.lastPathComponent, value.bytes > 0, value.bytes <= Self.maximumBytes,
                       HubVoiceAPI.validID(value.sessionID), HubVoiceAPI.validID(value.callID),
                       value.name.utf8.count <= 240 else { throw HubAttachmentError.invalidFile }
                 return value
