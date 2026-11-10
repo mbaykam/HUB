@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {once} from 'node:events';
+import {randomUUID} from 'node:crypto';
+import {createRequire} from 'node:module';
 import {attachVoiceScreenTool,installVoiceScreenTools,SCREEN_VIEW_TOOL} from '../packages/harness-overlay/src/host/voice-screen-tool.ts';
+import {createVoiceWeb} from '../packages/harness-overlay/src/host/voice-web.ts';
 
 const user=()=>[{type:'turn/start'},{type:'user/message',data:{source:{kind:'user'}}}];
 function agent(id='hub-eval-voice',parent){
@@ -60,4 +65,29 @@ test('installer mounts only voice owners and direct children of a real user requ
   call={callId:'reopened',sessionId:root.id};await assert.rejects(child.tool.execute({}, {agent:child,signal:new AbortController().signal}),/fresh worker/);
   detach();assert.equal(root.removed,true);
  }finally{mounted.dispose();}
+});
+
+test('isolated HTTP upload reaches the authorized image result and Stop revokes it without touching a provider',async()=>{
+ const require=createRequire(new URL('../vendor/deepseek-harness/packages/attachment/attachment-local/package.json',import.meta.url)),sharp=require('sharp');
+ const jpeg=await sharp({create:{width:12,height:8,channels:3,background:'#35738d'}}).jpeg().toBuffer();
+ const root=agent(),call={callId:randomUUID(),sessionId:root.id,sidecar:{done:new Promise(()=>{}),request:async()=>({status:200,body:{status:'waiting'}})}};
+ const web=createVoiceWeb({reject:req=>req.headers.cookie==='hub-eval=1'?undefined:401,open:async()=>call,close:async()=>{},validateScreen:async bytes=>{const decoded=await sharp(bytes).raw().toBuffer({resolveWithObject:true});assert.equal(decoded.info.width,12);}});
+ const server=createServer((req,res)=>void web.handler(req,res));server.listen(0,'127.0.0.1');await once(server,'listening');
+ const url=`http://127.0.0.1:${server.address().port}/api/hub/voice/`,shareId=randomUUID();
+ const json=(path,input,extra={},method='POST')=>fetch(url+path,{method,headers:{cookie:'hub-eval=1','content-type':'application/json',...extra},body:JSON.stringify(input)});
+ const screenHeaders={'x-hub-voice-screen':'1','x-hub-voice-call':call.callId};let writes=0,time=Date.now();
+ const off=attachVoiceScreenTool(root,{current:id=>web.screenIdentity(id),frame:id=>web.screenFrame(id),vision:async()=>true,allowed:()=>true,now:()=>time,save:async bytes=>{writes++;assert.deepEqual(bytes,jpeg);return{attachmentId:'fixture-real-jpeg',mediaType:'image/jpeg',width:12,height:8,bytes:bytes.length};}});
+ const exec={agent:root,signal:new AbortController().signal};
+ try{
+  assert.equal((await json('open',{requestId:randomUUID(),requestedAt:Date.now()})).status,200);
+  assert.equal((await json('screen',{shareId},screenHeaders)).status,200);assert.equal(writes,0);
+  const upload=await fetch(url+'screen',{method:'PUT',headers:{cookie:'hub-eval=1',...screenHeaders,'content-type':'image/jpeg','x-hub-screen-share':shareId,'x-hub-screen-sequence':'0','x-hub-screen-age-ms':'0'},body:jpeg});
+  assert.equal(upload.status,200);assert.equal(writes,0); // Streaming alone never persists an analysis image.
+  const value=await root.tool.execute({},exec);assert.equal(writes,1);
+  assert.equal(root.tool.finalizeContent(exec,{value,content:root.tool.output.render({},value)})[1].type,'image');
+  const pendingValue=await (async()=>{time+=3000;return root.tool.execute({},exec);})();
+  assert.equal((await json('screen',{shareId},screenHeaders,'DELETE')).status,200);
+  const withheld=root.tool.finalizeContent(exec,{value:pendingValue,content:root.tool.output.render({},pendingValue)});assert.equal(withheld.length,1);assert.match(withheld[0].text,/No screen image/);
+  time+=3000;await assert.rejects(root.tool.execute({},exec),/No fresh/);assert.equal(writes,2);
+ }finally{off();await web.dispose();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
