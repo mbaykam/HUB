@@ -62,6 +62,8 @@ final class HubAssistantCoordinator {
             try activity().begin(userInitiated: true)
             model.start()
             guard await model.waitForStartup() else { throw ActionError.unavailable }
+            // A recovered server call may still be waiting for its wake phrase.
+            try await model.resumeForSystem()
             try activity().requireOngoing()
         } catch { if systemRecording { voice?.end() }; activity().end(); throw error }
     }
