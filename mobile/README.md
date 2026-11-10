@@ -286,3 +286,17 @@ Interrupted transfer into the voice outbox reuses the same receipt; it cannot
 silently target another conversation. No automatic upload or model call occurs.
 Physical Share-sheet/provider/signing and cross-app acceptance are still pending;
 compilation and isolated two-instance fixture tests do not prove those outcomes.
+
+## Screen capture integration in development
+
+The native core now has a memory-only frame gate: explicit system-consent
+generation, exact HUB/conversation/call ownership, pause/stop invalidation,
+five-second expiry, JPEG validation and bounded dimensions/bytes. It neither
+captures nor uploads by itself, and makes no background model requests.
+
+Current Apple documentation recommends ScreenCaptureKit's system content picker
+on iOS27 and deprecates ReplayKit broadcast extensions there. The current hosted
+build uses Xcode26.6, so the iOS27 capture adapter needs a newer SDK and actual
+device verification. A system picker/capture UI and explicit frame-send workflow
+are still required; no inactive screen-sharing button is exposed as a feature.
+See [Apple's iOS capture sample](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-on-ios).
