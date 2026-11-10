@@ -316,3 +316,14 @@ freeze-on-return and explicit sending is still being connected; screen sharing
 is not exposed as a finished feature. Older SDKs exclude this adapter. The app
 also declares elapsed-event timing reason35F9.1 for rejecting queued old samples;
 raw system clock/boot information is never sent to HUB.
+
+On an iOS27 development build compiled with the newer SDK, native **Voice options
+→ Share screen** now presents the capture/review flow. Choose content in Apple's
+picker, visit what you want to show, return to freeze a recent frame, inspect it,
+then explicitly Send. Frozen review stops capture; upload retries reuse the same
+receipt. Ending the owned voice call blocks sending into a replacement call.
+Nothing is sent by starting capture, and capture adds no microphone/app audio.
+This snapshot workflow is not continuous automatic vision. The foreground-return
+freeze timing, exact captured content, picker behavior, background audio and
+physical iPhone/privacy acceptance still require device testing before release.
+Older OS/SDK builds do not expose this menu action.

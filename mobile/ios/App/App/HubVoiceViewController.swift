@@ -20,6 +20,15 @@ final class HubVoiceViewController: UIViewController {
             UIAction(title: "Reconnect audio", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.voice.reconnect() }
         ]))
         navigationItem.rightBarButtonItem?.accessibilityLabel = "Voice options"
+        #if canImport(ScreenCaptureKit)
+        if #available(iOS 27.0, *) {
+            let screen = UIAction(title: "Share screen", image: UIImage(systemName: "rectangle.on.rectangle")) { [weak self] _ in
+                guard let self, let context = self.voice.attachmentContext(), let screen = try? HubScreenViewController(context: context) else { return }
+                self.present(UINavigationController(rootViewController: screen), animated: true)
+            }
+            if let menu = navigationItem.rightBarButtonItem?.menu { navigationItem.rightBarButtonItem?.menu = UIMenu(children: menu.children + [screen]) }
+        }
+        #endif
         status.font = .preferredFont(forTextStyle: .headline)
         status.adjustsFontForContentSizeCategory = true
         status.numberOfLines = 0

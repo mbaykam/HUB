@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+ A19000000000000000000001 = {isa = PBXBuildFile; fileRef = A19000000000000000000002; };
  A18000000000000000000001 = {isa = PBXBuildFile; fileRef = A18000000000000000000002; };
 A17000000000000000000001 = {isa = PBXBuildFile; fileRef = A17000000000000000000002; };
 A17000000000000000000003 = {isa = PBXBuildFile; productRef = A17000000000000000000004; };
@@ -39,6 +40,7 @@ A17000000000000000000007 = {isa = PBXBuildFile; fileRef = A170000000000000000000
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+ A19000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubScreenViewController.swift; sourceTree = "<group>"; };
  A18000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubScreenCaptureSession.swift; sourceTree = "<group>"; };
 A17000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubShareExtension/ShareViewController.swift; sourceTree = SOURCE_ROOT; };
 A17000000000000000000006 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = HubShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -118,7 +120,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 				A11000000000000000000002 /* HubServer.swift */,
 				A11000000000000000000004 /* HubConnectionViewController.swift */,
 				A14000000000000000000002,
-				A15000000000000000000002, A18000000000000000000002,
+				A15000000000000000000002, A18000000000000000000002, A19000000000000000000002,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -249,7 +251,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				A12000000000000000000009 /* HubVoiceViewController.swift in Sources */,
 				A11000000000000000000003 /* HubConnectionViewController.swift in Sources */,
 				A14000000000000000000001,
-				A15000000000000000000001, A18000000000000000000001,
+				A15000000000000000000001, A18000000000000000000001, A19000000000000000000001,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 			);
