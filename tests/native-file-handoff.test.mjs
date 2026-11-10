@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {JSDOM} from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
 import {installUploadHandoff} from '../packages/harness-overlay/src/client/host/upload-handoff.ts';
 import {installDailyUseWeb} from '../packages/harness-overlay/src/host/daily-use-web.ts';
+import {installComposerUploads} from '../packages/harness-overlay/src/client/host/composer-uploads.tsx';
+import React,{act} from 'react';
+import {createRoot} from 'react-dom/client';
 const id='bcb5ca3b-adbf-4920-afbd-cd38acaf3bd6',tick=()=>new Promise(r=>setTimeout(r,15));
 function browser(){const d=new JSDOM('<main></main>',{url:`https://hub.test/?hubSession=chat&hubUpload=${id}`});d.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};return d;}
 const button=(d,text)=>[...d.window.document.querySelectorAll('button')].find(b=>b.textContent===text);
@@ -41,4 +44,20 @@ test('conversation chooser filters internal/archived/blank records, searches old
  const search=await request({'x-hub-session-query':encodeURIComponent('Türkçe')});assert.equal(search.body.conversations[0].sessionId,'chat-0');assert.equal(search.body.hasMore,false);
  assert.equal((await request({cookie:''})).code,401);assert.equal((await request({'sec-fetch-site':'cross-site'})).code,403);assert.equal((await request({},'POST')).code,405);assert.equal((await request({'x-hub-session-query':'%bad'})).code,400);}
  finally{off();}
+});
+test('real composer handoff appends a normal attachment chip without replacing existing text or submitting a message',async()=>{
+ const d=browser(),doc=d.window.document,previous={window:globalThis.window,document:globalThis.document,IS_REACT_ACT_ENVIRONMENT:globalThis.IS_REACT_ACT_ENVIRONMENT};
+ Object.assign(globalThis,{window:d.window,document:doc,IS_REACT_ACT_ENVIRONMENT:true});
+ let Component,source,state={draft:'Keep my existing question',draftRev:1,imageIds:[],occurrences:[]};const calls=[];
+ const input={state:{getSnapshot:()=>state},setDraft:draft=>{state={...state,draft,draftRev:state.draftRev+1};},addImages:()=>true,insertReference(ref){state={...state,occurrences:[...state.occurrences,ref]};return true;}};
+ const off=installComposerUploads({slots:{register(_options,c){Component=c;return()=>{};}},sessions:{scope:()=>({})}},{input:{for:()=>input},createDraftImages:()=>[],releaseDraftImages(){}},{registerSource(s){source=s;return()=>{};}},doc);
+ const host=doc.createElement('div');doc.body.append(host);const react=createRoot(host);
+ d.window.fetch=async(path,options)=>{calls.push({path,options});if(options.method==='POST'){const upload=options.headers['x-hub-upload-id'];return Response.json({id:upload,text:`User attachment: Notes.txt\n{HUB_ATTACHMENT:${upload}}`,name:'Notes.txt',bytes:7,mediaType:'text/plain',image:false});}return path.endsWith('/draft')?Response.json({id,sessionId:'chat',name:'Notes.txt',bytes:7,mediaType:'text/plain'}):new Response('fixture');};
+ try{
+  await act(async()=>react.render(React.createElement(Component,{sessionId:'chat',useInput:select=>select({phase:'plain'})})));
+  await act(async()=>{button(d,'Add to message').click();await tick();});
+  assert.equal(state.draft,'Keep my existing question [Notes.txt] ');assert.equal(state.occurrences.length,1);assert.ok(calls.every(c=>c.options.method!=='POST'));
+  let serialized;await act(async()=>{serialized=await source.codec.serialize(state.occurrences[0].ref,new AbortController().signal);});
+  assert.match(serialized,/HUB_ATTACHMENT/);assert.equal(calls.filter(c=>c.options.method==='POST').length,1);assert.equal(calls.at(-1).path,'/api/hub/uploads');
+ }finally{await act(async()=>react.unmount());off();Object.assign(globalThis,previous);d.window.close();}
 });
