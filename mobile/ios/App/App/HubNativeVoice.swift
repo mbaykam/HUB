@@ -45,6 +45,14 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private func notify() { changed?(); lifecycleChanged?() }
     private func update(_ value: String) { status = value; notify() }
     func waitForStartup() async -> Bool { await starting?.value; return isActive && lease != nil && peer != nil }
+    func conversationDestination() -> HubNotificationDestination? {
+        // A pending new admission must not navigate into an older conversation.
+        let saved = !isActive ? (try? deviceState.voice())?.lease.sessionId : nil
+        guard let id = lease?.sessionId ?? saved else { return nil }
+        let payload: [String: Any] = ["version": 1, "kind": "session", "origin": server.origin.absoluteString, "sessionId": id]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+        return try? HubNotificationDestination(data: data)
+    }
     func attachmentContext() -> HubVoiceAttachmentContext? {
         guard isActive, let owned = lease else { return nil }
         return HubVoiceAttachmentContext(server: server, sessionID: owned.sessionId, callID: owned.callId, voiceAPI: api,

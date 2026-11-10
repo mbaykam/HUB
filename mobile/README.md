@@ -45,6 +45,10 @@ The voice sheet has **Mute**, **Interrupt**, **End conversation**, and an overfl
 menu with **Reconnect audio**. **Hide** returns to HUB while keeping the call
 owned by the app. It also remains owned when the app backgrounds; the audio
 session uses voice-chat mode and the declared audio background capability.
+**Voice options → Open conversation** opens that owned conversation in HUB's
+normal chat view, so you can read its history and existing visual/file results
+while native audio continues. Pending startup cannot accidentally open an older
+chat; navigation checks the same original HUB and authenticated conversation list.
 Ending during admission waits for the owned receipt to finish and closes it;
 failed cleanup keeps an explicit retry instead of pretending the call ended.
 Reconnect uses the owned call, without resubmitting a user task or creating a
@@ -323,4 +327,7 @@ Packaging verification found that the current simulator SDK excludes the
 app builds. The workflow now probes both device and simulator SDKs with a direct
 import. The workflow described above is development source and is not available
 in that simulator artifact; do not infer capture support from a green base-app
-build. A verified capture-capable SDK/device build is still required.
+build. The preview workflow additionally compiles the capture-capable iPhone SDK branch
+without signing. Its separate `HUB-ios-device-unsigned-<commit>` artifact is compile
+evidence, not an installable iPhone app. Device capture still needs signing and
+physical acceptance.

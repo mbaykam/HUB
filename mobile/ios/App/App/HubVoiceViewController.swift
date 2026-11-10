@@ -2,13 +2,14 @@ import UIKit
 
 final class HubVoiceViewController: UIViewController {
     private let voice: HubNativeVoice
+    private let openConversation: () -> Void
     private let status = UILabel()
     private let transcript = UITextView()
     private let mute = UIButton(type: .system)
     private let interrupt = UIButton(type: .system)
     private let end = UIButton(type: .system)
 
-    init(voice: HubNativeVoice) { self.voice = voice; super.init(nibName: nil, bundle: nil) }
+    init(voice: HubNativeVoice, openConversation: @escaping () -> Void) { self.voice = voice; self.openConversation = openConversation; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Use init(voice:)") }
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -16,6 +17,7 @@ final class HubVoiceViewController: UIViewController {
         view.backgroundColor = .systemBackground
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Hide", style: .plain, target: self, action: #selector(hide))
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
+            UIAction(title: "Open conversation", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.openConversation() },
             UIAction(title: "Share a file", image: UIImage(systemName: "paperclip")) { [weak self] _ in self?.shareFile() },
             UIAction(title: "Reconnect audio", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.voice.reconnect() }
         ]))

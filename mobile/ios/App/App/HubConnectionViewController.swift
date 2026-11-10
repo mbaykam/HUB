@@ -195,7 +195,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil) {
         let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending)
         voice = model
-        let sheet = HubVoiceViewController(voice: model)
+        let sheet = HubVoiceViewController(voice: model) { [weak self, weak model] in
+            guard let self else { return }
+            guard let destination = model?.conversationDestination() else {
+                self.message.text = "Wait for voice to connect before opening its conversation."
+                return
+            }
+            self.dismiss(animated: true) { [weak self] in self?.openNotification(destination) }
+        }
         present(UINavigationController(rootViewController: sheet), animated: true) { [weak self, weak sheet] in
             model.changed = { [weak self, weak sheet, weak model] in
                 self?.navigationItem.leftBarButtonItem?.title = model?.isActive == true ? "Voice •" : "Voice"
