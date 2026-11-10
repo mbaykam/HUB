@@ -49,6 +49,35 @@ final class HubVoiceAPITests: XCTestCase {
              HTTPCookie(properties: [.name: "foreign", .value: "do-not-send", .domain: "elsewhere.test", .path: "/"])!]
         }
     }
+    func testScreenTransportPinsOriginCallConsentAndBinaryBody() async throws {
+        let api = try client(); defer { api.invalidate() }
+        let id = UUID(), bytes = Data([1,2,3]) // HTTP-only fixture; not an ImageIO test.
+        VoiceFixture.respond = { request, count in
+            XCTAssertEqual(request.url?.absoluteString, "https://hub.example.com/api/hub/voice/screen")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture-only")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-voice-screen"), "1")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-voice-call"), "owned-call")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Origin"), "https://hub.example.com")
+            if count == 2 {
+                XCTAssertEqual(request.httpMethod, "PUT"); XCTAssertEqual(VoiceFixture.bodies.last, bytes)
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "image/jpeg")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-screen-share"), id.uuidString.lowercased())
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-screen-sequence"), "7")
+                XCTAssertNotNil(Int(request.value(forHTTPHeaderField: "x-hub-screen-age-ms") ?? ""))
+            } else {
+                XCTAssertEqual(request.httpMethod, count == 1 ? "POST" : "DELETE")
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: VoiceFixture.bodies.last!) as? [String:String])
+                XCTAssertEqual(body, ["shareId":id.uuidString.lowercased()])
+            }
+            return (200,"application/json",count == 3 ? #"{"sharing":false,"hasFrame":false,"maxAgeMs":5000}"# : #"{"sharing":true,"hasFrame":true,"maxAgeMs":5000}"#)
+        }
+        try await api.screenConsent(callId: "owned-call", shareID: id, start: true)
+        try await api.screenFrame(callId: "owned-call", shareID: id, sequence: 7, frame: HubScreenFrame(id:UUID(),jpeg:bytes,capturedAt:Date(),width:1,height:1))
+        try await api.screenConsent(callId: "owned-call", shareID: id, start: false)
+        XCTAssertEqual(VoiceFixture.requests.count,3)
+        do { try await api.screenFrame(callId:"owned-call",shareID:id,sequence:8,frame:HubScreenFrame(id:UUID(),jpeg:bytes,capturedAt:Date().addingTimeInterval(-6),width:1,height:1)); XCTFail("Stale frame") } catch {}
+        XCTAssertEqual(VoiceFixture.requests.count,3)
+    }
     func testOwnedHealthAndAttentionKeepExactCallAndConfiguredWakePhrase() async throws {
         let api = try client(); defer { api.invalidate() }
         VoiceFixture.respond = { request, _ in

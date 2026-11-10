@@ -48,6 +48,15 @@ test('delayed upload read and decoding cannot extend the frame lifetime or survi
   }finally{gate.resolve();frames.clear();}
 });
 
+test('a killed client cannot hold sharing forever and its expired consent cannot revive',async()=>{
+  let now=0;const frames=new VoiceScreenFrames(validate,()=>now),id=randomUUID();
+  try{
+    frames.start(owner,id);now=15000;assert.equal(frames.status(owner).sharing,false);
+    frames.start(owner,randomUUID());assert.throws(()=>frames.start(owner,id),status(410));
+    frames.stop(owner,id);assert.equal(frames.status(owner).sharing,true);
+  }finally{frames.clear();}
+});
+
 test('full decoder rejects a fake JPEG header; size, dimensions, rate and sequence are bounded',async()=>{
   let now=0, decoded=0;const frames=new VoiceScreenFrames(async bytes=>{decoded++;await validate(bytes);},()=>now),id=randomUUID();
   const fake=Buffer.from([255,216,255,192,0,8,8,0,20,0,32,3,255,217]);

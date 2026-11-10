@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const SCREEN_MAX_BYTES = 2_000_000, SCREEN_MAX_AGE_MS = 5000;
 export interface ScreenOwner { callId: string; sessionId: string }
-type Lease = ScreenOwner & { shareId: string; sequence: number; attemptedAt: number; frame?: { bytes: Buffer; expiresAt: number } };
+type Lease = ScreenOwner & { shareId: string; sequence: number; attemptedAt: number; activeAt: number; frame?: { bytes: Buffer; expiresAt: number } };
 export class ScreenError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
@@ -44,15 +44,17 @@ export class VoiceScreenFrames {
   private owns(owner: ScreenOwner) { return this.scope?.callId === owner.callId && this.scope.sessionId === owner.sessionId; }
   private forgetFrame() { if (this.expiry) clearTimeout(this.expiry); this.expiry = undefined; if (this.lease) this.lease.frame = undefined; }
   clear() { this.forgetFrame(); this.lease = undefined; this.scope = undefined; this.seen.clear(); }
+  private expireIdle() { if (this.lease && this.now() - this.lease.activeAt >= 15_000) { this.forgetFrame(); this.lease = undefined; } }
   start(owner: ScreenOwner, shareId: unknown) {
     requireId(shareId);
+    this.expireIdle();
     if (!this.owns(owner)) { this.clear(); this.scope = { ...owner }; }
     if (this.lease?.shareId === shareId) return;
     if (this.seen.has(shareId)) throw new ScreenError(410, "screen-share-ended");
     if (this.lease) throw new ScreenError(409, "screen-already-sharing");
     if (this.seen.size >= 64) throw new ScreenError(429, "too-many-screen-shares");
     this.seen.add(shareId);
-    this.lease = { ...owner, shareId, sequence: -1, attemptedAt: -Infinity };
+    this.lease = { ...owner, shareId, sequence: -1, attemptedAt: -Infinity, activeAt: this.now() };
   }
   stop(owner: ScreenOwner, shareId: unknown) {
     requireId(shareId);
@@ -63,6 +65,7 @@ export class VoiceScreenFrames {
   }
   private selected(owner: ScreenOwner, shareId: unknown) {
     requireId(shareId);
+    this.expireIdle();
     if (!this.owns(owner) || this.lease?.shareId !== shareId) throw new ScreenError(410, "screen-share-ended");
     return this.lease;
   }
@@ -71,7 +74,7 @@ export class VoiceScreenFrames {
     if (!Number.isSafeInteger(sequence) || sequence < 0 || !Number.isSafeInteger(ageMs) || ageMs < 0 || ageMs >= SCREEN_MAX_AGE_MS) throw new ScreenError(400, "invalid-screen-frame");
     if (sequence <= lease.sequence) throw new ScreenError(409, "stale-screen-frame");
     if (this.decoding || started - lease.attemptedAt < 1000) throw new ScreenError(429, "screen-rate-limited");
-    this.decoding = true; lease.attemptedAt = started;
+    this.decoding = true; lease.attemptedAt = started; lease.activeAt = started;
     try {
       const bytes = Buffer.from(await read());
       if (this.lease !== lease || !stillOwned()) throw new ScreenError(410, "screen-share-ended");
@@ -91,7 +94,7 @@ export class VoiceScreenFrames {
     if (!lease?.frame || lease.sessionId !== sessionId) return;
     return { bytes: Buffer.from(lease.frame.bytes), sequence: lease.sequence, remainingMs: lease.frame.expiresAt - this.now() };
   }
-  status(owner: ScreenOwner) { const owned = this.owns(owner); return { sharing: owned && Boolean(this.lease), hasFrame: owned && Boolean(this.frame(owner.sessionId)), maxAgeMs: SCREEN_MAX_AGE_MS }; }
+  status(owner: ScreenOwner) { this.expireIdle(); const owned = this.owns(owner); return { sharing: owned && Boolean(this.lease), hasFrame: owned && Boolean(this.frame(owner.sessionId)), maxAgeMs: SCREEN_MAX_AGE_MS }; }
 }
 
 async function body(request: IncomingMessage, limit: number) {

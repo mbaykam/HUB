@@ -16,10 +16,11 @@ until the relevant workflows below are accepted.
 | Notifications | Opt-in, host-only Apple credentials, generic content, versioned revoke/register and known-session links | Signed sandbox/production provisioning, actual delivery, denied permission, token refresh, offline revoke and authenticated tap navigation |
 | Files / Share | Explicit selection/destination; original retention; retry receipts; normal composer Send starts work | Real Files/Photos providers, image formats including HEIC, interrupted transfer, wrong conversation/server and voice continuity; unsupported formats remain honest |
 | Local recovery | Bounded inbox/outbox, visible old/damaged/orphan copies, explicit local removal/copy only | Recover after process loss and full capacity without starting a microphone or losing selected originals |
-| Screen content | iOS27 system picker, memory-only bounded recent frame, frozen review and explicit Send | Actual selected content, timing after returning from another app, permission/stop/lock behavior and audio continuity |
+| Screen content | iOS27 system picker, separate reviewed snapshot and explicit Live consent, bounded recent-frame transport | Actual selected content, live delivery while viewing another app, return/review timing, permission/stop/lock behavior, recovery and audio continuity |
 
-The current screen-content implementation shares reviewed snapshots. It does
-not provide continuous remote screen viewing or automatic continuous vision.
+The current screen-content implementation has reviewed snapshots and a native
+Live delivery path in development. The assistant read tool is not connected yet;
+it does not provide completed continuous remote viewing or automatic vision.
 Do not treat those as equivalent, or infer capture availability from a simulator
 SDK that omits ScreenCaptureKit. The account owner's actual iOS version must be
 checked before deciding whether an older-OS capture path is required.
@@ -31,8 +32,9 @@ one upload/decoder at a time and a one-second admission interval. Stop, call
 close and disposal discard it; stale uploads cannot restore stopped sharing.
 The existing local image decoder validates bytes without saving an attachment.
 Status exposes metadata only. There are no per-frame model or Knowledge writes.
-This does not yet connect native capture to an assistant: native live consent,
-frame delivery, permission-scoped tool access and end-to-end acceptance remain.
+Native live consent/frame delivery are now wired in development. Permission-scoped
+assistant tool access and end-to-end acceptance remain. The host drops an idle
+consent after15seconds; an app process loss cannot hold sharing indefinitely.
 
 ## Evidence to retain
 

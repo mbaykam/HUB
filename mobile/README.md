@@ -386,9 +386,19 @@ compilation and isolated two-instance fixture tests do not prove those outcomes.
 The host's owned-call `/api/hub/voice/screen` transport is a development slice:
 explicit start/stop receipts, bounded binary JPEG uploads and short-lived RAM
 frames. Its status endpoint never returns image bytes. It does not start model
-requests or save frames to the vault. Native live streaming and an authorized
-assistant read tool are not connected yet; the current phone workflow below
-still sends reviewed snapshots. See [acceptance gates](ACCEPTANCE.md).
+requests or save frames to the vault. Native capture now has separate **Review
+frame / Live** choices. Live needs its own confirmation and Apple's picker;
+only then does a stable consent receipt start frame delivery to the owned call.
+The encoder produces at most one JPEG every two seconds. Slow transfers drop
+frames; nothing queues or writes an outbox. Three transfer failures stop live
+delivery, and Stop, closing, locking or losing the voice call cancels it. A lost
+start response retries the same receipt; late completions cannot restart it.
+An idle host consent expires after15seconds so process loss cannot block the
+next explicit share indefinitely. Retained image bytes expire after5seconds.
+The authorized assistant read tool is not connected yet: delivery makes recent
+content available to the host, without automatic model analysis. This is still
+development code requiring actual capture-device acceptance. See [acceptance
+gates](ACCEPTANCE.md).
 
 On an iOS27 development build compiled with the newer SDK, native **Voice options
 → Share screen** opens capture and review. Choose content in Apple's system
@@ -402,8 +412,8 @@ The memory-only frame gate enforces consent generations, exact HUB/conversation/
 call ownership, pause/stop invalidation, five-second capture-time expiry, JPEG
 validation and bounded dimensions/bytes. Frozen review is a separately explicit
 user-selected image, not a claim that an old frame is still live. Capture alone
-makes no model requests. This is a snapshot workflow, not automatic continuous
-vision. Verify the captured contents before sending, especially after returning
+makes no model requests. **Review frame** is a snapshot workflow; **Live** sends
+ephemeral recent frames without automatic continuous vision. Verify the captured contents before sending, especially after returning
 from another app; foreground-freeze timing requires physical device acceptance.
 
 Apple recommends ScreenCaptureKit on iOS27 and deprecates ReplayKit broadcasting

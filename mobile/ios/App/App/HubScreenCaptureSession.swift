@@ -32,12 +32,15 @@ private final class HubScreenJPEGEncoder: @unchecked Sendable {
     private let frames = HubScreenFrames()
     private var stream: SCStream?
     private var generation: UUID?
+    private var pickerEpoch = UUID()
     private var observing = false
     private var lockObserver: NSObjectProtocol?
     private let queue = DispatchQueue(label: "hub.screen.video", qos: .userInitiated)
     private nonisolated let encoder = HubScreenJPEGEncoder()
     private(set) var status = "Screen sharing is off."
     var changed: (() -> Void)?
+    var frameReady: ((HubScreenFrame) -> Void)?
+    var consentID: UUID? { stream != nil ? generation : nil }
     init(context: HubVoiceAttachmentContext) throws {
         self.context = context
         owner = try HubScreenOwner(server: context.server, sessionID: context.sessionID, callID: context.callID)
@@ -60,6 +63,7 @@ private final class HubScreenJPEGEncoder: @unchecked Sendable {
         picker.present()
     }
     func stop() {
+        pickerEpoch = UUID()
         let old = stream; stream = nil
         if let generation { Task { await frames.stop(generation: generation) } }
         generation = nil
@@ -80,10 +84,13 @@ private final class HubScreenJPEGEncoder: @unchecked Sendable {
     nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         Task { @MainActor in
             guard self.context.stillOwned() else { self.stop(); return }
+            let epoch = UUID(); self.pickerEpoch = epoch
             let old = self.stream; self.stream = nil
             if let generation = self.generation { await self.frames.stop(generation: generation) }
+            guard self.pickerEpoch == epoch else { return }
             self.generation = nil
             if let old { try? await old.stopCapture() }
+            guard self.pickerEpoch == epoch, self.context.stillOwned() else { return }
             do {
                 let config = SCStreamConfiguration()
                 // iOS owns stream pacing/geometry. macOS-only configuration
@@ -91,12 +98,15 @@ private final class HubScreenJPEGEncoder: @unchecked Sendable {
                 config.capturesAudio = false
                 let active = SCStream(filter: filter, configuration: config, delegate: self)
                 try active.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.queue)
-                self.generation = await self.frames.beginAfterSystemConsent(owner: self.owner)
+                let generation = await self.frames.beginAfterSystemConsent(owner: self.owner)
+                guard self.pickerEpoch == epoch else { await self.frames.stop(generation: generation); return }
+                self.generation = generation
                 self.stream = active
                 try await active.startCapture()
+                guard self.pickerEpoch == epoch else { try? await active.stopCapture(); return }
                 guard self.stream === active, self.context.stillOwned() else { self.stop(); return }
                 self.update("Screen capture is active. Frames stay on this iPhone until explicitly shared.")
-            } catch { self.stop(); self.update("Capture could not start. Voice was not stopped; retry sharing.") }
+            } catch { guard self.pickerEpoch == epoch else { return }; self.stop(); self.update("Capture could not start. Voice was not stopped; retry sharing.") }
         }
     }
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -116,8 +126,13 @@ private final class HubScreenJPEGEncoder: @unchecked Sendable {
         Task { @MainActor in
             guard self.stream === stream, let generation = self.generation else { return }
             guard self.context.stillOwned() else { self.stop(); return }
-            do { try await self.frames.accept(jpeg: jpeg, generation: generation, capturedAt: capturedAt); self.changed?() }
-            catch { await self.frames.pause(generation: generation); self.update("Waiting for a valid fresh frame. Restart sharing if needed.") }
+            do {
+                try await self.frames.accept(jpeg: jpeg, generation: generation, capturedAt: capturedAt)
+                let frame = try await self.frames.snapshot(generation: generation, owner: self.owner)
+                guard self.stream === stream, self.generation == generation, self.context.stillOwned() else { return }
+                self.frameReady?(frame); self.changed?()
+            }
+            catch { await self.frames.pause(generation: generation); if self.generation == generation { self.update("Waiting for a valid fresh frame. Restart sharing if needed.") } }
         }
     }
 }

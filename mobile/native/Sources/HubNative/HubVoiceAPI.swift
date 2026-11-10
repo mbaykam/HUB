@@ -83,7 +83,7 @@ public final class HubVoiceAPI {
         }
     }
 
-    private func request(_ action: String, method: String = "GET", body: [String: Any]? = nil, callId: String? = nil) async throws -> Data {
+    private func request(_ action: String, method: String = "GET", body: [String: Any]? = nil, callId: String? = nil, jpeg: Data? = nil, screenHeaders: [String: String] = [:], capturedAt: Date? = nil) async throws -> Data {
         if let callId, !Self.validID(callId) { throw HubVoiceAPIError.invalidResponse }
         // action is private and supplied only by the fixed methods below.
         let url = server.origin.appendingPathComponent("api/hub/voice/\(action)")
@@ -95,6 +95,21 @@ public final class HubVoiceAPI {
             request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(String(server.origin.absoluteString.dropLast()), forHTTPHeaderField: "Origin")
+        }
+        if let jpeg {
+            request.httpBody = jpeg
+            request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+            request.setValue(String(server.origin.absoluteString.dropLast()), forHTTPHeaderField: "Origin")
+        }
+        if action == "screen" {
+            request.timeoutInterval = 6
+            request.setValue("1", forHTTPHeaderField: "x-hub-voice-screen")
+            for (key, value) in screenHeaders { request.setValue(value, forHTTPHeaderField: key) }
+            if let capturedAt {
+                let age = Date().timeIntervalSince(capturedAt)
+                guard age.isFinite, age >= 0, age < 5 else { throw HubVoiceAPIError.invalidResponse }
+                request.setValue(String(Int(age * 1000)), forHTTPHeaderField: "x-hub-screen-age-ms")
+            }
         }
         if action == "share" { request.setValue("1", forHTTPHeaderField: "x-hub-voice-share") }
         if let callId { request.setValue(callId, forHTTPHeaderField: "x-hub-voice-call") }
@@ -119,6 +134,19 @@ public final class HubVoiceAPI {
         let value = try JSONDecoder().decode(HubVoiceStatus.self, from: await request("status"))
         guard value.serverTime > 0 else { throw HubVoiceAPIError.invalidResponse }
         return value
+    }
+
+    public func screenConsent(callId: String, shareID: UUID, start: Bool) async throws {
+        guard Self.validID(callId) else { throw HubVoiceAPIError.invalidResponse }
+        let data = try await request("screen", method: start ? "POST" : "DELETE", body: ["shareId": shareID.uuidString.lowercased()], callId: callId)
+        let value = try JSONDecoder().decode(HubScreenStatus.self, from: data)
+        guard value.maxAgeMs == 5000, !start || value.sharing else { throw HubVoiceAPIError.invalidResponse }
+    }
+    public func screenFrame(callId: String, shareID: UUID, sequence: Int, frame: HubScreenFrame) async throws {
+        guard Self.validID(callId), sequence >= 0, sequence <= 9_007_199_254_740_991, !frame.jpeg.isEmpty, frame.jpeg.count <= HubScreenFrames.maximumBytes else { throw HubVoiceAPIError.invalidResponse }
+        let data = try await request("screen", method: "PUT", callId: callId, jpeg: frame.jpeg, screenHeaders: ["x-hub-screen-share": shareID.uuidString.lowercased(), "x-hub-screen-sequence": String(sequence)], capturedAt: frame.capturedAt)
+        let value = try JSONDecoder().decode(HubScreenStatus.self, from: data)
+        guard value.sharing, value.hasFrame, value.maxAgeMs == 5000 else { throw HubVoiceAPIError.invalidResponse }
     }
 
     /// A lost response must reuse the original receipt, never create a second
