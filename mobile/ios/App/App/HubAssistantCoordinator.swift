@@ -12,6 +12,9 @@ final class HubAssistantCoordinator {
     enum ActionError: Error { case signIn, microphone, unavailable }
 
     func adopt(_ value: HubNativeVoice?, systemStart: Bool = false) {
+        // Merely opening the UI for a Siri-owned call must not drop its
+        // recording lifetime obligation or replace its lifecycle observer.
+        if voice === value { return }
         if voice !== value, #available(iOS 18.0, *) { activity().prepareForNewSession() }
         voice = value
         systemRecording = systemStart
@@ -48,7 +51,7 @@ final class HubAssistantCoordinator {
         if let voice, voice.isActive {
             let wasSystemRecording = systemRecording
             try activity().begin(userInitiated: true)
-            do { try await voice.resumeForSystem(); systemRecording = true }
+            do { try await voice.resumeForSystem(); try activity().requireOngoing(); systemRecording = true }
             catch { if !wasSystemRecording { activity().end() }; throw ActionError.unavailable }
             activity().update(voice); return
         }
@@ -59,7 +62,8 @@ final class HubAssistantCoordinator {
             try activity().begin(userInitiated: true)
             model.start()
             guard await model.waitForStartup() else { throw ActionError.unavailable }
-        } catch { activity().end(); throw error }
+            try activity().requireOngoing()
+        } catch { if systemRecording { voice?.end() }; activity().end(); throw error }
     }
     func endFromSystem() async throws -> Bool {
         if let voice, voice.isActive { voice.end(); return true }

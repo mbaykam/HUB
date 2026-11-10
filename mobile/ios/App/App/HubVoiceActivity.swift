@@ -11,6 +11,9 @@ final class HubVoiceActivity {
     private var recreationBlocked = false
     var systemEnded: (() -> Void)?
     func prepareForNewSession() { end(); recreationBlocked = false }
+    func requireOngoing() throws {
+        guard let activity, activity.activityState == .active || activity.activityState == .stale else { throw ActivityError.ended }
+    }
     func begin(userInitiated: Bool = false) throws {
         if userInitiated { recreationBlocked = false }
         guard activity == nil else { return }
