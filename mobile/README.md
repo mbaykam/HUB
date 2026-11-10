@@ -298,9 +298,11 @@ The account owner completes these steps in Apple Developer / App Store Connect:
 1. Enroll in the Apple Developer Program and select the intended team.
 2. Confirm the bundle identifier. `com.mbaykam.hub` is provisional; its availability
    and registration have not been checked. Register the final explicit App ID.
-   Also register the extension identifier `com.mbaykam.hub.voice-widget`. If the
+   Also register `com.mbaykam.hub.voice-widget`, `com.mbaykam.hub.share`, and
+   App Group `group.com.mbaykam.hub`. If the
    app ID changes, update `capacitor.config.json` and both configurations of the
-   app and widget targets together; `pnpm check` detects a mismatch.
+   app, widget and Share targets and their App Group entitlements together;
+   `pnpm check` detects a mismatch.
 3. Create the App Store Connect app record and configure signing/provisioning for
    that identifier. Use a Mac/Xcode or a chosen hosted signing workflow.
 4. If automated upload is wanted, authorize a suitably scoped App Store Connect
@@ -314,19 +316,23 @@ Apple's [TestFlight guide](https://developer.apple.com/help/app-store-connect/te
 describes beta distribution and its 90-day build lifetime. An unsigned simulator
 build is not evidence of iPhone, background audio or distribution acceptance.
 
-## Native work to start next
+## Acceptance still required
 
 1. Validate authenticated connection/session restoration and client compatibility,
    including expired access and interrupted admission. Keep existing auth gates.
 2. Accept native audio, same-conversation recovery, echo control, Bluetooth,
    interruptions and screen locking on an actual iPhone. Continue using selected
    providers; native alone does not improve the speech model's recognition.
-3. Add Siri/App Intents with correct lock/microphone policy, then native push
-   delivery and task/chat links. Finish native file/Share and screen sharing,
-   requesting permissions only when their actual feature is used.
+3. Accept the implemented Siri/App Intents, native push/task links and file/Share
+   paths on a signed iPhone build. Screen content currently uses reviewed
+   snapshots, not continuous remote viewing. Request permissions only when the
+   actual feature is used.
 4. Test physical-device lifecycle, weak/offline connections, microphone/camera
    denial, phone calls, closing/reopening, task continuity, data preservation,
    privacy and power use before calling this a daily-use iPhone client.
+
+Use [ACCEPTANCE.md](ACCEPTANCE.md) to distinguish implemented source paths,
+compiler/simulator evidence, remaining product behavior and physical/account gates.
 
 The remote HUB view is a plain `WKWebView`, with no Capacitor bridge or script
 message handlers. The unused bundled bridge configuration remains restricted to

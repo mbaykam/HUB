@@ -11,6 +11,11 @@ on:
         description: Exact full source commit of that simulator artifact
         required: true
         type: string
+      toolchain:
+        description: Simulator host (stable does not exercise iOS27 capture)
+        type: choice
+        default: stable
+        options: [stable, xcode-27]
 
 permissions:
   contents: read
@@ -19,7 +24,7 @@ permissions:
 jobs:
   launch:
     if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main'
-    runs-on: xcode-27
+    runs-on: ${{ inputs.toolchain == 'xcode-27' && 'xcode-27' || 'macos-latest' }}
     timeout-minutes: 15
     env:
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
