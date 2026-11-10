@@ -54,4 +54,16 @@ import XCTest
         sharing.offer(frame(now.addingTimeInterval(-5))); sharing.offer(frame(now.addingTimeInterval(1)))
         XCTAssertEqual(uploads, 0); sharing.stop()
     }
+    func testChangingSelectedContentWaitsForPriorConsentToClose() async {
+        let first = UUID(), next = UUID(); var starts: [UUID] = [], stopEntered = false
+        var finish: CheckedContinuation<Void, Never>?
+        let sharing = HubLiveScreenSharing(consent: { id, start in
+            if start { starts.append(id) }
+            else if id == first { stopEntered = true; await withCheckedContinuation { finish = $0 } }
+        }, upload: { _, _, _ in }, owned: { true })
+        sharing.beginAfterSystemConsent(first); await wait { starts == [first] }; await Task.yield()
+        sharing.beginAfterSystemConsent(next); await wait { stopEntered }
+        for _ in 0..<10 { await Task.yield() }; XCTAssertEqual(starts, [first])
+        finish?.resume(); await wait { starts == [first,next] }; sharing.stop()
+    }
 }

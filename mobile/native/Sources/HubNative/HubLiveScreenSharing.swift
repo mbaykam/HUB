@@ -18,6 +18,7 @@ public struct HubScreenStatus: Decodable {
     private var id: UUID?
     private var ended = Set<UUID>()
     private var operation: Task<Void, Never>?
+    private var cleanup: Task<Void, Never>?
     private var ready = false
     private var sequence = 0
     private var failures = 0
@@ -35,9 +36,12 @@ public struct HubScreenStatus: Decodable {
         if id == shareID { return }
         guard !ended.contains(shareID), ended.count < 64 else { return }
         stop(); id = shareID; ready = false; sequence = 0; failures = 0; lastAttempt = .distantPast
+        let priorCleanup = cleanup
         update("Connecting live screen sharing…")
         operation = Task { [weak self] in
             guard let self else { return }
+            await priorCleanup?.value
+            guard self.id == shareID, self.owned(), !Task.isCancelled else { return }
             do {
                 do { try await self.consent(shareID, true) }
                 catch let error as URLError where error.code != .cancelled {
@@ -81,7 +85,9 @@ public struct HubScreenStatus: Decodable {
         ended.insert(old)
         update("Live sharing stopped locally. Any unconfirmed remote frame expires within five seconds.")
         let consent = consent
-        Task {
+        let priorCleanup = cleanup
+        cleanup = Task {
+            await priorCleanup?.value
             do { try await consent(old, false) }
             catch { try? await consent(old, false) } // Tombstone delayed starts; never starts another share.
         }
