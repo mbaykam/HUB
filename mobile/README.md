@@ -289,41 +289,31 @@ compilation and isolated two-instance fixture tests do not prove those outcomes.
 
 ## Screen capture integration in development
 
-The native core now has a memory-only frame gate: explicit system-consent
-generation, exact HUB/conversation/call ownership, pause/stop invalidation,
-five-second expiry, JPEG validation and bounded dimensions/bytes. It neither
-captures nor uploads by itself, and makes no background model requests.
-
-Current Apple documentation recommends ScreenCaptureKit's system content picker
-on iOS27 and deprecates ReplayKit broadcast extensions there. The current hosted
-build uses Xcode26.6, so the iOS27 capture adapter needs a newer SDK and actual
-device verification. A system picker/capture UI and explicit frame-send workflow
-are still required; no inactive screen-sharing button is exposed as a feature.
-See [Apple's iOS capture sample](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-on-ios).
-
-The manual simulator workflow also offers the standard **xcode-27** public
-preview runner for adapter development; **stable** remains the default. Preview
-checks do not sign, install, submit or silently upgrade a release toolchain.
-GitHub lists this standard runner as free for public repositories; the workflow
-does not select a larger paid runner. Its preview availability and results need
-to be checked before relying on the newer SDK.
-
-The iOS27 development source also contains a native ScreenCaptureKit adapter:
-Apple's system picker, video-only low-rate capture, stop/lock handling and bounded
-local JPEG frames tied to the owned voice call. No microphone/app audio is added,
-no frames are uploaded, and no model is called by capture. The UI for review,
-freeze-on-return and explicit sending is still being connected; screen sharing
-is not exposed as a finished feature. Older SDKs exclude this adapter. The app
-also declares elapsed-event timing reason35F9.1 for rejecting queued old samples;
-raw system clock/boot information is never sent to HUB.
-
 On an iOS27 development build compiled with the newer SDK, native **Voice options
-→ Share screen** now presents the capture/review flow. Choose content in Apple's
-picker, visit what you want to show, return to freeze a recent frame, inspect it,
-then explicitly Send. Frozen review stops capture; upload retries reuse the same
-receipt. Ending the owned voice call blocks sending into a replacement call.
-Nothing is sent by starting capture, and capture adds no microphone/app audio.
-This snapshot workflow is not continuous automatic vision. The foreground-return
-freeze timing, exact captured content, picker behavior, background audio and
-physical iPhone/privacy acceptance still require device testing before release.
-Older OS/SDK builds do not expose this menu action.
+→ Share screen** opens capture and review. Choose content in Apple's system
+picker, visit what you want to show, then return to freeze a recent frame. Review
+that exact image and explicitly Send it to the owned voice conversation. Freezing
+stops capture; closing the screen or losing the voice owner also stops sharing.
+A failed upload keeps a retryable receipt under Share a file. Nothing is sent by
+starting capture, and capture adds no microphone or app-audio input.
+
+The memory-only frame gate enforces consent generations, exact HUB/conversation/
+call ownership, pause/stop invalidation, five-second capture-time expiry, JPEG
+validation and bounded dimensions/bytes. Frozen review is a separately explicit
+user-selected image, not a claim that an old frame is still live. Capture alone
+makes no model requests. This is a snapshot workflow, not automatic continuous
+vision. Verify the captured contents before sending, especially after returning
+from another app; foreground-freeze timing requires physical device acceptance.
+
+Apple recommends ScreenCaptureKit on iOS27 and deprecates ReplayKit broadcasting
+there. The manual simulator workflow offers the standard **xcode-27** runner for
+this development path; stable remains the default. Both toolchains compiled the
+current core; the capture adapter/review UI requires the newer SDK. Older OS/SDK
+builds do not expose the action. No release toolchain or installed app is silently
+upgraded. The app declares elapsed-event timing reason35F9.1 to reject queued old
+samples; raw system clock/boot information is not sent to HUB.
+
+See [Apple's iOS capture sample](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-on-ios).
+The picker, captured content, freeze timing, background audio, interruptions and
+privacy behavior still need physical iPhone acceptance before release. Simulator
+compilation does not prove those outcomes, and no signed iPhone build is implied.

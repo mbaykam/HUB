@@ -37,8 +37,17 @@ import HubNative
         send.addAction(UIAction { [weak self] _ in self?.confirmSend() }, for: .touchUpInside)
         let actions = UIStackView(arrangedSubviews: [start, freeze]); actions.distribution = .fillEqually; actions.spacing = 12
         let stack = UIStackView(arrangedSubviews: [message, preview, actions, send, stop]); stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16), stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20), stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12), preview.heightAnchor.constraint(greaterThanOrEqualToConstant: 100), send.heightAnchor.constraint(greaterThanOrEqualToConstant: 48)])
+        let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scroll); scroll.addSubview(stack)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor), scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 20), stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -20),
+            stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40), preview.heightAnchor.constraint(equalToConstant: 240),
+            start.heightAnchor.constraint(greaterThanOrEqualToConstant: 48), freeze.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+            send.heightAnchor.constraint(greaterThanOrEqualToConstant: 48), stop.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        ])
         capture.changed = { [weak self] in guard let self, self.frame == nil, !self.busy else { return }; self.message.text = self.capture.status }
         observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.backgroundAt = Date() } })
         observers.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
