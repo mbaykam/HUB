@@ -76,8 +76,14 @@ jobs:
       - name: Test HTTPS authority and native cookie isolation
         run: swift test --package-path native
       - name: Probe screen capture SDK availability without conditional imports
+        id: screen-sdk
         if: inputs.toolchain == 'xcode-27'
         run: bash scripts/probe-screen-sdk.sh
+      - name: Compile actual iPhone capture source without signing
+        if: steps.screen-sdk.outputs.iphoneos_available == 'true'
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath build/DeviceDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          ditto -c -k --sequesterRsrc --keepParent build/DeviceDerivedData/Build/Products/Debug-iphoneos/App.app build/HUB-ios-device-unsigned.zip
       - name: Compile for iOS Simulator without Apple credentials
         run: pnpm ios:build:simulator
       - name: Save simulator build
@@ -85,6 +91,15 @@ jobs:
         with:
           name: HUB-ios-simulator-${{ github.sha }}
           path: mobile/build/HUB-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Save unsigned iPhone compile evidence
+        if: steps.screen-sdk.outputs.iphoneos_available == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HUB-ios-device-unsigned-${{ github.sha }}
+          path: mobile/build/HUB-ios-device-unsigned.zip
           if-no-files-found: error
           retention-days: 7
           compression-level: 0

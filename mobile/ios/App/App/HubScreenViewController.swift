@@ -58,7 +58,7 @@ import HubNative
         } }
     }
     private func freeze() {
-        guard !busy else { return }
+        guard !busy, frame == nil else { return }
         Task {
             do {
                 let snapshot = try await capture.snapshotForExplicitReview()
