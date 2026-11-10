@@ -5,6 +5,7 @@ const installStyles = defineOverlayStyle("hub-mobile-hubs", styles);
 import type { HarnessClientContext } from "../core/context.ts";
 import {createVoiceCamera} from "./voice-camera.ts";
 import {createCharacterPicker} from "./character-picker.ts";
+import {createNativeVoiceEntry} from "./native-voice-entry.ts";
 import type { createVoiceClient, VoiceState } from "../voice/browser-client.ts";
 import { createMobileActivity, createActivitySignals, type ActivityPendingSource } from "./mobile-activity.ts";
 import {createDurableActivity} from "./mobile-durable-activity.ts";
@@ -52,6 +53,9 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   for (let index = 0; index < 5; index++) voiceGlyph.append(root.createElement("i"));
   const title = root.createElement("strong"); title.textContent = "Speak";
   start.append(title, voiceGlyph);
+  const nativeEntry=createNativeVoiceEntry(root);
+  if(nativeEntry)start.hidden=true;
+  nativeEntry?.addEventListener("click",event=>{if(!enabled||loading){event.preventDefault();error.textContent="Voice isn’t ready on HUB yet. Use Voice in the app bar or check the connection.";}});
   const controls = root.createElement("div"); controls.setAttribute("data-voice-controls", "");
   const status = root.createElement("span"); status.setAttribute("role", "status");
   const mute = root.createElement("button"); mute.type = "button"; mute.textContent = "Mute";
@@ -80,7 +84,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   liveLabel.setAttribute("role", "status"); liveLabel.setAttribute("aria-live", "polite");
   const play = root.createElement("button"); play.type = "button"; play.textContent = "Tap to hear audio"; play.hidden = true;
   const transcript = createMobileLiveTranscript(root);
-  hub.append(start, controls,liveVoice, transcript.panel, play, error); root.body.append(audio);
+  hub.append(start,...(nativeEntry?[nativeEntry]:[]), controls,liveVoice, transcript.panel, play, error); root.body.append(audio);
   const activity = createMobileActivity(root, (id,parentHint) => {
     void openMobileConversation(ctx.sessions, id,parentHint).catch(() => {
       error.textContent = "Couldn’t open this task’s conversation. Try again; your voice call is still connected.";
@@ -158,7 +162,8 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     browser.update(inHome && root.querySelector("[data-minke-mobile-web]") !== null && view!.innerWidth <= 1024, new Map(Object.entries(nativeSessions.byId).filter(([, session]) => session !== undefined).map(([id, session]) => [id, session?.displayTitle ?? session?.title ?? "Task"])), voiceSession);
     const work=durableActivity.read(nativeSessions);
     activity.update({ ...work, observations: activitySignals.read(work), pendingBySession: pendingSource?.getSnapshot() }, voiceSession,durableActivity.failed?"disconnected": ctx.connection?.state ? ctx.connection.state.getSnapshot() ?? "connecting" : "connected");
-    start.hidden = busy; start.disabled = !enabled || loading;
+    start.hidden = busy || !!nativeEntry; start.disabled = !enabled || loading;
+    if(nativeEntry){nativeEntry.hidden=busy;nativeEntry.setAttribute("aria-disabled",String(!enabled||loading));}
     controls.hidden = !busy;
     liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":attentionMode==="background"?`Waiting for “${wakePhrases[0]}”`:audioStage==="echo-tail"||inputPaused&&state==="listening"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
     attentionButton.textContent=attentionMode==="background"?"Resume":"Background";attentionButton.setAttribute("aria-pressed",String(attentionMode==="background"));attentionButton.title=attentionMode==="background"?"Resume conversation without reconnecting":"Only respond after hearing the wake phrase";
@@ -234,6 +239,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   // This is a local render tick, not another host polling loop.
   const refreshTime = view.setInterval(() => { if (!root.hidden && isHome()) schedule(); }, 60_000);
   start.addEventListener("click", async () => {
+    if(nativeEntry)return; // Never start a second browser audio owner in iOS.
     if (active()) return;
     transcript.reset();
     liveWords.textContent="";liveWords.removeAttribute("data-interim");audioStage="listening";inputPaused=false;receivingAudio=undefined;audioConnection=undefined;attentionMode="active";

@@ -13,6 +13,10 @@
 [data-hub-voice-hub][data-home]:not([data-shared]):after{content:'';position:absolute;left:50%;bottom:-15px;height:14px;width:1px;background:linear-gradient(#aeb9ff88,#ffffff22)}
 [data-hub-voice-hub] button{font:inherit;color:inherit;background:#ffffff0d;border:1px solid #ffffff1c;border-radius:14px;padding:10px 14px;min-height:44px;cursor:pointer}
 [data-hub-voice-hub] button:disabled{opacity:.5;cursor:default}
+[data-native-voice-entry]{font:inherit;color:inherit;text-decoration:none;cursor:pointer;border-radius:14px}
+[data-native-voice-entry][aria-disabled="true"]{opacity:.5;cursor:default}
+[data-native-voice-entry]:focus-visible{outline:2px solid #a6b2ff;outline-offset:3px}
+[data-voice-start][hidden]{display:none!important}
 [data-hub-voice-hub] button:focus-visible,[data-hub-voice-hub] textarea:focus-visible{outline:2px solid #a6b2ff;outline-offset:3px}
 [data-hub-voice-hub] [data-voice-start]{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:none;border:0;padding:0;text-align:left;width:100%;min-height:80px}
 [data-voice-start] strong{font-size:24px;font-weight:550;letter-spacing:-.6px}[data-voice-start] span{font-size:13px;color:#b6b9cc}

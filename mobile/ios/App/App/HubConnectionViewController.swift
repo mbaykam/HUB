@@ -32,6 +32,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.allowsInlineMediaPlayback = true
+        config.applicationNameForUserAgent = "HUBiOS/0.1"
         // Do not add native message handlers to this configuration.
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
@@ -235,6 +236,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        if let server, server.contains(url), URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "hubNative" }) == true {
+            decisionHandler(.cancel)
+            guard connected, presentedViewController == nil,
+                  HubVoiceNavigation.requestsConfirmation(url: url, source: navigationAction.sourceFrame.request.url, server: server,
+                    sourceIsMainFrame: navigationAction.sourceFrame.isMainFrame, targetIsMainFrame: mainFrame, isLink: navigationAction.navigationType == .linkActivated) else { return }
+            offerNativeVoice()
+            return
+        }
         if !mainFrame {
             decisionHandler(["https", "blob", "about", "data"].contains(url.scheme?.lowercased() ?? "") ? .allow : .cancel)
             return
@@ -314,6 +323,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func showFailure(_ error: Error) {
         if (error as NSError).code != NSURLErrorCancelled { message.text = "Could not open HUB. Check your connection, then choose Reload." }
     }
+    private func offerNativeVoice() {
+        let active = voice?.isActive == true
+        let alert = UIAlertController(title: active ? "Open voice controls?" : "Start voice?", message: active ? "Your existing voice conversation will stay active." : "Start or resume a voice conversation using your iPhone microphone.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: active ? "Open controls" : "Continue", style: .default) { [weak self] _ in self?.showVoice() })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
+    }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         message.text = "HUB needs to reconnect. Choose Reload to continue."
     }
@@ -323,6 +339,11 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         parts.scheme = origin.protocol; parts.host = origin.host
         if origin.port != 0 { parts.port = origin.port }
         let trusted = parts.url.map { server?.contains($0) == true } ?? false
-        decisionHandler(trusted && frame.isMainFrame ? .prompt : .deny)
+        // Keep one audio owner in this app, including with an older PWA. Camera
+        // uploads still use the standard prompt; web/agent frames get no mic.
+        if type == .microphone || type == .cameraAndMicrophone {
+            decisionHandler(.deny)
+            if trusted && frame.isMainFrame { message.text = "Use Voice in the app bar for iPhone audio." }
+        } else { decisionHandler(trusted && frame.isMainFrame ? .prompt : .deny) }
     }
 }

@@ -41,6 +41,23 @@ and uses native WebRTC audio with the existing SmallWebRTC/RTVI server. The same
 configured voice character, speech providers and saved conversation system stay
 on the server. No extra hosted voice provider or phone-side model key is needed.
 
+Inside the iPhone wrapper, Home's **Speak** links to a separate native Voice
+confirmation, rather than creating browser audio. A fixed same-origin root link
+may request that UI only from the main HUB page; it carries no session, call ID,
+credentials or commands. It cannot start, stop or inspect native audio. Starting
+or resuming still needs an explicit choice in native UIKit. Agent frames,
+redirects, extra parameters and unverified connections cannot request it.
+This is navigation to a confirmation, not a privileged JavaScript bridge.
+
+The wrapper identifies itself through a nonprivileged `HUBiOS` user-agent hint;
+ordinary Safari/PWA keeps its browser voice flow. Native WebKit microphone
+requests are denied, including on older PWA builds, with guidance to use **Voice**
+in the app bar. Native Voice owns microphone permission/audio instead. Normal
+main-page camera-only requests retain the standard permission prompt; agent
+frames still cannot use capture. This avoids accidentally choosing web audio
+that cannot provide native lock-screen continuity. Actual phone acceptance is
+still required; the hint and navigation are not authentication or authorization.
+
 The voice sheet has **Background listening / Resume conversation**, **Mute**,
 **Interrupt**, **End conversation**, and an overflow
 menu with **Reconnect audio**. **Hide** returns to HUB while keeping the call
