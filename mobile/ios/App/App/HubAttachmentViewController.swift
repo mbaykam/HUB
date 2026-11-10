@@ -15,6 +15,7 @@ struct HubVoiceAttachmentContext {
     private let context: HubVoiceAttachmentContext
     private let store: HubAttachmentStore
     private var items: [HubAttachmentDraft] = []
+    private var incomplete: [UUID] = []
     private var busy = false
     private var message = "Choose a file, then confirm Send. Your voice conversation stays active."
     init(context: HubVoiceAttachmentContext) throws {
@@ -32,14 +33,17 @@ struct HubVoiceAttachmentContext {
     }
     private func reloadDrafts() {
         Task {
-            do { items = try await store.drafts(server: context.server) }
+            do {
+                items = try await store.drafts(server: context.server)
+                incomplete = try await store.incompleteCopies()
+            }
             catch { message = "Saved files could not be read. They have been preserved." }
             tableView.reloadData()
         }
     }
-    override func numberOfSections(in tableView: UITableView) -> Int { 3 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 2 ? items.count : 1 }
-    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 2 ? "Pending files" : nil }
+    override func numberOfSections(in tableView: UITableView) -> Int { incomplete.isEmpty ? 3 : 4 }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 3 ? incomplete.count : section == 2 ? items.count : 1 }
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 3 ? "Interrupted preparation" : section == 2 ? "Pending files" : nil }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         section == 1 ? "Up to 8 pending files, 25 MB each. Sending retains the original on HUB and shares it with this voice conversation. Reading a file depends on its format and the selected model." : nil
     }
@@ -52,6 +56,10 @@ struct HubVoiceAttachmentContext {
         } else if indexPath.section == 1 {
             cell.textLabel?.text = "Choose from Files"; cell.imageView?.image = UIImage(systemName: "folder")
             cell.textLabel?.textColor = busy ? .secondaryLabel : .systemBlue; cell.accessibilityTraits = .button
+        } else if indexPath.section == 3 {
+            cell.textLabel?.text = "Incomplete local copy"
+            cell.detailTextLabel?.text = "Preparation was interrupted. Tap to review removal. The original selected file was not changed."
+            cell.accessoryType = .disclosureIndicator
         } else {
             let draft = items[indexPath.row]
             cell.textLabel?.text = draft.name
@@ -69,6 +77,20 @@ struct HubVoiceAttachmentContext {
             picker.allowsMultipleSelection = false; picker.delegate = self
             present(picker, animated: true)
         } else if indexPath.section == 2 { review(items[indexPath.row]) }
+        else if indexPath.section == 3 { reviewIncomplete(incomplete[indexPath.row]) }
+    }
+    private func reviewIncomplete(_ id: UUID) {
+        let sheet = UIAlertController(title: "Incomplete local copy", message: "This copy has no saved conversation receipt, so it cannot be sent safely. Remove only this unfinished copy to free a pending-file slot? Your original selected file stays unchanged.", preferredStyle: .alert)
+        sheet.addAction(UIAlertAction(title: "Keep", style: .cancel))
+        sheet.addAction(UIAlertAction(title: "Remove unfinished copy", style: .destructive) { [weak self] _ in
+            guard let self, !self.busy else { return }; self.busy = true
+            Task {
+                defer { self.busy = false; self.reloadDrafts() }
+                do { try await self.store.discardIncompleteCopy(id); self.message = "Unfinished local copy removed. You can choose the original file again." }
+                catch { self.message = "Could not remove this copy. Saved files were preserved." }
+            }
+        })
+        present(sheet, animated: true)
     }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first, !busy else { return }

@@ -95,6 +95,10 @@ the same receipts rather than submitting duplicate instructions. A file from a
 different or ended call is shown as such and cannot silently move into a new
 conversation. Removing a local draft never modifies the selected source file.
 Uploads are foreground operations; interruption can require an explicit retry.
+If preparation stopped before a conversation receipt was saved, an **Interrupted
+preparation** section exposes that local copy. It cannot be uploaded to an
+invented conversation. Explicitly removing the unfinished copy frees its slot;
+HUB does not silently delete these copies or alter the original selected file.
 
 This is a development slice. Files-provider behavior, permissions, screen locking,
 slow connections and physical audio continuity during file selection still need

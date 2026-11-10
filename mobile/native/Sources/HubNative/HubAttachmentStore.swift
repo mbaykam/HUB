@@ -88,5 +88,22 @@ public actor HubAttachmentStore {
             if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
         }
     }
+    /// A process can stop between writing payload and manifest, or between
+    /// deleting those files. Preserve these copies until the user removes them;
+    /// they must not occupy invisible capacity or be sent to an invented owner.
+    public func incompleteCopies() throws -> [UUID] {
+        try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).compactMap { url in
+            guard url.pathExtension == "bin", let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
+                  url.lastPathComponent == id.uuidString.lowercased() + ".bin",
+                  !FileManager.default.fileExists(atPath: file(id, ".json").path) else { return nil }
+            let attributes = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard attributes.isRegularFile == true, attributes.isSymbolicLink != true else { throw HubAttachmentError.invalidFile }
+            return id
+        }
+    }
+    public func discardIncompleteCopy(_ id: UUID) throws {
+        guard try incompleteCopies().contains(id) else { throw HubAttachmentError.invalidFile }
+        try FileManager.default.removeItem(at: file(id, ".bin"))
+    }
     public static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 }

@@ -17,6 +17,31 @@ private final class AttachmentFixture: URLProtocol {
     override func stopLoading() {}
 }
 final class HubAttachmentTests: XCTestCase {
+    func testInterruptedPreparationIsVisibleAndExplicitRemovalRestoresBoundedCapacity() async throws {
+        let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("original.txt"), original = Data("preserved fixture".utf8)
+        try original.write(to: source)
+        let folder = root.appendingPathComponent("outbox"), server = try HubServer(address: "https://hub.example.com")
+        let first = try HubAttachmentStore(root: folder)
+        var values: [HubAttachmentDraft] = []
+        for _ in 0..<8 { values.append(try await first.stage(source: source, server: server, sessionID: "chat", callID: "call")) }
+        let lost = try XCTUnwrap(values.first)
+        // Simulate process loss after payload write but before its manifest.
+        try FileManager.default.removeItem(at: folder.appendingPathComponent(lost.id.uuidString.lowercased() + ".json"))
+        let reopened = try HubAttachmentStore(root: folder)
+        let visible = try await reopened.drafts(server: server)
+        XCTAssertEqual(visible.count, 7)
+        do { _ = try await reopened.stage(source: source, server: server, sessionID: "chat", callID: "call"); XCTFail("No automatic deletion or capacity bypass") }
+        catch { guard case HubAttachmentError.full = error else { return XCTFail("Wrong capacity error") } }
+        let incomplete = try await reopened.incompleteCopies()
+        XCTAssertEqual(incomplete, [lost.id])
+        do { try await reopened.discardIncompleteCopy(values[1].id); XCTFail("Cannot remove a complete draft through orphan cleanup") } catch {}
+        try await reopened.discardIncompleteCopy(lost.id)
+        _ = try await reopened.stage(source: source, server: server, sessionID: "chat", callID: "call")
+        let restored = try await reopened.drafts(server: server)
+        XCTAssertEqual(restored.count, 8)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+    }
     private func root() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("hub-eval-attachments-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true); return url
