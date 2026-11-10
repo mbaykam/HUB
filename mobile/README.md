@@ -383,6 +383,13 @@ compilation and isolated two-instance fixture tests do not prove those outcomes.
 
 ## Screen capture integration in development
 
+The host's owned-call `/api/hub/voice/screen` transport is a development slice:
+explicit start/stop receipts, bounded binary JPEG uploads and short-lived RAM
+frames. Its status endpoint never returns image bytes. It does not start model
+requests or save frames to the vault. Native live streaming and an authorized
+assistant read tool are not connected yet; the current phone workflow below
+still sends reviewed snapshots. See [acceptance gates](ACCEPTANCE.md).
+
 On an iOS27 development build compiled with the newer SDK, native **Voice options
 → Share screen** opens capture and review. Choose content in Apple's system
 picker, visit what you want to show, then return to freeze a recent frame. Review

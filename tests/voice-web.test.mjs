@@ -16,6 +16,7 @@ async function fixture(overrides = {}, options = {}) {
     runtimeStatus: overrides.runtimeStatus,
     character: overrides.character,
     share:overrides.share,
+    validateScreen:overrides.validateScreen,
     async open(signal, sessionId) { opened++; if (overrides.open) await overrides.open(signal, sessionId); return call; },
     async close(value) { assert.equal(value, call); closed++; if (overrides.close) await overrides.close(); },
   }, options);
@@ -26,6 +27,32 @@ async function fixture(overrides = {}, options = {}) {
   return { web, call, process, requests, post, url, get opened() { return opened; }, get closed() { return closed; }, async dispose() { try { await web.dispose(); } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } } };
 }
 const admission = () => ({ requestId: randomUUID(), requestedAt: Date.now() });
+
+test('screen transport authenticates exact call, rejects cross-site/oversized input and clears during shutdown',async()=>{
+ const gate=defer(),started=defer();const f=await fixture({validateScreen:async()=>{},close:()=>{started.resolve();return gate.promise;}});const shareId=randomUUID();
+ const headers={cookie:'synthetic-auth=1','x-hub-voice-screen':'1','x-hub-voice-call':f.call.callId};
+ const screen=(method,body,extra={})=>fetch(f.url+'screen',{method,headers:{...headers,'content-type':'application/json',...extra},...(body===undefined?{}:{body:JSON.stringify(body)})});
+ try{
+  assert.equal((await screen('POST',{shareId})).status,410);await f.post('open',admission());
+  assert.equal((await screen('POST',{shareId},{cookie:''})).status,401);
+  assert.equal((await screen('POST',{shareId},{'sec-fetch-site':'cross-site'})).status,403);
+  assert.equal((await screen('POST',{shareId},{'x-hub-voice-screen':''})).status,403);
+  assert.equal((await screen('POST',{shareId},{'x-hub-voice-call':randomUUID()})).status,410);
+  assert.equal((await screen('POST',{shareId,prompt:'run task'})).status,400);
+  assert.equal((await screen('POST',{shareId})).status,200);
+  const jpeg=Buffer.from([255,216,255,192,0,8,8,0,20,0,32,3,255,217]); // transport-only fixture; real decoder tested separately
+  const put=body=>fetch(f.url+'screen',{method:'PUT',headers:{...headers,'content-type':'image/jpeg','x-hub-screen-share':shareId,'x-hub-screen-sequence':'0','x-hub-screen-age-ms':'0'},body});
+  assert.equal((await put(Buffer.alloc(2_000_001))).status,413);
+  await new Promise(r=>setTimeout(r,1010));assert.equal((await put(jpeg)).status,200);
+  assert.deepEqual(f.web.screenFrame(f.call.sessionId).bytes,jpeg);
+  const metadata=await(await screen('GET')).json();assert.deepEqual(metadata,{sharing:true,hasFrame:true,maxAgeMs:5000});
+  assert.equal(f.web.screenFrame('other'),undefined);assert.equal(f.requests.length,0);
+  const closing=f.post('close',{callId:f.call.callId});
+  await started.promise;
+  assert.equal((await screen('GET')).status,410);assert.equal(f.web.screenFrame(f.call.sessionId),undefined);
+  gate.resolve();await closing;
+ }finally{gate.resolve();await f.dispose();}
+});
 
 test('owned native health exposes listening mode without transcripts and rejects stale sidecar results',async()=>{
  const f=await fixture();const body={callId:f.call.callId};const gate=defer(),started=defer();

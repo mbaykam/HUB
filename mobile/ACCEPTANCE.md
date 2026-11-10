@@ -24,12 +24,22 @@ Do not treat those as equivalent, or infer capture availability from a simulator
 SDK that omits ScreenCaptureKit. The account owner's actual iOS version must be
 checked before deciding whether an older-OS capture path is required.
 
+The host now has a development-only current-frame transport. It requires normal
+authentication, the exact active call, an explicit consent UUID and a screen
+request marker. One JPEG (at most2MB) is held in RAM for at most5seconds, with
+one upload/decoder at a time and a one-second admission interval. Stop, call
+close and disposal discard it; stale uploads cannot restore stopped sharing.
+The existing local image decoder validates bytes without saving an attachment.
+Status exposes metadata only. There are no per-frame model or Knowledge writes.
+This does not yet connect native capture to an assistant: native live consent,
+frame delivery, permission-scoped tool access and end-to-end acceptance remain.
+
 ## Evidence to retain
 
 - The source commit, targeted behavior/security tests and real macOS build result.
 - For capture, the actual iPhone SDK branch and weak framework linkage, separately
   from the simulator build. An unsigned device archive cannot be installed as-is.
-- For first launch, the original trusted simulator build/run identity, fresh
+- For first launch, the original trusted simulator build/run identity, isolated
   simulator proof and inspected screenshot. This proves startup UI only.
 - For physical tests, the device/iOS/build, steps, actual result, recovery and
   limitations. Do not label emulation, mocked audio or fixtures as physical tests.

@@ -9,6 +9,7 @@ import type { LocalSpeechConfig } from "../voice-profile-contract.ts";
 import type { VoiceTranscriptLine } from "./voice-transcript.ts";
 import {uploadId,UPLOAD_MAX_FILES} from "../upload-contract.ts";
 import {UploadError} from "./uploads.ts";
+import { VoiceScreenFrames, handleVoiceScreen } from "./voice-screen.ts";
 
 interface Call { callId: string; sessionId: string; sidecar: VoiceSidecar; iceServers?: VoiceIceServer[]; profile?: ActiveVoiceProfile; transport?: "telegram"; speech?: LocalSpeechConfig }
 export interface VoiceWebPorts {
@@ -21,6 +22,7 @@ export interface VoiceWebPorts {
   character?(sessionId:string): {id:string;name:string}|undefined;
   runtimeStatus?(): "cold" | "warming" | "ready" | "unavailable";
   share?(call: Call, requestId: string, uploads: string[], instruction: string): Promise<unknown>;
+  validateScreen?(jpeg: Uint8Array): Promise<void>;
 }
 class RequestError extends Error {
   readonly status: number;
@@ -55,6 +57,7 @@ async function read(request: IncomingMessage): Promise<Record<string, unknown>> 
  */
 export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => number; pollMs?: number } = {}) {
   const now = options.now ?? Date.now;
+  const screens = new VoiceScreenFrames(bytes => ports.validateScreen!(bytes), now);
   const lifetime = new AbortController();
   let current: Call | undefined;
   let opening: Promise<Call> | undefined;
@@ -66,6 +69,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
   function publicCall(call: Call) { const profile=callProfile(call);return { callId: call.callId, sessionId: call.sessionId, ...(profile ? { profile } : {}), ...(call.iceServers ? { iceServers: parseVoiceIceServers(call.iceServers) } : {}) }; }
   function close(call: Call): Promise<void> {
     if (current !== call) return Promise.resolve();
+    screens.clear();
     if (closing) return closing;
     closing = (async () => {
       // Never release admission if shutdown failed; a second process must not
@@ -126,11 +130,17 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
     isBusy() { return Boolean(current || opening || closing); },
     openTelegram() { return admit({ requestId: randomUUID(), requestedAt: now() }, "telegram"); },
     activeProfile(): ActiveVoiceProfile | null { return current?callProfile(current)??null:null; },
+    screenFrame(sessionId: string) { return current?.sessionId === sessionId && !closing ? screens.frame(sessionId) : undefined; },
     async handler(request: IncomingMessage, response: ServerResponse) {
       const rejection = ports.reject(request);
       if (rejection || request.headers["sec-fetch-site"] === "cross-site") { send(response, rejection ?? 403, { error: "unauthorized" }); return; }
       if (disposed) { send(response, 503, { error: "voice-unavailable" }); return; }
       const path = request.url;
+      if (path === "/api/hub/voice/screen") {
+        if (!ports.validateScreen) { send(response, 503, { error: "screen-unavailable" }); return; }
+        await handleVoiceScreen(request, response, screens, () => current && !closing ? { callId: current.callId, sessionId: current.sessionId } : undefined);
+        return;
+      }
       if (path === "/api/hub/voice/share") {
         if (request.method !== "POST") { send(response, 405, { error: "method-not-allowed" }); return; }
         if (request.headers["x-hub-voice-share"] !== "1") { send(response, 403, { error: "unauthorized" }); return; }
@@ -239,6 +249,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
     },
     async dispose() {
       disposed = true; clearInterval(timer); lifetime.abort();
+      screens.clear();
       await opening?.catch(() => {});
       if (current) await close(current);
       if (closing) await closing;

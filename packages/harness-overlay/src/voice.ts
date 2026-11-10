@@ -28,11 +28,12 @@ import {prepareVoiceShare} from "./host/voice-media.ts";
 import {createSonioxCredentialsHandler,type SpeechCredentials} from "./host/soniox-credentials.ts";
 
 export const name = "hub-voice";
-export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess", "credentials"];
+export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess", "credentials", "attachments"];
 export interface Config { python: string; provider: string; model: string; reasoningEffort?: string; iceServers?: VoiceIceServer[]; taskModel?: VoiceModelRoute; telegramCallAccount?: string }
 interface Context extends NativeVoiceContext {
   hubCharacters: HubCharacters;
   credentials?: SpeechCredentials;
+  attachments: { validateImage(input: { data: Uint8Array; mediaType: string }): Promise<void> };
   on: NativeVoiceContext["on"] & TaskPolicyContext["on"];
   agents: NativeVoiceContext["agents"] & TaskPolicyContext["agents"];
   llm: VoiceModelCatalog & {
@@ -131,6 +132,7 @@ export function apply(ctx: Context, config: Config): void {
     void preparedRuntime.prepare(selectedSpeech()).catch(() => {});
     web = createVoiceWeb({
       history,
+      validateScreen: jpeg => ctx.attachments.validateImage({ data: jpeg, mediaType: "image/jpeg" }),
       runtimeStatus: () => preparedRuntime?.status() ?? "cold",
       transcript: sessionId => voiceTranscript(ctx.agents.get(sessionId)?.session.snapshotEvents() ?? []),
       character: sessionId => {if(!ctx.hubCharacters.voiceCalls.has(sessionId))return;const c=ctx.hubCharacters.effectiveCharacter(sessionId);return c?{id:c.id,name:c.name}:undefined;},
@@ -229,7 +231,7 @@ export function apply(ctx: Context, config: Config): void {
   })();
   // Keep startup rejection handled even if no browser ever opens voice.
   void startup.catch(() => {});
-  const off = ["open", "close", "offer", "status", "diagnostics", "history", "presentation", "presentation-document", "interrupt", "attention", "share"].map(action => ctx.webServer.register({ kind: "exact", path: `/api/hub/voice/${action}`,
+  const off = ["open", "close", "offer", "status", "diagnostics", "history", "presentation", "presentation-document", "interrupt", "attention", "share", "screen"].map(action => ctx.webServer.register({ kind: "exact", path: `/api/hub/voice/${action}`,
     async handler(request, response) {
       const rejection = ctx.connection.requestRejection(request);
       if (rejection || request.headers["sec-fetch-site"] === "cross-site" || !web || lifetime.signal.aborted || cleanupUncertain) {
