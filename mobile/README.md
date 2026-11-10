@@ -102,7 +102,7 @@ HUB does not silently delete these copies or alter the original selected file.
 
 This is a development slice. Files-provider behavior, permissions, screen locking,
 slow connections and physical audio continuity during file selection still need
-iPhone acceptance. A system-wide Share extension, native camera/photos sheet,
+iPhone acceptance. A native camera/photos sheet,
 general text-conversation destination picker and screen sharing are separate
 remaining work; this picker does not claim to implement them. Existing PWA file
 and camera controls keep their current behavior without a native JS bridge.
@@ -267,3 +267,22 @@ is collected. Conversations, audio, files and device notification tokens can be
 sent to your HUB and the configured speech/model providers when their features
 are used. Audit provider behavior, embedded SDK manifests and the final signed
 archive, then complete accurate collection/tracking declarations before submission.
+
+## System Share files in development
+
+The bundled **Save to HUB** Share extension accepts one selected file/photo at a
+time, up to 10 MB, into an eight-item local inbox. It makes no network requests
+and has no access to the app's private sign-in Keychain. It does not launch HUB
+through private APIs. Open HUB yourself, start native Voice, then choose **Voice
+options → Share a file → Saved from other apps**. Confirm the current HUB and
+conversation, then review the pending file and choose Send. Links/text shares and
+choosing an ordinary text-chat destination remain separate work.
+
+App and extension declare `group.com.mbaykam.hub`; the account owner must register
+that App Group and `com.mbaykam.hub.share`, and provision both targets with the
+matching group. The inbox uses locked, atomic single-file commits with integrity
+checks and device file protection, without credentials or an assumed destination.
+Interrupted transfer into the voice outbox reuses the same receipt; it cannot
+silently target another conversation. No automatic upload or model call occurs.
+Physical Share-sheet/provider/signing and cross-app acceptance are still pending;
+compilation and isolated two-instance fixture tests do not prove those outcomes.

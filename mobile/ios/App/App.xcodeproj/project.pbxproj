@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+A17000000000000000000001 = {isa = PBXBuildFile; fileRef = A17000000000000000000002; };
+A17000000000000000000003 = {isa = PBXBuildFile; productRef = A17000000000000000000004; };
+A17000000000000000000005 = {isa = PBXBuildFile; fileRef = A17000000000000000000006; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+A17000000000000000000007 = {isa = PBXBuildFile; fileRef = A17000000000000000000008; };
 		A16000000000000000000001 = {isa = PBXBuildFile; fileRef = A16000000000000000000002; };
 		A15000000000000000000001 = {isa = PBXBuildFile; fileRef = A15000000000000000000002; };
 		A14000000000000000000001 = {isa = PBXBuildFile; fileRef = A14000000000000000000002; };
@@ -34,6 +38,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+A17000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubShareExtension/ShareViewController.swift; sourceTree = SOURCE_ROOT; };
+A17000000000000000000006 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = HubShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+A17000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = text.xml; path = HubShareExtension/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		A16000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A15000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubAttachmentViewController.swift; sourceTree = "<group>"; };
 		A14000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubNotifications.swift; sourceTree = "<group>"; };
@@ -62,6 +69,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A17000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
 		A13000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3011FED79650016851F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -116,6 +124,8 @@
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
+ A17000000000000000000002,
+ A17000000000000000000008,
 				A16000000000000000000002,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
@@ -126,6 +136,7 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+A17000000000000000000010 = {isa = PBXNativeTarget; buildConfigurationList = A17000000000000000000014; buildPhases = (A17000000000000000000011, A17000000000000000000012, A17000000000000000000013, ); buildRules = (); dependencies = (); name = HubShareExtension; productName = HubShareExtension; productReference = A17000000000000000000006; productType = "com.apple.product-type.app-extension"; packageProductDependencies = (A17000000000000000000004, ); };
 		A13000000000000000000010 /* HubVoiceWidget */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A13000000000000000000014;
@@ -149,6 +160,7 @@
 			);
 			dependencies = (
 				A13000000000000000000018,
+ A17000000000000000000018,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -196,11 +208,13 @@
 			targets = (
 				504EC3031FED79650016851F /* App */,
 				A13000000000000000000010 /* HubVoiceWidget */,
+ A17000000000000000000010,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+A17000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A17000000000000000000007, ); runOnlyForDeploymentPostprocessing = 0; };
 		A13000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3021FED79650016851F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
@@ -219,6 +233,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A17000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
 		A13000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A13000000000000000000009, A1300000000000000000000A, ); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -443,9 +458,12 @@
 			};
 			name = Release;
 		};
+A17000000000000000000015 = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = HubShareExtension/Share.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = HubShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.share; PRODUCT_NAME = HubShareExtension; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); }; name = Debug; };
+A17000000000000000000016 = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = HubShareExtension/Share.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = HubShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.share; PRODUCT_NAME = HubShareExtension; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+A17000000000000000000014 = {isa = XCConfigurationList; buildConfigurations = (A17000000000000000000015, A17000000000000000000016, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		A13000000000000000000014 = {isa = XCConfigurationList; buildConfigurations = (A13000000000000000000015, A13000000000000000000016, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
 			isa = XCConfigurationList;
@@ -487,6 +505,7 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+A17000000000000000000004 = {isa = XCSwiftPackageProductDependency; package = A12000000000000000000005; productName = HubNative; };
 		A12000000000000000000002 /* HubNative */ = {isa = XCSwiftPackageProductDependency; package = A12000000000000000000005; productName = HubNative; };
 		A12000000000000000000004 /* WebRTC */ = {isa = XCSwiftPackageProductDependency; package = A12000000000000000000006; productName = WebRTC; };
 		4D22ABE82AF431CB00220026 /* CapApp-SPM */ = {
@@ -497,13 +516,15 @@
 /* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXContainerItemProxy section */
+A17000000000000000000019 = {isa = PBXContainerItemProxy; containerPortal = 504EC2FC1FED79650016851F; proxyType = 1; remoteGlobalIDString = A17000000000000000000010; remoteInfo = HubShareExtension; };
 		A13000000000000000000019 = {isa = PBXContainerItemProxy; containerPortal = 504EC2FC1FED79650016851F; proxyType = 1; remoteGlobalIDString = A13000000000000000000010; remoteInfo = HubVoiceWidget; };
 /* End PBXContainerItemProxy section */
 /* Begin PBXTargetDependency section */
+A17000000000000000000018 = {isa = PBXTargetDependency; target = A17000000000000000000010; targetProxy = A17000000000000000000019; };
 		A13000000000000000000018 = {isa = PBXTargetDependency; target = A13000000000000000000010; targetProxy = A13000000000000000000019; };
 /* End PBXTargetDependency section */
 /* Begin PBXCopyFilesBuildPhase section */
-		A13000000000000000000017 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (A1300000000000000000000C, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+		A13000000000000000000017 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (A1300000000000000000000C, A17000000000000000000005, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 	};
 	rootObject = 504EC2FC1FED79650016851F /* Project object */;

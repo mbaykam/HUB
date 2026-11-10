@@ -56,13 +56,23 @@ public actor HubAttachmentStore {
             }.filter { $0.origin == server.origin.absoluteString && (sessionID == nil || $0.sessionID == sessionID) && (callID == nil || $0.callID == callID) }
     }
     public func stage(source: URL, server: HubServer, sessionID: String, callID: String) throws -> HubAttachmentDraft {
+        try stage(data: readRegular(source, maximum: Self.maximumBytes), name: source.lastPathComponent, server: server, sessionID: sessionID, callID: callID)
+    }
+    public func stage(data: Data, name: String, server: HubServer, sessionID: String, callID: String, id: UUID = UUID(), requestID: UUID = UUID()) throws -> HubAttachmentDraft {
         guard HubVoiceAPI.validID(sessionID), HubVoiceAPI.validID(callID) else { throw HubAttachmentError.wrongConversation }
+        guard !data.isEmpty, data.count <= Self.maximumBytes else { throw HubAttachmentError.tooLarge }
+        if FileManager.default.fileExists(atPath: file(id, ".json").path) {
+            let old = try JSONDecoder().decode(HubAttachmentDraft.self, from: readRegular(file(id, ".json"), maximum: 4096))
+            guard old.origin == server.origin.absoluteString, old.sessionID == sessionID, old.callID == callID,
+                  old.requestID == requestID, old.name == name, old.sha256 == Self.digest(data) else { throw HubAttachmentError.wrongConversation }
+            _ = try bytes(old, server: server, sessionID: sessionID, callID: callID)
+            return old
+        }
+        guard !FileManager.default.fileExists(atPath: file(id, ".bin").path) else { throw HubAttachmentError.invalidFile }
         let existing = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         guard existing.filter({ $0.pathExtension == "bin" }).count < 8 else { throw HubAttachmentError.full }
-        let name = source.lastPathComponent
-        guard !name.isEmpty, name.utf8.count <= 240, !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw HubAttachmentError.invalidFile }
-        let data = try readRegular(source, maximum: Self.maximumBytes)
-        let draft = HubAttachmentDraft(id: UUID(), requestID: UUID(), origin: server.origin.absoluteString, sessionID: sessionID, callID: callID, name: name, bytes: data.count, sha256: Self.digest(data))
+        guard !name.isEmpty, name.utf8.count <= 240, !name.contains("/"), !name.contains("\\"), !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw HubAttachmentError.invalidFile }
+        let draft = HubAttachmentDraft(id: id, requestID: requestID, origin: server.origin.absoluteString, sessionID: sessionID, callID: callID, name: name, bytes: data.count, sha256: Self.digest(data))
         var options: Data.WritingOptions = .atomic
         #if os(iOS)
         options.insert(.completeFileProtectionUntilFirstUserAuthentication)

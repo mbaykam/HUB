@@ -16,10 +16,13 @@ struct HubVoiceAttachmentContext {
     private let store: HubAttachmentStore
     private var items: [HubAttachmentDraft] = []
     private var incomplete: [UUID] = []
+    private let inbox: HubShareInbox?
+    private var shared: [HubSharedFile] = []
     private var busy = false
     private var message = "Choose a file, then confirm Send. Your voice conversation stays active."
     init(context: HubVoiceAttachmentContext) throws {
         self.context = context
+        inbox = try? HubShareInbox.appGroupInbox()
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         store = try HubAttachmentStore(root: base.appendingPathComponent("HubAttachmentOutbox", isDirectory: true))
         super.init(style: .insetGrouped)
@@ -36,14 +39,15 @@ struct HubVoiceAttachmentContext {
             do {
                 items = try await store.drafts(server: context.server)
                 incomplete = try await store.incompleteCopies()
+                if let inbox { shared = try await inbox.list() }
             }
             catch { message = "Saved files could not be read. They have been preserved." }
             tableView.reloadData()
         }
     }
-    override func numberOfSections(in tableView: UITableView) -> Int { incomplete.isEmpty ? 3 : 4 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 3 ? incomplete.count : section == 2 ? items.count : 1 }
-    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 3 ? "Interrupted preparation" : section == 2 ? "Pending files" : nil }
+    override func numberOfSections(in tableView: UITableView) -> Int { shared.isEmpty ? (incomplete.isEmpty ? 3 : 4) : 5 }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 4 ? shared.count : section == 3 ? incomplete.count : section == 2 ? items.count : 1 }
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 4 ? "Saved from other apps" : section == 3 && !incomplete.isEmpty ? "Interrupted preparation" : section == 2 ? "Pending files" : nil }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         section == 1 ? "Up to 8 pending files, 25 MB each. Sending retains the original on HUB and shares it with this voice conversation. Reading a file depends on its format and the selected model." : nil
     }
@@ -56,6 +60,10 @@ struct HubVoiceAttachmentContext {
         } else if indexPath.section == 1 {
             cell.textLabel?.text = "Choose from Files"; cell.imageView?.image = UIImage(systemName: "folder")
             cell.textLabel?.textColor = busy ? .secondaryLabel : .systemBlue; cell.accessibilityTraits = .button
+        } else if indexPath.section == 4 {
+            cell.textLabel?.text = shared[indexPath.row].name
+            cell.detailTextLabel?.text = "Saved on this iPhone · Tap to choose this conversation"
+            cell.accessoryType = .disclosureIndicator
         } else if indexPath.section == 3 {
             cell.textLabel?.text = "Incomplete local copy"
             cell.detailTextLabel?.text = "Preparation was interrupted. Tap to review removal. The original selected file was not changed."
@@ -78,6 +86,33 @@ struct HubVoiceAttachmentContext {
             present(picker, animated: true)
         } else if indexPath.section == 2 { review(items[indexPath.row]) }
         else if indexPath.section == 3 { reviewIncomplete(incomplete[indexPath.row]) }
+        else if indexPath.section == 4 { reviewShared(shared[indexPath.row]) }
+    }
+    private func reviewShared(_ item: HubSharedFile) {
+        guard let inbox else { return }
+        let sheet = UIAlertController(title: item.name, message: "Add this saved copy to the current voice conversation on \(context.server.origin.host ?? "HUB")? You will review Send separately. Nothing is uploaded by adding it.", preferredStyle: .alert)
+        sheet.addAction(UIAlertAction(title: "Add to current conversation", style: .default) { [weak self] _ in
+            guard let self, !self.busy else { return }; self.busy = true
+            Task {
+                defer { self.busy = false; self.reloadDrafts() }
+                do {
+                    guard self.context.stillOwned() else { throw HubAttachmentError.callEnded }
+                    let bytes = try await inbox.bytes(item)
+                    _ = try await self.store.stage(data: bytes, name: item.name, server: self.context.server, sessionID: self.context.sessionID, callID: self.context.callID, id: item.id, requestID: item.id)
+                    try await inbox.remove(item)
+                    self.message = "Added to pending files. Tap it to review and send."
+                } catch { self.message = "Transfer could not be confirmed. Your copies are kept; retry in the original conversation." }
+            }
+        })
+        sheet.addAction(UIAlertAction(title: "Remove saved local copy", style: .destructive) { [weak self] _ in
+            guard let self, !self.busy else { return }; self.busy = true
+            Task {
+                defer { self.busy = false; self.reloadDrafts() }
+                do { try await inbox.remove(item); self.message = "Saved copy removed. The source in the other app was not changed." }
+                catch { self.message = "Could not remove the saved copy. Try again." }
+            }
+        })
+        sheet.addAction(UIAlertAction(title: "Keep for later", style: .cancel)); present(sheet, animated: true)
     }
     private func reviewIncomplete(_ id: UUID) {
         let sheet = UIAlertController(title: "Incomplete local copy", message: "This copy has no saved conversation receipt, so it cannot be sent safely. Remove only this unfinished copy to free a pending-file slot? Your original selected file stays unchanged.", preferredStyle: .alert)
