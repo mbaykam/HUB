@@ -130,6 +130,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
     isBusy() { return Boolean(current || opening || closing); },
     openTelegram() { return admit({ requestId: randomUUID(), requestedAt: now() }, "telegram"); },
     activeProfile(): ActiveVoiceProfile | null { return current?callProfile(current)??null:null; },
+    screenIdentity(sessionId: string) { return current?.sessionId === sessionId && !closing ? { callId: current.callId, sessionId } : undefined; },
     screenFrame(sessionId: string) { return current?.sessionId === sessionId && !closing ? screens.frame(sessionId) : undefined; },
     async handler(request: IncomingMessage, response: ServerResponse) {
       const rejection = ports.reject(request);

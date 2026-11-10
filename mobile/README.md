@@ -395,10 +395,21 @@ delivery, and Stop, closing, locking or losing the voice call cancels it. A lost
 start response retries the same receipt; late completions cannot restart it.
 An idle host consent expires after15seconds so process loss cannot block the
 next explicit share indefinitely. Retained image bytes expire after5seconds.
-The authorized assistant read tool is not connected yet: delivery makes recent
-content available to the host, without automatic model analysis. This is still
-development code requiring actual capture-device acceptance. See [acceptance
-gates](ACCEPTANCE.md).
+The scoped `hub_view_screen` tool reads a single fresh frame when the user asks.
+It requires the current call, the caller's existing tool permissions and an
+image-capable current request model. A direct delegated worker is bound to the
+original call and user request; unrelated, nested or older-call workers cannot
+read the new stream. Each request/worker has at most three reads, spaced at least
+three seconds apart. Text-only characters should delegate the question to an
+already configured vision-capable character, without changing provider settings.
+The user-selected live stream stays in RAM, but a frame deliberately requested
+for analysis is retained as a normal conversation attachment and sent through the
+configured vision model. The native confirmation explains this. These selected
+frames do not use Knowledge's automatic original-upload archiving path. No image
+is saved just because another frame arrived. Tool guidance is attached to the
+active voice agent and eligible worker; user personality files are preserved.
+This remains development code requiring actual capture-device acceptance. See
+[acceptance gates](ACCEPTANCE.md).
 
 On an iOS27 development build compiled with the newer SDK, native **Voice options
 → Share screen** opens capture and review. Choose content in Apple's system

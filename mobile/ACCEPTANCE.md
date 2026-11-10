@@ -19,8 +19,8 @@ until the relevant workflows below are accepted.
 | Screen content | iOS27 system picker, separate reviewed snapshot and explicit Live consent, bounded recent-frame transport | Actual selected content, live delivery while viewing another app, return/review timing, permission/stop/lock behavior, recovery and audio continuity |
 
 The current screen-content implementation has reviewed snapshots and a native
-Live delivery path in development. The assistant read tool is not connected yet;
-it does not provide completed continuous remote viewing or automatic vision.
+Live delivery path and scoped single-frame assistant read tool in development.
+It does not provide accepted continuous remote viewing or automatic vision.
 Do not treat those as equivalent, or infer capture availability from a simulator
 SDK that omits ScreenCaptureKit. The account owner's actual iOS version must be
 checked before deciding whether an older-OS capture path is required.
@@ -32,8 +32,11 @@ one upload/decoder at a time and a one-second admission interval. Stop, call
 close and disposal discard it; stale uploads cannot restore stopped sharing.
 The existing local image decoder validates bytes without saving an attachment.
 Status exposes metadata only. There are no per-frame model or Knowledge writes.
-Native live consent/frame delivery are now wired in development. Permission-scoped
-assistant tool access and end-to-end acceptance remain. The host drops an idle
+Native live consent/frame delivery and permission-scoped assistant tool access
+are wired in development. Asked-for analysis snapshots are retained as ordinary
+chat attachments and sent to the configured vision provider; the native Live
+confirmation discloses that distinction. Streaming itself has no durable writes.
+Physical end-to-end acceptance remains. The host drops an idle
 consent after15seconds; an app process loss cannot hold sharing indefinitely.
 
 ## Evidence to retain

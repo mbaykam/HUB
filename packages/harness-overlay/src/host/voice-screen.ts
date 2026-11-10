@@ -92,7 +92,7 @@ export class VoiceScreenFrames {
     const lease = this.lease;
     if (lease?.frame && lease.frame.expiresAt <= this.now()) this.forgetFrame();
     if (!lease?.frame || lease.sessionId !== sessionId) return;
-    return { bytes: Buffer.from(lease.frame.bytes), sequence: lease.sequence, remainingMs: lease.frame.expiresAt - this.now() };
+    return { bytes: Buffer.from(lease.frame.bytes), shareId: lease.shareId, sequence: lease.sequence, remainingMs: lease.frame.expiresAt - this.now() };
   }
   status(owner: ScreenOwner) { this.expireIdle(); const owned = this.owns(owner); return { sharing: owned && Boolean(this.lease), hasFrame: owned && Boolean(this.frame(owner.sessionId)), maxAgeMs: SCREEN_MAX_AGE_MS }; }
 }

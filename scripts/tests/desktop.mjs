@@ -194,6 +194,7 @@ const taskFiles = Object.freeze({
     "soniox-credentials.test.mjs",
     "voice-web.test.mjs",
     "voice-screen.test.mjs",
+    "voice-screen-tool.test.mjs",
     "voice-session.test.mjs",
     "voice-history-tool.test.mjs",
     "voice-browser-client.test.mjs",

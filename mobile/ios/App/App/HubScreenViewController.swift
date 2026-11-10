@@ -90,7 +90,7 @@ import HubNative
     private func chooseScreen() {
         guard !busy else { return }; stopSharing(); frame = nil; preview.image = nil; send.isEnabled = false
         guard mode.selectedSegmentIndex == 1 else { capture.presentSystemPicker(); return }
-        let alert = UIAlertController(title: "Share your screen live?", message: "After Apple's picker, recent screen frames will be sent to this HUB voice call, including while you view another app. Only the latest frame stays briefly in HUB memory. No automatic analysis runs. Stop or locking this iPhone ends capture.", preferredStyle: .alert)
+        let alert = UIAlertController(title: "Share your screen live?", message: "After Apple's picker, recent frames go to this HUB voice call, including while you view another app. The live stream keeps only a recent frame briefly in memory. When you ask the assistant to inspect it, that selected image is retained in the conversation and sent to the configured vision provider. There is no automatic analysis. Stop or locking this iPhone ends capture.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Share live", style: .default) { [weak self] _ in guard let self, self.context.stillOwned() else { return }; self.liveRequested = true; self.capture.presentSystemPicker() })
         present(alert, animated: true)

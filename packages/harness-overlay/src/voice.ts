@@ -26,6 +26,7 @@ import { createPreparedVoiceRuntime } from "./host/voice-runtime.ts";
 import {installVoiceTitles} from "./host/voice-titles.ts";
 import {prepareVoiceShare} from "./host/voice-media.ts";
 import {createSonioxCredentialsHandler,type SpeechCredentials} from "./host/soniox-credentials.ts";
+import { installVoiceScreenTools } from "./host/voice-screen-tool.ts";
 
 export const name = "hub-voice";
 export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess", "credentials", "attachments"];
@@ -33,7 +34,7 @@ export interface Config { python: string; provider: string; model: string; reaso
 interface Context extends NativeVoiceContext {
   hubCharacters: HubCharacters;
   credentials?: SpeechCredentials;
-  attachments: { validateImage(input: { data: Uint8Array; mediaType: string }): Promise<void> };
+  attachments: { validateImage(input: { data: Uint8Array; mediaType: string }): Promise<void>; saveImage(input: { data: Uint8Array; mediaType: string; name: string }): Promise<unknown> };
   on: NativeVoiceContext["on"] & TaskPolicyContext["on"];
   agents: NativeVoiceContext["agents"] & TaskPolicyContext["agents"];
   llm: VoiceModelCatalog & {
@@ -59,6 +60,7 @@ export function apply(ctx: Context, config: Config): void {
   const lifetime = new AbortController();
   let history: Awaited<ReturnType<typeof openConversationHistory>> | undefined;
   let offTitles:(()=>void)|undefined;
+  let screenTools: ReturnType<typeof installVoiceScreenTools> | undefined;
   let web: ReturnType<typeof createVoiceWeb> | undefined;
   let bridge: Awaited<ReturnType<typeof createVoiceBridgeServer<VoiceProfile>>> | undefined;
   let profiles: Awaited<ReturnType<typeof openVoiceProfiles>> | undefined;
@@ -93,6 +95,7 @@ export function apply(ctx: Context, config: Config): void {
     history = await openConversationHistory(ctx.storageDomain);
     if (lifetime.signal.aborted) return;
     offTitles=installVoiceTitles(ctx,history);
+    screenTools=installVoiceScreenTools(ctx,{current:sessionId=>web?.screenIdentity(sessionId),frame:sessionId=>web?.screenFrame(sessionId)});
     const localProfiles = await openVoiceProfiles(ctx.storageDomain, {
       name: "HUB", instructions: "Be warm, concise and practical. Ask one question at a time.",
       route: { provider: config.provider, model: config.model, ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}) },
@@ -106,13 +109,15 @@ export function apply(ctx: Context, config: Config): void {
       sessionId, profile, taskPolicies, created: agent => history!.markVoiceOrigin(agent.session), presentations, history,
       tasks: async agent => {
         const lease = await ctx.hubCharacters.beginVoice(agent, profile);
+        let offScreen: (() => void) | undefined;
         try {
+          offScreen = screenTools?.attachVoice(agent);
           if (!lease.toolName) throw new Error("Choose a configured delegation target for the voice character");
           const off = await attachNativeVoiceTasks(agent, undefined, lease);
           if (!off) throw new Error("Character background delegation is unavailable");
-          const release=Object.assign(async () => {await off();},{allowNested:off.allowNested,currentProfile:lease.currentProfile,releaseIdentity:lease.release});
+          const release=Object.assign(async () => {offScreen?.();await off();},{allowNested:off.allowNested,currentProfile:lease.currentProfile,releaseIdentity:lease.release});
           return release;
-        } catch (error) { lease.release(); throw error; }
+        } catch (error) { offScreen?.();lease.release(); throw error; }
       },
     }); }, { async incoming() {
       if (!web || !telegramListener || lifetime.signal.aborted) throw new Error("Telegram call admission is unavailable");
@@ -207,6 +212,7 @@ export function apply(ctx: Context, config: Config): void {
         const tools = ctx.tools.schemas(key).map(tool => ({ name: tool.name, description: tool.description.slice(0, 300) }));
         for (const tool of [
           { name: "hub_present", description: "Show diagrams, charts or interactive apps during voice; see canvas.md." },
+          { name: "hub_view_screen", description: "Read one fresh user-shared phone frame on request; vision model and existing tool permission required. The selected analysis frame is retained in the chat." },
           { name: "hub_save_conversation", description: "Save this voice conversation to Recents when requested." },
           ...(tools.some(tool => tool.name === "subagent") ? [{ name: "hub_task", description: "Delegate work in the background. Also requires the native subagent tool." }] : []),
         ]) if (!tools.some(item => item.name === tool.name)) tools.push(tool);
@@ -293,7 +299,7 @@ export function apply(ctx: Context, config: Config): void {
     } catch { response.writeHead(503); response.end(); }
   } }));
   ctx.effect(() => async () => {
-    off.forEach(remove => remove()); offTitles?.(); lifetime.abort();
+    off.forEach(remove => remove()); offTitles?.(); screenTools?.dispose(); lifetime.abort();
     await startup.catch(() => {});
     try { await web?.dispose(); }
     finally { try { await preparedRuntime?.close(); } finally { try { await telegramListener?.stop(); } finally { try { await bridge?.dispose(); } finally { await downloads.close(); await speechFlight?.catch(() => {}); try { await taskPolicies.close(); } finally { await profiles?.close(); await history?.close(); } } } } }
