@@ -1,0 +1,56 @@
+name: iOS simulator first launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful main-branch manual iOS simulator preparation run
+        required: true
+        type: string
+      source_sha:
+        description: Exact full source commit of that simulator artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  launch:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Validate the original trusted build and artifact identity
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node mobile/scripts/simulator-source.mjs
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          name: ${{ steps.source.outputs.artifact_name }}
+          path: mobile/build/simulator-download
+      - name: Boot a fresh iPhone simulator and verify native first launch
+        run: node mobile/scripts/launch-simulator.mjs
+      - name: Save first-launch evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HUB-native-first-launch-${{ inputs.source_sha }}
+          path: |
+            mobile/build/simulator-launch/*.json
+            mobile/build/simulator-launch/*.png
+          if-no-files-found: warn
+          retention-days: 7
