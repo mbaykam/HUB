@@ -307,3 +307,12 @@ checks do not sign, install, submit or silently upgrade a release toolchain.
 GitHub lists this standard runner as free for public repositories; the workflow
 does not select a larger paid runner. Its preview availability and results need
 to be checked before relying on the newer SDK.
+
+The iOS27 development source also contains a native ScreenCaptureKit adapter:
+Apple's system picker, video-only low-rate capture, stop/lock handling and bounded
+local JPEG frames tied to the owned voice call. No microphone/app audio is added,
+no frames are uploaded, and no model is called by capture. The UI for review,
+freeze-on-return and explicit sending is still being connected; screen sharing
+is not exposed as a finished feature. Older SDKs exclude this adapter. The app
+also declares elapsed-event timing reason35F9.1 for rejecting queued old samples;
+raw system clock/boot information is never sent to HUB.
