@@ -2,6 +2,12 @@ name: iOS simulator preparation
 
 on:
   workflow_dispatch:
+    inputs:
+      toolchain:
+        description: Native SDK check (preview is for iOS27 capture development)
+        type: choice
+        default: stable
+        options: [stable, xcode-27]
   push:
     branches: [main]
     paths: ["mobile/**", "assets/brand/hub-icon.svg", ".github/workflows/ios-simulator.yml"]
@@ -43,7 +49,7 @@ jobs:
     name: Build unsigned iOS foundation
     if: github.event_name == 'workflow_dispatch'
     needs: foundation
-    runs-on: macos-latest
+    runs-on: ${{ inputs.toolchain == 'xcode-27' && 'xcode-27' || 'macos-latest' }}
     timeout-minutes: 25
     defaults:
       run:

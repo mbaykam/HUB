@@ -300,3 +300,10 @@ build uses Xcode26.6, so the iOS27 capture adapter needs a newer SDK and actual
 device verification. A system picker/capture UI and explicit frame-send workflow
 are still required; no inactive screen-sharing button is exposed as a feature.
 See [Apple's iOS capture sample](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-on-ios).
+
+The manual simulator workflow also offers the standard **xcode-27** public
+preview runner for adapter development; **stable** remains the default. Preview
+checks do not sign, install, submit or silently upgrade a release toolchain.
+GitHub lists this standard runner as free for public repositories; the workflow
+does not select a larger paid runner. Its preview availability and results need
+to be checked before relying on the newer SDK.
