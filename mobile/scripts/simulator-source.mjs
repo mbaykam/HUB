@@ -1,6 +1,15 @@
 import {appendFile,mkdir,writeFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 
+export function selectSimulatorSeed(available){
+  for(const [runtime,devices]of Object.entries(available).sort(([a],[b])=>b.localeCompare(a,undefined,{numeric:true}))){
+    if(!runtime.includes('.iOS-'))continue;
+    const phone=devices.find(d=>d.isAvailable&&d.state==='Shutdown'&&d.name.startsWith('iPhone')&&/^[A-F0-9-]{36}$/i.test(d.udid??''));
+    if(phone)return{runtime,seed:phone.udid};
+  }
+  throw Error('No available shutdown iPhone seed; do not alter or erase a running device.');
+}
+
 export function validateSimulatorSource(run,artifacts,{runId,sha,repository}){
   if(!/^\d{1,15}$/.test(runId??'')||!/^[a-f0-9]{40}$/.test(sha??'')||repository!=='mbaykam/HUB')throw Error('Invalid simulator source identity.');
   if(String(run.id)!==runId||run.status!=='completed'||run.conclusion!=='success'||run.event!=='workflow_dispatch'||run.head_branch!=='main'||run.head_sha!==sha||run.path!=='.github/workflows/ios-simulator.yml'||run.repository?.full_name!==repository||run.head_repository?.full_name!==repository)throw Error('Use a successful trusted main-branch manual iOS build, not a PR/fork or another workflow.');

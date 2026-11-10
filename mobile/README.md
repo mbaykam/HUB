@@ -218,9 +218,12 @@ on a physical iPhone. Download it within its seven-day artifact retention window
 The separate manual **iOS simulator first launch** check can reuse that existing
 artifact without rebuilding. Supply its successful manual build run ID and exact
 40-character commit. It accepts only this repository's trusted `main` iOS build,
-checks artifact identity/expiry, boots a fresh isolated iPhone simulator, installs
+checks artifact identity/expiry, clones a shutdown runner-provided iPhone seed
+into an isolated simulator, boots it, installs
 and launches HUB, checks that the process remains alive, and saves the initial
-screen and a provenance JSON. It removes only its newly created CI simulator.
+screen and a provenance JSON. The provenance identifies the cloned baseline;
+this is not a claim of a factory-fresh OS. The original runner seed stays intact.
+It removes only its newly created CI simulator.
 No sign-in, microphone, server or Apple account is configured. Inspect the saved
 screen: successful launch is distinct from signed-device or voice acceptance.
 
