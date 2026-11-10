@@ -79,11 +79,9 @@ jobs:
         id: screen-sdk
         if: inputs.toolchain == 'xcode-27'
         run: bash scripts/probe-screen-sdk.sh
-      - name: Compile actual iPhone capture source without signing
+      - name: Archive actual iPhone Release source without signing
         if: steps.screen-sdk.outputs.iphoneos_available == 'true'
-        run: |
-          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath build/DeviceDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-          ditto -c -k --sequesterRsrc --keepParent build/DeviceDerivedData/Build/Products/Debug-iphoneos/App.app build/HUB-ios-device-unsigned.zip
+        run: python3 scripts/archive_unsigned.py
       - name: Compile for iOS Simulator without Apple credentials
         run: pnpm ios:build:simulator
       - name: Save simulator build
@@ -99,7 +97,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: HUB-ios-device-unsigned-${{ github.sha }}
-          path: mobile/build/HUB-ios-device-unsigned.zip
+          path: |
+            mobile/build/HUB-ios-device-unsigned.zip
+            mobile/build/unsigned-device-proof.json
           if-no-files-found: error
           retention-days: 7
           compression-level: 0

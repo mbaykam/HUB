@@ -455,6 +455,10 @@ app builds. The workflow now probes both device and simulator SDKs with a direct
 import. The workflow described above is development source and is not available
 in that simulator artifact; do not infer capture support from a green base-app
 build. The preview workflow additionally compiles the capture-capable iPhone SDK branch
-without signing. Its separate `HUB-ios-device-unsigned-<commit>` artifact is compile
-evidence, not an installable iPhone app. Device capture still needs signing and
+without signing. That path now creates an optimized **Release archive**, checks
+its app/extension identities and rejects embedded profiles/private signing files
+before packaging the app. The artifact includes `unsigned-device-proof.json`;
+it does not export or upload an IPA. Its separate
+`HUB-ios-device-unsigned-<commit>` artifact is compiler/archive evidence,
+not an installable iPhone app. Device capture still needs signing and
 physical acceptance.

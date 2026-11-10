@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from signing_policy import SigningError, invocation, protected_environment, profiles, export_options
 import signing_runner
+from archive_unsigned import inspect_archive
 
 NOW = dt.datetime(2026, 11, 10, tzinfo=dt.timezone.utc)
 TEAM, BUNDLE = "FIXTURE123", "com.example.fixture"
@@ -41,6 +42,25 @@ def metadata():
 
 
 class SigningPolicyTests(unittest.TestCase):
+    def test_unsigned_archive_evidence_accepts_only_matching_iphone_release_contents(self):
+        with tempfile.TemporaryDirectory(prefix="hub-eval-unsigned-archive-") as folder:
+            archive = Path(folder); app = archive / "Products/Applications/App.app"
+            app.mkdir(parents=True)
+            (archive / "Info.plist").write_bytes(plistlib.dumps({"ApplicationProperties": {}}))
+            info = {"CFBundleIdentifier": BUNDLE, "CFBundleVersion": "1", "CFBundleSupportedPlatforms": ["iPhoneOS"], "DTSDKName": "iphoneos27.1", "MinimumOSVersion": "15.0"}
+            (app / "Info.plist").write_bytes(plistlib.dumps(info))
+            for name, suffix in (("HubVoiceWidget", ".voice-widget"), ("HubShareExtension", ".share")):
+                extension = app / "PlugIns" / (name + ".appex"); extension.mkdir(parents=True)
+                (extension / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": BUNDLE + suffix, "CFBundleVersion": "1"}))
+            proof = inspect_archive(archive, BUNDLE, "a" * 40)
+            self.assertEqual(proof["configuration"], "Release"); self.assertFalse(proof["signedIPhoneDelivery"])
+            for name in ("embedded.mobileprovision", "private.p8", "identity.p12"):
+                candidate = app / name; candidate.write_bytes(b"synthetic forbidden metadata")
+                with self.assertRaises(ValueError): inspect_archive(archive, BUNDLE)
+                candidate.unlink()
+            (archive / "Info.plist").write_bytes(plistlib.dumps({"ApplicationProperties": {"SigningIdentity": "synthetic identity"}}))
+            with self.assertRaises(ValueError): inspect_archive(archive, BUNDLE)
+
     def test_default_and_untrusted_invocations_fail_closed(self):
         env = {"GITHUB_REPOSITORY": "mbaykam/HUB", "GITHUB_REF": "refs/heads/main",
                "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": "a" * 40,
