@@ -1,0 +1,77 @@
+name: iOS manual signing handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Archive checks only, or one explicit upload to your existing App Store Connect app
+        type: choice
+        default: archive
+        options: [archive, testflight]
+      confirmation:
+        description: Type ARCHIVE_ONLY or UPLOAD_TO_TESTFLIGHT to match the selected action
+        required: true
+        type: string
+      build_number:
+        description: New positive numeric CFBundleVersion for all three targets
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  deployments: read
+
+concurrency:
+  group: ios-signing
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.HUB_IOS_SIGNING_ENABLED == 'true'
+    environment: ios-signing
+    runs-on: xcode-27
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - name: Prepare and check without signing credentials
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm ios:prepare
+          pnpm check
+      - name: Validate protected signing context, archive and optionally upload once
+        run: python3 scripts/signing_runner.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNING_ENABLED: ${{ vars.HUB_IOS_SIGNING_ENABLED }}
+          SIGNING_MODE: ${{ inputs.mode }}
+          SIGNING_CONFIRMATION: ${{ inputs.confirmation }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_PROFILE_APP_BASE64: ${{ secrets.IOS_PROFILE_APP_BASE64 }}
+          IOS_PROFILE_WIDGET_BASE64: ${{ secrets.IOS_PROFILE_WIDGET_BASE64 }}
+          IOS_PROFILE_SHARE_BASE64: ${{ secrets.IOS_PROFILE_SHARE_BASE64 }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_ASC_APP_ID: ${{ secrets.IOS_ASC_APP_ID }}
+          IOS_ASC_PRIVATE_KEY_P8_BASE64: ${{ secrets.IOS_ASC_PRIVATE_KEY_P8_BASE64 }}
+          IOS_ASC_PROVIDER_PUBLIC_ID: ${{ secrets.IOS_ASC_PROVIDER_PUBLIC_ID }}
+      # Deliberately no artifact upload: archives/IPAs/profiles/logs are private
+      # and are removed along with the temporary keychain by signing_runner.py.

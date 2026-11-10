@@ -310,8 +310,9 @@ The account owner completes these steps in Apple Developer / App Store Connect:
    that identifier. Use a Mac/Xcode or a chosen hosted signing workflow.
 4. If automated upload is wanted, authorize a suitably scoped App Store Connect
    API key and a protected signing workflow. Store private keys/certificates in
-   approved encrypted secret storage, never Git or a chat. There is no upload
-   workflow or Apple credential installed by this preparation.
+   approved encrypted secret storage, never Git or a chat. A disabled, manual-only
+   signing/archive/upload handoff is prepared in [SIGNING.md](SIGNING.md). It has
+   not signed or uploaded with real credentials; no Apple credential is installed.
 5. Finish the native integration below, review its permissions/privacy reporting,
    then build a signed archive, upload it and install it through TestFlight.
 

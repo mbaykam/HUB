@@ -407,7 +407,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				);
 				MARKETING_VERSION = 0.1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
-				PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub; PROVISIONING_PROFILE_SPECIFIER = "$(HUB_APP_PROFILE)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
@@ -430,7 +430,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub; PROVISIONING_PROFILE_SPECIFIER = "$(HUB_APP_PROFILE)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
@@ -444,7 +444,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HubVoiceWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.voice-widget;
+				MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.voice-widget; PROVISIONING_PROFILE_SPECIFIER = "$(HUB_WIDGET_PROFILE)";
 				PRODUCT_NAME = HubVoiceWidget; SDKROOT = iphoneos; SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
@@ -457,15 +457,15 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HubVoiceWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.voice-widget;
+				MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.voice-widget; PROVISIONING_PROFILE_SPECIFIER = "$(HUB_WIDGET_PROFILE)";
 				PRODUCT_NAME = HubVoiceWidget; SDKROOT = iphoneos; SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
 			};
 			name = Release;
 		};
-A17000000000000000000015 = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = HubShareExtension/Share.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = HubShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.share; PRODUCT_NAME = HubShareExtension; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); }; name = Debug; };
-A17000000000000000000016 = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = HubShareExtension/Share.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = HubShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.share; PRODUCT_NAME = HubShareExtension; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); }; name = Release; };
+A17000000000000000000015 = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = HubShareExtension/Share.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = HubShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.share; PROVISIONING_PROFILE_SPECIFIER = "$(HUB_SHARE_PROFILE)"; PRODUCT_NAME = HubShareExtension; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); }; name = Debug; };
+A17000000000000000000016 = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = HubShareExtension/Share.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = HubShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.share; PROVISIONING_PROFILE_SPECIFIER = "$(HUB_SHARE_PROFILE)"; PRODUCT_NAME = HubShareExtension; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
