@@ -10,9 +10,8 @@ import HubNative
     private var server: HubServer?
     private var generation = 0
     private var work: Task<Void, Never>?
-    private weak var visibleSheet: UIAlertController?
-    private let explanation = "\n\nHUB sends generic task alerts. Opening an alert shows its conversation after sign-in. Delivery requires a signed iPhone build and Apple push configured on your HUB."
-    private(set) var status = "Notifications are off." { didSet { visibleSheet?.message = status + explanation } }
+    var changed: (() -> Void)?
+    private(set) var status = "Notifications are off." { didSet { changed?() } }
     var destinationHandler: ((HubNotificationDestination) -> Void)? {
         didSet { if let pending, let destinationHandler { self.pending = nil; destinationHandler(pending) } }
     }
@@ -28,15 +27,8 @@ import HubNative
         } else { status = "Notifications are off." }
     }
     func show(from view: UIViewController) {
-        let sheet = UIAlertController(title: "Notifications", message: status + explanation, preferredStyle: .alert)
-        visibleSheet = sheet
-        sheet.addAction(UIAlertAction(title: "Enable / retry", style: .default) { _ in self.enable(requestPermission: true) })
-        sheet.addAction(UIAlertAction(title: "Turn off", style: .destructive) { _ in self.disable() })
-        sheet.addAction(UIAlertAction(title: "iPhone notification settings", style: .default) { _ in
-            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-        })
-        sheet.addAction(UIAlertAction(title: "Done", style: .cancel))
-        view.present(sheet, animated: true)
+        let screen = HubNotificationSettingsViewController(manager: self) { self.enable(requestPermission: true) }
+        view.present(UINavigationController(rootViewController: screen), animated: true)
     }
     private func enable(requestPermission: Bool) {
         guard let api, let state else { status = "Connect and sign in to HUB first."; return }
@@ -125,5 +117,55 @@ import HubNative
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .list, .sound])
+    }
+}
+
+/// Keep progress and recovery visible while permission/network requests run.
+/// An alert action would dismiss precisely when the user needs this feedback.
+@MainActor private final class HubNotificationSettingsViewController: UITableViewController {
+    private let manager: HubNotifications
+    private let enable: () -> Void
+    init(manager: HubNotifications, enable: @escaping () -> Void) {
+        self.manager = manager; self.enable = enable
+        super.init(style: .insetGrouped)
+    }
+    required init?(coder: NSCoder) { fatalError("Use init(manager:enable:)") }
+    override func viewDidLoad() {
+        super.viewDidLoad(); title = "Notifications"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
+        manager.changed = { [weak self] in self?.tableView.reloadData() }
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 56
+    }
+    override func numberOfSections(in tableView: UITableView) -> Int { 2 }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 0 ? 1 : 3 }
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 0 ? "Status" : nil }
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        section == 1 ? "HUB sends generic task alerts. Open an alert to see its conversation after sign-in. Delivery needs a signed iPhone build and Apple push configured on your HUB." : nil
+    }
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        cell.textLabel?.font = .preferredFont(forTextStyle: .body)
+        cell.textLabel?.adjustsFontForContentSizeCategory = true
+        cell.textLabel?.numberOfLines = 0
+        if indexPath.section == 0 {
+            cell.textLabel?.text = manager.status; cell.selectionStyle = .none
+            cell.accessibilityTraits = [.staticText, .updatesFrequently]
+        } else {
+            cell.textLabel?.text = ["Enable / retry", "Turn off", "iPhone notification settings"][indexPath.row]
+            cell.textLabel?.textColor = indexPath.row == 1 ? .systemRed : .systemBlue
+            cell.accessibilityTraits = .button
+            if indexPath.row == 2 { cell.accessoryType = .disclosureIndicator }
+        }
+        return cell
+    }
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard indexPath.section == 1 else { return }
+        switch indexPath.row {
+        case 0: enable()
+        case 1: manager.disable()
+        default: if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        }
     }
 }
