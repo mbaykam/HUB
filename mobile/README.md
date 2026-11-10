@@ -255,3 +255,15 @@ the separate unprivileged HTTPS web view and the normal server access gate.
 Use the [Capacitor iOS](https://capacitorjs.com/docs/ios) and
 [Swift Package Manager](https://capacitorjs.com/docs/ios/spm) guidance when
 extending the project. Keep the PWA as a working fallback during development.
+
+## Privacy declaration in development
+
+The first-party app bundles `PrivacyInfo.xcprivacy` for its own required-reason
+API use: app-private server preferences (`CA92.1`), and file metadata inside its
+container or for a file explicitly selected by the user (`C617.1`, `3B52.1`).
+See Apple's [required-reason API reference](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitypereasons).
+This is not a completed App Store privacy label or a claim that no information
+is collected. Conversations, audio, files and device notification tokens can be
+sent to your HUB and the configured speech/model providers when their features
+are used. Audit provider behavior, embedded SDK manifests and the final signed
+archive, then complete accurate collection/tracking declarations before submission.

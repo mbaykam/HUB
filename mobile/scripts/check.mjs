@@ -24,3 +24,7 @@ if(!identifiers.length||identifiers.some(id=>id!==config.appId&&id!==config.appI
 const icon=await sharp(join(root,'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png')).metadata();
 if(icon.width!==1024||icon.height!==1024||icon.hasAlpha)throw Error('Prepare the opaque 1024-pixel HUB app icon.');
 console.log(JSON.stringify({bundleId:config.appId,platform:process.platform,foundationChecksPassed:true,appleTeamSelected:/DEVELOPMENT_TEAM = [A-Z0-9]{10};/.test(project),stage:'development-foundation'}));
+
+const privacy=await readFile(join(root,'ios/App/App/PrivacyInfo.xcprivacy'),'utf8');
+for(const reason of ['CA92.1','C617.1','3B52.1'])if(!privacy.includes('<string>'+reason+'</string>'))throw Error('Missing first-party privacy API reason '+reason);
+if(!project.includes('path = PrivacyInfo.xcprivacy;')||!project.includes('A16000000000000000000001,'))throw Error('Bundle the app privacy manifest as an Xcode resource.');

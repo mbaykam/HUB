@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A16000000000000000000001 = {isa = PBXBuildFile; fileRef = A16000000000000000000002; };
 		A15000000000000000000001 = {isa = PBXBuildFile; fileRef = A15000000000000000000002; };
 		A14000000000000000000001 = {isa = PBXBuildFile; fileRef = A14000000000000000000002; };
 		A13000000000000000000001 = {isa = PBXBuildFile; fileRef = A13000000000000000000002; };
@@ -33,6 +34,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A16000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A15000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubAttachmentViewController.swift; sourceTree = "<group>"; };
 		A14000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubNotifications.swift; sourceTree = "<group>"; };
 		A13000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubAssistantCoordinator.swift; sourceTree = "<group>"; };
@@ -114,6 +116,7 @@
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
+				A16000000000000000000002,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
@@ -204,6 +207,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */,
+				A16000000000000000000001,
 				50B271D11FEDC1A000F3C39B /* public in Resources */,
 				504EC30F1FED79650016851F /* Assets.xcassets in Resources */,
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
