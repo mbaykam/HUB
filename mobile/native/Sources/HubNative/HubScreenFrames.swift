@@ -36,19 +36,21 @@ public actor HubScreenFrames {
         let id = UUID(); generation = id; self.owner = owner; latest = nil; paused = false
         return id
     }
-    public func accept(jpeg: Data, generation: UUID) throws {
+    public func accept(jpeg: Data, generation: UUID, capturedAt: Date) throws {
         guard generation == self.generation, !paused, owner != nil else { throw FrameError.inactive }
+        let age = now().timeIntervalSince(capturedAt)
+        guard age >= 0, age <= Self.maximumAge else { throw FrameError.stale }
         guard !jpeg.isEmpty, jpeg.count <= Self.maximumBytes,
               let source = CGImageSourceCreateWithData(jpeg as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               CGImageSourceGetType(source) as String? == "public.jpeg",
               CGImageSourceGetCount(source) == 1,
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = properties[kCGImagePropertyPixelWidth as String] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? Int,
               width > 0, height > 0, width <= 1920, height <= 1920,
               width * height <= 3_000_000,
               CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary) != nil else { throw FrameError.invalidImage }
-        latest = HubScreenFrame(id: UUID(), jpeg: jpeg, capturedAt: now(), width: width, height: height)
+        latest = HubScreenFrame(id: UUID(), jpeg: jpeg, capturedAt: capturedAt, width: width, height: height)
     }
     public func snapshot(generation: UUID, owner: HubScreenOwner) throws -> HubScreenFrame {
         guard generation == self.generation, !paused else { throw FrameError.inactive }
