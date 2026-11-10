@@ -135,6 +135,9 @@ to that exact HUB conversation and opens its normal composer with a separate
 **Add to message** confirmation. Your existing text stays intact; only pressing
 the ordinary **Send** starts assistant work. Images use the composer's normal
 image path, with its existing format and size checks.
+The review shows the verified filename and size first. Reading this metadata
+does not download the original, attach it or start an assistant; those steps
+still require your separate choices.
 
 The inbox accepts up to eight nonempty files of 10 MB each, including explicitly
 selected originals from Files. This inbox is separate from the 25 MB voice/PWA
@@ -145,8 +148,20 @@ local prepared copy to free a slot; no JavaScript bridge acknowledges/deletes
 native files. Swipe an unassigned inbox copy to review removal. Removing a local
 copy does not delete the original in another app or on HUB.
 
+**Prepared copies** also exposes old voice-call copies and copies from another
+HUB, so they cannot silently occupy all eight outbox slots. Same-HUB copies may
+be explicitly copied into a chosen text conversation with fresh receipts; their
+older ownership stays intact. Another HUB's copies allow only local review/removal,
+never upload through the current connection. **Interrupted preparation** exposes
+payloads with missing or unreadable receipts. They cannot be sent or silently
+discarded; explicit removal frees capacity without touching selected originals.
+A malformed receipt does not hide other healthy copies. No voice startup is
+required to recover local capacity.
+
 The conversation catalog and upload-receipt handoff require the matching host
 and PWA source update; older hosts fail with a recovery message. These changes
+check the exact uploaded receipt before opening a handoff, including on retries.
+They
 are development source, not an update to the installed Windows/PWA release yet.
 Signed App Group provisioning, Share/Files providers, image handling and actual
 phone UI/audio continuity still require device acceptance.

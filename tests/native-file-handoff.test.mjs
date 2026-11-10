@@ -12,27 +12,27 @@ const button=(d,text)=>[...d.window.document.querySelectorAll('button')].find(b=
 test('handoff requires explicit consent, stages exact original, preserves text through caller and never submits a turn',async()=>{
  const d=browser(),calls=[],added=[];d.window.fetch=async(path,options)=>{calls.push({path,options});return path.endsWith('/draft')?Response.json({id,sessionId:'chat',name:'Notes.txt',bytes:7,mediaType:'text/plain'}):new Response('fixture');};
  const off=installUploadHandoff('chat',file=>added.push(file),d.window.document);
- try{assert.equal(calls.length,0);assert.equal(added.length,0);button(d,'Add to message').click();await tick();assert.equal(added.length,1);assert.equal(added[0].name,'Notes.txt');assert.equal(added[0].size,7);assert.equal(calls.length,2);assert.ok(calls.every(c=>!c.options.method&&c.options.redirect==='error'));assert.equal(calls[0].options.headers['x-hub-session'],'chat');assert.equal(d.window.document.querySelector('dialog'),null);assert.equal(new URL(d.window.location.href).search,'');}
+ try{await tick();assert.equal(calls.length,1);assert.equal(added.length,0);assert.equal(d.window.document.querySelector('dialog h2').textContent,'Notes.txt');assert.match(d.window.document.querySelector('[role=status]').textContent,/1 KB/);button(d,'Add to message').click();await tick();assert.equal(added.length,1);assert.equal(added[0].name,'Notes.txt');assert.equal(added[0].size,7);assert.equal(calls.length,2);assert.ok(calls.every(c=>!c.options.method&&c.options.redirect==='error'));assert.equal(calls[0].options.headers['x-hub-session'],'chat');assert.equal(d.window.document.querySelector('dialog'),null);assert.equal(new URL(d.window.location.href).search,'');}
  finally{off();d.window.close();}
 });
 test('foreign receipt and busy composer remain retryable without adding or losing the native draft URL',async()=>{
  const d=browser();let wrong=true,busy=true,attempts=0;
  d.window.fetch=async path=>path.endsWith('/draft')?Response.json({id,sessionId:wrong?'other':'chat',name:'Notes.txt',bytes:7,mediaType:'text/plain'}):new Response('fixture');
  const off=installUploadHandoff('chat',()=>{attempts++;if(busy)throw Error('Current message is busy; retry.');},d.window.document);
- try{button(d,'Add to message').click();await tick();assert.equal(attempts,0);assert.match(d.window.document.querySelector('[role=status]').textContent,/verified/);assert.ok(d.window.location.search.includes('hubUpload'));
- wrong=false;button(d,'Add to message').click();await tick();assert.equal(attempts,1);assert.match(d.window.document.querySelector('[role=status]').textContent,/busy/);assert.equal(button(d,'Add to message').disabled,false);
+ try{await tick();assert.equal(attempts,0);assert.match(d.window.document.querySelector('[role=status]').textContent,/verified/);assert.ok(d.window.location.search.includes('hubUpload'));
+ wrong=false;button(d,'Retry').click();await tick();button(d,'Add to message').click();await tick();assert.equal(attempts,1);assert.match(d.window.document.querySelector('[role=status]').textContent,/busy/);assert.equal(button(d,'Add to message').disabled,false);
  busy=false;button(d,'Add to message').click();await tick();assert.equal(attempts,2);assert.equal(d.window.document.querySelector('dialog'),null);}
  finally{off();d.window.close();}
 });
-test('cancel and conversation change cannot fetch, attach or execute work automatically',async()=>{
+test('cancel and conversation change cannot download, attach or execute work automatically',async()=>{
  const d=browser();let fetched=0,added=0;d.window.fetch=async()=>{fetched++;throw Error('unexpected');};
  const wrong=installUploadHandoff('other',()=>added++,d.window.document);assert.equal(d.window.document.querySelector('dialog'),null);wrong();
- const off=installUploadHandoff('chat',()=>added++,d.window.document);button(d,'Keep for later').click();assert.equal(fetched,0);assert.equal(added,0);assert.equal(d.window.location.search,'');off();d.window.close();
+ const off=installUploadHandoff('chat',()=>added++,d.window.document);button(d,'Keep for later').click();assert.equal(fetched,1,'only read-only metadata was requested');assert.equal(added,0);assert.equal(d.window.location.search,'');off();d.window.close();
 });
 test('home and conversation composers share one review and unmounting one cannot lose the other receiver',async()=>{
  const d=browser();let first=0,second=0;d.window.fetch=async path=>path.endsWith('/draft')?Response.json({id,sessionId:'chat',name:'Notes.txt',bytes:7,mediaType:'text/plain'}):new Response('fixture');
  const a=installUploadHandoff('chat',()=>first++,d.window.document),b=installUploadHandoff('chat',()=>second++,d.window.document);
- try{assert.equal(d.window.document.querySelectorAll('dialog').length,1);a();assert.equal(d.window.document.querySelectorAll('dialog').length,1);button(d,'Add to message').click();await tick();assert.equal(first,0);assert.equal(second,1);}
+ try{await tick();assert.equal(d.window.document.querySelectorAll('dialog').length,1);a();assert.equal(d.window.document.querySelectorAll('dialog').length,1);button(d,'Add to message').click();await tick();assert.equal(first,0);assert.equal(second,1);}
  finally{a();b();d.window.close();}
 });
 test('conversation chooser filters internal/archived/blank records, searches older titles and enforces read-only auth',async()=>{
@@ -55,6 +55,7 @@ test('real composer handoff appends a normal attachment chip without replacing e
  d.window.fetch=async(path,options)=>{calls.push({path,options});if(options.method==='POST'){const upload=options.headers['x-hub-upload-id'];return Response.json({id:upload,text:`User attachment: Notes.txt\n{HUB_ATTACHMENT:${upload}}`,name:'Notes.txt',bytes:7,mediaType:'text/plain',image:false});}return path.endsWith('/draft')?Response.json({id,sessionId:'chat',name:'Notes.txt',bytes:7,mediaType:'text/plain'}):new Response('fixture');};
  try{
   await act(async()=>react.render(React.createElement(Component,{sessionId:'chat',useInput:select=>select({phase:'plain'})})));
+  await tick();
   await act(async()=>{button(d,'Add to message').click();await tick();});
   assert.equal(state.draft,'Keep my existing question [Notes.txt] ');assert.equal(state.occurrences.length,1);assert.ok(calls.every(c=>c.options.method!=='POST'));
   let serialized;await act(async()=>{serialized=await source.codec.serialize(state.occurrences[0].ref,new AbortController().signal);});

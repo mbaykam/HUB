@@ -13,6 +13,7 @@ import HubNative
     private let openDraft: (URL) -> Void
     private var shared: [HubSharedFile] = []
     private var pending: [HubAttachmentDraft] = []
+    private var recovery: [(id: UUID, damaged: Bool)] = []
     private var busy = false { didSet { isModalInPresentation = busy; navigationController?.isModalInPresentation = busy; navigationItem.rightBarButtonItem?.isEnabled = !busy } }
     private var message = "Choose a saved file and its conversation. Review the message in HUB before pressing Send."
     init(server: HubServer, state: HubDeviceState, stillConnected: @escaping () -> Bool, openDraft: @escaping (URL) -> Void) throws {
@@ -32,14 +33,18 @@ import HubNative
     }
     private func reload() {
         Task {
-            do { shared = try await inbox.list(); pending = try await store.drafts(server: server).filter { $0.callID == "text-composer" } }
-            catch { message = "Saved files could not be read. Unlock the iPhone and retry; your copies are preserved." }
+            do { shared = try await inbox.list() }
+            catch { message = "The sharing inbox could not be read. Unlock the iPhone and retry; your copies are preserved." }
+            do {
+                let value = try await store.recovery(); pending = value.drafts
+                recovery = value.incompleteCopies.map { ($0, false) } + value.damagedCopies.map { ($0, true) }
+            } catch { message = "Prepared files could not be read. Unlock the iPhone and retry; your copies are preserved." }
             tableView.reloadData()
         }
     }
-    override func numberOfSections(in tableView: UITableView) -> Int { 4 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section < 2 ? 1 : section == 2 ? shared.count : pending.count }
-    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 2 ? "Saved from other apps" : section == 3 ? "Prepared copies on this iPhone" : nil }
+    override func numberOfSections(in tableView: UITableView) -> Int { 5 }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section < 2 ? 1 : section == 2 ? shared.count : section == 3 ? pending.count : recovery.count }
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 2 ? "Saved from other apps" : section == 3 ? "Prepared copies on this iPhone" : section == 4 && !recovery.isEmpty ? "Interrupted preparation" : nil }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         section == 1 ? "Up to 8 saved files, 10 MB each. Nothing is uploaded until you choose a conversation and confirm. Swipe a saved file to remove its local copy. The normal HUB composer also accepts files directly." : section == 3 ? "Prepared copies keep their original conversation for safe retries. After sending in HUB, you can explicitly remove the local copy here." : nil
     }
@@ -51,7 +56,12 @@ import HubNative
         case 0: cell.textLabel?.text = message; cell.selectionStyle = .none; cell.accessibilityTraits = [.staticText, .updatesFrequently]
         case 1: cell.textLabel?.text = "Choose from Files"; cell.imageView?.image = UIImage(systemName: "folder"); cell.accessibilityTraits = .button
         case 2: cell.textLabel?.text = shared[indexPath.row].name; cell.detailTextLabel?.text = "Tap to choose a conversation"; cell.accessoryType = .disclosureIndicator
-        default: cell.textLabel?.text = pending[indexPath.row].name; cell.detailTextLabel?.text = "Prepared for its saved conversation · Tap to review"; cell.accessoryType = .disclosureIndicator
+        case 3:
+            let draft = pending[indexPath.row]
+            cell.textLabel?.text = draft.name
+            cell.detailTextLabel?.text = draft.origin != server.origin.absoluteString ? "From another HUB · Local copy only" : draft.callID == "text-composer" ? "Prepared for its saved conversation · Tap to review" : "From a voice call · Tap to review or copy"
+            cell.accessoryType = .disclosureIndicator
+        default: cell.textLabel?.text = recovery[indexPath.row].damaged ? "Unreadable local receipt" : "Incomplete local copy"; cell.detailTextLabel?.text = "Cannot be sent safely · Tap to review local removal"; cell.accessoryType = .disclosureIndicator
         }
         return cell
     }
@@ -64,6 +74,7 @@ import HubNative
             let picker = HubConversationPicker(api: catalog) { [weak self] choice in self?.review(item, choice: choice) }
             navigationController?.pushViewController(picker, animated: true)
         } else if indexPath.section == 3 { review(pending[indexPath.row]) }
+        else if indexPath.section == 4 { reviewRecovery(recovery[indexPath.row]) }
     }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first, !busy else { return }; busy = true
@@ -101,7 +112,7 @@ import HubNative
                     let draft = try await self.store.stage(data: data, name: item.name, server: self.server, sessionID: choice.sessionId, callID: "text-composer", id: item.id, requestID: item.id)
                     try await self.inbox.remove(item)
                     try await self.prepare(draft)
-                } catch { self.message = "Preparation was not confirmed. Your saved copies are kept. Retry from Prepared copies if this file was already assigned a conversation." }
+                } catch { self.message = self.describe(error) }
             }
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -109,13 +120,20 @@ import HubNative
         DispatchQueue.main.async { [weak self] in self?.present(alert, animated: true) }
     }
     private func review(_ draft: HubAttachmentDraft) {
-        let alert = UIAlertController(title: draft.name, message: "Open a message draft in this file's saved HUB conversation? A retry preserves the same upload receipt. Nothing is sent to an assistant until you press Send in HUB.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Open message draft", style: .default) { [weak self] _ in
+        let sameServer = draft.origin == server.origin.absoluteString
+        let text = sameServer ? "You can review this copy or prepare a message. Nothing is sent to an assistant until you press Send in HUB." : "This local copy belongs to another HUB. It cannot be uploaded through your current connection. Keeping or removing this local copy does not change the original."
+        let alert = UIAlertController(title: draft.name, message: text, preferredStyle: .alert)
+        if sameServer && draft.callID == "text-composer" { alert.addAction(UIAlertAction(title: "Open message draft", style: .default) { [weak self] _ in
             guard let self, !self.busy else { return }; self.busy = true
-            Task { defer { self.busy = false; self.reload() }; do { try await self.prepare(draft) } catch { self.message = "Could not open the draft. Sign in or reconnect and retry. Your copy is preserved." } }
-        })
+            Task { defer { self.busy = false; self.reload() }; do { try await self.prepare(draft) } catch { self.message = self.describe(error) } }
+        }) }
+        if sameServer { alert.addAction(UIAlertAction(title: "Copy to a conversation", style: .default) { [weak self] _ in
+            guard let self else { return }
+            self.navigationController?.pushViewController(HubConversationPicker(api: self.catalog) { [weak self] choice in self?.reviewCopy(draft, choice: choice) }, animated: true)
+        }) }
         alert.addAction(UIAlertAction(title: "Remove local copy", style: .destructive) { [weak self] _ in
-            guard let self else { return }; Task { do { try await self.store.discard(draft); self.message = "Local copy removed. The original on HUB was not changed." } catch { self.message = "Could not remove this local copy." }; self.reload() }
+            guard let self, !self.busy else { return }; self.busy = true
+            Task { defer { self.busy = false; self.reload() }; do { try await self.store.discard(draft); self.message = "Local copy removed. Other originals and HUB files were not changed." } catch { self.message = "Could not remove this local copy." } }
         })
         alert.addAction(UIAlertAction(title: "Keep", style: .cancel)); present(alert, animated: true)
     }
@@ -124,9 +142,50 @@ import HubNative
         let bytes = try await store.bytes(draft, server: server, sessionID: draft.sessionID, callID: "text-composer")
         message = "Preparing your message…"; tableView.reloadData()
         try await upload.upload(draft, bytes: bytes)
+        // Older hosts can accept a file but cannot hand it to the composer.
+        // Confirm the exact receipt capability before claiming a draft opened.
+        let url = try await catalog.confirmedDraftURL(draft)
         guard stillConnected() else { throw HubAttachmentError.signInRequired }
-        let url = try catalog.draftURL(draft)
         dismiss(animated: true) { [openDraft] in openDraft(url) }
+    }
+    private func describe(_ error: Error) -> String {
+        switch error {
+        case HubAttachmentError.full: return "Eight prepared copies are waiting. Review Prepared copies or Interrupted preparation and explicitly remove an unneeded local copy, then retry. Nothing was deleted."
+        case HubAttachmentError.signInRequired: return "Sign in to HUB again, then retry. Your saved copy is preserved."
+        case HubAttachmentError.wrongConversation: return "This copy is already assigned. Retry its saved entry in Prepared copies; it was not moved."
+        default: return "HUB could not confirm the message draft. Reconnect or update the HUB host, then retry its Prepared copy. Your copies are preserved."
+        }
+    }
+    private func reviewRecovery(_ item: (id: UUID, damaged: Bool)) {
+        let alert = UIAlertController(title: "Remove unfinished local copy?", message: "This copy has no usable conversation receipt, so it cannot be sent safely. Removing it frees its pending-file slot. The original selected file and files on HUB stay intact.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Keep", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Remove unfinished copy", style: .destructive) { [weak self] _ in
+            guard let self, !self.busy else { return }; self.busy = true
+            Task {
+                defer { self.busy = false; self.reload() }
+                do {
+                    if item.damaged { try await self.store.discardDamagedCopy(item.id) } else { try await self.store.discardIncompleteCopy(item.id) }
+                    self.message = "Unfinished local copy removed. The selected original was not changed."
+                } catch { self.message = "Could not remove this copy. Your files were preserved." }
+            }
+        })
+        present(alert, animated: true)
+    }
+    private func reviewCopy(_ draft: HubAttachmentDraft, choice: HubConversationChoice) {
+        navigationController?.popToViewController(self, animated: false)
+        let alert = UIAlertController(title: draft.name, message: "Copy this file to “\(choice.title)” on the current HUB? The previous copy stays intact. You will review the message and press Send separately.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Prepare copy", style: .default) { [weak self] _ in
+            guard let self, !self.busy else { return }; self.busy = true
+            Task {
+                defer { self.busy = false; self.reload() }
+                do {
+                    guard self.stillConnected() else { throw HubAttachmentError.signInRequired }
+                    let copy = try await self.store.copy(draft, server: self.server, sessionID: choice.sessionId, callID: "text-composer")
+                    try await self.prepare(copy)
+                } catch { self.message = self.describe(error) }
+            }
+        })
+        alert.addAction(UIAlertAction(title: "Keep", style: .cancel)); DispatchQueue.main.async { [weak self] in self?.present(alert, animated: true) }
     }
 }
 

@@ -17,6 +17,31 @@ private final class AttachmentFixture: URLProtocol {
     override func stopLoading() {}
 }
 final class HubAttachmentTests: XCTestCase {
+    func testRecoveryShowsAllOwnersAndDamagedReceiptsWithoutDeletingOrHidingHealthyCopies() async throws {
+        let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("selected.txt"), bytes = Data("original stays intact".utf8); try bytes.write(to: source)
+        let folder = root.appendingPathComponent("outbox"), store = try HubAttachmentStore(root: folder)
+        let server = try HubServer(address: "https://hub.example.com"), foreign = try HubServer(address: "https://other.test")
+        let voice = try await store.stage(source: source, server: server, sessionID: "voice-chat", callID: "old-voice")
+        let other = try await store.stage(source: source, server: foreign, sessionID: "foreign-chat", callID: "text-composer")
+        let damaged = try await store.stage(source: source, server: server, sessionID: "old-chat", callID: "old-call")
+        try Data("broken receipt".utf8).write(to: folder.appendingPathComponent(damaged.id.uuidString.lowercased() + ".json"))
+        let orphan = UUID(); try bytes.write(to: folder.appendingPathComponent(orphan.uuidString.lowercased() + ".bin"))
+        var expected = [voice.id, other.id]
+        for _ in 0..<4 { let extra = try await store.stage(source: source, server: server, sessionID: "old-voice-chat", callID: "old-voice"); expected.append(extra.id) }
+        let snapshot = try await store.recovery()
+        XCTAssertEqual(Set(snapshot.drafts.map(\.id)), Set(expected)); XCTAssertEqual(snapshot.damagedCopies, [damaged.id]); XCTAssertEqual(snapshot.incompleteCopies, [orphan])
+        do { _ = try await store.copy(voice, server: server, sessionID: "text-chat", callID: "text-composer"); XCTFail("Full recovery queue must stay bounded") }
+        catch { guard case HubAttachmentError.full = error else { return XCTFail("Wrong capacity error") } }
+        do { try await store.discardDamagedCopy(voice.id); XCTFail("A stale recovery action cannot discard a healthy receipt") } catch {}
+        // Explicit removal is required; merely listing the damaged copy kept it.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent(damaged.id.uuidString.lowercased() + ".bin").path))
+        try await store.discardDamagedCopy(damaged.id); try await store.discardIncompleteCopy(orphan)
+        let after = try await store.recovery(); XCTAssertEqual(after.drafts.count, 6); XCTAssertTrue(after.damagedCopies.isEmpty); XCTAssertTrue(after.incompleteCopies.isEmpty)
+        let copied = try await store.copy(voice, server: server, sessionID: "text-chat", callID: "text-composer")
+        XCTAssertNotEqual(copied.id, voice.id)
+        XCTAssertEqual(try Data(contentsOf: source), bytes)
+    }
     func testExplicitCopyPreservesOriginalAndUsesFreshOwnerAndReceiptsWithinCapacity() async throws {
         let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
         let server = try HubServer(address: "https://hub.example.com"), store = try HubAttachmentStore(root: root.appendingPathComponent("outbox"))

@@ -13,6 +13,11 @@ public struct HubAttachmentDraft: Codable, Equatable {
 }
 
 public enum HubAttachmentError: Error { case invalidFile, tooLarge, full, wrongConversation, invalidResponse, signInRequired, callEnded, unavailable }
+public struct HubAttachmentRecovery {
+    public let drafts: [HubAttachmentDraft]
+    public let incompleteCopies: [UUID]
+    public let damagedCopies: [UUID]
+}
 
 /// Private, bounded outbox. IDs and immutable bytes survive response loss;
 /// retries cannot substitute a different document or voice conversation.
@@ -41,19 +46,34 @@ public actor HubAttachmentStore {
         guard !data.isEmpty, data.count <= maximum else { throw HubAttachmentError.tooLarge }
         return data
     }
+    private func manifest(_ url: URL) throws -> HubAttachmentDraft {
+        let value = try JSONDecoder().decode(HubAttachmentDraft.self, from: readRegular(url, maximum: 4096))
+        guard value.id.uuidString.lowercased() + ".json" == url.lastPathComponent, value.bytes > 0, value.bytes <= Self.maximumBytes,
+              HubVoiceAPI.validID(value.sessionID), HubVoiceAPI.validID(value.callID), !value.name.isEmpty,
+              value.name.utf8.count <= 240, (try? HubServer(address: value.origin).origin.absoluteString) == value.origin else { throw HubAttachmentError.invalidFile }
+        return value
+    }
     public func drafts(server: HubServer, sessionID: String? = nil, callID: String? = nil) throws -> [HubAttachmentDraft] {
         try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }.map { url in
-                let value = try JSONDecoder().decode(HubAttachmentDraft.self, from: readRegular(url, maximum: 4096))
-                // Directory enumeration may standardize the URL differently
-                // from appendingPathComponent (notably /var on Apple hosts).
-                // The enumerated direct child and its opaque filename bind the
-                // manifest; readRegular separately rejects symlinks.
-                guard value.id.uuidString.lowercased() + ".json" == url.lastPathComponent, value.bytes > 0, value.bytes <= Self.maximumBytes,
-                      HubVoiceAPI.validID(value.sessionID), HubVoiceAPI.validID(value.callID),
-                      value.name.utf8.count <= 240 else { throw HubAttachmentError.invalidFile }
-                return value
-            }.filter { $0.origin == server.origin.absoluteString && (sessionID == nil || $0.sessionID == sessionID) && (callID == nil || $0.callID == callID) }
+            .filter { $0.pathExtension == "json" }.map { try manifest($0) }
+            .filter { $0.origin == server.origin.absoluteString && (sessionID == nil || $0.sessionID == sessionID) && (callID == nil || $0.callID == callID) }
+    }
+    /// Account-neutral local recovery, not permission to upload across servers.
+    /// A damaged receipt never hides healthy copies or gets silently deleted.
+    public func recovery() throws -> HubAttachmentRecovery {
+        var drafts: [HubAttachmentDraft] = [], damaged: [UUID] = []
+        for url in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) where url.pathExtension == "json" {
+            guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent), url.lastPathComponent == id.uuidString.lowercased() + ".json" else { continue }
+            do { drafts.append(try manifest(url)) } catch { damaged.append(id) }
+        }
+        return HubAttachmentRecovery(drafts: drafts, incompleteCopies: try incompleteCopies(), damagedCopies: damaged)
+    }
+    public func discardDamagedCopy(_ id: UUID) throws {
+        guard try recovery().damagedCopies.contains(id) else { throw HubAttachmentError.invalidFile }
+        for suffix in [".json", ".bin"] {
+            let url = file(id, suffix)
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        }
     }
     public func stage(source: URL, server: HubServer, sessionID: String, callID: String) throws -> HubAttachmentDraft {
         try stage(data: readRegular(source, maximum: Self.maximumBytes), name: source.lastPathComponent, server: server, sessionID: sessionID, callID: callID)

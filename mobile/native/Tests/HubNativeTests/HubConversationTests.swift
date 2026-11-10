@@ -4,18 +4,39 @@ import XCTest
 
 private final class CatalogFixture: URLProtocol {
     static var reply = ""
+    static var code = 200
     static var request: URLRequest?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.request = request
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!
+        let response = HTTPURLResponse(url: request.url!, statusCode: Self.code, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(Self.reply.utf8)); client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
 }
 final class HubConversationTests: XCTestCase {
+    override func setUp() { CatalogFixture.code = 200; CatalogFixture.request = nil }
+    func testPendingHandoffChecksHostCapabilityAndExactReceiptBeforeOpening() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("hub-eval-confirm-draft-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = try HubServer(address: "https://hub.example.com"), store = try HubAttachmentStore(root: root), api = try client()
+        let draft = try await store.stage(data: Data("fixture".utf8), name: "File.txt", server: server, sessionID: "owned-chat", callID: "text-composer")
+        CatalogFixture.code = 404; CatalogFixture.reply = "{}"
+        do { _ = try await api.confirmedDraftURL(draft); XCTFail("An older host cannot silently open an unsupported handoff") } catch {}
+        CatalogFixture.code = 200
+        CatalogFixture.reply = "{\"id\":\"\(draft.id)\",\"sessionId\":\"other-chat\",\"name\":\"File.txt\",\"bytes\":7}"
+        do { _ = try await api.confirmedDraftURL(draft); XCTFail("Wrong receipt owner") } catch {}
+        CatalogFixture.reply = "{\"id\":\"\(draft.id)\",\"sessionId\":\"owned-chat\",\"name\":\"File.txt\",\"bytes\":7}"
+        let url = try await api.confirmedDraftURL(draft)
+        XCTAssertEqual(url, try api.draftURL(draft))
+        let request = try XCTUnwrap(CatalogFixture.request)
+        XCTAssertEqual(request.url?.path, "/api/hub/uploads/draft"); XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-session"), "owned-chat")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-upload-id"), draft.id.uuidString.lowercased())
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+    }
     private func client() throws -> HubConversationAPI {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [CatalogFixture.self]
         return HubConversationAPI(server: try HubServer(address: "https://hub.example.com"), configuration: config) {
