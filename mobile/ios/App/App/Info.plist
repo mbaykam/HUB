@@ -30,6 +30,8 @@
 	<string>Share a camera image with your assistant when you choose to.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Use your microphone for voice conversations you start in HUB.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Capture screen frames you choose to review and send to your assistant. Starting capture does not upload your screen.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

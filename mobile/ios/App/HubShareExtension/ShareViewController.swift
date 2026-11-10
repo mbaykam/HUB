@@ -31,6 +31,7 @@ import HubNative
             status.text = "Choose one supported file or photo. This signed build must also have HUB's App Group enabled."; return
         }
         saving = true; save.isEnabled = false; cancel.isEnabled = false; status.text = "Saving a private local copy…"
+        let suggestedName = provider.suggestedName
         provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, error in
             // Apple's provider URL is valid only inside this callback. Copy its
             // bounded bytes before returning; never persist an external path.
@@ -38,7 +39,7 @@ import HubNative
                 guard error == nil, let url else { throw HubAttachmentError.invalidFile }
                 return try HubShareInbox.readSelectedFile(url)
             }
-            var name = provider.suggestedName ?? url?.lastPathComponent ?? "Shared file"
+            var name = suggestedName ?? url?.lastPathComponent ?? "Shared file"
             if (name as NSString).pathExtension.isEmpty, let suffix = UTType(type)?.preferredFilenameExtension { name += "." + suffix }
             Task { @MainActor in
                 guard let self else { return }

@@ -5,6 +5,24 @@ import CoreImage
 import ImageIO
 import HubNative
 
+// CIContext is reusable. A nonblocking lock also bounds work if a delegate is
+// ever delivered concurrently; most frames are dropped before JPEG conversion.
+private final class HubScreenJPEGEncoder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let context = CIContext()
+    private var last = Date.distantPast
+    func encode(_ pixels: CVPixelBuffer) -> Data? {
+        guard lock.try() else { return nil }; defer { lock.unlock() }
+        guard Date().timeIntervalSince(last) >= 2 else { return nil }; last = Date()
+        let image = CIImage(cvPixelBuffer: pixels)
+        guard image.extent.width > 0, image.extent.height > 0 else { return nil }
+        let scale = min(1, 1440 / max(image.extent.width, image.extent.height))
+        let sized = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
+        return context.jpegRepresentation(of: sized, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [quality: 0.8])
+    }
+}
+
 /// Native-only adapter. Its caller supplies an owned voice context; only Apple's
 /// picker grants capture. It neither uploads frames nor adds audio inputs.
 @available(iOS 27.0, *)
@@ -17,6 +35,7 @@ import HubNative
     private var observing = false
     private var lockObserver: NSObjectProtocol?
     private let queue = DispatchQueue(label: "hub.screen.video", qos: .userInitiated)
+    private nonisolated let encoder = HubScreenJPEGEncoder()
     private(set) var status = "Screen sharing is off."
     var changed: (() -> Void)?
     init(context: HubVoiceAttachmentContext) throws {
@@ -32,6 +51,9 @@ import HubNative
     func presentSystemPicker() {
         guard context.stillOwned(), UIApplication.shared.isProtectedDataAvailable else { update("Unlock this iPhone and connect voice first."); return }
         let picker = SCContentSharingPicker.shared
+        var configuration = SCContentSharingPickerConfiguration()
+        configuration.showsMicrophoneControl = false; configuration.showsCameraControl = false
+        picker.defaultConfiguration = configuration
         if !observing { picker.add(self); observing = true }
         picker.isActive = true
         update("Choose what to share in the system picker. Nothing is sent to HUB automatically.")
@@ -64,9 +86,9 @@ import HubNative
             if let old { try? await old.stopCapture() }
             do {
                 let config = SCStreamConfiguration()
-                config.width = 1440; config.height = 1440; config.scalesToFit = true; config.preservesAspectRatio = true
-                config.minimumFrameInterval = CMTime(value: 2, timescale: 1); config.queueDepth = 3
-                config.capturesAudio = false; config.captureMicrophone = false
+                // iOS owns stream pacing/geometry. macOS-only configuration
+                // properties must not be used here; bound work in our encoder.
+                config.capturesAudio = false
                 let active = SCStream(filter: filter, configuration: config, delegate: self)
                 try active.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.queue)
                 self.generation = await self.frames.beginAfterSystemConsent(owner: self.owner)
@@ -84,14 +106,13 @@ import HubNative
         guard type == .screen, CMSampleBufferIsValid(buffer), let pixels = CMSampleBufferGetImageBuffer(buffer) else { return }
         // Preserve capture age across queueing/conversion instead of assigning
         // a new timestamp when a delayed callback finally reaches the frame gate.
-        let elapsed = CMTimeGetSeconds(CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), CMSampleBufferGetPresentationTimeStamp(buffer)))
+        guard let clock = stream.synchronizationClock else { return }
+        let hostClock = CMClockGetHostTimeClock()
+        let timestamp = CMSyncConvertTime(CMSampleBufferGetPresentationTimeStamp(buffer), from: clock, to: hostClock)
+        let elapsed = CMTimeGetSeconds(CMTimeSubtract(CMClockGetTime(hostClock), timestamp))
         guard elapsed.isFinite, elapsed >= 0, elapsed <= HubScreenFrames.maximumAge else { return }
         let capturedAt = Date().addingTimeInterval(-elapsed)
-        let image = CIImage(cvPixelBuffer: pixels)
-        let scale = min(1, 1440 / max(image.extent.width, image.extent.height))
-        let sized = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let color = CGColorSpaceCreateDeviceRGB()
-        guard let jpeg = CIContext().jpegRepresentation(of: sized, colorSpace: color, options: [.lossyCompressionQuality: 0.8]) else { return }
+        guard let jpeg = encoder.encode(pixels) else { return }
         Task { @MainActor in
             guard self.stream === stream, let generation = self.generation else { return }
             guard self.context.stillOwned() else { self.stop(); return }
