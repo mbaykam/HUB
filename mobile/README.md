@@ -317,3 +317,10 @@ See [Apple's iOS capture sample](https://developer.apple.com/documentation/scree
 The picker, captured content, freeze timing, background audio, interruptions and
 privacy behavior still need physical iPhone acceptance before release. Simulator
 compilation does not prove those outcomes, and no signed iPhone build is implied.
+
+Packaging verification found that the current simulator SDK excludes the
+`canImport(ScreenCaptureKit)` capture/review branch, even though the rest of the
+app builds. The workflow now probes both device and simulator SDKs with a direct
+import. The workflow described above is development source and is not available
+in that simulator artifact; do not infer capture support from a green base-app
+build. A verified capture-capable SDK/device build is still required.

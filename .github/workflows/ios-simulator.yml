@@ -75,6 +75,9 @@ jobs:
         run: pnpm check
       - name: Test HTTPS authority and native cookie isolation
         run: swift test --package-path native
+      - name: Probe screen capture SDK availability without conditional imports
+        if: inputs.toolchain == 'xcode-27'
+        run: bash scripts/probe-screen-sdk.sh
       - name: Compile for iOS Simulator without Apple credentials
         run: pnpm ios:build:simulator
       - name: Save simulator build
