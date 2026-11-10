@@ -79,6 +79,30 @@ long conversations and battery behavior. Simulator compilation and fixture
 protocol/control tests do not prove those outcomes. This is development code,
 not a published voice-quality or all-day-background guarantee.
 
+## Native voice files in development
+
+In the native Voice sheet, open **Voice options → Share a file**. Choose an
+original through Apple's Files picker, then tap the pending file to review it
+and explicitly **Send to conversation**. The call keeps its existing microphone
+and audio session while this separate screen is open. No file is uploaded merely
+because it was selected. HUB retains the original only after sending; readable
+content still depends on the file type and selected assistant/model.
+
+A private outbox holds at most eight files of 25 MB each. Drafts are excluded
+from backups, use iOS file protection, and preserve their original HTTPS server,
+conversation, call and immutable upload/share receipt IDs. Lost responses retry
+the same receipts rather than submitting duplicate instructions. A file from a
+different or ended call is shown as such and cannot silently move into a new
+conversation. Removing a local draft never modifies the selected source file.
+Uploads are foreground operations; interruption can require an explicit retry.
+
+This is a development slice. Files-provider behavior, permissions, screen locking,
+slow connections and physical audio continuity during file selection still need
+iPhone acceptance. A system-wide Share extension, native camera/photos sheet,
+general text-conversation destination picker and screen sharing are separate
+remaining work; this picker does not claim to implement them. Existing PWA file
+and camera controls keep their current behavior without a native JS bridge.
+
 ## Prepare from Windows or macOS
 
 Use Node 24+ and pnpm 11.7.0. From the repository root:

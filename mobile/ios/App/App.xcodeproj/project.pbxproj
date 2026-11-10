@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A15000000000000000000001 = {isa = PBXBuildFile; fileRef = A15000000000000000000002; };
 		A14000000000000000000001 = {isa = PBXBuildFile; fileRef = A14000000000000000000002; };
 		A13000000000000000000001 = {isa = PBXBuildFile; fileRef = A13000000000000000000002; };
 		A13000000000000000000003 = {isa = PBXBuildFile; fileRef = A13000000000000000000004; };
@@ -32,6 +33,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A15000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubAttachmentViewController.swift; sourceTree = "<group>"; };
 		A14000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubNotifications.swift; sourceTree = "<group>"; };
 		A13000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubAssistantCoordinator.swift; sourceTree = "<group>"; };
 		A13000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubVoiceActivity.swift; sourceTree = "<group>"; };
@@ -104,6 +106,7 @@
 				A11000000000000000000002 /* HubServer.swift */,
 				A11000000000000000000004 /* HubConnectionViewController.swift */,
 				A14000000000000000000002,
+				A15000000000000000000002,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -225,6 +228,7 @@
 				A12000000000000000000009 /* HubVoiceViewController.swift in Sources */,
 				A11000000000000000000003 /* HubConnectionViewController.swift in Sources */,
 				A14000000000000000000001,
+				A15000000000000000000001,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 			);

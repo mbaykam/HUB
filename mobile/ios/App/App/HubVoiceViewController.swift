@@ -16,6 +16,7 @@ final class HubVoiceViewController: UIViewController {
         view.backgroundColor = .systemBackground
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Hide", style: .plain, target: self, action: #selector(hide))
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
+            UIAction(title: "Share a file", image: UIImage(systemName: "paperclip")) { [weak self] _ in self?.shareFile() },
             UIAction(title: "Reconnect audio", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.voice.reconnect() }
         ]))
         navigationItem.rightBarButtonItem?.accessibilityLabel = "Voice options"
@@ -56,4 +57,11 @@ final class HubVoiceViewController: UIViewController {
         mute.isEnabled = voice.isActive; interrupt.isEnabled = voice.isActive; end.isEnabled = voice.isActive
     }
     @objc private func hide() { dismiss(animated: true) }
+    private func shareFile() {
+        guard let context = voice.attachmentContext(), let screen = try? HubAttachmentViewController(context: context) else {
+            let alert = UIAlertController(title: "Files unavailable", message: "Wait for voice to connect, then try again. Unlock your iPhone if local storage is unavailable.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default)); present(alert, animated: true); return
+        }
+        present(UINavigationController(rootViewController: screen), animated: true)
+    }
 }

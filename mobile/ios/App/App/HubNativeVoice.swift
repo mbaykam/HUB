@@ -45,6 +45,12 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private func notify() { changed?(); lifecycleChanged?() }
     private func update(_ value: String) { status = value; notify() }
     func waitForStartup() async -> Bool { await starting?.value; return isActive && lease != nil && peer != nil }
+    func attachmentContext() -> HubVoiceAttachmentContext? {
+        guard isActive, let owned = lease else { return nil }
+        return HubVoiceAttachmentContext(server: server, sessionID: owned.sessionId, callID: owned.callId, voiceAPI: api,
+            uploadAPI: HubAttachmentAPI(server: server) { [deviceState] in (try? deviceState.cookies()) ?? [] },
+            stillOwned: { [weak self] in self?.isActive == true && self?.lease?.callId == owned.callId && self?.lease?.sessionId == owned.sessionId })
+    }
 
     func start() {
         guard !isActive, starting == nil, lease == nil else { return }

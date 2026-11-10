@@ -83,6 +83,7 @@ public final class HubVoiceAPI {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(String(server.origin.absoluteString.dropLast()), forHTTPHeaderField: "Origin")
         }
+        if action == "share" { request.setValue("1", forHTTPHeaderField: "x-hub-voice-share") }
         if let callId { request.setValue(callId, forHTTPHeaderField: "x-hub-voice-call") }
         try Task.checkCancellation()
         let (data, response) = try await session.data(for: request)
@@ -130,6 +131,12 @@ public final class HubVoiceAPI {
     }
 
     public func close(callId: String) async throws { _ = try await request("close", method: "POST", body: ["callId": callId]) }
+    public func share(callId: String, uploadID: UUID, requestID: UUID) async throws {
+        guard Self.validID(callId) else { throw HubVoiceAPIError.invalidResponse }
+        let data = try await request("share", method: "POST", body: ["callId": callId, "requestId": requestID.uuidString.lowercased(), "uploads": [uploadID.uuidString.lowercased()], "instruction": "The user explicitly shared this file with the current conversation. Inspect it if supported; say clearly if its contents cannot be read."])
+        struct Acceptance: Decodable { let accepted: Bool }
+        guard try JSONDecoder().decode(Acceptance.self, from: data).accepted else { throw HubVoiceAPIError.invalidResponse }
+    }
     public func interrupt(callId: String) async throws { _ = try await request("interrupt", method: "POST", body: ["callId": callId]) }
     public func attention(callId: String, background: Bool) async throws {
         _ = try await request("attention", method: "POST", body: ["callId": callId, "mode": background ? "background" : "active"])
