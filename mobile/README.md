@@ -121,10 +121,35 @@ HUB does not silently delete these copies or alter the original selected file.
 
 This is a development slice. Files-provider behavior, permissions, screen locking,
 slow connections and physical audio continuity during file selection still need
-iPhone acceptance. A native camera/photos sheet,
-general text-conversation destination picker and screen sharing are separate
-remaining work; this picker does not claim to implement them. Existing PWA file
+iPhone acceptance. A native camera/photos sheet is separate remaining work;
+the system-share/text destination below and screen sharing have their own
+development paths. Existing PWA file
 and camera controls keep their current behavior without a native JS bridge.
+
+### Files without a voice conversation
+
+The connection menu's **Files** opens the local system-share inbox without
+starting a microphone or assistant. Choose a saved file, search your existing
+conversations by title, and confirm **Prepare message**. This uploads the original
+to that exact HUB conversation and opens its normal composer with a separate
+**Add to message** confirmation. Your existing text stays intact; only pressing
+the ordinary **Send** starts assistant work. Images use the composer's normal
+image path, with its existing format and size checks.
+
+The inbox accepts up to eight nonempty files of 10 MB each, including explicitly
+selected originals from Files. This inbox is separate from the 25 MB voice/PWA
+upload limit. A prepared copy remains origin/conversation-bound in the private
+outbox so response loss can retry the same upload receipt. Reopening never
+silently resends a chat message. After sending in HUB, explicitly remove its
+local prepared copy to free a slot; no JavaScript bridge acknowledges/deletes
+native files. Swipe an unassigned inbox copy to review removal. Removing a local
+copy does not delete the original in another app or on HUB.
+
+The conversation catalog and upload-receipt handoff require the matching host
+and PWA source update; older hosts fail with a recovery message. These changes
+are development source, not an update to the installed Windows/PWA release yet.
+Signed App Group provisioning, Share/Files providers, image handling and actual
+phone UI/audio continuity still require device acceptance.
 
 ## Prepare from Windows or macOS
 

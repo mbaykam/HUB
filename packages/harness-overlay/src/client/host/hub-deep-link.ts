@@ -17,7 +17,7 @@ export function installHubDeepLink(ctx: Pick<HarnessClientContext, "sessions">, 
     if (!opened && snapshot.byId[id!]) { opened = true; ctx.sessions.open(id!); }
     if (opened && (panel !== "models" || root.querySelector('[data-hub-models-launcher]'))) {
       if (panel === "models") root.querySelector<HTMLButtonElement>('[data-hub-models-launcher]')?.click();
-      complete = true; url.searchParams.delete("hubSession"); url.searchParams.delete("hubPanel"); view.history.replaceState(view.history.state, "", url.href); return;
+      complete = true; const current=new URL(view.location.href);if(!current.searchParams.has("hubUpload"))current.searchParams.delete("hubSession"); current.searchParams.delete("hubPanel"); view.history.replaceState(view.history.state, "", current.href); return;
     }
     if (Date.now() >= until) {
       complete = true;

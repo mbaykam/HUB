@@ -4,13 +4,24 @@ import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
  * new PWA process. No task is resumed, repeated or cancelled by these reads. */
 export function installDailyUseWeb(ctx:any){
   const ended=new Map<string,{version:number;kind:string}>();
-  const off=["activity","artifacts"].map(action=>ctx.webServer.register({kind:"exact",path:"/api/hub/"+action,handler:async(req:any,res:any)=>{
+  const off=["activity","artifacts","conversations"].map(action=>ctx.webServer.register({kind:"exact",path:"/api/hub/"+action,handler:async(req:any,res:any)=>{
     const send=(code:number,value:any)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};
     const reject=ctx.connection.requestRejection(req);if(reject||req.headers["sec-fetch-site"]==="cross-site"){send(reject??403,{error:"unauthorized"});return;}
     if(req.method!=="GET"){send(405,{error:"read-only"});return;}
     if(req.headers["x-hub-daily-use"]!=="1"){send(403,{error:"header-required"});return;}
     const signal=AbortSignal.timeout(15000);
     try{
+      if(action==="conversations"){
+        const raw=req.headers["x-hub-session-query"];
+        if(raw!==undefined&&(typeof raw!=="string"||raw.length>600)){send(400,{error:"invalid-search"});return;}
+        let search:string;try{search=decodeURIComponent(raw??"").trim().toLocaleLowerCase();}catch{send(400,{error:"invalid-search"});return;}
+        if(search.length>120){send(400,{error:"invalid-search"});return;}
+        const {items}=await ctx.sessionController.list({},signal),archived=new Set(ctx.get?.("workspaceRegistry")?.archivedSessionIds??[]);
+        const all=items.filter((s:any)=>!s.blank&&s.origin!=="subagent"&&!isKnowledgeEvaluation(s.sessionId)&&!archived.has(s.sessionId)&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(s.sessionId))
+          .map((s:any)=>({sessionId:s.sessionId,title:typeof s.projections?.values?.title==="string"&&s.projections.values.title.trim()?s.projections.values.title.slice(0,240):"Untitled conversation",updatedAt:Number.isFinite(s.updatedAt)&&s.updatedAt>=0?s.updatedAt:0}))
+          .filter((s:any)=>!search||s.title.toLocaleLowerCase().includes(search)).sort((a:any,b:any)=>b.updatedAt-a.updatedAt);
+        send(200,{conversations:all.slice(0,50),hasMore:all.length>50});return;
+      }
       if(action==="activity"){
         const {items}=await ctx.sessionController.list({},signal),now=Date.now(),byId:Record<string,unknown>={},query=ctx.get?.("sessionQuery")??ctx.sessionQuery,archived=new Set(ctx.get?.("workspaceRegistry")?.archivedSessionIds??[]);
         const headers=items.some((s:any)=>s.origin==="subagent"&&(s.running||now-s.updatedAt<24*60*60000))&&query?.listSessions?await query.listSessions(signal):[],parents=new Map<string,string>(headers.map(({header}:any)=>[header.id,header.parentSession]));

@@ -61,6 +61,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
+            UIAction(title: "Files", image: UIImage(systemName: "paperclip")) { [weak self] _ in self?.showSharedFiles() },
             UIAction(title: "Notifications", image: UIImage(systemName: "bell")) { [weak self] _ in
                 guard let self else { return }; HubNotifications.shared.show(from: self)
             },
@@ -216,6 +217,19 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let alert = UIAlertController(title: "A voice conversation is active", message: "Open Voice and end the conversation before changing the server or signing out.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+    private func showSharedFiles() {
+        guard connected, let server, let state = deviceState else { message.text = "Sign in to HUB before choosing a file conversation."; return }
+        let generation = connectionGeneration
+        do {
+            let screen = try HubSharedFilesViewController(server: server, state: state, stillConnected: { [weak self] in
+                self?.connected == true && self?.connectionGeneration == generation && self?.server == server
+            }, openDraft: { [weak self] url in
+                guard let self, self.connected, self.connectionGeneration == generation, server.contains(url) else { return }
+                self.webView.load(URLRequest(url: url))
+            })
+            present(UINavigationController(rootViewController: screen), animated: true)
+        } catch { message.text = "Files are unavailable. Unlock the iPhone and check the app's sharing setup; HUB's normal file button remains available." }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

@@ -22,6 +22,17 @@ test('real binary uploads retain originals, native images and replay-safe sessio
  assert.equal((await f.upload(Buffer.from('different'),id,'Other.txt')).status,409);
  assert.equal((await cold.uploadedAssets('another-session',result.text)).length,0);assert.equal((await cold.uploadedAssets('hub-eval-upload',result.text))[0].id,original.id);
 });
+
+test('native-to-composer handoff reads only the exact session receipt and cannot expose content or start work',async t=>{
+ const f=await fixture(t),receipt=await(await f.upload(Buffer.from('private fixture original'),randomUUID(),'Notes.txt')).json();
+ const headers={cookie:'fixture=1','x-hub-upload':'1','x-hub-upload-id':receipt.id,'x-hub-session':'hub-eval-upload'};
+ const get=extra=>fetch(f.url+'/draft',{headers:{...headers,...extra}});
+ const r=await get();assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');
+ assert.deepEqual(await r.json(),{id:receipt.id,sessionId:'hub-eval-upload',name:'Notes.txt',bytes:24,mediaType:'text/plain',image:false});
+ assert.equal((await get({cookie:''})).status,401);assert.equal((await get({'sec-fetch-site':'cross-site'})).status,403);
+ assert.equal((await get({'x-hub-upload':'0'})).status,403);assert.equal((await get({'x-hub-session':'other'})).status,404);
+ assert.equal((await get({'x-hub-upload-id':randomUUID()})).status,404);assert.equal(f.imageSaves,0);
+});
 test('documents have bounded untrusted previews, unknown files remain honest, and transport guards fail closed',async t=>{
  const f=await fixture(t),text=await (await f.upload(Buffer.from('A real bilingual fixture: merhaba / hello.'),randomUUID(),'Notes.txt')).json();assert.match(text.text,/BEGIN UNTRUSTED FILE CONTENT/);assert.match(text.text,/merhaba \/ hello/);
  const unknown=await (await f.upload(Buffer.from('fixture binary'),randomUUID(),'Original.bin')).json();assert.match(unknown.text,/no local text preview/);assert.equal(unknown.image,false);

@@ -4,6 +4,7 @@ import type {HarnessClientContext} from "../core/context.ts";
 import {defineOverlayStyle} from "../shared/style-runtime.ts";
 import {UPLOAD_MAX_BYTES,UPLOAD_MAX_FILES} from "../../upload-contract.ts";
 import {uploadFile} from "./uploads.ts";
+import {installUploadHandoff} from "./upload-handoff.ts";
 import styles from "./composer-uploads.css";
 const installStyles=defineOverlayStyle("hub-composer-uploads",styles);
 const SOURCE="hub-file";
@@ -40,6 +41,9 @@ export function installComposerUploads(ctx:HarnessClientContext,conversation:Com
     const [anchor,setAnchor]=useState({left:16,bottom:80});
     const phase=useInput(s=>s.phase);
     const limits=useProjection?.("imageLimits");
+    const handoff=useRef<(file:File)=>void>(()=>{});
+    handoff.current=file=>stage([file],true);
+    useEffect(()=>installUploadHandoff(sessionId,file=>handoff.current(file),root),[sessionId]);
     useEffect(()=>{const fn=()=>update(v=>v+1);listeners.add(fn);return()=>{listeners.delete(fn);};},[]);
     const status=[...refs.values()].find(item=>item.sessionId===sessionId&&item.status)?.status;
     useLayoutEffect(()=>{
@@ -50,9 +54,10 @@ export function installComposerUploads(ctx:HarnessClientContext,conversation:Com
     },[open,error,status]);
     function closeMenu(){setOpen(false);trigger.current?.focus();}
     useEffect(()=>{if(!open)return;const close=(e:Event)=>{if(!shell.current?.contains(e.target as Node)&&!panel.current?.contains(e.target as Node))setOpen(false);};const key=(e:KeyboardEvent)=>{if(e.key==="Escape")closeMenu();};root.addEventListener("pointerdown",close);root.addEventListener("keydown",key);return()=>{root.removeEventListener("pointerdown",close);root.removeEventListener("keydown",key);};},[open]);
-    function stage(list:FileList|null){
+    function stage(list:ArrayLike<File>|null,rethrow=false){
       setOpen(false);setError("");if(!list?.length)return;
       try{
+        if(phase!=="plain")throw Error("Wait for the current message to finish, then retry adding your file.");
         const scope=ctx.sessions.scope?.(sessionId);if(!scope)throw Error("This conversation is no longer available.");
         const input=conversation.input.for(scope),before=input.state.getSnapshot();
         const live=new Set(before.occurrences.filter(o=>o.source===SOURCE).map(o=>o.ref));
@@ -79,7 +84,7 @@ export function installComposerUploads(ctx:HarnessClientContext,conversation:Com
           const state=input.state.getSnapshot();
           if(!input.insertReference({source:SOURCE,ref:id,label,clipboardText:token},{start:prefix.length,end:prefix.length+token.length,draftRev:state.draftRev})){refs.delete(id);input.setDraft(old);throw Error("The attachment could not be added. Please select it again.");}
         }
-      }catch(err){setError(err instanceof Error?err.message:"Couldn’t add these files.");}
+      }catch(err){setError(err instanceof Error?err.message:"Couldn’t add these files.");if(rethrow)throw err;}
     }
     const position={"--minke-upload-left":`${anchor.left}px`,"--minke-upload-bottom":`${anchor.bottom}px`} as CSSProperties;
     return <div className="hub-upload-control" ref={shell}>

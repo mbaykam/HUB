@@ -30,6 +30,14 @@ export function createUploadsHandler(ports: UploadPorts) {
     if (rejected || req.headers["sec-fetch-site"] === "cross-site") { send(res, rejected ?? 403, { error: "unauthorized" }); return; }
     try {
       const path = new URL(req.url ?? "", "http://localhost").pathname;
+      if (req.method === "GET" && path === "/api/hub/uploads/draft") {
+        if(req.headers["x-hub-upload"]!=="1")throw new UploadError(403,"Upload authorization required");
+        const id=req.headers["x-hub-upload-id"],sessionId=req.headers["x-hub-session"];
+        if(typeof id!=="string"||!uploadId.test(id)||typeof sessionId!=="string"||!uploadSession.test(sessionId))throw new UploadError(400,"Invalid upload identity");
+        const receipt=await ports.assets.upload(id);
+        if(!receipt||receipt.sessionId!==sessionId)throw new UploadError(404,"Attachment unavailable in this conversation");
+        send(res,200,{id:receipt.id,sessionId:receipt.sessionId,name:receipt.name,bytes:receipt.bytes,mediaType:receipt.mediaType,image:!!receipt.image});return;
+      }
       if (req.method === "GET" && path.startsWith("/api/hub/uploads/")) {
         const id = path.slice("/api/hub/uploads/".length);
         if (!uploadId.test(id)) throw new UploadError(404, "Attachment not found");
