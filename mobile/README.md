@@ -41,7 +41,8 @@ and uses native WebRTC audio with the existing SmallWebRTC/RTVI server. The same
 configured voice character, speech providers and saved conversation system stay
 on the server. No extra hosted voice provider or phone-side model key is needed.
 
-The voice sheet has **Mute**, **Interrupt**, **End conversation**, and an overflow
+The voice sheet has **Background listening / Resume conversation**, **Mute**,
+**Interrupt**, **End conversation**, and an overflow
 menu with **Reconnect audio**. **Hide** returns to HUB while keeping the call
 owned by the app. It also remains owned when the app backgrounds; the audio
 session uses voice-chat mode and the declared audio background capability.
@@ -53,6 +54,16 @@ Ending during admission waits for the owned receipt to finish and closes it;
 failed cleanup keeps an explicit retry instead of pretending the call ended.
 Reconnect uses the owned call, without resubmitting a user task or creating a
 second conversation. Existing web/Telegram calls block a second native call.
+
+Background listening uses the server's existing local wake-word path and configured
+wake phrase; it does not add a hosted model or keep Soniox recognition running in
+that mode. Owned health checks update the native display after automatic idle or
+wake changes, without fetching ambient transcripts. A mode change is confirmed by
+the server before the control claims success. Siri **Talk to HUB** on an already
+active conversation resumes its foreground listening instead of admitting another
+call. The microphone still reaches the existing Windows voice host for local wake
+detection; this is not an on-iPhone/offline wake engine. These transitions and
+latency still require physical iPhone acceptance.
 
 After an interrupted app process, **Voice** offers **Resume last conversation**
 or **Start new conversation**. A device-only Keychain receipt identifies the
@@ -98,6 +109,10 @@ conversation, call and immutable upload/share receipt IDs. Lost responses retry
 the same receipts rather than submitting duplicate instructions. A file from a
 different or ended call is shown as such and cannot silently move into a new
 conversation. Removing a local draft never modifies the selected source file.
+For an older call's draft, **Copy to current conversation** explicitly prepares a
+new draft with fresh receipt IDs, on the same HUB. It keeps the older draft and
+its original ownership intact. Review and **Send** remain separate actions;
+capacity limits still apply and no file is silently moved or deleted.
 Uploads are foreground operations; interruption can require an explicit retry.
 If preparation stopped before a conversation receipt was saved, an **Interrupted
 preparation** section exposes that local copy. It cannot be uploaded to an

@@ -17,6 +17,23 @@ private final class AttachmentFixture: URLProtocol {
     override func stopLoading() {}
 }
 final class HubAttachmentTests: XCTestCase {
+    func testExplicitCopyPreservesOriginalAndUsesFreshOwnerAndReceiptsWithinCapacity() async throws {
+        let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+        let server = try HubServer(address: "https://hub.example.com"), store = try HubAttachmentStore(root: root.appendingPathComponent("outbox"))
+        let bytes = Data("preserved recovery fixture".utf8)
+        let old = try await store.stage(data: bytes, name: "fixture.txt", server: server, sessionID: "old-chat", callID: "old-call")
+        let copy = try await store.copy(old, server: server, sessionID: "new-chat", callID: "new-call")
+        XCTAssertNotEqual(old.id, copy.id); XCTAssertNotEqual(old.requestID, copy.requestID)
+        let original = try await store.bytes(old, server: server, sessionID: "old-chat", callID: "old-call")
+        let copied = try await store.bytes(copy, server: server, sessionID: "new-chat", callID: "new-call")
+        XCTAssertEqual(original, bytes); XCTAssertEqual(copied, bytes)
+        do { _ = try await store.copy(old, server: HubServer(address: "https://other.example.com"), sessionID: "new-chat", callID: "new-call"); XCTFail("Cannot copy across origins") } catch {}
+        for _ in 0..<6 { _ = try await store.copy(old, server: server, sessionID: "new-chat", callID: "new-call") }
+        do { _ = try await store.copy(old, server: server, sessionID: "new-chat", callID: "new-call"); XCTFail("No capacity bypass or automatic deletion") }
+        catch { guard case HubAttachmentError.full = error else { return XCTFail("Expected capacity feedback") } }
+        let drafts = try await store.drafts(server: server)
+        XCTAssertEqual(drafts.count, 8); XCTAssertTrue(drafts.contains(old))
+    }
     func testInterruptedPreparationIsVisibleAndExplicitRemovalRestoresBoundedCapacity() async throws {
         let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
         let source = root.appendingPathComponent("original.txt"), original = Data("preserved fixture".utf8)

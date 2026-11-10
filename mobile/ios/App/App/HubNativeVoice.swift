@@ -35,6 +35,15 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private var readyTimeout: Task<Void, Never>?
     private var ready = false
     private var ownsAudio = false
+    private(set) var listeningInBackground = false
+    private(set) var changingAttention = false
+    private var attentionMonitor: Task<Void, Never>?
+    private var attentionChange: Task<HubVoiceAttention, Error>?
+    private var attentionRevision = 0
+    private var inputPaused = false
+    private var wakePhrase = "your wake phrase"
+    var canChangeAttention: Bool { isActive && ready && !ending && !changingAttention }
+    private var listeningStatus: String { changingAttention ? "Changing listening mode…" : listeningInBackground ? "Background listening · say “\(wakePhrase)”" : inputPaused ? "Resuming listening…" : "Listening" }
 
     init(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, resume: HubVoiceCheckpoint? = nil, pendingAdmission: HubVoiceAdmission? = nil) {
         self.api = api; self.server = server; self.deviceState = deviceState; self.resume = resume
@@ -222,12 +231,15 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
 
     func end() {
         guard isActive, !ending else { return }
-        ending = true; input?.isEnabled = false; channel?.close(); peer?.close()
+        ending = true; attentionMonitor?.cancel(); attentionMonitor = nil; attentionRevision += 1
+        input?.isEnabled = false; channel?.close(); peer?.close()
         update("Ending…")
         let pending = starting
         Task { await pending?.value; await finish() }
     }
     private func finish() async {
+        attentionMonitor?.cancel(); attentionMonitor = nil; attentionRevision += 1
+        changingAttention = false; attentionChange = nil
         readyTimeout?.cancel()
         input?.isEnabled = false; channel?.close(); peer?.close()
         channel = nil; peer = nil; input = nil; peerID = nil
@@ -250,6 +262,54 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         } else { notify() }
     }
     func toggleMute() { muted.toggle(); input?.isEnabled = !muted; notify() }
+    func toggleAttention() {
+        guard canChangeAttention else { return }
+        Task { do { try await changeAttention(background: !listeningInBackground) } catch { update("Listening mode was not confirmed. Use Resume or reconnect.") } }
+    }
+    func resumeForSystem() async throws {
+        guard await waitForStartup() else { throw HubVoiceAPIError.callUnavailable }
+        try await changeAttention(background: false)
+    }
+    private func changeAttention(background: Bool) async throws {
+        guard let owned = lease, isActive, !ending else { throw HubVoiceAPIError.callUnavailable }
+        let previous = attentionChange
+        attentionRevision += 1; let revision = attentionRevision
+        changingAttention = true; update(listeningStatus)
+        let task = Task { @MainActor [weak self] () throws -> HubVoiceAttention in
+            if let previous { _ = try? await previous.value }
+            guard let self, self.isActive, !self.ending, self.lease?.callId == owned.callId else { throw HubVoiceAPIError.callUnavailable }
+            return try await self.api.attention(callId: owned.callId, background: background)
+        }
+        attentionChange = task
+        defer { if attentionRevision == revision { changingAttention = false; attentionChange = nil; notify() } }
+        let result = try await task.value
+        guard attentionRevision == revision, lease?.callId == owned.callId, !ending else { return }
+        listeningInBackground = result.mode == .background; wakePhrase = result.wakePhrases[0]; inputPaused = false; changingAttention = false
+        update(listeningStatus)
+    }
+    private func monitorAttention() {
+        guard attentionMonitor == nil else { return }
+        attentionMonitor = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.isActive, !self.ending, let owned = self.lease else { return }
+                let revision = self.attentionRevision
+                do {
+                    let health = try await self.api.ownedHealth(callId: owned.callId, sessionId: owned.sessionId)
+                    guard !Task.isCancelled, self.lease?.callId == owned.callId else { return }
+                    if !self.changingAttention, revision == self.attentionRevision {
+                        let previous = self.listeningStatus
+                        if let attention = health.attention { self.listeningInBackground = attention.mode == .background; self.wakePhrase = attention.wakePhrases[0] }
+                        self.inputPaused = health.inputPaused == true
+                        if self.status == previous { self.update(self.listeningStatus) }
+                    }
+                } catch {
+                    if error as? HubVoiceAPIError == .callUnavailable { self.end(); return }
+                    // A transient health failure must not end audio or replay work.
+                }
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
+            }
+        }
+    }
     func interrupt() {
         guard let lease, !ending else { return }
         Task { do { try await api.interrupt(callId: lease.callId) } catch { update("Could not interrupt. Check the connection.") } }
@@ -276,7 +336,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         if type == .began { input?.isEnabled = false; update("Audio interrupted") }
         else {
             if AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume) {
-                do { try configureAudio(); input?.isEnabled = !muted; update("Listening") }
+                do { try configureAudio(); input?.isEnabled = !muted; update(listeningStatus) }
                 catch { update("Audio paused. Choose Reconnect to continue.") }
             } else { update("Audio paused. Choose Reconnect to continue.") }
         }
@@ -295,7 +355,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         DispatchQueue.main.async { [weak self] in
             guard let self, self.peer === peerConnection, !self.ending else { return }
             if newState == .failed || newState == .disconnected { self.update("Audio disconnected. Choose Reconnect to resume this conversation.") }
-            else if self.ready && (newState == .connected || newState == .completed) { self.update("Listening") }
+            else if self.ready && (newState == .connected || newState == .completed) { self.update(self.listeningStatus) }
         }
     }
     nonisolated func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
@@ -311,8 +371,8 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         DispatchQueue.main.async { [weak self] in
             guard let self, self.channel === dataChannel, !self.ending else { return }
             switch event.type {
-            case "bot-ready": self.ready = true; self.readyTimeout?.cancel(); self.update("Listening")
-            case "bot-stopped-speaking": self.update("Listening")
+            case "bot-ready": self.ready = true; self.readyTimeout?.cancel(); self.update(self.listeningStatus); self.monitorAttention()
+            case "bot-stopped-speaking": self.update(self.listeningStatus)
             case "bot-started-speaking": self.update("Speaking")
             case "bot-llm-started": self.update("Thinking…")
             case "error":

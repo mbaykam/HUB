@@ -49,6 +49,40 @@ final class HubVoiceAPITests: XCTestCase {
              HTTPCookie(properties: [.name: "foreign", .value: "do-not-send", .domain: "elsewhere.test", .path: "/"])!]
         }
     }
+    func testOwnedHealthAndAttentionKeepExactCallAndConfiguredWakePhrase() async throws {
+        let api = try client(); defer { api.invalidate() }
+        VoiceFixture.respond = { request, _ in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture-only")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: VoiceFixture.bodies.last!) as? [String: Any])
+            XCTAssertEqual(body["callId"] as? String, "owned-call")
+            if request.url?.path.hasSuffix("attention") == true {
+                XCTAssertEqual(body["mode"] as? String, "active")
+                return (200, "application/json", #"{"attention":{"mode":"active","wakePhrases":["Renamed assistant"]}}"#)
+            }
+            return (200, "application/json", #"{"callId":"owned-call","sessionId":"same-chat","status":"connected","attention":{"mode":"background","wakePhrases":["Renamed assistant"]},"inputPaused":true}"#)
+        }
+        let health = try await api.ownedHealth(callId: "owned-call", sessionId: "same-chat")
+        XCTAssertEqual(health.attention?.mode, .background); XCTAssertEqual(health.inputPaused, true)
+        let resumed = try await api.attention(callId: "owned-call", background: false)
+        XCTAssertEqual(resumed.mode, .active); XCTAssertEqual(resumed.wakePhrases, ["Renamed assistant"])
+        XCTAssertEqual(VoiceFixture.requests.count, 2)
+    }
+    func testHealthRejectsForeignOwnershipAndAttentionCannotFalselyConfirmResume() async throws {
+        let api = try client(); defer { api.invalidate() }
+        for reply in [
+            #"{"callId":"foreign-call","sessionId":"same-chat","status":"connected"}"#,
+            #"{"callId":"owned-call","sessionId":"foreign-chat","status":"connected"}"#,
+            #"{"callId":"owned-call","sessionId":"same-chat","status":"connected","attention":{"mode":"background","wakePhrases":[]}}"#
+        ] {
+            VoiceFixture.respond = { _, _ in (200, "application/json", reply) }
+            do { _ = try await api.ownedHealth(callId: "owned-call", sessionId: "same-chat"); XCTFail("Invalid owned health") }
+            catch { XCTAssertEqual(error as? HubVoiceAPIError, .invalidResponse) }
+        }
+        VoiceFixture.respond = { _, _ in (200, "application/json", #"{"attention":{"mode":"background","wakePhrases":["Vera"]}}"#) }
+        do { _ = try await api.attention(callId: "owned-call", background: false); XCTFail("Resume was not confirmed") }
+        catch { XCTAssertEqual(error as? HubVoiceAPIError, .invalidResponse) }
+    }
     func testAuthenticatedStatusNeverAcceptsAnHTMLLoginAsConnected() async throws {
         let api = try client()
         defer { api.invalidate() }

@@ -36,7 +36,7 @@ final class HubVoiceActivity {
     func update(_ voice: HubNativeVoice) {
         guard let activity else { return }
         let text = voice.status
-        let phase = text == "Speaking" || text == "Listening" ? text :
+        let phase = voice.listeningInBackground ? "Background listening" : text == "Speaking" || text == "Listening" ? text :
             text.hasPrefix("Thinking") ? "Thinking" :
             text.hasPrefix("Ending") ? "Ending" :
             text.hasPrefix("Connecting") || text.hasPrefix("Recovering") || text.hasPrefix("Allow microphone") ? "Connecting" : "Check HUB"

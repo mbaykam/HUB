@@ -220,7 +220,9 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
         }
         if (path === "/api/hub/voice/status") {
           const reply = await call.sidecar.request("/status", "GET");
-          send(response, reply.status, { ...publicCall(call), status: reply.body.status }); return;
+          if(current!==call||closing)throw new RequestError(410,"voice-call-ended");
+          const audio=reply.body.audio&&typeof reply.body.audio==="object"&&!Array.isArray(reply.body.audio)?reply.body.audio as Record<string,unknown>:undefined;
+          send(response, reply.status, { ...publicCall(call), status: reply.body.status, attention:audio?.attention??null,inputPaused:audio?.inputPaused===true }); return;
         }
         // Strip browser-only IDs and reject arbitrary proxy destinations.
         const payload = Object.fromEntries(["sdp", "type", "pc_id", "restart_pc", "candidates"].filter(key => key in body).map(key => [key, body[key]]));

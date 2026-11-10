@@ -46,7 +46,10 @@ final class HubAssistantCoordinator {
         // AudioRecordingIntent requires an ongoing Live Activity. Do not silently
         // start recording when that visible system surface is disabled.
         if let voice, voice.isActive {
-            try activity().begin(userInitiated: true); systemRecording = true
+            let wasSystemRecording = systemRecording
+            try activity().begin(userInitiated: true)
+            do { try await voice.resumeForSystem(); systemRecording = true }
+            catch { if !wasSystemRecording { activity().end() }; throw ActionError.unavailable }
             activity().update(voice); return
         }
         do {

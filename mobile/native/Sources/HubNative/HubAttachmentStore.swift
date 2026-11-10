@@ -91,6 +91,12 @@ public actor HubAttachmentStore {
         guard data.count == draft.bytes, Self.digest(data) == draft.sha256 else { throw HubAttachmentError.invalidFile }
         return data
     }
+    /// Explicit local copy only. Keep the old owner/receipts intact, validate
+    /// immutable source bytes, and allocate fresh receipts for the new owner.
+    public func copy(_ draft: HubAttachmentDraft, server: HubServer, sessionID: String, callID: String) throws -> HubAttachmentDraft {
+        let data = try bytes(draft, server: server, sessionID: draft.sessionID, callID: draft.callID)
+        return try stage(data: data, name: draft.name, server: server, sessionID: sessionID, callID: callID)
+    }
     public func discard(_ draft: HubAttachmentDraft) throws {
         // Only opaque files owned by this outbox; never touch the selected source.
         for suffix in [".json", ".bin"] {

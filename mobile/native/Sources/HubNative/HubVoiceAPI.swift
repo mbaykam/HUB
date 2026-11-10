@@ -12,6 +12,19 @@ public struct HubActiveVoiceCall: Decodable {
     public let sessionId: String
 }
 
+public struct HubVoiceAttention: Decodable {
+    public enum Mode: String, Decodable { case active, background }
+    public let mode: Mode
+    public let wakePhrases: [String]
+}
+public struct HubOwnedVoiceHealth: Decodable {
+    public let callId: String
+    public let sessionId: String
+    public let status: String
+    public let attention: HubVoiceAttention?
+    public let inputPaused: Bool?
+}
+
 public struct HubVoiceLease: Codable {
     public let callId: String
     public let sessionId: String
@@ -138,8 +151,23 @@ public final class HubVoiceAPI {
         guard try JSONDecoder().decode(Acceptance.self, from: data).accepted else { throw HubVoiceAPIError.invalidResponse }
     }
     public func interrupt(callId: String) async throws { _ = try await request("interrupt", method: "POST", body: ["callId": callId]) }
-    public func attention(callId: String, background: Bool) async throws {
-        _ = try await request("attention", method: "POST", body: ["callId": callId, "mode": background ? "background" : "active"])
+    public func ownedHealth(callId: String, sessionId: String) async throws -> HubOwnedVoiceHealth {
+        guard Self.validID(callId), Self.validID(sessionId) else { throw HubVoiceAPIError.invalidResponse }
+        let value = try JSONDecoder().decode(HubOwnedVoiceHealth.self, from: await request("status", method: "POST", body: ["callId": callId]))
+        guard value.callId == callId, value.sessionId == sessionId else { throw HubVoiceAPIError.invalidResponse }
+        if let attention = value.attention { try Self.validateAttention(attention) }
+        return value
+    }
+    private static func validateAttention(_ value: HubVoiceAttention) throws {
+        guard (1...3).contains(value.wakePhrases.count), value.wakePhrases.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 160 }) else { throw HubVoiceAPIError.invalidResponse }
+    }
+    @discardableResult public func attention(callId: String, background: Bool) async throws -> HubVoiceAttention {
+        guard Self.validID(callId) else { throw HubVoiceAPIError.invalidResponse }
+        struct Reply: Decodable { let attention: HubVoiceAttention }
+        let value = try JSONDecoder().decode(Reply.self, from: await request("attention", method: "POST", body: ["callId": callId, "mode": background ? "background" : "active"])).attention
+        try Self.validateAttention(value)
+        guard value.mode == (background ? .background : .active) else { throw HubVoiceAPIError.invalidResponse }
+        return value
     }
     public func offer(callId: String, payload: [String: Any], trickle: Bool = false) async throws -> Data {
         let allowed: Set<String> = ["sdp", "type", "pc_id", "restart_pc", "candidates"]

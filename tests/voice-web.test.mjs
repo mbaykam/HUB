@@ -27,6 +27,24 @@ async function fixture(overrides = {}, options = {}) {
 }
 const admission = () => ({ requestId: randomUUID(), requestedAt: Date.now() });
 
+test('owned native health exposes listening mode without transcripts and rejects stale sidecar results',async()=>{
+ const f=await fixture();const body={callId:f.call.callId};const gate=defer(),started=defer();
+ try{
+  await f.post('open',admission());
+  assert.equal((await f.post('status',body,{cookie:''})).status,401);
+  assert.equal((await f.post('status',body,{'sec-fetch-site':'cross-site'})).status,403);
+  assert.equal((await f.post('status',{callId:randomUUID()})).status,410);
+  f.call.sidecar.request=async()=>({status:200,body:{status:'connected',audio:{attention:{mode:'background',wakePhrases:['Vera']},inputPaused:true,partialText:'private fixture'}}});
+  const health=await(await f.post('status',body)).json();
+  assert.equal(health.callId,f.call.callId);assert.equal(health.sessionId,f.call.sessionId);
+  assert.deepEqual(health.attention,{mode:'background',wakePhrases:['Vera']});assert.equal(health.inputPaused,true);
+  assert.doesNotMatch(JSON.stringify(health),/private fixture|partialText/);
+  f.call.sidecar.request=async()=>{started.resolve();await gate.promise;return{status:200,body:{status:'connected',audio:{attention:{mode:'active',wakePhrases:['Vera']}}}};};
+  const pending=f.post('status',body);await started.promise;
+  await f.post('close',body);gate.resolve();assert.equal((await pending).status,410);
+ }finally{gate.resolve();await f.dispose();}
+});
+
 test('PWA and Telegram call identity follows explicit character handoffs without reopening speech',async()=>{
  let character={id:'voice-fixture',name:'Voice fixture'};
  const f=await fixture({character:session=>{assert.equal(session,'synthetic-voice-chat');return character;}});

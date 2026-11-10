@@ -8,6 +8,7 @@ final class HubVoiceViewController: UIViewController {
     private let mute = UIButton(type: .system)
     private let interrupt = UIButton(type: .system)
     private let end = UIButton(type: .system)
+    private let attention = UIButton(type: .system)
 
     init(voice: HubNativeVoice, openConversation: @escaping () -> Void) { self.voice = voice; self.openConversation = openConversation; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Use init(voice:)") }
@@ -43,12 +44,14 @@ final class HubVoiceViewController: UIViewController {
         mute.addAction(UIAction { [weak self] _ in self?.voice.toggleMute() }, for: .touchUpInside)
         interrupt.configuration = .tinted(); interrupt.setTitle("Interrupt", for: .normal)
         interrupt.addAction(UIAction { [weak self] _ in self?.voice.interrupt() }, for: .touchUpInside)
+        attention.configuration = .tinted()
+        attention.addAction(UIAction { [weak self] _ in self?.voice.toggleAttention() }, for: .touchUpInside)
         end.configuration = .filled(); end.configuration?.baseBackgroundColor = .systemRed
         end.setTitle("End conversation", for: .normal)
         end.addAction(UIAction { [weak self] _ in self?.voice.end() }, for: .touchUpInside)
         let actions = UIStackView(arrangedSubviews: [mute, interrupt])
         actions.distribution = .fillEqually; actions.spacing = 12
-        let stack = UIStackView(arrangedSubviews: [status, transcript, actions, end])
+        let stack = UIStackView(arrangedSubviews: [status, transcript, attention, actions, end])
         stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -57,6 +60,7 @@ final class HubVoiceViewController: UIViewController {
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             mute.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+            attention.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
             end.heightAnchor.constraint(greaterThanOrEqualToConstant: 48)
         ])
         refresh()
@@ -65,6 +69,8 @@ final class HubVoiceViewController: UIViewController {
         status.text = voice.status
         transcript.text = voice.transcript.isEmpty ? "Your conversation will appear here. Hide returns to HUB while keeping the call active. End stops the microphone." : voice.transcript
         mute.setTitle(voice.muted ? "Unmute" : "Mute", for: .normal)
+        attention.setTitle(voice.changingAttention ? "Changing listening mode…" : voice.listeningInBackground ? "Resume conversation" : "Background listening", for: .normal)
+        attention.isEnabled = voice.canChangeAttention
         mute.isEnabled = voice.isActive; interrupt.isEnabled = voice.isActive; end.isEnabled = voice.isActive
     }
     @objc private func hide() { dismiss(animated: true) }

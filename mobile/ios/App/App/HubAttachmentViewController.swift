@@ -142,8 +142,22 @@ struct HubVoiceAttachmentContext {
     }
     private func owns(_ draft: HubAttachmentDraft) -> Bool { draft.sessionID == context.sessionID && draft.callID == context.callID && context.stillOwned() }
     private func review(_ draft: HubAttachmentDraft) {
-        let sheet = UIAlertController(title: draft.name, message: owns(draft) ? "Send this file to the current voice conversation? HUB will retain the original. You can continue speaking while it uploads." : "This file belongs to a different or ended call. It will not be sent to your current conversation. Your local copy is preserved.", preferredStyle: .alert)
+        let sheet = UIAlertController(title: draft.name, message: owns(draft) ? "Send this file to the current voice conversation? HUB will retain the original. You can continue speaking while it uploads." : "This file belongs to a different or ended call. You can explicitly copy it to the current conversation on \(context.server.origin.host ?? "HUB"). The previous draft stays intact. Copying does not upload; Send is a separate step.", preferredStyle: .alert)
         if owns(draft) { sheet.addAction(UIAlertAction(title: "Send to conversation", style: .default) { [weak self] _ in self?.send(draft) }) }
+        else if context.stillOwned() {
+            sheet.addAction(UIAlertAction(title: "Copy to current conversation", style: .default) { [weak self] _ in
+                guard let self, !self.busy else { return }; self.busy = true
+                Task {
+                    defer { self.busy = false; self.reloadDrafts() }
+                    do {
+                        guard self.context.stillOwned() else { throw HubAttachmentError.callEnded }
+                        _ = try await self.store.copy(draft, server: self.context.server, sessionID: self.context.sessionID, callID: self.context.callID)
+                        guard self.context.stillOwned() else { throw HubAttachmentError.callEnded }
+                        self.message = "Copied to pending files. Tap the new copy to review and send. The previous draft is preserved."
+                    } catch { self.message = self.describe(error) + " The previous draft is preserved." }
+                }
+            })
+        }
         sheet.addAction(UIAlertAction(title: "Remove local draft", style: .destructive) { [weak self] _ in
             guard let self else { return }
             Task { do { try await self.store.discard(draft); self.message = "Local draft removed. The original selected file was not changed." } catch { self.message = "Could not remove the local draft." }; self.reloadDrafts() }
