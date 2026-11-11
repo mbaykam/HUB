@@ -25,7 +25,11 @@ try{
   device=sim('clone',selected.seed,'HUB isolated launch '+process.env.GITHUB_RUN_ID);
   if(!/^[A-F0-9-]{36}$/i.test(device))throw Error('Invalid new simulator identity.');
   stage='boot';console.log('Booting '+device);sim('boot',device);
-  run('/usr/bin/open',['-a','Simulator','--args','-CurrentDeviceUDID',device]);
+  // Hosted Xcode installations may not register Simulator with Launch Services.
+  // Use the Simulator belonging to the selected toolchain, not an app-name lookup.
+  const simulatorApp=resolve(run('/usr/bin/xcode-select',['-p']),'Applications/Simulator.app');
+  if(!(await lstat(simulatorApp)).isDirectory())throw Error('Selected Xcode has no Simulator app.');
+  run('/usr/bin/open',['-a',simulatorApp,'--args','-CurrentDeviceUDID',device]);
   stage='bootstatus';console.log('Waiting for native simulator startup');
   run('xcrun',['simctl','bootstatus',device,'-b'],480000);
   stage='install';console.log('Installing the verified existing bundle');
