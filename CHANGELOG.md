@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.0
+
+- Supply authenticated host endpoints for the iPhone companion's conversations,
+  opt-in notifications and explicitly consented screen frames.
+- Keep native audio and saved-call recovery separate from unprivileged remote
+  PWA content; preserve existing web and Telegram workflows and user settings.
+- Validate a real Apple-signed iPhone archive and App Store export. TestFlight
+  delivery and physical-device acceptance remain distinct from build success.
+
 ## 1.9.2
 
 - Add new voice conversations to normal Recents automatically, without a

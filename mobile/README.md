@@ -5,7 +5,8 @@ your existing HTTPS HUB in a persistent, unprivileged WebKit view. Sign in throu
 your existing access provider; no server or model-provider key is copied to the
 iPhone. It is not yet a finished daily-use client: native voice is in development
 and requires device acceptance; Siri/Live Activities are also development-only,
-and notifications and system sharing are still being implemented. Windows HUB and
+and notifications and system sharing require the matching host configuration and
+physical-device acceptance described below. Windows HUB and
 its PWA continue to use their existing release.
 
 ## Connect a development build

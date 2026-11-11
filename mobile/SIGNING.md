@@ -1,16 +1,17 @@
 # Manual iPhone signing handoff
 
-The signing workflow is prepared development code. It has not signed or uploaded
-HUB with real Apple credentials. Offline policy/cleanup fixtures do not prove
+The protected manual workflow has signed and exported the iPhone app with real
+Apple credentials. Signing success does not prove TestFlight processing or
+physical iPhone behavior. Offline policy/cleanup fixtures do not prove
 certificate trust, signing, TestFlight processing or physical iPhone behavior.
 The existing unsigned simulator/device workflow remains separate.
 
 ## Owner setup, after enrollment
 
 1. Select the Apple team and register the final app, voice-widget and Share IDs
-   and App Group. The current `com.mbaykam.hub` identifiers are provisional.
+   and App Group. This deployment uses the registered `com.mbaykam.hub` IDs.
    Commit any identifier changes consistently; `pnpm check` verifies the project.
-2. Create the corresponding App Store Connect app record yourself. Prepare an
+2. Create the corresponding App Store Connect app record in your own account. Prepare an
    existing Apple Distribution identity as a password-protected PKCS#12 file and
    three **App Store distribution** profiles. App and Share need the committed App
    Group; the app profile needs production notifications. Developer/ad-hoc and
@@ -84,8 +85,8 @@ Deliver the matching HUB host/PWA through the normal supported update before the
 first phone test, with a private backup and no active user work. Older installed
 hosts may support voice but lack native screen, conversation or push routes.
 Keep [ACCEPTANCE.md](ACCEPTANCE.md) open during signing/device acceptance. A
-successful unsigned build, metadata fixture or export is not a finished iPhone
-release. No signing workflow was enabled or run during this preparation.
+successful unsigned build, metadata fixture or signed export is not a finished
+iPhone release. Keep account credentials and deployment evidence private.
 
 Apple documents [uploading builds](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/)
 and [API-authenticated altool uploads](https://help.apple.com/asc/appsaltool/en.lproj/static.html).
