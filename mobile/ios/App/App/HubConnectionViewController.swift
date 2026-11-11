@@ -22,7 +22,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         set { HubAssistantCoordinator.shared.adopt(newValue) }
     }
     private var deviceState: HubDeviceState?
-    deinit { probe?.cancel(); api?.invalidate() }
+    private var keyboardObserver: NSObjectProtocol?
+    deinit { probe?.cancel(); api?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) } }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -39,6 +40,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         webView.allowsBackForwardNavigationGestures = true
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        hideKeyboardShortcuts(in: webView)
+        keyboardObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in guard let self else { return }; self.hideKeyboardShortcuts(in: self.webView) }
+        }
         message.font = .preferredFont(forTextStyle: .caption1)
         message.adjustsFontForContentSizeCategory = true
         message.textColor = .secondaryLabel
@@ -85,6 +90,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func showContent() { recovery.isHidden = true; webView.isHidden = false }
+    // Public UIKit API only: no private WebKit classes, method replacement or
+    // privileged script access to the remote page.
+    private func hideKeyboardShortcuts(in view: UIView) {
+        view.inputAssistantItem.leadingBarButtonGroups = []
+        view.inputAssistantItem.trailingBarButtonGroups = []
+        for child in view.subviews { hideKeyboardShortcuts(in: child) }
+    }
     private func showRecovery(_ text: String) {
         probe?.cancel(); connected = false
         message.text = text; recoveryVoice.isHidden = voice?.isActive != true
@@ -230,7 +242,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil) {
         let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending)
         voice = model
-        let sheet = HubVoiceViewController(voice: model) { [weak self, weak model] in
+        let sheet = HubVoiceViewController(voice: model, restart: { [weak self] in
+            self?.dismiss(animated: true) { [weak self] in self?.showVoice() }
+        }) { [weak self, weak model] in
             guard let self else { return }
             guard let destination = model?.conversationDestination() else {
                 self.showNotice("Wait for voice to connect before opening its conversation.")
@@ -362,6 +376,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
     private func offerNativeVoice() {
         let active = voice?.isActive == true
+        if active { showVoice(); return }
         let alert = UIAlertController(title: active ? "Open voice controls?" : "Start voice?", message: active ? "Your existing voice conversation will stay active." : "Start or resume a voice conversation using your iPhone microphone.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: active ? "Open controls" : "Continue", style: .default) { [weak self] _ in self?.showVoice() })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))

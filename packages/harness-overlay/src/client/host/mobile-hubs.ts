@@ -6,6 +6,7 @@ import type { HarnessClientContext } from "../core/context.ts";
 import {createVoiceCamera} from "./voice-camera.ts";
 import {createCharacterPicker} from "./character-picker.ts";
 import {createNativeVoiceEntry} from "./native-voice-entry.ts";
+import {compactComposer} from "./compact-composer.ts";
 import type { createVoiceClient, VoiceState } from "../voice/browser-client.ts";
 import { createMobileActivity, createActivitySignals, type ActivityPendingSource } from "./mobile-activity.ts";
 import {createDurableActivity} from "./mobile-durable-activity.ts";
@@ -146,7 +147,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     hub.toggleAttribute("data-voice-background",attentionMode==="background");
     hub.toggleAttribute("data-external-call", !!external);
     hub.toggleAttribute("data-home", inHome);
-    hub.toggleAttribute("data-idle-bar", inHome && !busy);
+    hub.toggleAttribute("data-idle-bar", !busy);
     surface.hidden = !inHome;
     if (inHome) {
       for (const [index,node] of [knowledge.panel, liveVoice, planner.panel, activity.panel, transcript.panel, browser.panel].entries()) if (surface.children[index]!==node) surface.insertBefore(node,surface.children[index]??null);
@@ -155,7 +156,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
       if (transcript.panel.parentElement !== hub) hub.insertBefore(transcript.panel, play);
     }
     hub.removeAttribute("data-shared");
-    hub.hidden = !inHome && !busy;
+    hub.hidden = false;
     nav.hidden = inHome;
     activity.panel.hidden = !inHome;
     const nativeSessions = ctx.sessions.list.getSnapshot();durableActivity.update(inHome);
@@ -163,7 +164,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     const work=durableActivity.read(nativeSessions);
     activity.update({ ...work, observations: activitySignals.read(work), pendingBySession: pendingSource?.getSnapshot() }, voiceSession,durableActivity.failed?"disconnected": ctx.connection?.state ? ctx.connection.state.getSnapshot() ?? "connecting" : "connected");
     start.hidden = busy || !!nativeEntry; start.disabled = !enabled || loading;
-    if(nativeEntry){nativeEntry.hidden=busy;nativeEntry.setAttribute("aria-disabled",String(!enabled||loading));}
+    if(nativeEntry){nativeEntry.hidden=false;nativeEntry.setAttribute("aria-disabled",String(!enabled||loading));const label=nativeEntry.querySelector('strong');if(label)label.textContent=busy?'Open voice':'Speak';}
     controls.hidden = !busy;
     liveVoice.hidden=!busy;liveLabel.textContent=loading||["microphone","starting","connecting"].includes(state)?"Preparing voice…":state==="ending"?"Ending voice…":audioConnection==="connecting"?"Connecting audio…":muted&&!external?"Microphone muted":attentionMode==="background"?`Waiting for “${wakePhrases[0]}”`:audioStage==="echo-tail"||inputPaused&&state==="listening"?"Resuming listening…":state==="speaking"?"Speaking":state==="thinking"?"Preparing a reply…":audioStage==="transcribing"?"Understanding your words…":receivingAudio===false?"Audio hasn’t reached HUB yet":"Listening to you";
     attentionButton.textContent=attentionMode==="background"?"Resume":"Background";attentionButton.setAttribute("aria-pressed",String(attentionMode==="background"));attentionButton.title=attentionMode==="background"?"Resume conversation without reconnecting":"Only respond after hearing the wake phrase";
@@ -193,6 +194,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     stack.setAttribute("data-hub-composer-stack", "");
     if (hub.parentElement !== stack) stack.prepend(hub);
     const nativeBar = seat.querySelector('[data-slot="conversation.composer.bar"]');
+    const card=seat.querySelector<HTMLElement>('[data-composer-card]');if(card)compactComposer(card);
     const scroll = next.querySelector<HTMLElement>("[data-conversation-scroll]");
     if (scroll && surface.parentElement !== scroll) scroll.prepend(surface);
     if (nativeBar && textHeading.parentElement !== stack) stack.insertBefore(textHeading, nativeBar);

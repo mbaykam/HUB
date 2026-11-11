@@ -194,6 +194,22 @@ html[data-minke-mobile-web] [data-hub-home] [data-composer-seat]{position:relati
 [data-hub-home][data-hub-voice-active] [data-voice-actions]{grid-column:1/-1;grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-columns:auto}
 [data-voice-actions] [data-voice-camera]{order:9}
 [data-voice-actions] [data-voice-end]{order:10}
+/* One editor and three actions: menu, voice, send. Hidden triggers keep their
+   original handlers and anchor geometry for the existing accessible popovers. */
+html[data-minke-mobile-web] [data-hub-compact-composer]{position:relative;min-height:62px!important;padding:10px 154px 10px 14px!important;border-radius:22px!important;box-sizing:border-box}
+html[data-minke-mobile-web] [data-hub-compact-composer] [data-input-scroll]{padding:0!important;min-height:40px;max-height:150px}
+html[data-minke-mobile-web] [data-hub-compact-composer] [data-composer-placeholder]{max-width:100%;font-size:16px;line-height:40px}
+html[data-minke-mobile-web] [data-hub-composer-row],html[data-minke-mobile-web] [data-hub-composer-tools],html[data-minke-mobile-web] [data-hub-composer-trailing]{display:contents!important}
+html[data-minke-mobile-web] [data-hub-compact-composer] :is([aria-label="Choose character"],[aria-label="Attach photos or files"]){position:absolute!important;left:12px;bottom:10px;visibility:hidden;pointer-events:none}
+html[data-minke-mobile-web] [data-hub-composer-menu]{position:absolute;right:106px;bottom:9px;width:42px;height:42px;min-height:42px!important;min-width:42px!important;background:none;border:0}
+html[data-minke-mobile-web] [data-hub-composer-send]{position:absolute!important;right:10px;bottom:9px;width:42px!important;height:42px!important;min-height:42px!important;min-width:42px!important}
+html[data-minke-mobile-web] [data-hub-composer-stack] [data-hub-voice-hub][data-idle-bar]{position:absolute;right:60px;bottom:9px;top:auto;z-index:3;width:42px;min-height:42px;height:42px;margin:0;padding:0;background:none;border:0}
+html[data-minke-mobile-web] [data-hub-voice-hub][data-idle-bar] [data-voice-start]{width:42px;height:42px;min-height:42px;padding:0;border:0;background:none;display:flex;align-items:center;justify-content:center}
+html[data-minke-mobile-web] [data-hub-voice-hub][data-idle-bar] [data-voice-start] strong{display:none}
+html[data-minke-mobile-web] [data-hub-voice-hub][data-idle-bar] [data-voice-glyph]{position:static;transform:none;height:24px;display:flex;align-items:center;gap:3px}
+html[data-minke-mobile-web] [data-hub-voice-hub][data-idle-bar] [data-voice-glyph] i{width:2px;height:10px}
+html[data-minke-mobile-web] [data-hub-voice-hub][data-idle-bar] [data-voice-glyph] i:nth-child(3){height:22px}
+html[data-minke-mobile-web] [data-hub-text-heading]{display:none!important}
 @media(max-width:600px){[data-hub-voice-hub]:not([data-home]) [data-voice-actions]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:row;grid-auto-columns:auto}}
 html[data-minke-mobile-web] [data-hub-chat-stats]{display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;white-space:normal;overflow:visible;max-width:100%;width:100%;min-width:0;padding:5px 12px 0;font-size:11px;line-height:1.45}
 html[data-minke-mobile-web] [data-hub-chat-stats]>span{min-width:0;overflow-wrap:anywhere}

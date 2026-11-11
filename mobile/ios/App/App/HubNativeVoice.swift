@@ -383,6 +383,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
                 if let text = event.text, event.final {
                     self.transcript += "\(event.type == "user-transcription" ? "You" : "Assistant"): \(text)\n\n"
                     self.transcript = String(self.transcript.suffix(24_000)); self.notify()
+                    if event.type == "user-transcription", HubRTVI.requestsEnd(text) { self.end() }
                 }
             default: break
             }

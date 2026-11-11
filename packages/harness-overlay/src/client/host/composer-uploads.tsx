@@ -52,7 +52,7 @@ export function installComposerUploads(ctx:HarnessClientContext,conversation:Com
       place();view.addEventListener("resize",place);root.addEventListener("scroll",place,true);view.visualViewport?.addEventListener("resize",place);
       return()=>{view.removeEventListener("resize",place);root.removeEventListener("scroll",place,true);view.visualViewport?.removeEventListener("resize",place);};
     },[open,error,status]);
-    function closeMenu(){setOpen(false);trigger.current?.focus();}
+    function closeMenu(){setOpen(false);const button=trigger.current;const target=button&&root.defaultView?.getComputedStyle(button).visibility==='hidden'?button.closest('[data-composer-card]')?.querySelector<HTMLButtonElement>('[aria-label="More actions"]'):button;target?.focus();}
     useEffect(()=>{if(!open)return;const close=(e:Event)=>{if(!shell.current?.contains(e.target as Node)&&!panel.current?.contains(e.target as Node))setOpen(false);};const key=(e:KeyboardEvent)=>{if(e.key==="Escape")closeMenu();};root.addEventListener("pointerdown",close);root.addEventListener("keydown",key);return()=>{root.removeEventListener("pointerdown",close);root.removeEventListener("keydown",key);};},[open]);
     function stage(list:ArrayLike<File>|null,rethrow=false){
       setOpen(false);setError("");if(!list?.length)return;

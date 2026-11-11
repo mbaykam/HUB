@@ -42,6 +42,17 @@ entry below for that development path. Agent HTML has no native plugin access.
 
 ## Native voice development path
 
+The compact mobile composer shows **Chat…**, **More actions**, **Speak** and
+**Send**. More actions contains attachments, characters, research, commands and
+chat settings. An active native call keeps **Open voice** reachable from HUB.
+Ended native calls offer **Resume conversation**, instead of disabled controls.
+Final user transcripts containing an explicit short end-call request (for
+example “Vera, sesi kapat” or “End the call”) close only this phone's owned call;
+assistant speech, negatives and quoted examples are excluded. This control does
+not depend on the language model having a hangup tool. Device speech acceptance
+is still required. UIKit input-assistant groups are cleared using public APIs;
+the actual iPhone keyboard accessory appearance must be checked on device.
+
 After the connection is verified, choose **Speak** in HUB's existing composer, or
 **Settings → iPhone → Voice**. It
 requests the microphone, admits one call through the existing HUB control plane,
