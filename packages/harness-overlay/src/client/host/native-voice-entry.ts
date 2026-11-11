@@ -11,3 +11,16 @@ export function createNativeVoiceEntry(root:Document):HTMLAnchorElement|undefine
   for(let i=0;i<5;i++)glyph.append(root.createElement("i"));
   link.append(title,glyph);return link;
 }
+
+/** Settings-only entry supported by the header-free native client. UA is a
+ * display hint; UIKit independently validates the exact user-activated link. */
+export function createNativeOptionsEntry(root:Document):HTMLAnchorElement|undefined{
+  const view=root.defaultView;
+  const version=view?.navigator.userAgent.match(/(?:^|\s)HUBiOS\/(\d+)\.(\d+)(?:\.\d+)?(?:\s|$)/);
+  if(!view||view.location.protocol!=="https:"||!version||Number(version[1])===0&&Number(version[2])<2)return;
+  const link=root.createElement("a");
+  link.href=new URL("/?hubNative=options",view.location.origin).href;
+  link.textContent="iPhone";link.setAttribute("data-native-options-entry","");
+  link.setAttribute("aria-label","iPhone settings");link.title="Voice, notifications, files and connection";
+  return link;
+}

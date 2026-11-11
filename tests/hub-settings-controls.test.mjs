@@ -4,9 +4,10 @@ import { setImmediate } from "node:timers/promises";
 import { JSDOM } from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
 import { installHubSettingsControls } from "@minke/harness-overlay/client/host/hub-settings-controls.ts";
 
-function fixture() {
+function fixture(userAgent) {
   const dom = new JSDOM('<div data-slot="sidebar.settings"><div role="dialog"><nav></nav><div><header><button data-hub-settings-native-close>Close</button></header><main></main></div></div></div><button data-minke-mobile-right-drawer-close>Close panel</button>', { url: "https://hub.test/" });
   const root = dom.window.document, requests = [], opened = [], changes = [];
+  if(userAgent)Object.defineProperty(dom.window.navigator,"userAgent",{value:userAgent});
   dom.window.ResizeObserver = class { observe() {} disconnect() {} };
   dom.window.HTMLDialogElement.prototype.showModal = function() { this.setAttribute("open", ""); };
   dom.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute("open"); this.dispatchEvent(new dom.window.Event("close")); };
@@ -22,6 +23,18 @@ function fixture() {
   const dispose = installHubSettingsControls(container, root, sessions, history);
   return { dom, root, container, requests, opened, changes, dispose };
 }
+
+test("header-free iPhone controls stay in Settings while old builds and ordinary browsers keep their existing navigation",()=>{
+ for(const [ua,expected] of [["Safari HUBiOS/0.2",true],["Safari HUBiOS/0.10",true],["Safari HUBiOS/0.1",false],["Safari",false]]){
+  const f=fixture(ua);
+  try{
+   const link=f.container.querySelector('[data-native-options-entry]');
+   assert.equal(Boolean(link),expected);
+   if(link){assert.equal(link.href,"https://hub.test/?hubNative=options");assert.equal(link.getAttribute('aria-label'),'iPhone settings');assert.equal(link.closest('[data-hub-settings-connections]')!==null,true);}
+   assert.ok(f.requests.every(r=>r.method!=="POST"));
+  }finally{f.dispose();f.dom.window.close();}
+ }
+});
 
 test("Settings opens existing characters and Telegram controls without changing configuration", async () => {
   const f = fixture();

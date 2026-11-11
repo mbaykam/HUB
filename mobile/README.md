@@ -23,8 +23,14 @@ a fresh verified session. After reboot it is unavailable until the first unlock.
 Reopening uses the saved server address and existing web state; expired sessions
 still need sign-in. Passwords and cookies are never stored in app preferences.
 
-The top-right connection menu offers **Connection**, **Reload**, and **Sign out on
-this iPhone**. Signing out clears native saved access and web sign-in cookies, and closes its web
+The connected screen has no native header or connection-status row. The PWA fills
+the space below the iPhone's system status area. **Settings → iPhone** offers
+**Voice**, **Files**, **Notifications**, **Connection**, **Reload**, and **Sign out on
+this iPhone**. This entry is shown only by a supporting native client; ordinary
+Safari and older wrappers keep their existing controls. It opens a native menu,
+not an automatic command or privileged JavaScript bridge. Offline/first-connect
+recovery retains explicit Connect/Retry actions and controls for an active call.
+Signing out clears native saved access and web sign-in cookies, and closes its web
 view, without deleting anything on the HUB server. External links open in a
 separate browser sheet. Offline/TLS/login failures leave an explicit recovery
 message and a way back to Connection. Foreground microphone/camera access uses
@@ -36,7 +42,8 @@ entry below for that development path. Agent HTML has no native plugin access.
 
 ## Native voice development path
 
-After the connection is verified, choose **Voice** in the native top bar. It
+After the connection is verified, choose **Speak** in HUB's existing composer, or
+**Settings → iPhone → Voice**. It
 requests the microphone, admits one call through the existing HUB control plane,
 and uses native WebRTC audio with the existing SmallWebRTC/RTVI server. The same
 configured voice character, speech providers and saved conversation system stay
@@ -53,7 +60,7 @@ This is navigation to a confirmation, not a privileged JavaScript bridge.
 The wrapper identifies itself through a nonprivileged `HUBiOS` user-agent hint;
 ordinary Safari/PWA keeps its browser voice flow. Native WebKit microphone
 requests are denied, including on older PWA builds, with guidance to use **Voice**
-in the app bar. Native Voice owns microphone permission/audio instead. Normal
+through HUB's Speak entry. Native Voice owns microphone permission/audio instead. Normal
 main-page camera-only requests retain the standard permission prompt; agent
 frames still cannot use capture. This avoids accidentally choosing web audio
 that cannot provide native lock-screen continuity. Actual phone acceptance is

@@ -7,6 +7,7 @@ import type { VoiceHistoryClient } from "./voice-history.ts";
 import styles from "./hub-settings-controls.css";
 import {installSpeechSettings} from "./mobile-speech-settings.ts";
 import {installMobileModels} from "./mobile-models.ts";
+import {createNativeOptionsEntry} from "./native-voice-entry.ts";
 
 const installStyles = defineOverlayStyle("hub-settings-controls", styles);
 
@@ -35,6 +36,8 @@ export function installHubSettingsControls(
     view.dispatchEvent(new view.Event("hub:characters-open"));
   });
   connections.append(characters);
+  const iphone=createNativeOptionsEntry(root);
+  if(iphone)connections.append(iphone);
   const removeSpeech=installSpeechSettings(connections,root);
   const removeModels=installMobileModels(connections,root,()=>undefined,{browseOnly:true});
   const knowledge = root.createElement("div");

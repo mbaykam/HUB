@@ -55,7 +55,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   start.append(title, voiceGlyph);
   const nativeEntry=createNativeVoiceEntry(root);
   if(nativeEntry)start.hidden=true;
-  nativeEntry?.addEventListener("click",event=>{if(!enabled||loading){event.preventDefault();error.textContent="Voice isn’t ready on HUB yet. Use Voice in the app bar or check the connection.";}});
+  nativeEntry?.addEventListener("click",event=>{if(!enabled||loading){event.preventDefault();error.textContent="Voice isn’t ready on HUB yet. Check your connection in Settings → iPhone.";}});
   const controls = root.createElement("div"); controls.setAttribute("data-voice-controls", "");
   const status = root.createElement("span"); status.setAttribute("role", "status");
   const mute = root.createElement("button"); mute.type = "button"; mute.textContent = "Mute";

@@ -10,8 +10,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var server: HubServer?
     private var webView: WKWebView!
     private let message = UILabel()
-    private let progress = UIProgressView(progressViewStyle: .bar)
-    private var progressObservation: NSKeyValueObservation?
+    private let recovery = UIStackView()
+    private let recoveryVoice = UIButton(type: .system)
     private var probe: Task<Void, Never>?
     private var api: HubVoiceAPI?
     private var connectionGeneration = 0
@@ -27,18 +27,18 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        title = "HUB"
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Voice", style: .plain, target: self, action: #selector(showVoice))
+        navigationController?.setNavigationBarHidden(true, animated: false)
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.allowsInlineMediaPlayback = true
-        config.applicationNameForUserAgent = "HUBiOS/0.1"
+        config.applicationNameForUserAgent = "HUBiOS/0.2"
         // Do not add native message handlers to this configuration.
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
         message.font = .preferredFont(forTextStyle: .caption1)
         message.adjustsFontForContentSizeCategory = true
         message.textColor = .secondaryLabel
@@ -46,41 +46,72 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         message.numberOfLines = 0
         message.text = "Connect to your HUB to get started."
         message.accessibilityTraits = .updatesFrequently
-        let status = UIStackView(arrangedSubviews: [message, progress])
-        status.axis = .vertical
-        status.spacing = 4
-        status.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(status)
+        let connectButton = UIButton(type: .system)
+        connectButton.setTitle("Connect to HUB", for: .normal)
+        connectButton.addAction(UIAction { [weak self] _ in self?.showConnection() }, for: .touchUpInside)
+        let retryButton = UIButton(type: .system)
+        retryButton.setTitle("Retry", for: .normal)
+        retryButton.addAction(UIAction { [weak self] _ in self?.reload() }, for: .touchUpInside)
+        recovery.axis = .vertical
+        recovery.spacing = 16
+        recovery.translatesAutoresizingMaskIntoConstraints = false
+        recoveryVoice.setTitle("Open voice controls", for: .normal)
+        recoveryVoice.addAction(UIAction { [weak self] _ in self?.showVoice() }, for: .touchUpInside)
+        recoveryVoice.isHidden = true
+        let recoveryControls: [UIView] = [message, connectButton, retryButton, recoveryVoice]
+        recoveryControls.forEach { recovery.addArrangedSubview($0) }
         view.addSubview(webView)
+        view.addSubview(recovery)
         NSLayoutConstraint.activate([
-            status.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
-            status.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            status.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            webView.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 4),
+            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            recovery.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+            recovery.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            recovery.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)
         ])
-        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
-            UIAction(title: "Files", image: UIImage(systemName: "paperclip")) { [weak self] _ in self?.showSharedFiles() },
-            UIAction(title: "Notifications", image: UIImage(systemName: "bell")) { [weak self] _ in
-                guard let self else { return }; HubNotifications.shared.show(from: self)
-            },
-            UIAction(title: "Connection", image: UIImage(systemName: "network")) { [weak self] _ in self?.showConnection() },
-            UIAction(title: "Reload", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.reload() },
-            UIAction(title: "Sign out on this iPhone", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { [weak self] _ in self?.confirmSignOut() }
-        ]))
-        navigationItem.rightBarButtonItem?.accessibilityLabel = "HUB connection options"
-        progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] web, _ in
-            self?.progress.progress = Float(web.estimatedProgress)
-            self?.progress.isHidden = web.estimatedProgress >= 1
-        }
         HubNotifications.shared.destinationHandler = { [weak self] destination in self?.openNotification(destination) }
         if let address = UserDefaults.standard.string(forKey: savedOriginKey), let saved = try? HubServer(address: address) {
             connect(saved)
         } else {
             DispatchQueue.main.async { [weak self] in self?.showConnection() }
         }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(true, animated: false)
+    }
+
+    private func showContent() { recovery.isHidden = true; webView.isHidden = false }
+    private func showRecovery(_ text: String) {
+        probe?.cancel(); connected = false
+        message.text = text; recoveryVoice.isHidden = voice?.isActive != true
+        recovery.isHidden = false; webView.isHidden = true
+    }
+    private func showNotice(_ text: String) {
+        message.text = text
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(title: "HUB", message: text, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+    private func showOptions() {
+        let sheet = UIAlertController(title: "iPhone", message: message.text, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: voice?.isActive == true ? "Open voice controls" : "Voice", style: .default) { [weak self] _ in self?.afterOptions { $0.showVoice() } })
+        sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
+        sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
+        sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
+        sheet.addAction(UIAlertAction(title: "Reload", style: .default) { [weak self] _ in self?.afterOptions { $0.reload() } })
+        sheet.addAction(UIAlertAction(title: "Sign out on this iPhone", style: .destructive) { [weak self] _ in self?.afterOptions { $0.confirmSignOut() } })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.safeAreaInsets.top, width: 1, height: 1)
+        present(sheet, animated: true)
+    }
+    private func afterOptions(_ action: @escaping (HubConnectionViewController) -> Void) {
+        dismiss(animated: true) { [weak self] in guard let self else { return }; action(self) }
     }
 
     private func showConnection(error: String? = nil, address: String? = nil) {
@@ -130,11 +161,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         // Only a canonical origin is saved. The web data store owns HttpOnly cookies.
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         message.text = "Connecting to \(value.origin.host ?? "HUB")…"
+        showContent()
         webView.load(URLRequest(url: value.origin))
     }
 
     private func reload() {
         if server == nil { showConnection(); return }
+        showContent()
         if !connected, let server { webView.load(URLRequest(url: server.origin)); return }
         if let url = webView.url, server?.contains(url) == true { webView.reload() }
         else if let server { webView.load(URLRequest(url: server.origin)) }
@@ -150,7 +183,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             self.probe?.cancel()
             HubNotifications.shared.disable()
             do { try self.deviceState?.clear() }
-            catch { self.message.text = "Sign-out could not clear saved access. Unlock this iPhone and try again."; return }
+            catch { self.showNotice("Sign-out could not clear saved access. Unlock this iPhone and try again."); return }
             HubNotifications.shared.forgetConnection()
             self.connected = false
             self.webView.stopLoading()
@@ -163,7 +196,6 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 group.notify(queue: .main) {
                     // Destroy the old web view, including its active sockets and
                     // media, instead of merely hiding a still-running signed-in page.
-                    self.progressObservation?.invalidate()
                     self.api?.invalidate()
                     self.view.window?.rootViewController = UINavigationController(rootViewController: HubConnectionViewController())
                 }
@@ -175,7 +207,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     @objc private func showVoice() {
         guard let api, let server, let deviceState else { showConnection(); return }
         guard connected || voice?.isActive == true else {
-            message.text = "Complete HUB sign-in before starting voice."
+            showConnection(error: "Complete HUB sign-in before starting voice.")
             return
         }
         if voice?.isActive != true, let pending = try? deviceState.admission() {
@@ -190,7 +222,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             choices.addAction(UIAlertAction(title: "Resume last conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: saved) })
             choices.addAction(UIAlertAction(title: "Start new conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) })
             choices.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            choices.popoverPresentationController?.barButtonItem = navigationItem.leftBarButtonItem
+            choices.popoverPresentationController?.sourceView = view
+            choices.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
             present(choices, animated: true)
         } else { presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) }
     }
@@ -200,15 +233,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let sheet = HubVoiceViewController(voice: model) { [weak self, weak model] in
             guard let self else { return }
             guard let destination = model?.conversationDestination() else {
-                self.message.text = "Wait for voice to connect before opening its conversation."
+                self.showNotice("Wait for voice to connect before opening its conversation.")
                 return
             }
             self.dismiss(animated: true) { [weak self] in self?.openNotification(destination) }
         }
         present(UINavigationController(rootViewController: sheet), animated: true) { [weak self, weak sheet] in
-            model.changed = { [weak self, weak sheet, weak model] in
-                self?.navigationItem.leftBarButtonItem?.title = model?.isActive == true ? "Voice •" : "Voice"
-                self?.navigationItem.leftBarButtonItem?.accessibilityLabel = model?.isActive == true ? "Open active voice conversation" : "Start voice conversation"
+            model.changed = { [weak sheet] in
                 sheet?.refresh()
             }
             if !model.isActive { model.start() }
@@ -220,7 +251,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         present(alert, animated: true)
     }
     private func showSharedFiles() {
-        guard connected, let server, let state = deviceState else { message.text = "Sign in to HUB before choosing a file conversation."; return }
+        guard connected, let server, let state = deviceState else { showNotice("Sign in to HUB before choosing a file conversation."); return }
         let generation = connectionGeneration
         do {
             let screen = try HubSharedFilesViewController(server: server, state: state, stillConnected: { [weak self] in
@@ -230,7 +261,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 self.webView.load(URLRequest(url: url))
             })
             present(UINavigationController(rootViewController: screen), animated: true)
-        } catch { message.text = "Files are unavailable. Unlock the iPhone and check the app's sharing setup; HUB's normal file button remains available." }
+        } catch { showNotice("Files are unavailable. Unlock the iPhone and check the app's sharing setup; HUB's normal file button remains available.") }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -238,10 +269,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         if let server, server.contains(url), URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "hubNative" }) == true {
             decisionHandler(.cancel)
-            guard connected, presentedViewController == nil,
-                  HubVoiceNavigation.requestsConfirmation(url: url, source: navigationAction.sourceFrame.request.url, server: server,
-                    sourceIsMainFrame: navigationAction.sourceFrame.isMainFrame, targetIsMainFrame: mainFrame, isLink: navigationAction.navigationType == .linkActivated) else { return }
-            offerNativeVoice()
+            guard presentedViewController == nil else { return }
+            let source = navigationAction.sourceFrame.request.url
+            let sourceIsMain = navigationAction.sourceFrame.isMainFrame
+            let isLink = navigationAction.navigationType == .linkActivated
+            if HubVoiceNavigation.requestsConfirmation(url: url, source: source, server: server, sourceIsMainFrame: sourceIsMain, targetIsMainFrame: mainFrame, isLink: isLink) {
+                if connected || voice?.isActive == true { offerNativeVoice() }
+                else { showConnection(error: "Complete HUB sign-in before starting voice.") }
+            }
+            else if HubVoiceNavigation.requestsOptions(url: url, source: source, server: server, sourceIsMainFrame: sourceIsMain, targetIsMainFrame: mainFrame, isLink: isLink) { showOptions() }
             return
         }
         if !mainFrame {
@@ -283,6 +319,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration,
                       let url = self.webView.url, expected.contains(url) else { return }
                 self.connected = true
+                self.showContent()
                 self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
                 let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
                     self.webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
@@ -321,7 +358,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showFailure(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showFailure(error) }
     private func showFailure(_ error: Error) {
-        if (error as NSError).code != NSURLErrorCancelled { message.text = "Could not open HUB. Check your connection, then choose Reload." }
+        if (error as NSError).code != NSURLErrorCancelled { showRecovery("Could not open HUB. Check your connection, then retry or choose another connection.") }
     }
     private func offerNativeVoice() {
         let active = voice?.isActive == true
@@ -331,7 +368,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         present(alert, animated: true)
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        message.text = "HUB needs to reconnect. Choose Reload to continue."
+        showRecovery("HUB needs to reconnect. Tap Retry to continue.")
     }
 
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
@@ -343,7 +380,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         // uploads still use the standard prompt; web/agent frames get no mic.
         if type == .microphone || type == .cameraAndMicrophone {
             decisionHandler(.deny)
-            if trusted && frame.isMainFrame { message.text = "Use Voice in the app bar for iPhone audio." }
+            if trusted && frame.isMainFrame { showNotice("Use the Speak button in HUB for iPhone audio.") }
         } else { decisionHandler(trusted && frame.isMainFrame ? .prompt : .deny) }
     }
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
-import {createNativeVoiceEntry} from '../packages/harness-overlay/src/client/host/native-voice-entry.ts';
+import {createNativeVoiceEntry,createNativeOptionsEntry} from '../packages/harness-overlay/src/client/host/native-voice-entry.ts';
 import {installMobileHubs} from '../packages/harness-overlay/src/client/host/mobile-hubs.ts';
 
 test('iPhone wrapper presents a plain fixed confirmation link with no conversation, command or credential payload',()=>{
@@ -19,6 +19,17 @@ test('normal Safari/PWA and unrelated UA strings keep the existing browser voice
 test('a UA hint cannot create a native entry on cleartext pages',()=>{
  const dom=new JSDOM('<main></main>',{url:'http://localhost/'});Object.defineProperty(dom.window.navigator,'userAgent',{value:'HUBiOS/0.1'});
  try{assert.equal(createNativeVoiceEntry(dom.window.document),undefined);}finally{dom.window.close();}
+});
+
+test('native settings navigation never copies chat identifiers, auth tokens or commands and needs a supported HTTPS wrapper',()=>{
+ for(const url of ['https://hub.example.com/?token=private&hubSession=private#secret','http://hub.example.com/']){
+  const dom=new JSDOM('<main></main>',{url});Object.defineProperty(dom.window.navigator,'userAgent',{value:'Safari HUBiOS/0.2'});
+  try{
+   const link=createNativeOptionsEntry(dom.window.document);
+   if(url.startsWith('http:'))assert.equal(link,undefined);
+   else{assert.equal(link.href,'https://hub.example.com/?hubNative=options');assert.doesNotMatch(link.outerHTML,/private|secret|token=|messageHandlers|webkit\./);}
+  }finally{dom.window.close();}
+ }
 });
 test('installed iPhone Home surface hides browser audio and cannot start it through the old button',async()=>{
  const dom=new JSDOM('<main data-minke-mobile-web><div data-slot="conversation"><section data-phase="hero"><div data-conversation-scroll></div><div data-composer-seat><div data-slot="conversation.composer.bar"></div></div></section></div></main>',{url:'https://hub.example.com/',pretendToBeVisual:true}),root=dom.window.document;

@@ -3,6 +3,19 @@ import XCTest
 @testable import HubNative
 
 final class HubVoiceNavigationTests: XCTestCase {
+    func testOptionsOnlyOpenAnOwnedMainFramePanelAndCannotCarryCommands() throws {
+        let server = try HubServer(address: "https://hub.example.com"), source = server.origin
+        func allowed(_ value: String, sourceIsMain: Bool = true, targetIsMain: Bool = true, isLink: Bool = true) -> Bool {
+            HubVoiceNavigation.requestsOptions(url: URL(string: value)!, source: source, server: server, sourceIsMainFrame: sourceIsMain, targetIsMainFrame: targetIsMain, isLink: isLink)
+        }
+        let target = "https://hub.example.com/?hubNative=options"
+        XCTAssertTrue(allowed(target))
+        XCTAssertFalse(allowed(target, sourceIsMain: false))
+        XCTAssertFalse(allowed(target, targetIsMain: false))
+        XCTAssertFalse(allowed(target, isLink: false))
+        for value in ["https://foreign.test/?hubNative=options", "http://hub.example.com/?hubNative=options", "https://hub.example.com/frame?hubNative=options", target + "&command=signout", target + "&token=secret", target + "#reload", target + "&hubNative=options"] { XCTAssertFalse(allowed(value)) }
+        XCTAssertFalse(HubVoiceNavigation.requestsOptions(url: URL(string: target)!, source: URL(string: "https://hub.example.com/agent.html"), server: server, sourceIsMainFrame: true, targetIsMainFrame: true, isLink: true))
+    }
     func testOnlyAnOwnedRootMainFrameLinkCanRequestTheUIConfirmation() throws {
         let server = try HubServer(address: "https://hub.example.com"), source = URL(string: "https://hub.example.com/?hubSession=existing")!
         let target = URL(string: "https://hub.example.com/?hubNative=voice")!
