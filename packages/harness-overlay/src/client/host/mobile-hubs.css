@@ -200,6 +200,8 @@ html[data-minke-mobile-web] [data-hub-compact-composer]{position:relative;min-he
 html[data-minke-mobile-web] [data-hub-compact-composer] [data-input-scroll]{padding:0!important;min-height:40px;max-height:150px}
 html[data-minke-mobile-web] [data-hub-compact-composer] [data-composer-placeholder]{max-width:100%;font-size:16px;line-height:40px}
 html[data-minke-mobile-web] [data-hub-composer-row],html[data-minke-mobile-web] [data-hub-composer-tools],html[data-minke-mobile-web] [data-hub-composer-trailing]{display:contents!important}
+html[data-minke-mobile-web] [data-hub-composer-tools]>span{display:contents!important}
+html[data-minke-mobile-web] [data-hub-composer-trailing]>:not([data-hub-composer-send]):not(:has([data-hub-composer-send])){display:none!important}
 html[data-minke-mobile-web] [data-hub-compact-composer] :is([aria-label="Choose character"],[aria-label="Attach photos or files"]){position:absolute!important;left:12px;bottom:10px;visibility:hidden;pointer-events:none}
 html[data-minke-mobile-web] [data-hub-composer-menu]{position:absolute;right:106px;bottom:9px;width:42px;height:42px;min-height:42px!important;min-width:42px!important;background:none;border:0}
 html[data-minke-mobile-web] [data-hub-composer-send]{position:absolute!important;right:10px;bottom:9px;width:42px!important;height:42px!important;min-height:42px!important;min-width:42px!important}
