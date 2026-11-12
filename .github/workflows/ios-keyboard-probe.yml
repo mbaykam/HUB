@@ -1,0 +1,29 @@
+name: iPhone keyboard accessory verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keyboard:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Compare real system keyboards using default and production WebKit views
+        run: node mobile/scripts/check-keyboard.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: HUB-keyboard-evidence-${{ github.sha }}
+          path: mobile/build/keyboard-accessory/evidence
+          if-no-files-found: warn
+          retention-days: 7
