@@ -46,6 +46,17 @@ final class KeyboardAccessoryUITests: XCTestCase {
         XCTAssertTrue(editor.waitForExistence(timeout: 10), "Actual WebKit contenteditable is accessible")
         editor.tap() // Real user gesture; JavaScript focus does not prove keyboard presentation.
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "Software keyboard must actually be shown; disable simulator hardware keyboard before this run")
+        // A fresh disposable simulator can show Apple's Slide to Type tutorial
+        // over the first keyboard. Dismiss only that observed, informational UI;
+        // never mistake its covered baseline toolbar for removal by the product.
+        let tutorial = app.staticTexts["Speed up your typing by sliding your finger across the letters to compose a word."]
+        let tutorialContinue = app.buttons["Continue"]
+        if tutorial.exists && tutorialContinue.exists && tutorialContinue.isHittable {
+            tutorialContinue.tap()
+            XCTAssertFalse(tutorial.exists)
+            editor.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.exists)
+        }
         editor.typeText(text)
         let typed = app.staticTexts["probe.typed"]
         let preserved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@ OR label == %@", text, text), object: typed)
