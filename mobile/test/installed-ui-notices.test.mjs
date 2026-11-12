@@ -13,6 +13,7 @@ test("collects only actual dependency notices, including fonts and nested packag
       await writeFile(join(root, "node_modules", pkg, pkg.includes("fonts") ? "OFL.txt" : "LICENSE-MIT"), "synthetic notice < &");
       await writeFile(join(root, "node_modules", pkg, "README.md"), "not a notice");
     }
+    await writeFile(join(root,"node_modules/.pnpm/lock.yaml"),"synthetic lock metadata, not a package");
     const first = await collectInstalledUINotices(root), second = await collectInstalledUINotices(root);
     assert.deepEqual(first, second);
     assert.equal(first.length, 3);

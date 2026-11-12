@@ -39,8 +39,9 @@ export async function collectInstalledUINotices(runtimeRoot) {
     for (const entry of (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
       if (entry.name === ".pnpm") {
         const store = await contained(join(path, entry.name));
-        for (const item of await readdir(store)) {
-          const nested = join(store, item, "node_modules");
+        for (const item of await readdir(store, {withFileTypes:true})) {
+          if(!item.isDirectory()&&!item.isSymbolicLink())continue;
+          const nested = join(store, item.name, "node_modules");
           if (await optionalDirectory(nested)) await visitModules(nested);
         }
       } else if (entry.name.startsWith("@")) {
