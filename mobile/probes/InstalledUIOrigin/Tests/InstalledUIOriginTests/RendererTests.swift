@@ -64,6 +64,7 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
                   const exports=factory(require);
                   return {...exports,apply(...args){window.__hubProbeOverlayContext=args[0];return exports.apply(...args);}};
                 }};
+              }
               return load.call(this,registration);
             };
           }});
@@ -76,6 +77,9 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
         }
         addEventListener('error', e => window.__hubRendererProbeErrors.push(String(e.message)));
         addEventListener('unhandledrejection', e => window.__hubRendererProbeErrors.push(String(e.reason)));
+        window.__hubProbeFrames=0;
+        requestAnimationFrame(function tick(){if(++window.__hubProbeFrames<5)requestAnimationFrame(tick);});
+        window.__hubProbeInstalled=true;
         """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: configuration)
         // A detached macOS web view suppresses requestAnimationFrame. The real
@@ -126,6 +130,9 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
             voice:describe(document.querySelector('[data-voice-start]')),
             send:describe(card?.querySelector('[data-hub-composer-send]') ?? card?.querySelector('button[aria-label="Send"]')),
             errors:window.__hubRendererProbeErrors ?? [],
+            probeInstalled:window.__hubProbeInstalled===true,
+            frames:window.__hubProbeFrames ?? 0,
+            phases:[...document.querySelectorAll('[data-slot="conversation"] [data-phase]')].map(n=>({phase:n.getAttribute('data-phase'),seat:!!n.querySelector('[data-composer-seat]')})),
             capabilityLogs:(window.__hubProbeOverlayContext?.logger?.buffer ?? []).map(row=>({type:row.type,name:row.name,args:row.args?.map(arg=>String(arg?.stack ?? arg))})),
             styles:[...document.querySelectorAll('style')].map(s=>({id:s.id,attributes:[...s.attributes].map(a=>[a.name,a.value]),bytes:s.textContent.length})),
             text:document.body.innerText.slice(0,1200)};
@@ -164,6 +171,7 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
             } catch { print("No screenshot saved: public WKWebView snapshot unavailable: \(error)") }
         }
         XCTAssertTrue(mounted, "actual [data-hub-home-nav] did not mount; inspect renderer metrics/errors")
+        XCTAssertEqual(metrics["probeInstalled"] as? Bool, true, "fixture instrumentation must execute")
         XCTAssertEqual(metrics["href"] as? String, base.absoluteString)
         let viewport = try XCTUnwrap(metrics["viewport"] as? [String: Any])
         XCTAssertEqual(viewport["width"] as? Int, 390)
