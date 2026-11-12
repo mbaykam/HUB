@@ -110,7 +110,7 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
             do {
                 let snapshot = WKSnapshotConfiguration()
                 snapshot.rect = webView.bounds
-                let image = try await webView.takeSnapshot(with: snapshot)
+                let image = try await webView.takeSnapshot(configuration: snapshot)
                 let tiff = try XCTUnwrap(image.tiffRepresentation)
                 let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
                 var colors = Set<String>()
