@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.3
+
+- Repair phone composer control placement, Stop focus, and drawer navigation after Home.
+- Recover from failed or blank iPhone pages and bound browser cancellation when a connection fails.
+- Deliver requested screenshots in chat and report recorded tokens and available OpenRouter receipts.
+
 ## 1.10.2
 
 - Add a read-only Knowledge AI activity log beside the sidebar Knowledge tile,

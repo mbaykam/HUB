@@ -1,8 +1,10 @@
+import {conversationScreenshots,installScreenshotDelivery} from "./screenshot-delivery.ts";
 import {conversationArtifacts,artifactDocument} from "./conversation-artifacts.ts";
 import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
 /** Read-only native state, available before any chat has been opened in the
  * new PWA process. No task is resumed, repeated or cancelled by these reads. */
 export function installDailyUseWeb(ctx:any){
+  const offScreenshot=installScreenshotDelivery(ctx);
   const ended=new Map<string,{version:number;kind:string}>();
   const off=["activity","artifacts","conversations"].map(action=>ctx.webServer.register({kind:"exact",path:"/api/hub/"+action,handler:async(req:any,res:any)=>{
     const send=(code:number,value:any)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};
@@ -36,11 +38,20 @@ export function installDailyUseWeb(ctx:any){
       const session=req.headers["x-hub-session"],id=req.headers["x-hub-artifact"];
       if(typeof session!=="string"||!/^[-\w.]{1,200}$/.test(session)){send(400,{error:"invalid-session"});return;}
       const query=ctx.get?.("sessionQuery")??ctx.sessionQuery,observation=await query.observeSession(session,{signal,projectionMode:"none"});
-      try{const files=conversationArtifacts([...observation.events]),apps=files.filter(f=>/\.html?$/i.test(f.name));
-        if(id===undefined){send(200,{artifacts:apps.map(({content,...item})=>item)});return;}
+      try{const events=[...observation.events],screenshots=conversationScreenshots(events),imageId=req.headers["x-hub-screenshot"];
+        if(imageId!==undefined){
+          const screenshot=screenshots.find(item=>item.id===imageId);
+          if(!screenshot){send(404,{error:"screenshot-unavailable"});return;}
+          const stored=await ctx.attachments.readImage(screenshot.attachment,signal);
+          if(stored.ref.mediaType!==screenshot.attachment.mediaType||stored.data.byteLength!==screenshot.attachment.bytes||stored.ref.attachmentId!==screenshot.attachment.attachmentId){send(404,{error:"screenshot-unavailable"});return;}
+          res.writeHead(200,{"content-type":screenshot.attachment.mediaType,"content-length":stored.data.byteLength,"cache-control":"private, no-store","x-content-type-options":"nosniff","cross-origin-resource-policy":"same-origin"});
+          res.end(stored.data);return;
+        }
+        const files=conversationArtifacts(events),apps=files.filter(f=>/\.html?$/i.test(f.name));
+        if(id===undefined){send(200,{artifacts:apps.map(({content,...item})=>item),screenshots:screenshots.map(({attachment,...item})=>item)});return;}
         const app=apps.find(f=>f.id===id);if(!app){send(404,{error:"artifact-unavailable"});return;}
         send(200,{document:artifactDocument(app,files),name:app.name,at:app.at});
       }finally{observation[Symbol.dispose]();}
     }catch{send(503,{error:"native-state-unavailable"});}
-  }}));return()=>{ended.clear();off.forEach((f:any)=>f());};
+  }}));return()=>{offScreenshot();ended.clear();off.forEach((f:any)=>f());};
 }

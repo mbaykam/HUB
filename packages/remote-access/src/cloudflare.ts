@@ -374,7 +374,7 @@ export class CloudflareAccessGateway {
       });
     });
     server.on("upgrade", (request, socket, head) => {
-      void this.#handleUpgrade(request, socket, head);
+      void this.#handleUpgrade(request, socket, head).catch(() => socket.destroy());
     });
     try {
       await new Promise<void>((resolvePromise, reject) => {
@@ -505,61 +505,71 @@ export class CloudflareAccessGateway {
     socket: Duplex,
     head: Buffer,
   ): Promise<void> {
+    // Node removes HTTP's socket error listener when a connection upgrades.
+    // Cloudflared can drop the connection even while Access verification awaits.
+    let upstream: ReturnType<typeof requestHttp> | undefined;
+    let peer: Duplex | undefined;
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      socket.destroy();
+      if (peer) peer.destroy();
+      else upstream?.destroy();
+    };
+    socket.on("error", close);
+    socket.once("close", close);
+
     if (!(await this.#authorized(request))) {
-      rejectUpgrade(socket, 403);
+      if (!socket.destroyed) rejectUpgrade(socket, 403);
       return;
     }
+    if (socket.destroyed) return;
     const target = this.#target;
     if (target === undefined) {
       rejectUpgrade(socket, 503);
       return;
     }
-    if (
-      request.url === undefined ||
-      !request.url.startsWith("/")
-    ) {
+    if (request.url === undefined || !request.url.startsWith("/")) {
       rejectUpgrade(socket, 400);
       return;
     }
-    const upstream = this.#request({
+    upstream = this.#request({
       hostname: target.hostname,
       port: Number(target.port),
       method: request.method,
       path: request.url,
       headers: upstreamHeaders(request.headers),
     });
-    upstream.once(
-      "upgrade",
-      (response, upstreamSocket, upstreamHead) => {
-        const status = response.statusCode ?? 101;
-        const phrase =
-          response.statusMessage ?? "Switching Protocols";
-        socket.write(
-          `HTTP/1.1 ${String(status)} ${phrase}\r\n`,
-        );
-        for (let index = 0;
-          index < response.rawHeaders.length;
-          index += 2) {
-          socket.write(
-            `${response.rawHeaders[index]}: ` +
-              `${response.rawHeaders[index + 1]}\r\n`,
-          );
-        }
-        socket.write("\r\n");
-        if (upstreamHead.length > 0) {
-          socket.write(upstreamHead);
-        }
-        if (head.length > 0) upstreamSocket.write(head);
-        socket.pipe(upstreamSocket);
-        upstreamSocket.pipe(socket);
-      },
-    );
-    upstream.once("response", (response) => {
-      response.resume();
-      rejectUpgrade(socket, 503);
+    upstream.once("upgrade", (response, upstreamSocket, upstreamHead) => {
+      peer = upstreamSocket;
+      upstreamSocket.on("error", close);
+      upstreamSocket.once("close", close);
+      if (socket.destroyed) {
+        upstreamSocket.destroy();
+        return;
+      }
+
+      const status = response.statusCode ?? 101;
+      const phrase = response.statusMessage ?? "Switching Protocols";
+      socket.write(`HTTP/1.1 ${String(status)} ${phrase}\r\n`);
+      for (let index = 0; index < response.rawHeaders.length; index += 2) {
+        socket.write(`${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}\r\n`);
+      }
+      socket.write("\r\n");
+      if (upstreamHead.length > 0) socket.write(upstreamHead);
+      if (head.length > 0) upstreamSocket.write(head);
+      socket.pipe(upstreamSocket);
+      upstreamSocket.pipe(socket);
     });
-    upstream.once("error", () => {
-      rejectUpgrade(socket, 503);
+    upstream.once("response", response => {
+      response.on("error", close);
+      response.resume();
+      if (!socket.destroyed) rejectUpgrade(socket, 503);
+    });
+    upstream.on("error", () => {
+      if (peer) close();
+      else if (!socket.destroyed) rejectUpgrade(socket, 503);
     });
     upstream.end();
   }

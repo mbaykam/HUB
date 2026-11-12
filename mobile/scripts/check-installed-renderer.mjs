@@ -1,7 +1,9 @@
 import {execFileSync} from 'node:child_process';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
+import {validateRendererReceipt} from './renderer-receipt.mjs';
 import {readInstalledUI} from './installed-ui-bundle.mjs';
 import {selectSimulatorSeed} from './simulator-source.mjs';
 
@@ -36,7 +38,24 @@ try{
  const log=run('xcodebuild',['test-without-building',...args,'-only-testing:KeyboardAccessoryUITests/KeyboardAccessoryUITests/testInstalledRendererActualHomeAndCompactComposer','-parallel-testing-enabled','NO','-resultBundlePath',result],600000);
  await writeFile(resolve(evidence,'xcodebuild.log'),log);
  if(!/testInstalledRendererActualHomeAndCompactComposer.*passed/u.test(log)||/testInstalledRendererActualHomeAndCompactComposer.*skipped/iu.test(log))throw Error('Required actual renderer test did not explicitly pass.');
- await writeFile(resolve(evidence,'proof.json'),JSON.stringify({sourceSha:process.env.GITHUB_SHA,artifactSourceSha:process.env.HUB_PROBE_ARTIFACT_SOURCE_SHA??process.env.GITHUB_SHA,documentSHA256:built.manifest.document.sha256,documentBytes:built.document.length,manifestSHA256:createHash('sha256').update(built.data).digest('hex'),productionWebViewSHA256:createHash('sha256').update(await readFile('mobile/native/Sources/HubNative/HubWebView.swift')).digest('hex'),xcode,runtime:selected.runtime,isolatedSimulator:true,exactEmbeddedBytes:true,realRendered:true,actualUIKitScene:true,nativeBridge:false,networkBlockedByTestCSP:true,physicalIPhoneAcceptance:false},null,2));
+ stage='fresh-renderer-receipt';
+ const nonce=randomUUID(),bundle='dev.hub.probe.KeyboardAccessory';
+ sim('launch','--terminate-running-process',device,bundle,'--installed-renderer','--renderer-receipt-nonce',nonce);
+ const container=sim('get_app_container',device,bundle,'data');
+ const receiptFile=resolve(container,'Documents',`installed-renderer-${nonce}.json`);
+ let receipt;
+ for(let attempt=0;attempt<240;attempt++){
+  try{receipt=JSON.parse(await readFile(receiptFile,'utf8'));break;}catch(error){if(error.code!=='ENOENT')throw error;}
+  await delay(250);
+ }
+ validateRendererReceipt(receipt,{nonce,documentSHA256:built.manifest.document.sha256,manifestSHA256:createHash('sha256').update(built.data).digest('hex'),documentBytes:built.document.length});
+ await writeFile(resolve(evidence,'renderer-receipt.json'),JSON.stringify(receipt,null,2));
+ stage='simulator-renderer-screenshot';
+ const screenshot=resolve(evidence,'renderer-ios.png');
+ sim('io',device,'screenshot','--display=1',screenshot);
+ const png=await readFile(screenshot);
+ if(png.length<1000||!png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||png.readUInt32BE(16)<1||png.readUInt32BE(20)<1)throw Error('Simulator did not produce an actual renderer PNG');
+ await writeFile(resolve(evidence,'proof.json'),JSON.stringify({screenshot:{file:'renderer-ios.png',sha256:createHash('sha256').update(png).digest('hex'),bytes:png.length,width:png.readUInt32BE(16),height:png.readUInt32BE(20)},receiptNonce:nonce,sourceSha:process.env.GITHUB_SHA,artifactSourceSha:process.env.HUB_PROBE_ARTIFACT_SOURCE_SHA??process.env.GITHUB_SHA,documentSHA256:built.manifest.document.sha256,documentBytes:built.document.length,manifestSHA256:createHash('sha256').update(built.data).digest('hex'),productionWebViewSHA256:createHash('sha256').update(await readFile('mobile/native/Sources/HubNative/HubWebView.swift')).digest('hex'),xcode,runtime:selected.runtime,isolatedSimulator:true,exactEmbeddedBytes:true,realRendered:true,actualUIKitScene:true,nativeBridge:false,networkBlockedByTestCSP:true,physicalIPhoneAcceptance:false},null,2));
  console.log('Actual exported renderer Home and compact composer passed in an isolated iOS UIKit app host; physical iPhone/auth acceptance remains separate.');
 }catch(error){
  await writeFile(resolve(evidence,'failure.json'),JSON.stringify({stage,code:error.code??null,message:String(error.message).slice(0,2000),stdout:String(error.stdout??'').slice(-30000),stderr:String(error.stderr??'').slice(-5000)},null,2));

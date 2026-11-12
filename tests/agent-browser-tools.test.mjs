@@ -202,6 +202,34 @@ test("abort sends cancel and waits for Electron's terminal response", async () =
   client.dispose();
 });
 
+test("lost cancellation receipt settles stopped turn and quarantines only its owner", async () => {
+  const port = new FakeProcessPort();
+  const client = new AgentBrowserProcessClient(port, { cancelGraceMs: 20 });
+  const controller = new AbortController();
+  const pending = client.request("stopped-owner", "open", { url: "https://example.com" }, controller.signal);
+  const rejection = assert.rejects(pending, { name: "AbortError" });
+  controller.abort(new Error("user stopped"));
+  await rejection;
+  assert.ok(port.sent.some(message => message.type === "release-owner" && message.ownerSessionId === "stopped-owner"));
+  const before = port.sent.length;
+  await assert.rejects(client.request("stopped-owner", "open", { url: "https://example.org" }, new AbortController().signal), error => error.outcome === "unknown");
+  assert.equal(port.sent.length, before, "quarantined owner cannot dispatch more work");
+  const other = client.request("other-owner", "open", { url: "https://example.org" }, new AbortController().signal);
+  const request = port.sent.at(-1);
+  port.emit("message", agentBrowserSuccessResponse(request.requestId, "open", sessionResult()));
+  assert.deepEqual(await other, sessionResult());
+  client.dispose();
+});
+
+test("missing browser terminal response has a bounded deadline without a caller abort", async () => {
+  const port = new FakeProcessPort();
+  const client = new AgentBrowserProcessClient(port, { requestTimeoutMs: 20, cancelGraceMs: 20 });
+  await assert.rejects(client.request("hung-owner", "open", { url: "https://example.com" }, new AbortController().signal), error => error.remoteCode === "agent_browser_terminal_timeout" && error.outcome === "unknown");
+  assert.ok(port.sent.some(message => message.type === "cancel"));
+  assert.ok(port.sent.some(message => message.type === "release-owner"));
+  client.dispose();
+});
+
 test("IPC disconnect rejects pending work and makes later calls unavailable", async () => {
   const port = new FakeProcessPort();
   const client = new AgentBrowserProcessClient(port);

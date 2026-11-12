@@ -1,4 +1,5 @@
 import { Context, Service } from "@deepseek-ai/cordis";
+import {installConversationUsage} from "./host/conversation-usage.ts";
 import {installDailyUseWeb} from "./host/daily-use-web.ts";
 import * as nativeSubagent from "@deepseek-ai/dsh-tool-subagent";
 import { homedir } from "node:os";
@@ -34,7 +35,7 @@ import {installNativePush} from "./host/native-push-install.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
 export const name="hub-characters";
-export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments"];
+export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments","credentials"];
 declare module "@deepseek-ai/cordis" { interface Context { hubCharacters:HubCharacters; } }
 type CharacterAgent={id:string;status?:string;session:{header:{origin?:string;parentSession?:string};snapshotEvents():readonly {type:string;data?:unknown}[]};ctx:any};
 type Mount={revision:number;fibers:{dispose():Promise<void>}[];names:Map<string,string>;snapshot?:HubCharactersState;turnSnapshot?:HubCharactersState;loading?:Promise<void>;assembled?:{character:HubCharacter;state:HubCharactersState};voiceCharacter?:HubCharacter;pendingVoiceCharacter?:HubCharacter;nativeRoute?:string};
@@ -135,7 +136,7 @@ export class HubCharacters extends Service {
         if(exec.name==="hub_switch_character"||exec.name==="hub_research")return; // Explicit user navigation has its own authorization check.
         const policy=selected?.tools;
         if(policy?.mode==="allow" && !policy.names.includes(exec.name))return "This tool is disabled for this character.";
-        if(coordinatesTelegram(mount.turnSnapshot??this.store.snapshot(),selected)&&!new Set(["hub_present","hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_planner","hub_work_plan","hub_knowledge_write_note","hub_memory_index","hub_skill_read","hub_skill_save","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
+        if(coordinatesTelegram(mount.turnSnapshot??this.store.snapshot(),selected)&&!new Set(["hub_present","hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_planner","hub_work_plan","hub_conversation_usage","hub_knowledge_write_note","hub_memory_index","hub_skill_read","hub_skill_save","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
       });
       agent.ctx.tools.register({name:"hub_switch_character",description:"Bring a configured character into this text, Telegram or live voice conversation as the active speaker, keeping the same conversation and context. Choose this tool by the meaning of the user's request, in any language; no keywords or exact phrasing are required. Resolve names or roles from the current roster and conversation context; pass the stable character ID. The following reply uses that character's model and persona. For a request to have the character perform background work, use hub_delegate instead. Ask briefly if that distinction is unclear.",parameters:{type:"object",properties:{character:{type:"string",description:"Stable character ID from the current roster (preferred); a current display name is also accepted."}},required:["character"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
         if(exec.agent?.id!==agent.id)throw new Error("Use this conversation's character navigation");
@@ -175,6 +176,7 @@ export class HubCharacters extends Service {
     },{global:true});
     for(const agent of ctx.agents.list())attach(agent as any);
     ctx.effect(()=>this.installWeb(),"HUB character management");
+    ctx.effect(()=>installConversationUsage(ctx as unknown as Parameters<typeof installConversationUsage>[0]),"HUB conversation usage receipts");
     ctx.effect(()=>installDailyUseWeb(ctx),"HUB durable activity and generated applications");
     ctx.effect(()=>installConversationTitles(ctx),"HUB conversation topic titles");
     ctx.effect(()=>{

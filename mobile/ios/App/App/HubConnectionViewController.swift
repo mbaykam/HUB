@@ -28,7 +28,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
     private var deviceState: HubDeviceState?
     private var keyboardObserver: NSObjectProtocol?
-    deinit { probe?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) } }
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var pageDeadline: Task<Void, Never>?
+    private var pageRecovery = HubPageRecovery()
+    private var pageEpoch = 0
+    private var inspectingPageEpoch: Int?
+    private var activeNavigation: WKNavigation?
+    private var showingPageLoad = false
+    deinit { probe?.cancel(); pageDeadline?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) } }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -45,6 +52,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        webView.isOpaque = false
+        webView.backgroundColor = .systemBackground
+        webView.scrollView.backgroundColor = .systemBackground
         webView.allowsBackForwardNavigationGestures = true
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -53,6 +63,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         keyboardObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in guard let self else { return }; self.hideKeyboardShortcuts(in: self.webView) }
         }
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.validateForegroundPage() }
+        })
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.cancelPageDeadline() }
+        })
         message.font = .preferredFont(forTextStyle: .caption1)
         message.adjustsFontForContentSizeCategory = true
         message.textColor = .secondaryLabel
@@ -107,9 +123,62 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         for child in view.subviews { hideKeyboardShortcuts(in: child) }
     }
     private func showRecovery(_ text: String) {
+        cancelPageDeadline(); showingPageLoad = false
+        activeNavigation = nil
         probe?.cancel(); connected = false
+        webView.stopLoading()
         message.text = text; recoveryVoice.isHidden = voice?.isActive != true
         recovery.isHidden = false; webView.isHidden = true
+    }
+    private func cancelPageDeadline() { pageDeadline?.cancel(); pageDeadline = nil; pageRecovery.cancel() }
+    private func watchPage(timeout: UInt64) {
+        pageDeadline?.cancel()
+        pageEpoch = pageRecovery.begin()
+        let epoch = pageEpoch
+        pageDeadline = Task { [weak self] in
+            for _ in 0..<timeout {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, let self, UIApplication.shared.applicationState != .background else { return }
+                self.inspectVisiblePage()
+            }
+            guard !Task.isCancelled, let self, UIApplication.shared.applicationState != .background,
+                  self.pageRecovery.expired(epoch) else { return }
+            self.showRecovery("HUB did not finish opening. Check your connection, then tap Retry. Your conversations stay on HUB.")
+        }
+    }
+    private func preparePageLoad() {
+        probe?.cancel(); connected = false; showingPageLoad = true
+        message.text = "Opening HUB…"
+        recoveryVoice.isHidden = voice?.isActive != true
+        recovery.isHidden = false
+        // Keep WebKit onscreen so its real renderer can receive animation frames.
+        webView.isHidden = false
+        watchPage(timeout: 25)
+    }
+    private func inspectVisiblePage() {
+        // During provisional navigation, WebKit still exposes the old document.
+        // Its contents must not satisfy the new page's opening deadline.
+        guard !webView.isLoading, pageDeadline != nil, inspectingPageEpoch != pageEpoch else { return }
+        let epoch = pageEpoch, installed = usingInstalledUI
+        inspectingPageEpoch = epoch
+        let expression = installed
+            ? "Array.from(document.querySelectorAll('[data-hub-home-nav],[data-composer-card]')).some(element => {const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility === 'visible';})"
+            : "!!document.body && (document.body.innerText.trim().length > 0 || !!document.body.querySelector('input,button,iframe,canvas,video'))"
+        webView.evaluateJavaScript(expression) { [weak self] value, _ in
+            guard let self else { return }
+            if self.inspectingPageEpoch == epoch { self.inspectingPageEpoch = nil }
+            guard !self.webView.isLoading, value as? Bool == true, self.pageRecovery.visible(epoch) else { return }
+            self.pageDeadline?.cancel(); self.pageDeadline = nil
+            if self.showingPageLoad { self.showingPageLoad = false; self.showContent() }
+        }
+    }
+    private func validateForegroundPage() {
+        guard isViewLoaded, view.window != nil, let server, recovery.isHidden || showingPageLoad else { return }
+        // Inspect first; never reload a healthy page or a user's current draft.
+        watchPage(timeout: showingPageLoad ? 25 : 8)
+        webView.setNeedsLayout()
+        inspectVisiblePage()
+        if let url = webView.url, server.contains(url), !webView.isLoading { checkConnection(server) }
     }
     private func showNotice(_ text: String) {
         message.text = text
@@ -202,13 +271,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         // The selected HTTPS origin and WebKit's own cookie store remain intact;
         // there is no native fetch proxy, JS bridge or restored user snapshot.
         if !preferRemoteUI, let installedUI {
+            preparePageLoad()
             usingInstalledUI = true
-            webView.loadHTMLString(installedUI.html, baseURL: value.origin)
+            activeNavigation = webView.loadHTMLString(installedUI.html, baseURL: value.origin)
         } else { loadRemote(value.origin) }
     }
     private func loadRemote(_ url: URL) {
+        preparePageLoad()
         usingInstalledUI = false
-        webView.load(URLRequest(url: url))
+        activeNavigation = webView.load(URLRequest(url: url))
     }
 
     private func reload() {
@@ -227,6 +298,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         alert.addAction(UIAlertAction(title: "Sign out", style: .destructive) { [weak self] _ in
             guard let self else { return }
             self.connectionGeneration += 1
+            self.cancelPageDeadline()
             self.probe?.cancel()
             HubNotifications.shared.disable()
             do { try self.deviceState?.clear() }
@@ -333,11 +405,25 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
         // HTTPS authentication redirects may visit Access and the chosen identity
         // provider. Native API requests still target only the exact selected HUB.
-        if navigationAction.targetFrame == nil { decisionHandler(.cancel); usingInstalledUI = false; webView.load(navigationAction.request); return }
+        if navigationAction.targetFrame == nil { decisionHandler(.cancel); preparePageLoad(); usingInstalledUI = false; activeNavigation = webView.load(navigationAction.request); return }
         decisionHandler(.allow)
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        if navigation !== activeNavigation { preparePageLoad(); activeNavigation = navigation }
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if let response = navigationResponse.response as? HTTPURLResponse,
+           HubPageRecovery.failedHTTP(status: response.statusCode, mainFrame: navigationResponse.isForMainFrame) {
+            decisionHandler(.cancel)
+            showRecovery("HUB returned HTTP \(response.statusCode). Retry or check Connection to sign in again.")
+            return
+        }
+        decisionHandler(.allow)
+    }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard navigation === activeNavigation else { return }
+        inspectVisiblePage()
         guard let server, let url = webView.url, server.contains(url) else {
             message.text = "Complete sign-in to connect to HUB."
             return
@@ -366,7 +452,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                     }
                 }
                 self.connected = true
-                self.showContent()
+                if !self.showingPageLoad { self.showContent() }
                 self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
                 let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
                     self.webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
@@ -409,14 +495,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         loadRemote(url)
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showFailure(error) }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showFailure(error) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { if navigation === activeNavigation { showFailure(error) } }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { if navigation === activeNavigation { showFailure(error) } }
     private func showFailure(_ error: Error) {
         if (error as NSError).code != NSURLErrorCancelled { showRecovery("Could not open HUB. Check your connection, then retry or choose another connection.") }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        cancelPageDeadline()
         connected = false
-        if let server, installedUI != nil, !preferRemoteUI, installedProcessRecoveries < 1 {
+        if UIApplication.shared.applicationState != .background, let server, installedUI != nil, !preferRemoteUI, installedProcessRecoveries < 1 {
             installedProcessRecoveries += 1
             // Fresh Home, not a cached conversation or a restored screen.
             showContent(); loadHub(server)

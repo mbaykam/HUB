@@ -86,6 +86,17 @@ final class InstalledRendererController: UIViewController, WKNavigationDelegate 
 
     private func finish(error: String? = nil) {
         if let error { proof["error"] = error }
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--renderer-receipt-nonce"), index + 1 < arguments.count,
+           UUID(uuidString: arguments[index + 1]) != nil,
+           let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let nonce = arguments[index + 1]
+            proof["receiptNonce"] = nonce
+            do {
+                let bytes = try JSONSerialization.data(withJSONObject: proof, options: [.sortedKeys])
+                try bytes.write(to: documents.appendingPathComponent("installed-renderer-\(nonce).json"), options: .atomic)
+            } catch { proof["receiptWriteError"] = String(describing: error) }
+        }
         if let bytes = try? JSONSerialization.data(withJSONObject: proof, options: [.sortedKeys]), let json = String(data: bytes, encoding: .utf8) {
             report.accessibilityValue = json
         }

@@ -1989,3 +1989,64 @@ test("remote settings stay desktop-capability gated", async () => {
   unsubscribe();
   assert.equal(publishRuntime, undefined);
 });
+
+test("Cloudflare upgrades absorb socket aborts during Access verification and proxying", async () => {
+  const config = {...parseCloudflareAccessConfig(configuredCloudflare()), originPort: 19876};
+  const server = new EventEmitter();
+  server.listening = false;
+  server.address = () => ({address: "127.0.0.1", port: config.originPort});
+  server.listen = () => {server.listening = true; server.emit("listening");};
+  server.close = done => {server.listening = false; done();};
+  let releaseVerification;
+  const gate = new Promise(resolve => {releaseVerification = resolve;});
+  const requests = [];
+  const gateway = new CloudflareAccessGateway({
+    config, createServer: () => server,
+    verifyToken: token => token === "slow" ? gate : Promise.resolve(),
+    request() {
+      const request = new EventEmitter();
+      request.end = () => {};
+      request.destroy = () => {};
+      requests.push(request);
+      return request;
+    },
+  });
+  const upgrade = (token, socket) => server.emit("upgrade", {
+    method: "GET", url: "/stream", headers: {host: config.hostname, "cf-access-jwt-assertion": token},
+  }, socket, Buffer.alloc(0));
+  const reset = () => Object.assign(new Error("socket write aborted"), {code: "ECONNABORTED"});
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  await gateway.start();
+  gateway.setTarget("http://127.0.0.1:19877");
+  try {
+    const early = new PassThrough();
+    upgrade("slow", early);
+    early.emit("error", reset());
+    releaseVerification();
+    await tick();
+    assert.equal(early.destroyed, true);
+    assert.equal(requests.length, 0, "a disconnected client is not forwarded");
+
+    const client = new PassThrough();
+    const peer = new PassThrough();
+    // Keep these stream doubles from echoing bytes back into each other.
+    client.pipe = destination => destination;
+    peer.pipe = destination => destination;
+    upgrade("valid", client);
+    await tick();
+    assert.equal(requests.length, 1);
+    requests[0].emit("upgrade", {statusCode: 101, rawHeaders: []}, peer, Buffer.alloc(0));
+    client.emit("error", reset());
+    peer.emit("error", reset());
+    assert.equal(client.destroyed, true);
+    assert.equal(peer.destroyed, true);
+
+    const rejected = new PassThrough();
+    rejected.end = () => {queueMicrotask(() => rejected.emit("error", reset())); return rejected;};
+    upgrade(undefined, rejected);
+    await tick();
+    assert.equal(rejected.destroyed, true);
+  } finally {
+    await gateway.stop();
+  }
+});

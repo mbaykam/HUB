@@ -6,7 +6,7 @@ import type { HarnessClientContext } from "../core/context.ts";
 import {createVoiceCamera} from "./voice-camera.ts";
 import {createCharacterPicker} from "./character-picker.ts";
 import {createNativeVoiceEntry} from "./native-voice-entry.ts";
-import {compactComposer,createWorkspaceComposerMenu} from "./compact-composer.ts";
+import {compactComposer,createWorkspaceComposerMenu,seatComposerVoice} from "./compact-composer.ts";
 import type { createVoiceClient, VoiceState } from "../voice/browser-client.ts";
 import { createMobileActivity, createActivitySignals, type ActivityPendingSource } from "./mobile-activity.ts";
 import {createDurableActivity} from "./mobile-durable-activity.ts";
@@ -109,6 +109,13 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   let audioConnection: string | undefined;
   let external: { callId: string; sessionId: string; profile?: { name: string } } | undefined, externalTranscriptKey = "", statusFlight = false,lastStatusAt=0;
   let frame: number | undefined;
+  const composerResize=typeof view.ResizeObserver==="function"?new view.ResizeObserver(()=>schedule()):undefined;
+  let observedCard:HTMLElement|undefined,observedStack:HTMLElement|undefined;
+  function observeComposerSize(card:HTMLElement|undefined,stack:HTMLElement|undefined){
+    if(card===observedCard&&stack===observedStack)return;
+    composerResize?.disconnect();observedCard=card;observedStack=stack;
+    if(card)composerResize?.observe(card);if(stack)composerResize?.observe(stack);
+  }
   let conversation: HTMLElement | undefined;
   const activitySignals = createActivitySignals(ctx.sessions, schedule);
   const durableActivity=createDurableActivity(root,schedule);
@@ -149,6 +156,9 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     hub.toggleAttribute("data-external-call", !!external);
     hub.toggleAttribute("data-home", inHome);
     hub.toggleAttribute("data-idle-bar", !busy);
+    const composerStack=conversation?.querySelector<HTMLElement>('[data-hub-composer-stack]');
+    const composerCard=conversation?.querySelector<HTMLElement>('[data-composer-card]');
+    if(composerStack)seatComposerVoice(hub,composerStack,composerCard??undefined,!busy);
     surface.hidden = !inHome;
     if (inHome) {
       for (const [index,node] of [knowledge.panel, liveVoice, planner.panel, activity.panel, transcript.panel, browser.panel].entries()) if (surface.children[index]!==node) surface.insertBefore(node,surface.children[index]??null);
@@ -188,14 +198,13 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     // A running PWA call must retain End/Mute controls through a resize.
     const next = mobile || active() ? root.querySelector<HTMLElement>('[data-slot="conversation"] [data-phase]') : null;
     const seat = next?.querySelector<HTMLElement>("[data-composer-seat]");
-    if (!next || !seat) { workspaceMenu.update(undefined);hub.remove(); surface.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.panel.remove(); browser.update(false, new Map()); clearConversation(); conversation = undefined; return; }
+    if (!next || !seat) { observeComposerSize(undefined,undefined);workspaceMenu.update(undefined);hub.remove(); surface.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.panel.remove(); browser.update(false, new Map()); clearConversation(); conversation = undefined; return; }
     if (conversation !== next) { clearConversation(); conversation = next; }
     if (nav.parentElement !== next) next.prepend(nav);
     const stack = seat.querySelector('[data-slot="conversation.composer.bar"]')?.parentElement ?? seat;
     stack.setAttribute("data-hub-composer-stack", "");
-    if (hub.parentElement !== stack) stack.prepend(hub);
     const nativeBar = seat.querySelector('[data-slot="conversation.composer.bar"]');
-    const card=seat.querySelector<HTMLElement>('[data-composer-card]');workspaceMenu.update(card??undefined);if(card)compactComposer(card);
+    const card=seat.querySelector<HTMLElement>('[data-composer-card]');workspaceMenu.update(card??undefined);if(card)compactComposer(card);observeComposerSize(card??undefined,stack as HTMLElement);
     const scroll = next.querySelector<HTMLElement>("[data-conversation-scroll]");
     if (scroll && surface.parentElement !== scroll) scroll.prepend(surface);
     if (nativeBar && textHeading.parentElement !== stack) stack.insertBefore(textHeading, nativeBar);
@@ -304,7 +313,7 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
     finally { interrupt.disabled = false; void checkStatus(); }
   });
   play.addEventListener("click", () => { play.hidden = true; void voice?.play(); });
-  view.addEventListener("resize", schedule); schedule();
+  view.addEventListener("resize", schedule);view.visualViewport?.addEventListener("resize",schedule); schedule();
   async function checkStatus() {
     if (statusFlight || root.hidden || lifetime.signal.aborted) return;
     statusFlight = true;
@@ -354,5 +363,5 @@ export function installMobileHubs(ctx: HarnessClientContext, root: Document = do
   const callPoll = view.setInterval(() => {if(active()||Date.now()-lastStatusAt>=2500)void checkStatus();}, 500);
   const visibleStatus = () => { if (!root.hidden) {void checkStatus();void ctx.sessions.refresh?.().catch(()=>{});} }; root.addEventListener("visibilitychange", visibleStatus);
   void checkStatus();
-  return () => { lifetime.abort(); workspaceMenu.dispose(); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose();durableActivity.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); characterPicker.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); planner.dispose();knowledge.dispose();plannerNav.remove();audio.remove(); removeStyles();removeDashboardStyles(); };
+  return () => { lifetime.abort(); workspaceMenu.dispose();composerResize?.disconnect();view.visualViewport?.removeEventListener("resize",schedule); root.removeEventListener("visibilitychange", visibleStatus); view.clearInterval(callPoll); view.clearInterval(identityPoll); activitySignals.dispose();durableActivity.dispose(); observer.disconnect(); unsubscribe(); unsubscribeConnection?.(); view.clearInterval(refreshTime); view.removeEventListener("resize", schedule); if (frame !== undefined) view.cancelAnimationFrame(frame); void voice?.stop(); clearConversation(); transcript.dispose(); characterPicker.dispose(); hub.remove(); textHeading.remove(); nav.remove(); activity.panel.remove(); browser.dispose(); presentation.dispose(); planner.dispose();knowledge.dispose();plannerNav.remove();audio.remove(); removeStyles();removeDashboardStyles(); };
 }

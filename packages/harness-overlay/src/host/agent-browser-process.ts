@@ -89,6 +89,9 @@ export function installAgentBrowserParentLifetime(
 
 interface PendingRequest {
   readonly operation: AgentBrowserOperation | "claim-control";
+  readonly ownerSessionId: string;
+  deadline?: ReturnType<typeof setTimeout>;
+  cancellationDeadline?: ReturnType<typeof setTimeout>;
   readonly signal: AbortSignal;
   readonly onAbort: () => void;
   readonly resolve: (value: AgentBrowserOperationResult) => void;
@@ -225,14 +228,17 @@ function unavailableError(message: string): AgentBrowserProcessError {
 /**
  * Correlates model-facing tool calls with Electron-main Agent Browser work.
  *
- * Aborting a request sends a cancellation frame but intentionally does not
- * abandon the promise. The promise settles only after Electron reports a
- * terminal response (or the IPC transport itself terminates), preserving the
- * Harness tool pipeline's quiescence contract.
+ * Normal cancellation waits for remote quiescence. A missing terminal receipt
+ * has a bounded grace period: release and quarantine that owner, report an
+ * unknown outcome, and never admit another operation for that owner in this
+ * process. An unavailable parent must not keep a stopped turn alive forever.
  */
 export class AgentBrowserProcessClient {
   readonly #port: AgentBrowserProcessPort;
   readonly #pending = new Map<number, PendingRequest>();
+  readonly #quarantinedOwners = new Set<string>();
+  readonly #requestTimeoutMs: number;
+  readonly #cancelGraceMs: number;
   readonly #controlListeners =
     new Set<(event: AgentBrowserControlChangedEvent) => void>();
   #disposed = false;
@@ -305,7 +311,13 @@ export class AgentBrowserProcessClient {
   constructor(
     port: AgentBrowserProcessPort =
       process as unknown as AgentBrowserProcessPort,
+    options: { requestTimeoutMs?: number; cancelGraceMs?: number } = {},
   ) {
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? 120_000;
+    this.#cancelGraceMs = options.cancelGraceMs ?? 5_000;
+    for (const value of [this.#requestTimeoutMs, this.#cancelGraceMs]) {
+      if (!Number.isSafeInteger(value) || value <= 0) throw new RangeError("Invalid Agent Browser deadline");
+    }
     this.#port = port;
     if (
       typeof port.send === "function" &&
@@ -324,6 +336,7 @@ export class AgentBrowserProcessClient {
     signal: AbortSignal,
   ): Promise<AgentBrowserOperationResult> {
     return this.#dispatch(
+      ownerSessionId,
       operation,
       signal,
       (requestId) =>
@@ -344,6 +357,7 @@ export class AgentBrowserProcessClient {
     signal: AbortSignal,
   ): Promise<AgentBrowserClaimControlResult> {
     return this.#dispatch(
+      ownerSessionId,
       "claim-control",
       signal,
       (requestId) =>
@@ -358,6 +372,7 @@ export class AgentBrowserProcessClient {
   }
 
   #dispatch(
+    ownerSessionId: string,
     operation: AgentBrowserOperation | "claim-control",
     signal: AbortSignal,
     createRequest: (
@@ -365,6 +380,13 @@ export class AgentBrowserProcessClient {
     ) => AgentBrowserProcessRequest,
     failureMessage: string,
   ): Promise<AgentBrowserOperationResult> {
+    if (this.#quarantinedOwners.has(ownerSessionId)) {
+      return Promise.reject(new AgentBrowserProcessError(
+        "agent_browser_owner_quarantined",
+        "Browser cleanup was not acknowledged. This conversation cannot run browser actions until HUB reconnects its browser process; do not retry or switch tools to repeat the action.",
+        "unknown",
+      ));
+    }
     if (this.#disposed) {
       return Promise.reject(
         unavailableError("Agent Browser process client is disposed"),
@@ -406,12 +428,16 @@ export class AgentBrowserProcessClient {
         };
         this.#pending.set(requestId, {
           operation,
+          ownerSessionId,
           signal,
           onAbort,
           resolve,
           reject,
           cancelSent: false,
         });
+        const pending = this.#pending.get(requestId)!;
+        pending.deadline = setTimeout(() => this.#cancel(requestId), this.#requestTimeoutMs);
+        if (this.#requestTimeoutMs >= 1_000) pending.deadline.unref();
         signal.addEventListener("abort", onAbort, { once: true });
 
         this.#send(
@@ -508,6 +534,21 @@ export class AgentBrowserProcessClient {
     const pending = this.#pending.get(requestId);
     if (pending === undefined || pending.cancelSent) return;
     pending.cancelSent = true;
+    pending.cancellationDeadline = setTimeout(() => {
+      if (!this.#pending.has(requestId)) return;
+      this.#quarantinedOwners.add(pending.ownerSessionId);
+      this.releaseOwner(pending.ownerSessionId);
+      for (const [id, owned] of this.#pending) {
+        if (owned.ownerSessionId !== pending.ownerSessionId) continue;
+        this.#sendCancelBestEffort(id);
+        this.#reject(id, owned.signal.aborted ? abortError(owned.signal) : new AgentBrowserProcessError(
+          "agent_browser_terminal_timeout",
+          "The browser did not acknowledge cancellation. Cleanup was requested and this conversation's browser actions are blocked. The operation outcome is unknown; do not retry.",
+          "unknown",
+        ));
+      }
+    }, this.#cancelGraceMs);
+    if (this.#cancelGraceMs >= 1_000) pending.cancellationDeadline.unref();
     const cancel = createAgentBrowserCancelRequest(requestId);
     this.#send(
       cancel,
@@ -556,6 +597,8 @@ export class AgentBrowserProcessClient {
     const pending = this.#pending.get(requestId);
     if (pending === undefined) return undefined;
     this.#pending.delete(requestId);
+    clearTimeout(pending.deadline);
+    clearTimeout(pending.cancellationDeadline);
     pending.signal.removeEventListener(
       "abort",
       pending.onAbort,

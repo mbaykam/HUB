@@ -1,3 +1,4 @@
+import {createScreenshotPreviews} from "./screenshot-previews.ts";
 import type {HarnessClientContext} from "../core/context.ts";
 import {defineOverlayStyle} from "../shared/style-runtime.ts";
 import styles from "./mobile-artifacts.css";
@@ -9,11 +10,17 @@ export function installMobileArtifacts(ctx:HarnessClientContext,root:Document=do
   const dialog=el("dialog"),header=el("header"),title=el("strong","Conversation apps"),back=button("‹ Apps",()=>showList()),close=button("Close",()=>dialog.close()),status=el("p"),list=el("section"),stage=el("section");dialog.dataset.hubAppsDialog="";dialog.setAttribute("aria-label","Conversation apps");status.setAttribute("role","status");
   header.append(back,title,close);dialog.append(header,status,list,stage);root.body.append(dialog);
   let session:string|undefined,voiceSession:string|undefined,items:{id:string;name:string;at:number;path:string}[]=[],busy=false,epoch=0,disposed=false;
+  const screenshots=createScreenshotPreviews(root,async(id,signal)=>{
+    if(!session)throw Error("Conversation unavailable");
+    const response=await view.fetch("/api/hub/artifacts",{credentials:"same-origin",cache:"no-store",headers:{"x-hub-daily-use":"1","x-hub-session":session,"x-hub-screenshot":id},signal:AbortSignal.any([signal,lifetime.signal,AbortSignal.timeout(16000)])});
+    if(!response.ok)throw Error("Screenshot unavailable");
+    return response.blob();
+  });
   async function request(id?:string){const r=await view.fetch("/api/hub/artifacts",{credentials:"same-origin",cache:"no-store",headers:{"x-hub-daily-use":"1","x-hub-session":session!,...(id?{"x-hub-artifact":id}:{})},signal:AbortSignal.any([lifetime.signal,AbortSignal.timeout(16000)])});if(!r.ok)throw Error();return r.json();}
-  function place(){const current=ctx.sessions.list.getSnapshot().current,next=current??voiceSession;if(next!==session){session=next;epoch++;items=[];launcher.hidden=true;if(dialog.open)dialog.close();void refresh();}
+  function place(){const current=ctx.sessions.list.getSnapshot().current,next=current??voiceSession;if(next!==session){session=next;epoch++;items=[];screenshots.update([]);launcher.hidden=true;if(dialog.open)dialog.close();void refresh();}
     const target=current?root.querySelector('[data-slot="conversation.session.header.utilities"]'):voiceSession?root.querySelector('[data-hub-voice-hub]'):undefined;
-    if(target&&launcher.parentElement!==target)target.append(launcher);else if(!target)launcher.remove();}
-  async function refresh(){if(!session||busy||root.hidden||disposed)return;const ticket=epoch;busy=true;try{const result=await request();if(ticket!==epoch)return;items=Array.isArray(result.artifacts)?result.artifacts:[];launcher.hidden=!items.length;}catch{/* Never interrupt the chat or voice on a preview outage. */}finally{busy=false;}}
+    if(target&&launcher.parentElement!==target)target.append(launcher);else if(!target)launcher.remove();screenshots.place();}
+  async function refresh(){if(!session||busy||root.hidden||disposed)return;const ticket=epoch;busy=true;try{const result=await request();if(ticket!==epoch)return;items=Array.isArray(result.artifacts)?result.artifacts:[];launcher.hidden=!items.length;screenshots.update(result.screenshots);}catch{/* Never interrupt the chat or voice on a preview outage. */}finally{busy=false;}}
   function showList(){title.textContent="Conversation apps";stage.replaceChildren();stage.hidden=true;back.hidden=true;list.hidden=false;list.replaceChildren();status.textContent=items.length?"Saved outputs from this conversation.":"No apps found. Reopen this preview to retry.";for(const item of items)list.append(button(item.name,()=>void play(item.id)));}
   async function open(id?:string){if(!session)return;await refresh();showList();if(!dialog.open)dialog.showModal();close.focus();if(id)void play(id);else if(items.length===1)void play(items[0]!.id);}
   async function play(id:string){const ticket=epoch;status.textContent="Opening app…";try{const result=await request(id);if(ticket!==epoch||!dialog.open)return;if(typeof result.document!=="string"||result.document.length>6_000_000)throw Error();title.textContent=result.name;const frame=el("iframe");frame.title=result.name;frame.setAttribute("sandbox","allow-scripts");frame.setAttribute("allow","camera 'none'; microphone 'none'; geolocation 'none'");frame.referrerPolicy="no-referrer";frame.srcdoc=result.document;stage.replaceChildren(frame);stage.hidden=false;list.hidden=true;back.hidden=false;status.textContent="";}catch{status.textContent="The app couldn’t open. Return to Apps and try again.";}}
@@ -21,5 +28,5 @@ export function installMobileArtifacts(ctx:HarnessClientContext,root:Document=do
   const inlineOpen=(event:MouseEvent)=>{const target=event.target instanceof view.Element?event.target.closest<HTMLElement>('button,a'):null;if(!target||!target.closest('[data-slot="conversation.view"]'))return;const path=(target.getAttribute("title")??target.getAttribute("aria-label")?.replace(/^Open /,"")??target.textContent??"").replace(/\\+/g,"/");const file=items.find(f=>f.path===path);if(file){event.preventDefault();event.stopImmediatePropagation();void open(file.id);}};root.addEventListener("click",inlineOpen,true);
   const off=ctx.sessions.list.subscribe(place),voice=(event:Event)=>{const detail=(event as CustomEvent).detail;voiceSession=detail?.sessionId;place();};root.addEventListener("hub:artifact-session",voice);
   const observer=new view.MutationObserver(place);observer.observe(root.body,{childList:true,subtree:true});const timer=view.setInterval(()=>void refresh(),5000);place();
-  return()=>{disposed=true;lifetime.abort();off();observer.disconnect();view.clearInterval(timer);root.removeEventListener("click",inlineOpen,true);root.removeEventListener("hub:artifact-session",voice);dialog.close();dialog.remove();launcher.remove();offStyles();};
+  return()=>{disposed=true;lifetime.abort();screenshots.dispose();off();observer.disconnect();view.clearInterval(timer);root.removeEventListener("click",inlineOpen,true);root.removeEventListener("hub:artifact-session",voice);dialog.close();dialog.remove();launcher.remove();offStyles();};
 }

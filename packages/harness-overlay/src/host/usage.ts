@@ -87,6 +87,7 @@ async function providerJson(
   fetchImpl: typeof globalThis.fetch,
   url: string,
   apiKey: string,
+  signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
 ): Promise<unknown> {
   const response = await fetchImpl(url, {
     method: "GET",
@@ -97,7 +98,7 @@ async function providerJson(
       "cache-control": "no-store",
       "user-agent": "HUB usage meter",
     },
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    signal,
   });
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -115,6 +116,22 @@ function finiteAmount(value: unknown, label: string): number {
     throw new TypeError(`OpenRouter returned an invalid ${label}`);
   }
   return value;
+}
+
+/** Fetch an existing generation receipt without creating a model request. */
+export async function readOpenRouterGenerationCost(
+  id: string,
+  apiKey: string,
+  signal: AbortSignal,
+  fetchImpl = globalThis.fetch,
+): Promise<number> {
+  if (!/^gen-[A-Za-z0-9_-]{1,160}$/u.test(id)) throw new TypeError("Invalid OpenRouter generation ID");
+  const url = new URL("https://openrouter.ai/api/v1/generation");
+  url.searchParams.set("id", id);
+  const root = object(await providerJson(fetchImpl, url.href, apiKey, signal), "OpenRouter generation response");
+  const data = object(root.data, "OpenRouter generation data");
+  if (data.id !== id) throw new Error("OpenRouter returned a different generation");
+  return finiteAmount(data.total_cost, "billed cost");
 }
 
 export function parseOpenRouterKeyResponse(value: unknown): Readonly<{

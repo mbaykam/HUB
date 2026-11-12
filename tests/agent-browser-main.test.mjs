@@ -515,6 +515,7 @@ function runtimeFixture(options = {}) {
     },
     guestAttachTimeoutMs: 250,
     cdpCommandTimeoutMs: options.cdpCommandTimeoutMs ?? 250,
+    sessionCleanupTimeoutMs: options.sessionCleanupTimeoutMs,
     history: options.history,
   });
   const ipc = new FakeIpc();
@@ -5163,4 +5164,24 @@ test("persistent or wrongly hosted guests fail closed", async () => {
   });
   wrongHost.binding.dispose();
   wrongHost.runtime.dispose();
+});
+
+
+test("cancelled open settles after guest revocation even when Chromium cleanup never finishes", async () => {
+  const target = runtimeFixture({ sessionCleanupTimeoutMs: 20, sessionFactory() {
+    const session = new FakeSession();
+    session.closeAllConnections = () => new Promise(() => {});
+    session.clearStorageData = () => new Promise(() => {});
+    return session;
+  }});
+  const controller = new AbortController();
+  const pending = target.runtime.handleProcessRequest(createAgentBrowserRequest(1, "cancelled-owner", "open", {url: "https://example.com"}), controller.signal);
+  assert.equal(target.runtime.projections().length, 1);
+  const rejection = assert.rejects(pending, error => error.code === "agent_browser_cancelled");
+  controller.abort(new Error("user stopped"));
+  await settleAsyncWork();
+  assert.equal(target.runtime.projections().length, 0, "removed guest is published before housekeeping finishes");
+  await rejection;
+  target.binding.dispose();
+  target.runtime.dispose();
 });

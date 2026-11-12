@@ -115,6 +115,7 @@ export interface AgentBrowserRuntimeOptions {
   readonly createToken?: () => string;
   readonly guestAttachTimeoutMs?: number;
   readonly cdpCommandTimeoutMs?: number;
+  readonly sessionCleanupTimeoutMs?: number;
   /** Runtime-owned durable visit log, closed by dispose(). */
   readonly history?: AgentBrowserHistoryPort;
 }
@@ -384,6 +385,7 @@ export class AgentBrowserRuntime {
   readonly #options: AgentBrowserRuntimeOptions;
   readonly #attachTimeoutMs: number;
   readonly #cdpTimeoutMs: number;
+  readonly #cleanupTimeoutMs: number;
   readonly #history: AgentBrowserHistoryPort | undefined;
   readonly #states =
     new Map<string, AgentBrowserSessionState>();
@@ -409,6 +411,7 @@ export class AgentBrowserRuntime {
       30_000,
       "Agent Browser CDP timeout",
     );
+    this.#cleanupTimeoutMs = positiveTimeout(options.sessionCleanupTimeoutMs, 3_000, "Agent Browser session cleanup timeout");
     this.#history = options.history;
   }
 
@@ -1769,8 +1772,9 @@ export class AgentBrowserRuntime {
     const state = this.#states.get(sessionId);
     if (state === undefined) return;
     this.#states.delete(sessionId);
-    await this.#releaseState(state, true);
+    // Removal must be observable even if Chromium storage cleanup stalls.
     this.#publish();
+    await this.#releaseState(state, true);
   }
 
   async closeOwner(ownerSessionId: string): Promise<void> {
@@ -2496,10 +2500,22 @@ export class AgentBrowserRuntime {
     );
     state.session.setPermissionCheckHandler(null);
     state.session.setPermissionRequestHandler(null);
-    await Promise.allSettled([
-      state.session.closeAllConnections(),
-      state.session.clearStorageData(),
+    // Authority, listeners, debugger and guest have already been revoked above.
+    // These unique in-memory partitions are never reused. Chromium housekeeping
+    // must not hold a cancelled agent turn open indefinitely. Keep observing late
+    // rejection, but bound the wait after executable browser work is gone.
+    const cleanup = Promise.allSettled([
+      Promise.resolve().then(() => state.session.closeAllConnections()),
+      Promise.resolve().then(() => state.session.clearStorageData()),
     ]);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([cleanup, new Promise<void>(resolve => {
+        deadline = setTimeout(resolve, this.#cleanupTimeoutMs);
+      })]);
+    } finally {
+      clearTimeout(deadline);
+    }
   }
 
   #sessionResult(

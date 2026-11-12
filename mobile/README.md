@@ -57,6 +57,15 @@ separate browser sheet. Offline/TLS/login failures leave an explicit recovery
 message and a way back to Connection. Foreground microphone/camera access uses
 system prompts only after you choose those existing PWA features.
 
+The native connection source now checks the page when the app returns to the
+foreground. A blank/unresponsive page has an eight-second recovery deadline;
+an opening page has twenty-five seconds, with native Retry, Connection and
+active Voice controls available. Main-page HTTP errors and failed WebKit loads
+also expose recovery. Healthy pages are inspected without reloading drafts;
+backgrounding cancels the deadline, and stale navigation callbacks cannot
+replace a newer page. Cold launch/reopen, expired login and process-loss
+recovery still require acceptance on the intended iPhone.
+
 This connection slice needs simulator/device acceptance before release. It does
 not make a web voice call survive screen locking. Use the separate native Voice
 entry below for that development path. Agent HTML has no native plugin access.

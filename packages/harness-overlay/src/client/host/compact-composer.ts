@@ -25,6 +25,34 @@ export function createWorkspaceComposerMenu(root:Document){
   },dispose(){close();button.remove();card=undefined;}};
 }
 
+/** Keep the voice owner outside React's native card while sharing its geometry. */
+export function seatComposerVoice(hub:HTMLElement,stack:HTMLElement,card:HTMLElement|undefined,idle:boolean){
+  if(hub.parentElement!==stack)stack.prepend(hub);
+  if(idle&&card){
+    const outer=stack.getBoundingClientRect(),inner=card.getBoundingClientRect();
+    const primary=card.querySelector<HTMLElement>('[data-hub-composer-send]')?.getBoundingClientRect();
+    hub.style.right=`${primary?outer.right-primary.left+8:outer.right-inner.right+60}px`;
+    hub.style.bottom=`${primary?outer.bottom-primary.bottom:outer.bottom-inner.bottom+9}px`;
+  }else{hub.style.removeProperty("right");hub.style.removeProperty("bottom");}
+}
+const stopFocusCards=new WeakSet<HTMLElement>();
+function preventStopEditorFocus(card:HTMLElement){
+  if(stopFocusCards.has(card))return;
+  stopFocusCards.add(card);
+  card.addEventListener("mousedown",event=>{
+    if(!card.ownerDocument.documentElement.hasAttribute("data-minke-mobile-web"))return;
+    const button=(event.target as Element).closest?.('button');
+    if(!button||!card.contains(button))return;
+    const stop=button.hasAttribute('data-hub-composer-stop')||
+      (button.hasAttribute('data-hub-composer-send')&&button.querySelector('svg rect')!==null);
+    if(!stop)return;
+    // Upstream keepFocus deliberately focuses the editor on mousedown. A Stop
+    // tap must keep the keyboard closed; its original click handler still owns
+    // cancellation, including keyboard/assistive activation.
+    event.preventDefault();event.stopPropagation();
+  },true);
+}
+
 /** Keep the real editor, attachment state and send/stop handlers in their seats. */
 export function compactComposer(card:HTMLElement){
   const more=card.querySelector<HTMLElement>('[aria-label="More actions"]');
@@ -46,6 +74,7 @@ export function compactComposer(card:HTMLElement){
     for(const name of ['row','tools','trailing','send'])node.removeAttribute(`data-hub-composer-${name}`);
   }
   card.setAttribute('data-hub-compact-composer','');
+  preventStopEditorFocus(card);
   more.setAttribute('data-hub-composer-menu','');
   tools.setAttribute('data-hub-composer-tools','');
   row.setAttribute('data-hub-composer-row','');

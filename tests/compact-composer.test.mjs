@@ -17,25 +17,36 @@ test('actual upstream InputBar wrappers keep menu, primary and independent Stop 
  const {resolve}=await import('node:path');
  const built=await build({entryPoints:['tests/fixtures/real-composer.jsx'],bundle:true,write:false,outdir:'.tmp/composer-unit',loader:{'.module.css':'local-css','.css':'css','.ttf':'dataurl','.woff':'dataurl','.woff2':'dataurl'},plugins:[{name:'overlay-style-text',setup(b){b.onLoad({filter:/harness-overlay.*\.css$/},a=>({contents:readFileSync(a.path,'utf8'),loader:'text'}));}}],alias:{react:'./node_modules/react','react-dom':'./node_modules/react-dom'},jsx:'automatic',define:{'process.env.NODE_ENV':'"development"'},logLevel:'silent'});
  const script=built.outputFiles.find(file=>file.path.endsWith('.js')).text;
- for(const search of ['', '?child', '?before', '?pending']){
+ for(const search of ['', '?child', '?before', '?pending', '?chat', '?chat&child']){
   const dom=new JSDOM('<!doctype html><html data-minke-mobile-web><div id="root"></div></html>',{url:'http://localhost/'+search,pretendToBeVisual:true,runScripts:'outside-only'});
   try{
    dom.window.eval(script);
    const ready=Date.now()+5000;
    while(!dom.window.fixtureReady&&Date.now()<ready)await new Promise(r=>setTimeout(r,20));
    assert.equal(dom.window.fixtureReady,true,'actual React component mounted');
-   const d=dom.window.document,card=d.querySelector('[data-composer-card]'),more=card.querySelector('[aria-label="More actions"]'),send=card.querySelector('[aria-label="Send"]');
+   const d=dom.window.document,card=d.querySelector('[data-composer-card]'),more=card.querySelector('[aria-label="More actions"]'),send=card.querySelector('[aria-label="Send"]')??card.querySelector('[aria-label="Stop"]');
    if(search==='?before'){
     assert.equal(card.querySelector('[data-hub-composer-send]').getAttribute('aria-label'),'Attach photos or files','old parent counting reproduces the production bug');
     compactComposer(card);
    }
    assert.ok(card.querySelector('[data-hub-composer-menu]')===more,'existing menu owns compact action seat');
    assert.ok(card.querySelector('[data-hub-composer-send]')===send,'existing Send owns primary seat');
-   assert.equal(send.disabled,true,'empty draft retains native disabled gate');
+   assert.equal(send.disabled,search==='?chat'?false:true,'native primary disabled gate survives');
    assert.equal(card.querySelector('[data-hub-composer-row]').parentElement,card);
    assert.equal(card.querySelector('[data-hub-composer-tools]').className,'InputBar_tools');
    if(search!=='?pending')assert.equal(card.querySelector('[data-slot="conversation.input.left"]').hasAttribute('data-hub-composer-tools'),false);
    if(search==='?child')assert.equal(card.querySelector('[data-hub-composer-stop]').getAttribute('aria-label'),'Stop');
+   if(search.includes('chat')){
+    const stop=card.querySelector('[data-hub-composer-stop]')??send;
+    assert.equal(stop.getAttribute('aria-label'),'Stop');
+    const beforeFocus=dom.window.fixtureFocusCalls,beforeStops=dom.window.fixtureStops;
+    d.activeElement?.blur();
+    stop.dispatchEvent(new dom.window.MouseEvent('mousedown',{bubbles:true,cancelable:true}));stop.click();
+    assert.equal(dom.window.fixtureFocusCalls,beforeFocus,'native Stop mousedown never refocuses editor');
+    assert.equal(dom.window.fixtureStops,beforeStops+1,'original upstream Stop click handler fires once');
+    assert.notEqual(d.activeElement,card.querySelector('[data-composer-input]'));
+    assert.equal(d.querySelector('[data-hub-voice-hub]').parentElement,d.querySelector('[data-hub-composer-stack]'),'voice stays outside native React card');
+   }
    more.click();
    if(search==='?pending'){
     assert.deepEqual([...d.querySelectorAll('[role="dialog"] button')].map(b=>b.textContent),['Choose workspace…']);

@@ -1,4 +1,5 @@
 import { BookmarkClient } from "./bookmarks.ts";
+import { MOBILE_HOME_NAVIGATION_EVENT } from "./mobile-home-navigation.ts";
 
 const MOBILE_SIDEBAR_FRAME_ATTRIBUTE =
   "data-minke-mobile-sidebar-frame";
@@ -152,6 +153,7 @@ type MobileSidebarView = Window & {
   readonly Element: typeof Element;
   readonly HTMLButtonElement: typeof HTMLButtonElement;
   readonly HTMLElement: typeof HTMLElement;
+  readonly Event: typeof Event;
   readonly MutationObserver: typeof MutationObserver;
 };
 
@@ -316,6 +318,7 @@ export class MobileSidebarDrawerRuntime {
     );
     this.#root.addEventListener("click", this.#onClick, true);
     this.#root.addEventListener("keydown", this.#onKeyDown, true);
+    this.#root.addEventListener(MOBILE_HOME_NAVIGATION_EVENT, this.#onHomeNavigation);
     this.#root.addEventListener(
       RIGHT_DRAWER_OPENING_EVENT,
       this.#onRightDrawerOpening,
@@ -359,6 +362,7 @@ export class MobileSidebarDrawerRuntime {
     );
     this.#root.removeEventListener("click", this.#onClick, true);
     this.#root.removeEventListener("keydown", this.#onKeyDown, true);
+    this.#root.removeEventListener(MOBILE_HOME_NAVIGATION_EVENT, this.#onHomeNavigation);
     this.#root.removeEventListener(
       RIGHT_DRAWER_OPENING_EVENT,
       this.#onRightDrawerOpening,
@@ -450,6 +454,10 @@ export class MobileSidebarDrawerRuntime {
   };
 
   #clearFrame(): void {
+    if (this.#settleTimer !== undefined) this.#view.clearTimeout(this.#settleTimer);
+    this.#settleTimer = undefined;
+    if (this.#selectionCloseFrame !== undefined) this.#view.cancelAnimationFrame(this.#selectionCloseFrame);
+    this.#selectionCloseFrame = undefined;
     const frame = this.#frame;
     const content = this.#content;
     if (frame !== undefined) {
@@ -1214,13 +1222,16 @@ export class MobileSidebarDrawerRuntime {
     if (
       frame === undefined ||
       target === undefined ||
+      !frame.contains(target) ||
       this.#gesture !== undefined ||
       !this.#enabled() ||
       frame.hasAttribute("data-minke-mobile-sidebar-settling") ||
+      frame.hasAttribute("data-minke-mobile-right-drawer-settling") ||
       frame.hasAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE) ||
       !event.isPrimary ||
       event.button !== 0 ||
-      target.closest(GESTURE_IGNORE_SELECTOR) !== null
+      target.closest(GESTURE_IGNORE_SELECTOR) !== null ||
+      target.closest('[role="dialog"],dialog[open],[data-hub-widget-back-header],[data-hub-widget-back-edge]') !== null
     ) {
       return;
     }
@@ -1279,7 +1290,7 @@ export class MobileSidebarDrawerRuntime {
       }
 
       gesture.dragging = true;
-      this.#root.dispatchEvent(new Event(LEFT_DRAWER_OPENING_EVENT));
+      this.#root.dispatchEvent(new this.#view.Event(LEFT_DRAWER_OPENING_EVENT));
       frame.setAttribute(MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE, "");
       if (!gesture.startedOpen) {
         this.#syncOpenState(true);
@@ -1560,9 +1571,29 @@ export class MobileSidebarDrawerRuntime {
   };
 
   readonly #onRightDrawerOpening = (): void => {
+    this.#gesture = undefined;
     if (this.#frame?.hasAttribute(MOBILE_SIDEBAR_OPEN_ATTRIBUTE)) {
       this.#settle(false, true);
     }
+  };
+
+  readonly #onHomeNavigation = (): void => {
+    if (this.#gesture) {
+      this.#suppressClickUntil = this.#view.performance.now() + CLICK_SUPPRESSION_MS;
+      this.#suppressClickTarget = this.#gesture.target;
+    }
+    this.#gesture = undefined;
+    if (this.#selectionCloseFrame !== undefined) this.#view.cancelAnimationFrame(this.#selectionCloseFrame);
+    this.#selectionCloseFrame = undefined;
+    if (this.#settleTimer !== undefined) this.#view.clearTimeout(this.#settleTimer);
+    this.#settleTimer = undefined;
+    const frame = this.#frame;
+    if (!frame) return;
+    frame.removeAttribute(MOBILE_SIDEBAR_DRAGGING_ATTRIBUTE);
+    frame.removeAttribute("data-minke-mobile-sidebar-settling");
+    if (!frame.hasAttribute(SIDEBAR_COLLAPSED_ATTRIBUTE)) this.#layout.toggleSidebar();
+    this.#syncOpenState(false);
+    this.#clearVisuals(frame);
   };
 
   readonly #onKeyDown = (event: KeyboardEvent): void => {

@@ -1,5 +1,6 @@
 import { installMobileMemoryGraph } from "./mobile-memory-graph.ts";
 import {installMobileWork} from "./mobile-work.ts";
+import { MOBILE_HOME_NAVIGATION_EVENT } from "./mobile-home-navigation.ts";
 
 
 const MOBILE_WEB_ROOT_SELECTOR = "[data-minke-mobile-web]";
@@ -57,6 +58,7 @@ interface RightDrawerGesture {
 
 type MobileRightDrawerView = Window & {
   readonly HTMLElement: typeof HTMLElement;
+  readonly Event: typeof Event;
   readonly MutationObserver: typeof MutationObserver;
 };
 
@@ -167,6 +169,7 @@ export class MobileRightDrawerRuntime {
     );
     this.#root.addEventListener("click", this.#onClick, true);
     this.#root.addEventListener("keydown", this.#onKeyDown, true);
+    this.#root.addEventListener(MOBILE_HOME_NAVIGATION_EVENT, this.#onHomeNavigation);
     this.#root.addEventListener(
       LEFT_DRAWER_OPENING_EVENT,
       this.#onLeftDrawerOpening,
@@ -203,6 +206,7 @@ export class MobileRightDrawerRuntime {
     );
     this.#root.removeEventListener("click", this.#onClick, true);
     this.#root.removeEventListener("keydown", this.#onKeyDown, true);
+    this.#root.removeEventListener(MOBILE_HOME_NAVIGATION_EVENT, this.#onHomeNavigation);
     this.#root.removeEventListener(
       LEFT_DRAWER_OPENING_EVENT,
       this.#onLeftDrawerOpening,
@@ -290,6 +294,8 @@ export class MobileRightDrawerRuntime {
   }
 
   #clearFrame(): void {
+    if (this.#settleTimer !== undefined) this.#view.clearTimeout(this.#settleTimer);
+    this.#settleTimer = undefined;
     this.#setBackgroundInert(false);
     this.#frame?.removeAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE);
     this.#frame?.removeAttribute(
@@ -482,14 +488,20 @@ export class MobileRightDrawerRuntime {
     if (
       frame === undefined ||
       target === undefined ||
+      !frame.contains(target) ||
       this.#gesture !== undefined ||
       !this.#enabled() ||
+      frame.hasAttribute("data-minke-mobile-sidebar-open") ||
+      frame.hasAttribute("data-minke-mobile-sidebar-settling") ||
+      frame.hasAttribute("data-minke-mobile-right-drawer-settling") ||
       !event.isPrimary ||
       event.button !== 0 ||
       target.closest(GESTURE_IGNORE_SELECTOR) !== null
     ) {
       return;
     }
+    const modal = target.closest('[role="dialog"],dialog[open]');
+    if ((modal !== null && modal !== this.#drawer) || target.closest('[data-hub-widget-back-header],[data-hub-widget-back-edge]')) return;
     const open = frame.hasAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE);
     if (
       (!open &&
@@ -544,7 +556,7 @@ export class MobileRightDrawerRuntime {
       frame.setAttribute(MOBILE_RIGHT_DRAWER_DRAGGING_ATTRIBUTE, "");
       if (!gesture.startedOpen) {
         this.#root.dispatchEvent(
-          new Event("minke:mobile-right-drawer-opening"),
+          new this.#view.Event("minke:mobile-right-drawer-opening"),
         );
         this.#syncOpenState(true);
       }
@@ -669,9 +681,24 @@ export class MobileRightDrawerRuntime {
   };
 
   readonly #onLeftDrawerOpening = (): void => {
+    this.#gesture = undefined;
     if (this.#frame?.hasAttribute(MOBILE_RIGHT_DRAWER_OPEN_ATTRIBUTE)) {
       this.#settle(false);
     }
+  };
+
+  readonly #onHomeNavigation = (): void => {
+    if (this.#gesture) {
+      this.#suppressClickUntil = this.#view.performance.now() + CLICK_SUPPRESSION_MS;
+      this.#suppressClickTarget = this.#gesture.target;
+    }
+    this.#gesture = undefined;
+    if (this.#settleTimer !== undefined) this.#view.clearTimeout(this.#settleTimer);
+    this.#settleTimer = undefined;
+    this.#frame?.removeAttribute(MOBILE_RIGHT_DRAWER_DRAGGING_ATTRIBUTE);
+    this.#frame?.removeAttribute("data-minke-mobile-right-drawer-settling");
+    this.#syncOpenState(false);
+    this.#clearVisuals();
   };
 
   readonly #onKeyDown = (event: KeyboardEvent): void => {

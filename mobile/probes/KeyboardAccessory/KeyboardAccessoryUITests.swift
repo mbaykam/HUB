@@ -9,14 +9,13 @@ final class KeyboardAccessoryUITests: XCTestCase {
     func testInstalledRendererActualHomeAndCompactComposer() throws {
         #if HUB_INSTALLED_UI_PROBE
         let app = XCUIApplication()
+        var reportedMetrics = "<not captured>"
         app.launchArguments = ["--installed-renderer", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         defer {
-            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            screenshot.name = "installed-renderer-actual-ios-screen"; screenshot.lifetime = .keepAlways; add(screenshot)
-            let tree = XCTAttachment(string: app.debugDescription)
-            tree.name = "installed-renderer-public-accessibility"; tree.lifetime = .keepAlways; add(tree)
-            let metrics = XCTAttachment(string: app.staticTexts["renderer.metrics"].value as? String ?? "<missing>")
+            // Renderer PNG capture uses simctl after this test passes; requesting
+            // an XCUIScreenshot here can block test completion on the runner.
+            let metrics = XCTAttachment(string: reportedMetrics)
             metrics.name = "installed-renderer-metrics-json"; metrics.lifetime = .keepAlways; add(metrics)
             app.terminate()
         }
@@ -25,6 +24,7 @@ final class KeyboardAccessoryUITests: XCTestCase {
         let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Renderer ready' OR label == 'Renderer failed'"), object: status)
         XCTAssertEqual(XCTWaiter.wait(for: [done], timeout: 75), .completed)
         let json = try XCTUnwrap(app.staticTexts["renderer.metrics"].value as? String)
+        reportedMetrics = json
         print("Actual installed renderer evidence: \(json)")
         let data = try XCTUnwrap(json.data(using: .utf8))
         let proof = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -51,9 +51,6 @@ final class KeyboardAccessoryUITests: XCTestCase {
         let choose = app.webViews.buttons["Choose workspace…"]
         XCTAssertTrue(choose.waitForExistence(timeout: 5))
         XCTAssertTrue(choose.isHittable)
-        let menuScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        menuScreenshot.name = "installed-renderer-workspace-recovery-menu"
-        menuScreenshot.lifetime = .keepAlways; add(menuScreenshot)
         more.tap()
         XCTAssertFalse(choose.exists)
         #else
