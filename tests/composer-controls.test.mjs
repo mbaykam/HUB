@@ -9,6 +9,30 @@ import {createRoot} from 'react-dom/client';
 const flush=()=>new Promise(r=>setTimeout(r,20));
 function browser(){const d=new JSDOM('<main><button data-hub-native-commands>Native commands</button><span id="slot"></span></main>',{url:'https://hub.test',pretendToBeVisual:true});d.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};d.window.HTMLDialogElement.prototype.close=function(){this.open=false;};return d;}
 const btn=(r,text)=>[...r.querySelectorAll('button')].find(b=>b.textContent===text);
+
+test('shared menu forwards real actions, reflects unavailable attachments and retains the draft',async()=>{
+ const d=browser(),root=d.window.document,main=root.querySelector('main');
+ main.setAttribute('data-composer-card','');main.setAttribute('data-hub-composer-stack','');
+ main.insertAdjacentHTML('beforeend','<div contenteditable="true">Keep this draft</div><button aria-label="Attach photos or files" disabled>Original attachment</button><button aria-label="Choose character">Original character</button><div data-hub-text-heading><button>Original options</button></div>');
+ const previous={window:globalThis.window,document:globalThis.document,IS_REACT_ACT_ENVIRONMENT:globalThis.IS_REACT_ACT_ENVIRONMENT};
+ Object.assign(globalThis,{window:d.window,document:root,IS_REACT_ACT_ENVIRONMENT:true});
+ let Component,chosen=0,files=0,options=0;
+ root.querySelector('[aria-label="Choose character"]').onclick=()=>chosen++;
+ root.querySelector('[aria-label="Attach photos or files"]').onclick=()=>files++;
+ root.querySelector('[data-hub-text-heading] button').onclick=()=>options++;
+ const off=installComposerResearch({slots:{register(_o,c){Component=c;return()=>{};}},sessions:{}},{},root),react=createRoot(root.querySelector('#slot'));
+ try{
+  await act(async()=>react.render(React.createElement(Component,{sessionId:'hub-eval-menu'})));
+  const more=root.querySelector('[aria-label="More actions"]');more.click();
+  assert.equal(btn(root,'Photos or files').disabled,true);btn(root,'Photos or files').click();assert.equal(files,0);
+  btn(root,'Choose character').click();assert.equal(chosen,1);assert.equal(root.querySelector('[role=dialog]'),null);
+  more.click();btn(root,'Chat options').click();assert.equal(options,1);
+  const attachment=root.querySelector('[aria-label="Attach photos or files"]');attachment.disabled=false;
+  root.querySelector('[data-hub-text-heading] button').hidden=true;
+  more.click();assert.equal(btn(root,'Chat options'),undefined);btn(root,'Photos or files').click();assert.equal(files,1);
+  assert.equal(root.querySelector('[contenteditable]').textContent,'Keep this draft');assert.equal(root.activeElement,more);
+ }finally{await act(async()=>react.unmount());off();Object.assign(globalThis,previous);d.window.close();}
+});
 test('research paragraphs show readable source links and emphasis without interpreting HTML or corrupting prices',()=>{const d=browser(),r=d.window.document,p=researchParagraph(r,'Read [Example.com](https://example.com/) for **documentation**, with `inline code` and *a caveat*. $123.45 <img src=x onerror=alert(1)> [unsafe](javascript:alert(1))');try{assert.equal(p.querySelector('a').textContent,'Example.com');assert.equal(p.querySelector('a').href,'https://example.com/');assert.equal(p.querySelector('a').rel,'noopener noreferrer');assert.equal(p.querySelector('strong').textContent,'documentation');assert.equal(p.querySelector('code').textContent,'inline code');assert.equal(p.querySelector('em').textContent,'a caveat');assert.equal(p.querySelectorAll('img,script').length,0);assert.equal(p.querySelectorAll('a').length,1);assert.ok(p.textContent.includes('$123.45'));}finally{d.window.close();}});
 test('character picker uses stable IDs, queued selection feedback, close focus and no model prompt',async()=>{const d=browser(),root=d.window.document,calls=[],previous=globalThis.CustomEvent;globalThis.CustomEvent=d.window.CustomEvent;d.window.fetch=async(url,init)=>{calls.push({url,init});return {ok:true,json:async()=>init.method==='POST'?{pending:true}:{revision:8,currentId:'a',selectedId:'a',canSelect:true,characters:[{id:'a',name:'Renamable A',role:'Main assistant',model:'fixture/smart'},{id:'b',name:'Renamable B',role:'Specialist',model:'fixture/other'}]}};};const picker=createCharacterPicker(root,()=> 'hub-eval-chat');root.body.append(picker.button);try{picker.button.click();await flush();assert.equal(root.querySelector('[aria-label="Choose character"][role=dialog]').contains(root.activeElement),true);const row=[...root.querySelectorAll('[role=radio]')].find(b=>b.textContent.includes('Renamable B'));row.click();await flush();assert.match(root.querySelector('[role=status]').textContent,/will reply next/);const request=JSON.parse(calls[1].init.body);assert.deepEqual(request,{action:'select',revision:8,id:'b',sessionId:'hub-eval-chat'});btn(root,'Close').click();assert.equal(root.activeElement,picker.button);assert.equal(root.querySelector('[role=dialog]'),null);}finally{picker.dispose();globalThis.CustomEvent=previous;d.window.close();}});
 test('picker revision conflict preserves the existing session and offers a safe reopen',async()=>{const d=browser(),r=d.window.document;d.window.fetch=async(_url,init)=>({ok:init.method!=='POST',status:409,json:async()=>init.method==='POST'?{}:{revision:1,canSelect:true,selectedId:'a',characters:[{id:'a',name:'A',role:'Main',model:'fixture'}]}});const p=createCharacterPicker(r,()=> 'fixture');r.body.append(p.button);try{p.button.click();await flush();r.querySelector('[role=radio]').click();await flush();assert.match(r.querySelector('[role=status]').textContent,/Close and reopen/);assert.equal(btn(r,'Close').disabled,false);}finally{p.dispose();d.window.close();}});

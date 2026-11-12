@@ -53,8 +53,34 @@ export function installComposerResearch(ctx:HarnessClientContext,conversation:Co
     }
     void load(showJobs);timer=root.defaultView!.setInterval(()=>{if(jobId&&!root.hidden&&!busy&&!root.activeElement?.closest("details[open]"))void showJob(jobId,true);},5000);
   }
-  function Control({sessionId}:{sessionId:string}){const anchor=useRef<HTMLSpanElement>(null);useEffect(()=>{const button=root.createElement("button");button.type="button";button.className="hub-composer-button";button.textContent="+";button.style.fontSize="23px";button.setAttribute("aria-label","More actions");button.setAttribute("aria-expanded","false");let popup:ReturnType<typeof anchoredPopover>|undefined;
-      button.onclick=()=>{if(popup?.panel.isConnected){popup.close();return;}let card:Element|null=button.closest('[data-composer-card]');if(!card){card=button.parentElement;while(card&&!card.querySelector('[data-hub-native-commands]'))card=card.parentElement;}const click=(selector:string)=>card?.querySelector<HTMLButtonElement>(selector)?.click();popup=anchoredPopover(root,button,"More actions");for(const [text,run]of [["Photos or files",()=>click('[aria-label="Attach photos or files"]')],["Choose character",()=>click('[aria-label="Choose character"]')],["Research…",()=>panel(sessionId,button)],["Research tasks",()=>panel(sessionId,button,true)],["Chat options",()=>card?.closest('[data-hub-composer-stack]')?.querySelector<HTMLButtonElement>('[data-hub-text-heading] button')?.click()],["Commands",()=>click('[data-hub-native-commands]')],["Close",()=>{}]] as const){const row=root.createElement("button");row.type="button";row.textContent=text;row.onclick=()=>{popup?.close();run();};popup.panel.append(row);}popup.place();popup.panel.querySelector("button")?.focus();};anchor.current?.append(button);return()=>{popup?.close();button.remove();};},[sessionId]);return <span ref={anchor}/>;}
+  function Control({sessionId}:{sessionId:string}){
+    const anchor=useRef<HTMLSpanElement>(null);
+    useEffect(()=>{
+      const button=root.createElement("button");button.type="button";button.className="hub-composer-button";
+      button.textContent="+";button.style.fontSize="23px";button.setAttribute("aria-label","More actions");button.setAttribute("aria-expanded","false");
+      let popup:ReturnType<typeof anchoredPopover>|undefined;
+      button.onclick=()=>{
+        if(popup?.panel.isConnected){popup.close();return;}
+        let card:Element|null=button.closest('[data-composer-card]');
+        if(!card){card=button.parentElement;while(card&&!card.querySelector('[data-hub-native-commands]'))card=card.parentElement;}
+        popup=anchoredPopover(root,button,"More actions");
+        const add=(label:string,run:()=>void,disabled=false)=>{
+          const row=root.createElement("button");row.type="button";row.textContent=label;row.disabled=disabled;
+          row.onclick=()=>{popup?.close();run();};popup!.panel.append(row);
+        };
+        const forward=(label:string,target:HTMLButtonElement|null|undefined)=>{if(target)add(label,()=>target.click(),target.disabled);};
+        forward("Photos or files",card?.querySelector<HTMLButtonElement>('[aria-label="Attach photos or files"]'));
+        forward("Choose character",card?.querySelector<HTMLButtonElement>('[aria-label="Choose character"]'));
+        add("Research…",()=>panel(sessionId,button));add("Research tasks",()=>panel(sessionId,button,true));
+        const options=card?.closest('[data-hub-composer-stack]')?.querySelector<HTMLButtonElement>('[data-hub-text-heading] button');
+        if(options&&!options.hidden)forward("Chat options",options);
+        forward("Commands",card?.querySelector<HTMLButtonElement>('[data-hub-native-commands]'));
+        add("Close",()=>{});popup.place();popup.panel.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+      };
+      anchor.current?.append(button);return()=>{popup?.close();button.remove();};
+    },[sessionId]);
+    return <span ref={anchor}/>;
+  }
   const off=ctx.slots.register({name:"conversation.input.left",id:"hub-research-actions",order:-110},Control);
   return()=>{off();for(const close of dialogs)close();removeStyles();};
 }
