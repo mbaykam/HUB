@@ -50,6 +50,23 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.addUserScript(WKUserScript(source: """
         window.__hubRendererProbeErrors = [];
+        // Cordis catches capability-effect failures in its in-memory logger,
+        // not console. Observe the real overlay context without replacing it.
+        let probeLoader;
+        Object.defineProperty(window, '__ModuleLoader__', {configurable:true,
+          get(){return probeLoader;}, set(loader){
+            probeLoader=loader;
+            const load=loader.load;
+            loader.load=function(registration){
+              if(registration.id==='@lencx/minke-harness-overlay'){
+                const factory=registration.factory;
+                registration={...registration,factory(require){
+                  const exports=factory(require);
+                  return {...exports,apply(...args){window.__hubProbeOverlayContext=args[0];return exports.apply(...args);}};
+                }};
+              return load.call(this,registration);
+            };
+          }});
         for (const level of ['warn','error']) {
           const original = console[level].bind(console);
           console[level] = (...args) => {
@@ -109,6 +126,7 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
             voice:describe(document.querySelector('[data-voice-start]')),
             send:describe(card?.querySelector('[data-hub-composer-send]') ?? card?.querySelector('button[aria-label="Send"]')),
             errors:window.__hubRendererProbeErrors ?? [],
+            capabilityLogs:(window.__hubProbeOverlayContext?.logger?.buffer ?? []).map(row=>({type:row.type,name:row.name,args:row.args?.map(arg=>String(arg?.stack ?? arg))})),
             styles:[...document.querySelectorAll('style')].map(s=>({id:s.id,attributes:[...s.attributes].map(a=>[a.name,a.value]),bytes:s.textContent.length})),
             text:document.body.innerText.slice(0,1200)};
         })()
