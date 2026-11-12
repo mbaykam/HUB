@@ -51,6 +51,7 @@ jobs:
       - name: Run actual WebKit and isolated transport checks
         env:
           HUB_RUN_WEBKIT_PROBE: '1'
+          HUB_RUN_MAC_RENDERER_PROBE: '1'
           HUB_RUN_WEBKIT_TRANSPORT_PROBE: '1'
           HUB_INSTALLED_UI_DOCUMENT_PATH: ${{ github.workspace }}/mobile/build/installed-ui/document.html
           HUB_INSTALLED_UI_EVIDENCE_DIR: ${{ github.workspace }}/mobile/build/installed-ui-evidence

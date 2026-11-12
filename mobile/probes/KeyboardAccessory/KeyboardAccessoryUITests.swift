@@ -6,6 +6,47 @@ final class KeyboardAccessoryUITests: XCTestCase {
     private let doneLabels = ["Done", "Bitti"]
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testInstalledRendererActualHomeAndCompactComposer() throws {
+        #if HUB_INSTALLED_UI_PROBE
+        let app = XCUIApplication()
+        app.launchArguments = ["--installed-renderer", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer {
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "installed-renderer-actual-ios-screen"; screenshot.lifetime = .keepAlways; add(screenshot)
+            let tree = XCTAttachment(string: app.debugDescription)
+            tree.name = "installed-renderer-public-accessibility"; tree.lifetime = .keepAlways; add(tree)
+            let metrics = XCTAttachment(string: app.staticTexts["renderer.metrics"].value as? String ?? "<missing>")
+            metrics.name = "installed-renderer-metrics-json"; metrics.lifetime = .keepAlways; add(metrics)
+            app.terminate()
+        }
+        let status = app.staticTexts["renderer.status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 20))
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Renderer ready' OR label == 'Renderer failed'"), object: status)
+        XCTAssertEqual(XCTWaiter.wait(for: [done], timeout: 75), .completed)
+        let json = try XCTUnwrap(app.staticTexts["renderer.metrics"].value as? String)
+        print("Actual installed renderer evidence: \(json)")
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let proof = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(status.label, "Renderer ready", json)
+        XCTAssertEqual(proof["realRendered"] as? Bool, true, json)
+        XCTAssertEqual(proof["nativeBridge"] as? Bool, false)
+        XCTAssertEqual(proof["nonPersistent"] as? Bool, true)
+        XCTAssertEqual(proof["testOnlyCSP"] as? Bool, true)
+        XCTAssertEqual((proof["sourceSHA256"] as? String)?.count, 64)
+        let renderer = try XCTUnwrap(proof["renderer"] as? [String: Any])
+        XCTAssertEqual(renderer["home"] as? Bool, true)
+        XCTAssertEqual(renderer["compact"] as? Bool, true)
+        let card = try XCTUnwrap(renderer["composer"] as? [String: Any])
+        XCTAssertLessThanOrEqual(try XCTUnwrap(card["height"] as? Double), 80)
+        for key in ["composer", "menu", "voice", "send"] {
+            XCTAssertEqual((renderer[key] as? [String: Any])?["visible"] as? Bool, true, key)
+        }
+        #else
+        throw XCTSkip("Actual exported renderer resource not supplied to this keyboard-only build")
+        #endif
+    }
+
     func testEnglishSyntheticTextAndFormAccessory() throws {
         try compare(language: "en", locale: "en_US", text: "Hello keyboard 123")
     }

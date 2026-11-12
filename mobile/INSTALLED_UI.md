@@ -23,3 +23,18 @@ HTML contains the module queue, all factory registrations, boot graph, rebundled
 The inert `hub-installed-ui-licenses` template includes the graph bundle's generated notices and actual top-level LICENSE/COPYING/NOTICE/OFL files found across staged npm package directories, including contained pnpm layouts. Collection is sorted and deterministic, records original file SHA-256, rejects files outside staging, and reads no README or user configuration. It includes all available staged dependency notices rather than claiming each package occurs in the browser payload. Full and reused staging retain `NOTICE.frontend-dependencies.txt`: actual contained pinned vendor dependency notices, original KaTeX font copyright/license/reserved-name records, and the SHA-256-pinned official SIL OFL1.1 text. Every staged font must byte-match a pinned original. Runtime validation requires this notice file; fingerprinting includes its collector and pinned license source.
 
 Native must verify hash, size bound, schema/profile and compatibility metadata. Confirm live host compatibility asynchronously before mutations; mismatch needs compatible host/app update or remote-UI recovery. WebKit origin, `webView.url`, persistent cookies, authenticated HTTP/WSS, login redirects, sign-out, navigation and server switching require controlled HTTPS-fixture and iPhone acceptance before default activation.
+
+The required `ios-renderer-probe.yml` job loads that exact verified document in a
+real UIKit application on a disposable iPhone simulator. It checks actual Home,
+the compact composer and the three visible controls, and retains system-screen
+screenshots and accessibility evidence. It uses synthetic offline data, no account
+or model, and no native message handler on the renderer. Both simulator packaging
+and protected signing depend on this job; a base-page mount is insufficient.
+
+The standalone workflow can reuse an existing exact artifact run/source for a
+test-only change. This verifies the artifact's original source and hashes rather
+than attributing it to the newer test commit. A signed build still generates and
+verifies its own exact-source renderer. SwiftPM macOS probes retain origin and
+cookie/HTTPS/WSS checks. Their optional layout investigation needs an actual
+AppKit application host: a CLI test window can remain occluded with zero animation
+frames. It is not a substitute for the required iPhone app-host rendering check.

@@ -36,9 +36,9 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
 
     func testActualInstalledRendererOfflineAtPhoneWidth() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["HUB_RUN_WEBKIT_PROBE"] == "1",
+        guard environment["HUB_RUN_MAC_RENDERER_PROBE"] == "1",
               let documentPath = environment["HUB_INSTALLED_UI_DOCUMENT_PATH"], !documentPath.isEmpty else {
-            throw XCTSkip("Set HUB_RUN_WEBKIT_PROBE=1 and HUB_INSTALLED_UI_DOCUMENT_PATH to the actual exported document.html")
+            throw XCTSkip("Layout requires an application-host window. Required iOS renderer job checks the actual document; set HUB_RUN_MAC_RENDERER_PROBE=1 only for a graphical Mac application-host investigation.")
         }
         var html = try String(contentsOfFile: documentPath, encoding: .utf8)
         let head = try XCTUnwrap(html.range(of: "<head>", options: .caseInsensitive), "exported document has a head")

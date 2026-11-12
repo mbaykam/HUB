@@ -2,6 +2,13 @@
 
 This isolated Swift package tests public WKWebView loadHTMLString APIs. Run in a graphical macOS session:
 
+The required Home/composer rendering gate uses a real UIKit scene through
+`ios-renderer-probe.yml`. SwiftPM's CLI process can leave its macOS window
+occluded and its page hidden, suspending animation frames. The optional Mac
+layout investigation requires `HUB_RUN_MAC_RENDERER_PROBE=1`; it retains strict
+layout assertions and must not replace the iPhone app-host gate. The origin and
+synthetic HTTPS/WSS checks below remain enabled independently.
+
 ```sh
 HUB_RUN_WEBKIT_PROBE=1 swift test --package-path mobile/probes/InstalledUIOrigin
 ```

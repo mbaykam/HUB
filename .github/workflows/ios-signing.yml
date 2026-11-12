@@ -30,10 +30,13 @@ jobs:
   installed-ui:
     if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.HUB_IOS_SIGNING_ENABLED == 'true'
     uses: ./.github/workflows/ios-installed-ui.yml
+  renderer:
+    needs: installed-ui
+    uses: ./.github/workflows/ios-renderer-probe.yml
   sign:
     if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.HUB_IOS_SIGNING_ENABLED == 'true'
     environment: ios-signing
-    needs: installed-ui
+    needs: [installed-ui, renderer]
     runs-on: xcode-27
     timeout-minutes: 75
     defaults:

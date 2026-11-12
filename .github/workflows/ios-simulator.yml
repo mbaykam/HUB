@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ios-simulator-${{ github.event_name }}-${{ github.ref }}
@@ -25,6 +26,9 @@ jobs:
   installed-ui:
     if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/ios-installed-ui.yml
+  renderer:
+    needs: installed-ui
+    uses: ./.github/workflows/ios-renderer-probe.yml
   foundation:
     name: Check iOS preparation
     runs-on: ubuntu-24.04
@@ -51,7 +55,7 @@ jobs:
   simulator:
     name: Build unsigned iOS foundation
     if: github.event_name == 'workflow_dispatch'
-    needs: [foundation, installed-ui]
+    needs: [foundation, installed-ui, renderer]
     runs-on: ${{ inputs.toolchain == 'xcode-27' && 'xcode-27' || 'macos-latest' }}
     timeout-minutes: 25
     defaults:

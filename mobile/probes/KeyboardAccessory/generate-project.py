@@ -3,6 +3,8 @@
 import argparse
 import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
 
 
@@ -27,6 +29,20 @@ def main():
     project = output / "KeyboardAccessory.xcodeproj"
     schemes = project / "xcshareddata/xcschemes"
     schemes.mkdir(parents=True, exist_ok=True)
+    installed = os.environ.get("HUB_INSTALLED_UI_DOCUMENT_PATH")
+    resource_names = []
+    if installed:
+        document = Path(installed).resolve(strict=True)
+        manifest_path = document.with_name("manifest.json")
+        manifest = json.loads(manifest_path.read_bytes())
+        data = document.read_bytes()
+        if document.name != "document.html" or manifest.get("document", {}).get("sha256") != hashlib.sha256(data).hexdigest() or manifest["document"].get("bytes") != len(data):
+            raise SystemExit("Installed renderer resource checksum mismatch")
+        destination = output / "InstalledUI"
+        destination.mkdir(exist_ok=True)
+        for file in (document, manifest_path):
+            shutil.copyfile(file, destination / file.name)
+        resource_names = ["installed-resource-build"]
     objects = []
 
     def obj(name, body):
@@ -45,6 +61,10 @@ def main():
     obj("test-product", 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = KeyboardAccessoryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
     obj("products", f"isa = PBXGroup; children = {refs(['app-product', 'test-product'])}; name = Products; sourceTree = \"<group>\";")
     obj("main-group", f"isa = PBXGroup; children = {refs(list(files) + ['products'])}; sourceTree = \"<group>\";")
+    if installed:
+        obj("installed-resource", f"isa = PBXFileReference; lastKnownFileType = folder; path = {quote(output / 'InstalledUI')}; sourceTree = \"<absolute>\";")
+        obj("installed-resource-build", f"isa = PBXBuildFile; fileRef = {identifier('installed-resource')};")
+    obj("app-resources", f"isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = {refs(resource_names) if resource_names else '()'}; runOnlyForDeploymentPostprocessing = 0;")
     obj("app-sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {refs(['app-source-build','production-source-build'])}; runOnlyForDeploymentPostprocessing = 0;")
     obj("test-sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {refs(['test-source-build'])}; runOnlyForDeploymentPostprocessing = 0;")
     for name in ("app-frameworks", "test-frameworks"):
@@ -62,11 +82,13 @@ def main():
         elif target == "test":
             settings.update(PRODUCT_NAME="KeyboardAccessoryUITests", PRODUCT_BUNDLE_IDENTIFIER="dev.hub.probe.KeyboardAccessoryUITests",
                             TEST_TARGET_NAME="KeyboardAccessory")
+            if installed:
+                settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "HUB_INSTALLED_UI_PROBE"
         body = " ".join(f"{key} = {quote(value)};" for key, value in settings.items())
         for config in ("Debug", "Release"):
             obj(target + config, f"isa = XCBuildConfiguration; buildSettings = {{ {body} }}; name = {config};")
         obj(target + "-configs", f"isa = XCConfigurationList; buildConfigurations = {refs([target+'Debug',target+'Release'])}; defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug;")
-    obj("app-target", f"isa = PBXNativeTarget; buildConfigurationList = {identifier('app-configs')}; buildPhases = {refs(['app-sources','app-frameworks'])}; buildRules = (); dependencies = (); name = KeyboardAccessory; productName = KeyboardAccessory; productReference = {identifier('app-product')}; productType = \"com.apple.product-type.application\";")
+    obj("app-target", f"isa = PBXNativeTarget; buildConfigurationList = {identifier('app-configs')}; buildPhases = {refs(['app-sources','app-frameworks','app-resources'])}; buildRules = (); dependencies = (); name = KeyboardAccessory; productName = KeyboardAccessory; productReference = {identifier('app-product')}; productType = \"com.apple.product-type.application\";")
     obj("test-target", f"isa = PBXNativeTarget; buildConfigurationList = {identifier('test-configs')}; buildPhases = {refs(['test-sources','test-frameworks'])}; buildRules = (); dependencies = {refs(['app-dependency'])}; name = KeyboardAccessoryUITests; productName = KeyboardAccessoryUITests; productReference = {identifier('test-product')}; productType = \"com.apple.product-type.bundle.ui-testing\";")
     obj("project", f"isa = PBXProject; attributes = {{ LastUpgradeCheck = 1600; TargetAttributes = {{ {identifier('test-target')} = {{ TestTargetID = {identifier('app-target')}; }}; }}; }}; buildConfigurationList = {identifier('project-configs')}; compatibilityVersion = \"Xcode 14.0\"; developmentRegion = en; knownRegions = (en,tr,Base); mainGroup = {identifier('main-group')}; productRefGroup = {identifier('products')}; projectDirPath = \"\"; projectRoot = \"\"; targets = {refs(['app-target','test-target'])};")
     (project / "project.pbxproj").write_text("// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n" + "\n".join(objects) + f"\n}}; rootObject = {identifier('project')}; }}\n")
