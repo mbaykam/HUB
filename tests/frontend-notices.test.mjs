@@ -40,11 +40,22 @@ test("stage notice retention verifies original font bytes and includes official 
     assert.equal(first.sha256, second.sha256);
     assert.equal(first.verifiedFonts, 1);
     const text = await readFile(first.output, "utf8");
-    assert.match(text, /Synthetic KaTeX code notice/);
-    assert.match(text, /Synthetic original nested font notice/);
-    assert.match(text, /Copyright: Synthetic copyright/);
-    assert.match(text, /SIL OPEN FONT LICENSE Version 1\.1 - 26 February 2007/);
-    assert.match(text, /https:\/\/openfontlicense.org\/documents\/OFL.txt/);
+    // Inspect the generated notice artifact as records, including the complete
+    // original notice/license bodies, rather than matching implementation text.
+    const sections = text.trimEnd().split("\n\n----------------------------------------\n\n");
+    const codeNotice = sections.find(section => section.startsWith("node_modules/katex/LICENSE\n"));
+    assert.equal(codeNotice.split("\n").slice(2).join("\n"), "Synthetic KaTeX code notice");
+    assert.equal(sections.find(section => section.startsWith("node_modules/katex/dist/fonts/OFL.txt\n")),
+      "node_modules/katex/dist/fonts/OFL.txt\nSynthetic original nested font notice");
+    assert.equal(sections.find(section => section.startsWith("Synthetic.ttf\n")),
+      "Synthetic.ttf\nCopyright: Synthetic copyright and reserved font name");
+    const officialLicense = await readFile(new URL("../resources/licenses/SIL-OFL-1.1.txt", import.meta.url), "utf8");
+    assert.equal(sections.at(-1), [
+      "Official SIL Open Font License 1.1",
+      "Source: https://openfontlicense.org/documents/OFL.txt",
+      "The example copyright header below is from SIL; actual font ownership and reserved names are preserved above.",
+      officialLicense,
+    ].join("\n").trimEnd());
     const installed = await collectInstalledUINotices(runtimeRoot);
     assert.equal(installed.length, 1);
     assert.equal(installed[0].file, "node_modules/frontend/NOTICE.frontend-dependencies.txt");
