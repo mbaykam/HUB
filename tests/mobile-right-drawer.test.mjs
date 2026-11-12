@@ -160,8 +160,16 @@ test("Right drawer renders Knowledge and one Tasks entry while retaining access 
     const body = root.querySelector("[data-minke-mobile-right-drawer-body]");
     assert.equal(body.children.length, 2);
     assert.equal(body.lastElementChild.hasAttribute("data-hub-work-tile"),true);
-    assert.equal(body.firstElementChild.tagName, "BUTTON");
-    assert.equal(body.firstElementChild.hasAttribute("data-hub-graph-tile"), true);
+    const knowledgeRow = body.firstElementChild;
+    const knowledgeButton = knowledgeRow.querySelector("button[data-hub-graph-tile]");
+    assert.ok(knowledgeButton);
+    assert.equal(knowledgeButton.tagName, "BUTTON");
+    const logButton = knowledgeRow.querySelector("button[data-hub-knowledge-activity-tile]");
+    assert.ok(logButton, "Activity stays beside Knowledge, not in the Home header");
+    logButton.click();
+    assert.ok(root.querySelector('dialog[aria-label="Knowledge AI activity"]')?.open);
+    root.querySelector('dialog[aria-label="Knowledge AI activity"] button').click();
+    assert.equal(root.querySelector('dialog[aria-label="Knowledge AI activity"]').open, false);
     assert.equal(root.querySelector("[data-minke-mobile-right-drawer-settings]").textContent, "Settings");
     assert.equal(root.querySelector("[data-minke-mobile-right-drawer]").getAttribute("aria-label"), "Knowledge and tasks");
   } finally { drawer.dispose(); dom.window.close(); }

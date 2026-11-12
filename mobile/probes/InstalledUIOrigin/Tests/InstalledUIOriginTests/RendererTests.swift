@@ -54,9 +54,18 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
         addEventListener('unhandledrejection', e => window.__hubRendererProbeErrors.push(String(e.reason)));
         """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: configuration)
+        // A detached macOS web view suppresses requestAnimationFrame. The real
+        // mobile enhancements use it, so exercise a visible, disposable window
+        // rather than accepting only the unenhanced base renderer.
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: webView.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = webView
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1 HUBiOS/0.2"
         webView.navigationDelegate = self
-        defer { webView.navigationDelegate = nil; webView.stopLoading() }
+        defer { webView.navigationDelegate = nil; webView.stopLoading(); window.close() }
         finished = expectation(description: "actual exported document didFinish")
         webView.loadHTMLString(html, baseURL: base)
         await fulfillment(of: [try XCTUnwrap(finished)], timeout: 30)
