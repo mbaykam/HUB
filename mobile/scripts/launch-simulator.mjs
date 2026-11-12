@@ -46,7 +46,9 @@ try{
   await new Promise(resolve=>setTimeout(resolve,4000));
   stage='process';const processName=run('/bin/ps',['-ww','-p',String(pid),'-o','comm=']);
   if(processName!=='App'&&!processName.endsWith('/App.app/App'))throw Error('HUB did not stay running after first launch.');
-  stage='screenshot';sim('io',device,'screenshot',resolve(folder,'native-first-launch.png'));
+  // Newer iPhone runtime seeds can expose multiple displays. Capture the
+  // primary phone display explicitly rather than relying on simctl's default.
+  stage='screenshot';sim('io',device,'screenshot','--display=1',resolve(folder,'native-first-launch.png'));
   await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:false,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
