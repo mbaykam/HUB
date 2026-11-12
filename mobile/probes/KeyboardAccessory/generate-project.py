@@ -58,7 +58,7 @@ def main():
         settings = dict(common)
         if target == "app":
             settings.update(PRODUCT_NAME="KeyboardAccessory", PRODUCT_BUNDLE_IDENTIFIER="dev.hub.probe.KeyboardAccessory",
-                            INFOPLIST_KEY_UILaunchScreen_Generation="YES", INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents="YES")
+                            INFOPLIST_KEY_UILaunchScreen_Generation="YES", INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents="YES", INFOPLIST_KEY_UIApplicationSceneManifest_Generation="YES")
         elif target == "test":
             settings.update(PRODUCT_NAME="KeyboardAccessoryUITests", PRODUCT_BUNDLE_IDENTIFIER="dev.hub.probe.KeyboardAccessoryUITests",
                             TEST_TARGET_NAME="KeyboardAccessory")

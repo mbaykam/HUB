@@ -3,14 +3,24 @@ import WebKit
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        true
+    }
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: "Keyboard probe", sessionRole: session.role)
+        configuration.delegateClass = KeyboardProbeScene.self
+        return configuration
+    }
+}
+
+final class KeyboardProbeScene: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: scene)
         window.rootViewController = KeyboardProbeController()
         self.window = window
         window.makeKeyAndVisible()
-        return true
     }
 }
 
