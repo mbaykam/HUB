@@ -229,3 +229,5 @@ html[data-minke-mobile-web] [data-hub-composer-send]{transform:none}
 html[data-minke-mobile-web] [data-hub-composer-trailing]>[data-hub-composer-stop]{display:grid!important;position:absolute;right:154px;bottom:9px;width:42px;height:42px;min-height:42px!important;min-width:42px!important;transform:none}
 html[data-minke-mobile-web] [data-hub-compact-composer][data-hub-composer-independent-stop]{padding-right:198px!important}
 html[data-minke-mobile-web] [data-hub-compact-composer] [data-composer-placeholder]{top:0}
+
+html[data-minke-mobile-web] [data-hub-workspace-menu]{pointer-events:auto!important;opacity:1;font-size:23px}

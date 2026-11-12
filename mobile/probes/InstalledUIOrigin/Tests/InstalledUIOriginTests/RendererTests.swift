@@ -130,7 +130,7 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
             mobile:document.documentElement.hasAttribute('data-minke-mobile-web'),
             composer:describe(card), compact:card?.hasAttribute('data-hub-compact-composer') ?? false,
             menu:describe(card?.querySelector('[data-hub-composer-menu]')),
-            voice:describe(document.querySelector('[data-voice-start]')),
+            voice:describe(document.querySelector('[data-native-voice-entry]')??document.querySelector('[data-voice-start]')),
             send:describe(card?.querySelector('[data-hub-composer-send]') ?? card?.querySelector('button[aria-label="Send"]')),
             errors:window.__hubRendererProbeErrors ?? [],
             probeInstalled:window.__hubProbeInstalled===true,

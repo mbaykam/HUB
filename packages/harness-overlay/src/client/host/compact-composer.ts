@@ -1,3 +1,30 @@
+import {anchoredPopover} from "./character-picker.ts";
+
+/** Keep the same three-control layout while the real workspace picker owns input.
+ * This recovery menu never enables the session's locked message controls. */
+export function createWorkspaceComposerMenu(root:Document){
+  const button=root.createElement("button");button.type="button";button.textContent="+";
+  button.className="hub-composer-button";button.setAttribute("aria-label","More actions");
+  button.setAttribute("data-hub-workspace-menu","");button.setAttribute("aria-expanded","false");
+  let card:HTMLElement|undefined,popup:ReturnType<typeof anchoredPopover>|undefined;
+  const close=()=>{const current=popup;popup=undefined;if(current?.panel.isConnected)current.close();};
+  button.addEventListener("click",event=>{
+    event.stopPropagation();
+    if(popup?.panel.isConnected){close();return;}
+    popup=anchoredPopover(root,button,"More actions");
+    const choose=root.createElement("button");choose.type="button";choose.textContent="Choose workspace…";
+    choose.onclick=()=>{close();card?.querySelector<HTMLElement>('[contenteditable][aria-haspopup="menu"]')?.click();};
+    popup.panel.append(choose);popup.place();choose.focus();
+  });
+  return {update(next:HTMLElement|undefined){
+    const picker=next?.querySelector('[contenteditable][aria-haspopup="menu"]');
+    const liveMenu=next?.querySelector('[aria-label="More actions"]:not([data-hub-workspace-menu])');
+    const row=next?.lastElementChild,tools=row?.firstElementChild;
+    if(!picker||liveMenu||!tools||tools===row?.lastElementChild){close();if(button.isConnected)button.remove();card=undefined;return;}
+    card=next;if(button.parentElement!==tools)tools.append(button);
+  },dispose(){close();button.remove();card=undefined;}};
+}
+
 /** Keep the real editor, attachment state and send/stop handlers in their seats. */
 export function compactComposer(card:HTMLElement){
   const more=card.querySelector<HTMLElement>('[aria-label="More actions"]');
@@ -29,7 +56,7 @@ export function compactComposer(card:HTMLElement){
   independentStop?.setAttribute('data-hub-composer-stop','');
   card.toggleAttribute('data-hub-composer-independent-stop',!!independentStop);
   const placeholder=card.querySelector<HTMLElement>('[data-composer-placeholder]');
-  if(placeholder&&/^(Ask anything|Message or run a task)/i.test(placeholder.textContent??''))placeholder.textContent='Chat…';
+  if(placeholder&&placeholder.textContent!=='Chat…'&&(/^(Ask anything|Message or run a task)/i.test(placeholder.textContent??'')||more.hasAttribute('data-hub-workspace-menu')))placeholder.textContent='Chat…';
   const input=card.querySelector<HTMLElement>('[contenteditable]');
   if(input&&/^(Ask anything|Message or run a task)/i.test(input.getAttribute('aria-label')??''))input.setAttribute('aria-label','Chat');
 }
