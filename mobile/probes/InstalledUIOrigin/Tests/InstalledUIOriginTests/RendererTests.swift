@@ -81,15 +81,18 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
         requestAnimationFrame(function tick(){if(++window.__hubProbeFrames<5)requestAnimationFrame(tick);});
         window.__hubProbeInstalled=true;
         """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let application = NSApplication.shared
+        application.setActivationPolicy(.regular)
+        application.finishLaunching()
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: configuration)
         // A detached macOS web view suppresses requestAnimationFrame. The real
         // mobile enhancements use it, so exercise a visible, disposable window
         // rather than accepting only the unenhanced base renderer.
-        _ = NSApplication.shared
         let window = NSWindow(contentRect: webView.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1 HUBiOS/0.2"
         webView.navigationDelegate = self
@@ -132,6 +135,7 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
             errors:window.__hubRendererProbeErrors ?? [],
             probeInstalled:window.__hubProbeInstalled===true,
             frames:window.__hubProbeFrames ?? 0,
+            visibility:document.visibilityState,
             phases:[...document.querySelectorAll('[data-slot="conversation"] [data-phase]')].map(n=>({phase:n.getAttribute('data-phase'),seat:!!n.querySelector('[data-composer-seat]')})),
             capabilityLogs:(window.__hubProbeOverlayContext?.logger?.buffer ?? []).map(row=>({type:row.type,name:row.name,args:row.args?.map(arg=>String(arg?.stack ?? arg))})),
             styles:[...document.querySelectorAll('style')].map(s=>({id:s.id,attributes:[...s.attributes].map(a=>[a.name,a.value]),bytes:s.textContent.length})),
@@ -139,6 +143,9 @@ final class RendererTests: XCTestCase, WKNavigationDelegate {
         })()
         """)
         var metrics = try XCTUnwrap(result as? [String: Any])
+        metrics["nativeWindowVisible"] = window.isVisible
+        metrics["nativeWindowOcclusionVisible"] = window.occlusionState.contains(.visible)
+        metrics["nativeApplicationActive"] = NSApp.isActive
         metrics["cancelledNavigations"] = cancelledNavigations
         metrics["evidenceScope"] = "Actual exported renderer; macOS WebKit, phone-sized viewport and synthetic empty offline data; no iPhone/auth acceptance"
         let json = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
