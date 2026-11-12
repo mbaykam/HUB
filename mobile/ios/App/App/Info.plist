@@ -26,6 +26,11 @@
 	<string>$(HUB_PUSH_ENVIRONMENT)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Existing export questionnaire outcome: standard WebRTC encryption,
+	     private owner testing in Turkey; not a claim that encryption is absent.
+	     Reassess before cryptography or distribution-country changes. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Share a camera image with your assistant when you choose to.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -81,6 +81,23 @@ review in the owner's controlled signing environment, not dumping secrets into C
 
 ## Compatibility and acceptance
 
+The main app records the existing export-questionnaire result with
+`ITSAppUsesNonExemptEncryption = false`. This is **not** a claim that encryption
+is absent or supplied exclusively by Apple's OS: the pinned WebRTC library also
+uses standard encryption. The current reviewed deployment is private internal
+testing by the owner in Turkey, with no France distribution. App Store Connect's
+truthful standard-encryption / no-France answers for builds2 and3 produced this
+same exemption value. Reassess this determination before changing cryptography
+or distributing in France or a different release scope; do not reuse it blindly.
+Recording that reviewed result in the package prevents the same per-build
+questionnaire from blocking each authorized update. It does not expand the
+Developer upload key's role or bypass sign-in/access protections.
+
+Apple documents the package field in
+[ITSAppUsesNonExemptEncryption](https://developer.apple.com/documentation/bundleresources/information-property-list/itsappusesnonexemptencryption)
+and the territorial documentation requirement in
+[Export compliance documentation for encryption](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption/).
+
 Deliver the matching HUB host/PWA through the normal supported update before the
 first phone test, with a private backup and no active user work. Older installed
 hosts may support voice but lack native screen, conversation or push routes.
