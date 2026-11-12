@@ -1,0 +1,64 @@
+name: Installed renderer WebKit probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run:
+        description: Existing renderer artifact run ID (same repository)
+        required: true
+        type: string
+      artifact_source:
+        description: Exact 40-character renderer source SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 10
+    env:
+      ARTIFACT_RUN: ${{ inputs.artifact_run }}
+      ARTIFACT_SOURCE: ${{ inputs.artifact_source }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify original artifact run identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module -e 'if(!/^[0-9]+$/.test(process.env.ARTIFACT_RUN)||!/^[a-f0-9]{40}$/.test(process.env.ARTIFACT_SOURCE))throw Error("Invalid artifact identity")'
+          gh api "repos/mbaykam/HUB/actions/runs/$ARTIFACT_RUN" > "$RUNNER_TEMP/source-run.json"
+          node --input-type=module -e 'import {readFileSync} from "node:fs";const run=JSON.parse(readFileSync(process.env.RUNNER_TEMP+"/source-run.json"));if(run.repository.full_name!=="mbaykam/HUB"||run.head_sha!==process.env.ARTIFACT_SOURCE||run.status!=="completed")throw Error("Unexpected original run")'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: HUB-installed-ui-${{ inputs.artifact_source }}
+          path: mobile/build
+          run-id: ${{ inputs.artifact_run }}
+          github-token: ${{ github.token }}
+      - name: Verify renderer bytes and original source proof
+        env:
+          HUB_PROBE_ARTIFACT_SOURCE_SHA: ${{ inputs.artifact_source }}
+        run: node mobile/scripts/verify-installed-ui-artifact.mjs verify
+      - name: Run actual WebKit and isolated transport checks
+        env:
+          HUB_RUN_WEBKIT_PROBE: '1'
+          HUB_RUN_WEBKIT_TRANSPORT_PROBE: '1'
+          HUB_INSTALLED_UI_DOCUMENT_PATH: ${{ github.workspace }}/mobile/build/installed-ui/document.html
+          HUB_INSTALLED_UI_EVIDENCE_DIR: ${{ github.workspace }}/mobile/build/installed-ui-evidence
+        run: swift test --package-path mobile/probes/InstalledUIOrigin
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: HUB-webkit-probe-${{ github.sha }}
+          path: mobile/build/installed-ui-evidence
+          if-no-files-found: warn
+          retention-days: 7

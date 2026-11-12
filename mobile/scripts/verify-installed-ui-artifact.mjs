@@ -10,7 +10,11 @@ if(process.env.GITHUB_REPOSITORY!=='mbaykam/HUB'||!/^[a-f0-9]{40}$/u.test(proces
 const bundle=await readInstalledUI(join(root,'build/installed-ui'));
 const profile=JSON.parse(await readFile(join(root,'installed-ui-profile.json'),'utf8'));
 if(JSON.stringify([...bundle.manifest.packages].sort())!==JSON.stringify([...profile.packages].sort()))throw Error('Installed UI package roster does not match this source');
-const proof={schema:1,repository:process.env.GITHUB_REPOSITORY,sourceSha:process.env.GITHUB_SHA,compatibility:bundle.manifest.compatibility,manifestSHA256:createHash('sha256').update(bundle.data).digest('hex'),documentSHA256:bundle.manifest.document.sha256};
+// A read-only probe may test an earlier, exactly identified app artifact using
+// newer test code. Generation/signing never substitute another source identity.
+const artifactSource=mode==='verify'?(process.env.HUB_PROBE_ARTIFACT_SOURCE_SHA??process.env.GITHUB_SHA):process.env.GITHUB_SHA;
+if(!/^[a-f0-9]{40}$/u.test(artifactSource))throw Error('Invalid expected artifact source');
+const proof={schema:1,repository:process.env.GITHUB_REPOSITORY,sourceSha:artifactSource,compatibility:bundle.manifest.compatibility,manifestSHA256:createHash('sha256').update(bundle.data).digest('hex'),documentSHA256:bundle.manifest.document.sha256};
 const file=join(root,'build/installed-ui-proof.json');
 if(mode==='write')await writeFile(file,JSON.stringify(proof,null,2)+'\n',{flag:'wx'});
 else{
