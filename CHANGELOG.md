@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.1
+
+- Repair the compact phone composer against actual input slot wrappers, keeping
+  menu, voice and Send visible and preserving existing input handlers.
+- Load the full Knowledge graph on demand; minify versioned UI factories and
+  privately cache verified static assets without caching conversations or drafts.
+- Remove the iPhone's extra Start voice confirmation after a deliberate Speak tap;
+  preserve microphone permission, call ownership and main-frame navigation checks.
+
 ## 1.10.0
 
 - Supply authenticated host endpoints for the iPhone companion's conversations,

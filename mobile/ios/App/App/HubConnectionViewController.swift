@@ -216,34 +216,21 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         present(alert, animated: true)
     }
 
-    @objc private func showVoice() {
+    private func showVoice(resumeLastConversation: Bool = false) {
         guard let api, let server, let deviceState else { showConnection(); return }
         guard connected || voice?.isActive == true else {
             showConnection(error: "Complete HUB sign-in before starting voice.")
             return
         }
-        if voice?.isActive != true, let pending = try? deviceState.admission() {
-            let choices = UIAlertController(title: "Interrupted voice startup", message: "Recover the previous request before starting another conversation.", preferredStyle: .alert)
-            choices.addAction(UIAlertAction(title: "Recover startup", style: .default) { [weak self] _ in
-                self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil, pending: pending)
-            })
-            choices.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            present(choices, animated: true)
-        } else if voice?.isActive != true, let saved = try? deviceState.voice() {
-            let choices = UIAlertController(title: "Voice conversation", message: "Continue your last voice conversation, or start a new one.", preferredStyle: .actionSheet)
-            choices.addAction(UIAlertAction(title: "Resume last conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: saved) })
-            choices.addAction(UIAlertAction(title: "Start new conversation", style: .default) { [weak self] _ in self?.presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) })
-            choices.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            choices.popoverPresentationController?.sourceView = view
-            choices.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
-            present(choices, animated: true)
-        } else { presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil) }
+        let pending: HubVoiceAdmission? = voice?.isActive == true ? nil : (try? deviceState.admission())
+        let saved: HubVoiceCheckpoint? = pending == nil && voice?.isActive != true ? (try? deviceState.voice()) : nil
+        presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: saved, pending: pending, resumeOnlyIfActive: !resumeLastConversation)
     }
-    private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil) {
-        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending)
+    private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false) {
+        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending, resumeOnlyIfActive: resumeOnlyIfActive)
         voice = model
         let sheet = HubVoiceViewController(voice: model, restart: { [weak self] in
-            self?.dismiss(animated: true) { [weak self] in self?.showVoice() }
+            self?.dismiss(animated: true) { [weak self] in self?.showVoice(resumeLastConversation: true) }
         }) { [weak self, weak model] in
             guard let self else { return }
             guard let destination = model?.conversationDestination() else {
@@ -287,8 +274,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             let source = navigationAction.sourceFrame.request.url
             let sourceIsMain = navigationAction.sourceFrame.isMainFrame
             let isLink = navigationAction.navigationType == .linkActivated
-            if HubVoiceNavigation.requestsConfirmation(url: url, source: source, server: server, sourceIsMainFrame: sourceIsMain, targetIsMainFrame: mainFrame, isLink: isLink) {
-                if connected || voice?.isActive == true { offerNativeVoice() }
+            if HubVoiceNavigation.requestsVoice(url: url, source: source, server: server, sourceIsMainFrame: sourceIsMain, targetIsMainFrame: mainFrame, isLink: isLink) {
+                if connected || voice?.isActive == true { showVoice() }
                 else { showConnection(error: "Complete HUB sign-in before starting voice.") }
             }
             else if HubVoiceNavigation.requestsOptions(url: url, source: source, server: server, sourceIsMainFrame: sourceIsMain, targetIsMainFrame: mainFrame, isLink: isLink) { showOptions() }
@@ -373,14 +360,6 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showFailure(error) }
     private func showFailure(_ error: Error) {
         if (error as NSError).code != NSURLErrorCancelled { showRecovery("Could not open HUB. Check your connection, then retry or choose another connection.") }
-    }
-    private func offerNativeVoice() {
-        let active = voice?.isActive == true
-        if active { showVoice(); return }
-        let alert = UIAlertController(title: active ? "Open voice controls?" : "Start voice?", message: active ? "Your existing voice conversation will stay active." : "Start or resume a voice conversation using your iPhone microphone.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: active ? "Open controls" : "Continue", style: .default) { [weak self] _ in self?.showVoice() })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         showRecovery("HUB needs to reconnect. Tap Retry to continue.")

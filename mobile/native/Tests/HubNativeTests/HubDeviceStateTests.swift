@@ -23,6 +23,13 @@ final class HubDeviceStateTests: XCTestCase {
         let suffix = active.isEmpty ? "" : #", "activeCall":{"callId":"\#(active)","sessionId":"original-chat"}"#
         return try JSONDecoder().decode(HubVoiceStatus.self, from: Data("{\"enabled\":true,\"busy\":\(busy),\"serverTime\":1\(suffix)}".utf8))
     }
+    func testSpeakStartsFreshAfterAnEndedCallUnlessResumeWasExplicit() throws {
+        let checkpoint = HubVoiceCheckpoint(server: try HubServer(address: "https://hub.example.com"), lease: try lease(), peerID: "peer-fixture")
+        XCTAssertNil(checkpoint.forExplicitStart(status: try status(busy: false), resumeEndedConversation: false))
+        XCTAssertEqual(checkpoint.forExplicitStart(status: try status(busy: false), resumeEndedConversation: true)?.lease.sessionId, "original-chat")
+        XCTAssertEqual(checkpoint.forExplicitStart(status: try status("owned-call", busy: true), resumeEndedConversation: false)?.recovery(status: try status("owned-call", busy: true)), .rejoinOwnedCall)
+        XCTAssertEqual(checkpoint.forExplicitStart(status: try status("foreign-call", busy: true), resumeEndedConversation: false)?.recovery(status: try status("foreign-call", busy: true)), .anotherCall)
+    }
     func testOnlyVerifiedOriginAuthCookiesSurviveAStoreReopen() throws {
         let server = try HubServer(address: "https://hub.example.com"), store = PrivateFixture()
         let state = HubDeviceState(server: server, store: store, now: { self.time })

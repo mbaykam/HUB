@@ -8,3 +8,39 @@ test('compact layout retains draft, file and send handlers across repeated recon
  compactComposer(card);compactComposer(card);send.click();file.click();
  assert.equal(card.querySelector('[contenteditable]').textContent,'Keep my draft');assert.equal(card.querySelector('[data-composer-placeholder]').textContent,'Chat…');assert.equal(card.querySelectorAll('[data-hub-composer-send]').length,1);assert.equal(card.querySelector('[data-hub-composer-send]'),send);assert.equal(sends,1);assert.equal(files,1);
 });
+
+// Render the upstream component itself: this catches slot wrappers that a
+// hand-written DOM approximation omits. The browser fixture uses the same entry.
+test('actual upstream InputBar wrappers keep menu, primary and independent Stop in their correct seats',async()=>{
+ const {build}=await import('esbuild');
+ const {readFileSync}=await import('node:fs');
+ const {resolve}=await import('node:path');
+ const built=await build({entryPoints:['tests/fixtures/real-composer.jsx'],bundle:true,write:false,outdir:'.tmp/composer-unit',loader:{'.module.css':'local-css','.css':'css','.ttf':'dataurl','.woff':'dataurl','.woff2':'dataurl'},plugins:[{name:'overlay-style-text',setup(b){b.onLoad({filter:/harness-overlay.*\.css$/},a=>({contents:readFileSync(a.path,'utf8'),loader:'text'}));}}],alias:{react:'./node_modules/react','react-dom':'./node_modules/react-dom'},jsx:'automatic',define:{'process.env.NODE_ENV':'"development"'},logLevel:'silent'});
+ const script=built.outputFiles.find(file=>file.path.endsWith('.js')).text;
+ for(const search of ['', '?child', '?before']){
+  const dom=new JSDOM('<!doctype html><html data-minke-mobile-web><div id="root"></div></html>',{url:'http://localhost/'+search,pretendToBeVisual:true,runScripts:'outside-only'});
+  try{
+   dom.window.eval(script);
+   const ready=Date.now()+5000;
+   while(!dom.window.fixtureReady&&Date.now()<ready)await new Promise(r=>setTimeout(r,20));
+   assert.equal(dom.window.fixtureReady,true,'actual React component mounted');
+   const d=dom.window.document,card=d.querySelector('[data-composer-card]'),more=card.querySelector('[aria-label="More actions"]'),send=card.querySelector('[aria-label="Send"]');
+   if(search==='?before'){
+    assert.equal(card.querySelector('[data-hub-composer-send]').getAttribute('aria-label'),'Attach photos or files','old parent counting reproduces the production bug');
+    compactComposer(card);
+   }
+   assert.equal(card.querySelector('[data-hub-composer-menu]'),more);
+   assert.equal(card.querySelector('[data-hub-composer-send]'),send);
+   assert.equal(send.disabled,true,'empty draft retains native disabled gate');
+   assert.equal(card.querySelector('[data-hub-composer-row]').parentElement,card);
+   assert.equal(card.querySelector('[data-hub-composer-tools]').className,'InputBar_tools');
+   assert.equal(card.querySelector('[data-slot="conversation.input.left"]').hasAttribute('data-hub-composer-tools'),false);
+   if(search==='?child')assert.equal(card.querySelector('[data-hub-composer-stop]').getAttribute('aria-label'),'Stop');
+   more.click();
+   assert.deepEqual([...d.querySelectorAll('[role="dialog"] button')].map(b=>b.textContent),['Photos or files','Choose character','Research…','Research tasks','Chat options','Close']);
+   d.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+   assert.equal(d.querySelector('[role="dialog"]'),null);assert.equal(d.activeElement,more);
+   more.click();assert.ok(d.querySelector('[role="dialog"]'),'menu reopens');
+  }finally{dom.window.fixtureDispose?.();dom.window.close();}
+ }
+});

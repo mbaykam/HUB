@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLicenses } from "./browser-licenses.mjs";
+import { createPwaFactory } from "./pwa-factory.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const overlayPackageRoot = join(
@@ -397,10 +398,7 @@ if (/require\(["']@deepseek-ai\//u.test(clientBundle)) {
 
 // A PWA factory can be preloaded before Harness materializes its usual module.
 // The native desktop has no HTTP injection and keeps the bundled factory.
-const factoryStart = clientBundle.indexOf("((require) =>");
-const factoryEnd = clientBundle.lastIndexOf("return module.exports; }) });");
-if (factoryStart < 0 || factoryEnd < factoryStart) throw new Error("Invalid UI factory boundary");
-await writeFile(join(overlayOutputRoot, "pwa-client.js"), "window.__HUB_UI_FACTORY__ = " + clientBundle.slice(factoryStart, factoryEnd) + "return module.exports; });\n");
+await writeFile(join(overlayOutputRoot, "pwa-client.js"), await createPwaFactory(clientBundle));
 
 // Conservative compatibility: any native host, runtime contract, lockfile,
 // configured vendor patch or speech-server change requires a host install.

@@ -18,6 +18,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private let server: HubServer
     private let deviceState: HubDeviceState
     private let resume: HubVoiceCheckpoint?
+    private let resumeOnlyIfActive: Bool
     private let pendingAdmission: HubVoiceAdmission?
     private static let sharedFactory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
@@ -45,9 +46,10 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     var canChangeAttention: Bool { isActive && ready && !ending && !changingAttention }
     private var listeningStatus: String { changingAttention ? "Changing listening mode…" : listeningInBackground ? "Background listening · say “\(wakePhrase)”" : inputPaused ? "Resuming listening…" : "Listening" }
 
-    init(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, resume: HubVoiceCheckpoint? = nil, pendingAdmission: HubVoiceAdmission? = nil) {
+    init(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, resume: HubVoiceCheckpoint? = nil, pendingAdmission: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false) {
         self.api = api; self.server = server; self.deviceState = deviceState; self.resume = resume
         self.pendingAdmission = pendingAdmission
+        self.resumeOnlyIfActive = resumeOnlyIfActive
         super.init()
     }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
@@ -79,6 +81,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
                 let state = try await api.status()
                 guard !ending else { return }
                 guard state.enabled else { throw HubVoiceAPIError.serviceUnavailable }
+                let resume = self.resume?.forExplicitStart(status: state, resumeEndedConversation: !resumeOnlyIfActive)
                 let recovery = resume?.recovery(status: state)
                 if let pendingAdmission {
                     update("Recovering interrupted startup…")

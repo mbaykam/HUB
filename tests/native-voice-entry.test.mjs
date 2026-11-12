@@ -4,7 +4,7 @@ import {JSDOM} from '../vendor/deepseek-harness/node_modules/jsdom/lib/api.js';
 import {createNativeVoiceEntry,createNativeOptionsEntry} from '../packages/harness-overlay/src/client/host/native-voice-entry.ts';
 import {installMobileHubs} from '../packages/harness-overlay/src/client/host/mobile-hubs.ts';
 
-test('iPhone wrapper presents a plain fixed confirmation link with no conversation, command or credential payload',()=>{
+test('iPhone wrapper presents a plain fixed user-navigation link with no conversation, command or credential payload',()=>{
  const dom=new JSDOM('<main></main>',{url:'https://hub.example.com/?hubSession=private-chat&token=do-not-copy#section'});
  Object.defineProperty(dom.window.navigator,'userAgent',{value:'Mozilla/5.0 (iPhone) Safari/605.1 HUBiOS/0.1'});
  try{const link=createNativeVoiceEntry(dom.window.document);assert.equal(link.tagName,'A');assert.equal(link.href,'https://hub.example.com/?hubNative=voice');assert.equal(link.getAttribute('aria-label'),'Open iPhone voice controls');assert.equal(link.querySelectorAll('[data-voice-glyph] i').length,5);assert.doesNotMatch(link.outerHTML,/private-chat|token=|messageHandlers|webkit\./);}

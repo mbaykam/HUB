@@ -38,6 +38,11 @@ public struct HubVoiceCheckpoint: Codable {
         guard let active = status.activeCall, active.callId == lease.callId, active.sessionId == lease.sessionId else { return .anotherCall }
         return peerID == nil ? .missingPeer : .rejoinOwnedCall
     }
+    /// A new explicit Speak tap can recover a still-owned call, but never
+    /// silently restore an ended conversation unless Resume was chosen.
+    public func forExplicitStart(status: HubVoiceStatus, resumeEndedConversation: Bool) -> HubVoiceCheckpoint? {
+        !resumeEndedConversation && recovery(status: status) == .resumeEndedConversation ? nil : self
+    }
 }
 
 /// All values use an origin-scoped private-store key. Only the canonical server

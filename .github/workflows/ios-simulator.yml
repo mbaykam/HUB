@@ -75,6 +75,10 @@ jobs:
         run: pnpm check
       - name: Test HTTPS authority and native cookie isolation
         run: swift test --package-path native
+      - name: Probe installed document origin with isolated synthetic cookies
+        env:
+          HUB_RUN_WEBKIT_PROBE: '1'
+        run: swift test --package-path probes/InstalledUIOrigin
       - name: Probe screen capture SDK availability without conditional imports
         id: screen-sdk
         if: inputs.toolchain == 'xcode-27'

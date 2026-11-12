@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createPwaFactory } from "../scripts/harness/pwa-factory.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -93,8 +94,36 @@ test("real HTTP: authenticated read-only routes, activation without restart, pin
   assert.ok(html.includes("integrity=\"sha256-"));
   assert.equal((await (await get("/api/hub/ui/status")).json()).id, uiHash(a));
   const pinned = `/api/hub/ui/asset?release=${uiHash(a)}&file=memory-graph-browser.js`;
+  const cached = await get(pinned);
+  const etag = cached.headers.get("etag");
+  assert.equal(cached.headers.get("cache-control"), "private, max-age=31536000, immutable");
+  assert.match(cached.headers.get("vary"), /Authorization/);
+  assert.ok(etag);
+  const conditional = headers => get(pinned, { headers: { authorization: "test-only", "if-none-match": etag, ...headers } });
+  const unchanged = await conditional({});
+  assert.equal(unchanged.status, 304); assert.equal(await unchanged.text(), "");
+  for (const [headers, status] of [[{ authorization: "" }, 401], [{ "sec-fetch-site": "cross-site" }, 403]]) {
+    const denied = await conditional(headers);
+    assert.equal(denied.status, status);
+    assert.equal(denied.headers.get("cache-control"), "private, no-store");
+    assert.equal(denied.headers.get("etag"), null);
+  }
+  for (const suffix of ["&release=" + uiHash(b), "&file=voice-browser.js", "&unexpected=1"]) {
+    const invalid = await get(pinned + suffix);
+    assert.equal(invalid.status, 400); assert.equal(invalid.headers.get("cache-control"), "private, no-store");
+  }
+  assert.equal((await get(`/api/hub/ui/asset?release=${"f".repeat(64)}&file=pwa-client.js`, { headers: { authorization: "test-only", "if-none-match": etag } })).status, 404);
   await changeUiRelease(directory, compatibility, { text: b, sha256: uiHash(b) });
-  assert.equal((await (await get("/api/hub/ui/status")).json()).label, "B");
+  const refreshed = await get("/api/hub/ui/status");
+  assert.equal(refreshed.headers.get("cache-control"), "private, no-store");
+  assert.equal((await refreshed.json()).label, "B");
+  assert.ok(transform("<head></head>").includes(`release=${uiHash(b)}`));
+  const next = await get(pinned.replace(uiHash(a), uiHash(b)), { headers: { authorization: "test-only", "if-none-match": etag } });
+  assert.equal(next.status, 200); assert.notEqual(next.headers.get("etag"), etag);
+  await changeUiRelease(directory, compatibility, "rollback");
+  assert.ok(transform("<head></head>").includes(`release=${uiHash(a)}`));
+  assert.equal((await conditional({})).status, 304);
+  await changeUiRelease(directory, compatibility, { text: b, sha256: uiHash(b) });
   assert.match(await (await get(pinned)).text(), / A /);
   assert.equal((await get(`/api/hub/ui/asset?release=${uiHash(a)}&file=../../credentials`)).status, 400);
   assert.equal((await get(pinned, { headers: {} })).status, 401);
@@ -124,6 +153,13 @@ test("built factory chooses the override before materialization; desktop retains
   runInNewContext(pwa, { window });
   assert.equal(typeof window.__HUB_UI_FACTORY__, "function");
   assert.ok(!pwa.includes("sourceMappingURL="));
+  const minified = await createPwaFactory(source);
+  const optimizedWindow = {};
+  runInNewContext(minified, { window: optimizedWindow });
+  assert.equal(typeof optimizedWindow.__HUB_UI_FACTORY__, "function");
+  assert.equal(optimizedWindow.__HUB_UI_FACTORY__.length, bundled.length);
+  assert.ok(Buffer.byteLength(minified) < Buffer.byteLength(source));
+  assert.ok(!minified.includes("sourceMappingURL="));
 });
 
 test("compressed CLI package round-trip requires its exact checksum and the target host metadata", async t => {
@@ -145,4 +181,27 @@ test("compressed CLI package round-trip requires its exact checksum and the targ
   assert.equal(spawnSync(process.execPath, [script.pathname.replace(/^\/([A-Z]:)/i, "$1"), "status", "--host-manifest", host, "--host-compatibility", compatibility], { windowsHide: true }).status, 1);
   const wrong = join(root, "wrong-host.json"); await writeFile(wrong, JSON.stringify({ schema: 1, compatibility: "b".repeat(64) }));
   assert.equal(spawnSync(process.execPath, [script.pathname.replace(/^\/([A-Z]:)/i, "$1"), "activate", "--host-manifest", wrong, "--store", join(root, "store"), "--package", artifact, "--sha256", packed.sha256], { windowsHide: true }).status, 1);
+});
+
+
+test("minified PWA factory preserves require, exports, names and the exact release wrapper", async () => {
+  const factory = `((require) => { var module = { exports: {} }; var exports = module.exports;
+    function NamedComponent(value) { return require("react").render(value); }
+    exports.Component = NamedComponent;
+    exports.propertyName = "unchanged";
+    return module.exports; })`;
+  const source = `window.__ModuleLoader__.load({id:"fixture", factory: window.__HUB_UI_FACTORY__ ?? ${factory} });`;
+  const minified = await createPwaFactory(source);
+  assert.ok(minified.startsWith("window.__HUB_UI_FACTORY__ = "));
+  let original;
+  runInNewContext(source, { window: { __ModuleLoader__: { load(value) { original = value.factory; } } } });
+  const window = {}; runInNewContext(minified, { window });
+  const require = name => { assert.equal(name, "react"); return { render: value => "rendered " + value }; };
+  for (const result of [original(require), window.__HUB_UI_FACTORY__(require)]) {
+    assert.deepEqual(Object.keys(result), ["Component", "propertyName"]);
+    assert.equal(result.Component.name, "NamedComponent");
+    assert.equal(result.Component("fixture"), "rendered fixture");
+    assert.equal(result.propertyName, "unchanged");
+  }
+  await assert.rejects(createPwaFactory("changed wrapper"), /factory boundary/);
 });

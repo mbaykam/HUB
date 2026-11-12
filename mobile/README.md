@@ -60,13 +60,14 @@ and uses native WebRTC audio with the existing SmallWebRTC/RTVI server. The same
 configured voice character, speech providers and saved conversation system stay
 on the server. No extra hosted voice provider or phone-side model key is needed.
 
-Inside the iPhone wrapper, Home's **Speak** links to a separate native Voice
-confirmation, rather than creating browser audio. A fixed same-origin root link
+Inside the iPhone wrapper, Home's **Speak** directly opens native Voice and
+starts audio after the explicit tap, without another start-confirmation popup.
+A fixed same-origin root link
 may request that UI only from the main HUB page; it carries no session, call ID,
-credentials or commands. It cannot start, stop or inspect native audio. Starting
-or resuming still needs an explicit choice in native UIKit. Agent frames,
+credentials or commands. Only a user-activated main-page link can request the
+native start flow; the iPhone's microphone permission still applies. Agent frames,
 redirects, extra parameters and unverified connections cannot request it.
-This is navigation to a confirmation, not a privileged JavaScript bridge.
+This is tightly scoped user navigation, not a privileged JavaScript bridge.
 
 The wrapper identifies itself through a nonprivileged `HUBiOS` user-agent hint;
 ordinary Safari/PWA keeps its browser voice flow. Native WebKit microphone
@@ -101,8 +102,10 @@ call. The microphone still reaches the existing Windows voice host for local wak
 detection; this is not an on-iPhone/offline wake engine. These transitions and
 latency still require physical iPhone acceptance.
 
-After an interrupted app process, **Voice** offers **Resume last conversation**
-or **Start new conversation**. A device-only Keychain receipt identifies the
+After an interrupted app process, **Speak** rejoins a still-owned active call.
+When that old call has ended it starts a new conversation; only the ended voice
+screen's explicit **Resume conversation** keeps the old conversation.
+A device-only Keychain receipt identifies the
 original conversation and owned call. Rejoining requires the current server call
 to match both IDs; another phone/browser's call is never adopted or ended. If
 the old call has ended, resume opens a new audio connection to the same saved

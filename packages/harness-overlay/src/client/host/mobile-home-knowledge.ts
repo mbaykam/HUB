@@ -1,13 +1,26 @@
 import type {KnowledgeGraph} from "../../knowledge-contract.ts";
 import {knowledgeRecordCounts,isArchivedConversation} from "../../knowledge-record-scope.ts";
 import {createKnowledgePreview2D} from "../memory/knowledge-preview-2d.ts";
-import {openMemoryGraph} from "../memory/graph-browser.ts";
+import type {openMemoryGraph} from "../memory/graph-browser.ts";
+import {pwaUiAsset} from "./mobile-ui-update.ts";
+type GraphViewer={openMemoryGraph:typeof openMemoryGraph};
+const loadGraphViewer=(root:Document):Promise<GraphViewer>=>import(/* @vite-ignore */ pwaUiAsset(root,"memory-graph-browser.js","/api/hub/memory?view=client"));
 
-export function createHomeKnowledge(root:Document){
+export function createHomeKnowledge(root:Document,viewer:()=>Promise<GraphViewer>=()=>loadGraphViewer(root)){
   const view=root.defaultView!,panel=root.createElement("section"),stats=root.createElement("div"),preview=root.createElement("div"),title=root.createElement("h2"),numbers=root.createElement("dl"),status=root.createElement("p"),open=root.createElement("button");
   panel.dataset.hubHomeKnowledge="";panel.setAttribute("aria-label","Knowledge overview");stats.className="hub-home-knowledge-stats";preview.className="hub-home-knowledge-map";title.textContent="Knowledge";open.type="button";open.textContent="Explore knowledge";status.setAttribute("role","status");stats.append(title,numbers,status,open);panel.append(stats,preview);
   let enabled=false,graph:KnowledgeGraph|undefined,cloud:ReturnType<typeof createKnowledgePreview2D>|undefined,flight:AbortController|undefined,timer:number|undefined,disposeGraph:(()=>void)|undefined,disposed=false,retrying=false;
-  function explore(noteId?:string){if(!graph)return;disposeGraph?.();disposeGraph=openMemoryGraph(panel,root,graph as any,()=>{disposeGraph=undefined;open.focus();},noteId);}
+  let opening=false,openingGeneration=0;
+  async function explore(noteId?:string){
+    if(!graph||opening||!enabled||disposed)return;
+    opening=true;const generation=++openingGeneration;open.disabled=true;open.setAttribute("aria-busy","true");
+    try{
+      const module=await viewer();
+      if(disposed||!enabled||generation!==openingGeneration)return;
+      disposeGraph?.();disposeGraph=module.openMemoryGraph(panel,root,graph as any,()=>{disposeGraph=undefined;open.focus();},noteId);
+    }catch{if(enabled&&!disposed&&generation===openingGeneration)status.textContent="Couldn’t open Knowledge. Tap Explore knowledge to retry.";}
+    finally{if(generation===openingGeneration){opening=false;open.disabled=false;open.removeAttribute("aria-busy");}}
+  }
   open.addEventListener("click",()=>{if(retrying){void load();return;}explore();});
   async function load(){
     if(!enabled||root.hidden||flight)return;const controller=flight=new AbortController();
@@ -16,11 +29,11 @@ export function createHomeKnowledge(root:Document){
       const count=knowledgeRecordCounts(next.nodes),domains=next.domains?.filter(d=>!d.parentId&&d.status==="active").length??0;numbers.replaceChildren();
       for(const [label,value]of [["Brain notes",count.brain],["Domains",domains],["Connections",next.edges.length],["Chat archive",count.chats]] as const){const row=root.createElement("div"),term=root.createElement("dt"),number=root.createElement("dd");term.textContent=label;number.textContent=value.toLocaleString();row.append(number,term);numbers.append(row);}
       status.textContent=next.partial?"Showing the indexed part of your knowledge.":count.brain?"":"Your saved brain notes will grow here. Original chats are in Chat archive.";
-      if(!cloud){cloud=createKnowledgePreview2D(root,explore);preview.append(cloud.panel);}const brain=next.nodes.filter(n=>!isArchivedConversation(n)),ids=new Set(brain.map(n=>n.id));cloud.update({...next,nodes:brain,edges:next.edges.filter(e=>ids.has(e.source)&&ids.has(e.target))});open.disabled=false;retrying=false;open.textContent="Explore knowledge";
+      if(!cloud){cloud=createKnowledgePreview2D(root,explore);preview.append(cloud.panel);}const brain=next.nodes.filter(n=>!isArchivedConversation(n)),ids=new Set(brain.map(n=>n.id));cloud.update({...next,nodes:brain,edges:next.edges.filter(e=>ids.has(e.source)&&ids.has(e.target))});open.disabled=opening;retrying=false;open.textContent="Explore knowledge";
     }catch{if(enabled&&!controller.signal.aborted){status.textContent="Knowledge could not load. Tap to retry.";open.textContent="Retry knowledge";retrying=true;}}
     finally{if(flight===controller)flight=undefined;}
   }
-  function update(active:boolean){if(enabled===active)return;enabled=active;panel.hidden=!active;view.clearInterval(timer);if(active){void load();timer=view.setInterval(()=>void load(),60000);}else{flight?.abort();flight=undefined;cloud?.dispose();cloud=undefined;preview.replaceChildren();}}
+  function update(active:boolean){if(enabled===active)return;enabled=active;panel.hidden=!active;view.clearInterval(timer);if(active){void load();timer=view.setInterval(()=>void load(),60000);}else{openingGeneration++;opening=false;open.disabled=false;open.removeAttribute("aria-busy");flight?.abort();flight=undefined;cloud?.dispose();cloud=undefined;preview.replaceChildren();disposeGraph?.();disposeGraph=undefined;}}
   const visible=()=>{if(enabled&&!root.hidden)void load();};root.addEventListener("visibilitychange",visible);panel.hidden=true;
   return{panel,update,dispose(){disposed=true;update(false);root.removeEventListener("visibilitychange",visible);disposeGraph?.();panel.remove();}};
 }

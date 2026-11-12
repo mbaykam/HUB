@@ -201,7 +201,7 @@ html[data-minke-mobile-web] [data-hub-compact-composer] [data-input-scroll]{padd
 html[data-minke-mobile-web] [data-hub-compact-composer] [data-composer-placeholder]{max-width:100%;font-size:16px;line-height:40px}
 html[data-minke-mobile-web] [data-hub-composer-row],html[data-minke-mobile-web] [data-hub-composer-tools],html[data-minke-mobile-web] [data-hub-composer-trailing]{display:contents!important}
 html[data-minke-mobile-web] [data-hub-composer-tools]>span{display:contents!important}
-html[data-minke-mobile-web] [data-hub-composer-trailing]>:not([data-hub-composer-send]):not(:has([data-hub-composer-send])){display:none!important}
+html[data-minke-mobile-web] [data-hub-composer-trailing]>:not([data-hub-composer-send]):not([data-hub-composer-stop]):not(:has([data-hub-composer-send])){display:none!important}
 html[data-minke-mobile-web] [data-hub-compact-composer] :is([aria-label="Choose character"],[aria-label="Attach photos or files"]){position:absolute!important;left:12px;bottom:10px;visibility:hidden;pointer-events:none}
 html[data-minke-mobile-web] [data-hub-composer-menu]{position:absolute;right:106px;bottom:9px;width:42px;height:42px;min-height:42px!important;min-width:42px!important;background:none;border:0}
 html[data-minke-mobile-web] [data-hub-composer-send]{position:absolute!important;right:10px;bottom:9px;width:42px!important;height:42px!important;min-height:42px!important;min-width:42px!important}
@@ -220,3 +220,12 @@ html[data-minke-mobile-web] [data-hub-chat-stats]>span[aria-hidden]{display:none
 /* Finished work reads as a compact inbox; current work retains its detail. */
 [data-hub-home-surface] [data-hub-work]:not([data-work-status=running]):not([data-work-status=stopping]):not([data-work-status=waiting]):not([data-work-status=attention]) [data-hub-work-open]{gap:4px;padding:10px 12px}
 [data-hub-home-surface] [data-hub-work]:is([data-work-status=finished],[data-work-status=completed],[data-work-status=failed],[data-work-status=killed]) [data-hub-work-open]>p{display:none}
+/* The upstream hero editor has a two-line floor. Compact mode owns that
+   floor as well as the toolbar; slot wrappers themselves stay layout-neutral. */
+html[data-minke-mobile-web] [data-hub-compact-composer]{gap:0}
+html[data-minke-mobile-web] [data-hub-compact-composer] [data-composer-input]{min-height:40px!important;padding-top:8px;padding-bottom:8px;box-sizing:border-box}
+html[data-minke-mobile-web] [data-hub-composer-tools]>:not([data-hub-composer-menu]):not(:has([data-hub-composer-menu])){position:absolute!important;visibility:hidden;pointer-events:none}
+html[data-minke-mobile-web] [data-hub-composer-send]{transform:none}
+html[data-minke-mobile-web] [data-hub-composer-trailing]>[data-hub-composer-stop]{display:grid!important;position:absolute;right:154px;bottom:9px;width:42px;height:42px;min-height:42px!important;min-width:42px!important;transform:none}
+html[data-minke-mobile-web] [data-hub-compact-composer][data-hub-composer-independent-stop]{padding-right:198px!important}
+html[data-minke-mobile-web] [data-hub-compact-composer] [data-composer-placeholder]{top:0}

@@ -67,11 +67,24 @@ export function installUiUpdates(web: PwaWebServer, reject: (request: IncomingMe
     try {
       const query = new URL(request.url ?? "", "http://127.0.0.1").searchParams;
       const id = query.get("release") ?? "", file = query.get("file") as UiFile;
-      if (!UI_HASH.test(id) || !UI_FILES.includes(file)) { send(response, 400, '{"error":"invalid-asset"}'); return; }
+      const exactQuery = [...query.keys()].every(key => key === "release" || key === "file") &&
+        query.getAll("release").length === 1 && query.getAll("file").length === 1;
+      if (!exactQuery || !UI_HASH.test(id) || !UI_FILES.includes(file)) { send(response, 400, '{"error":"invalid-asset"}'); return; }
       // Retained releases are intentional: an already-open tab must never mix
       // its factory with a newly activated graph or voice client.
       const selected = snapshot?.id === id ? snapshot : read(id);
-      send(response, 200, selected.assets.get(file)!, file.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/plain; charset=utf-8");
+      const etag = `"${selected.release.files[file].sha256}"`;
+      // Only checksum-verified, release-pinned static code/licenses may persist
+      // in the private browser cache. Authorization runs before any 304.
+      const headers = {
+        "content-type": file.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/plain; charset=utf-8",
+        "cache-control": "private, max-age=31536000, immutable",
+        "vary": "Cookie, Authorization", "etag": etag,
+        "x-content-type-options": "nosniff", "cross-origin-resource-policy": "same-origin",
+      };
+      const matches = request.headers["if-none-match"]?.split(",").some(value => value.trim().replace(/^W\//u, "") === etag || value.trim() === "*");
+      response.writeHead(matches ? 304 : 200, headers);
+      response.end(matches ? undefined : selected.assets.get(file)!);
     } catch { send(response, 404, '{"error":"release-unavailable"}'); }
   } })];
   return () => off.reverse().forEach(dispose => dispose());

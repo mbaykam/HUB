@@ -1,9 +1,9 @@
 import Foundation
 
-/// A read-only navigation request for a native confirmation, never an audio
-/// command or a web-to-native API. UIKit must obtain its own explicit gesture.
+/// Fixed navigation from an explicit main-page user tap into native voice.
+/// No payload, subframe, redirect or programmatic navigation may request it.
 public enum HubVoiceNavigation {
-    public static func requestsConfirmation(url: URL, source: URL?, server: HubServer, sourceIsMainFrame: Bool, targetIsMainFrame: Bool, isLink: Bool) -> Bool {
+    public static func requestsVoice(url: URL, source: URL?, server: HubServer, sourceIsMainFrame: Bool, targetIsMainFrame: Bool, isLink: Bool) -> Bool {
         requestsPanel("voice", url: url, source: source, server: server, sourceIsMainFrame: sourceIsMainFrame, targetIsMainFrame: targetIsMainFrame, isLink: isLink)
     }
     public static func requestsOptions(url: URL, source: URL?, server: HubServer, sourceIsMainFrame: Bool, targetIsMainFrame: Bool, isLink: Bool) -> Bool {
