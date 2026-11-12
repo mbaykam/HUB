@@ -152,6 +152,8 @@ test("Right drawer renders Knowledge and one Tasks entry while retaining access 
   </body></html>`, { url: "https://hub.test/", pretendToBeVisual: true });
   Object.defineProperty(dom.window, "innerWidth", { value: 390 });
   dom.window.ResizeObserver=class{observe(){}disconnect(){}};
+  const previousElement = globalThis.Element;
+  globalThis.Element = dom.window.Element;
   const root = dom.window.document;
   const drawer = new MobileRightDrawerRuntime(root);
   drawer.start();
@@ -172,7 +174,7 @@ test("Right drawer renders Knowledge and one Tasks entry while retaining access 
     assert.equal(root.querySelector('dialog[aria-label="Knowledge AI activity"]').open, false);
     assert.equal(root.querySelector("[data-minke-mobile-right-drawer-settings]").textContent, "Settings");
     assert.equal(root.querySelector("[data-minke-mobile-right-drawer]").getAttribute("aria-label"), "Knowledge and tasks");
-  } finally { drawer.dispose(); dom.window.close(); }
+  } finally { drawer.dispose(); dom.window.close(); if(previousElement===undefined)delete globalThis.Element;else globalThis.Element=previousElement; }
 });
 
 test("mobile usage stays compact until its dropdown is opened", () => {
