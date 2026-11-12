@@ -42,6 +42,20 @@ final class KeyboardAccessoryUITests: XCTestCase {
         for key in ["composer", "menu", "voice", "send"] {
             XCTAssertEqual((renderer[key] as? [String: Any])?["visible"] as? Bool, true, key)
         }
+        // Exercise the real recovery control through native UI input as well as
+        // DOM geometry: a visible button covered by the inert toolbar is unusable.
+        let more = app.webViews.buttons["More actions"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        XCTAssertTrue(more.isHittable)
+        more.tap()
+        let choose = app.webViews.buttons["Choose workspace…"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 5))
+        XCTAssertTrue(choose.isHittable)
+        let menuScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menuScreenshot.name = "installed-renderer-workspace-recovery-menu"
+        menuScreenshot.lifetime = .keepAlways; add(menuScreenshot)
+        more.tap()
+        XCTAssertFalse(choose.exists)
         #else
         throw XCTSkip("Actual exported renderer resource not supplied to this keyboard-only build")
         #endif
