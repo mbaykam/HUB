@@ -24,7 +24,9 @@
     "patches/deepseek-harness/chat-currency-markdown.patch",
     "patches/deepseek-harness/personal-assistant-context.patch",
     "patches/deepseek-harness/compaction-cancellation.patch",
-    "patches/deepseek-harness/composer-controls.patch"
+    "patches/deepseek-harness/composer-controls.patch",
+    "patches/deepseek-harness/static-client-export.patch",
+    "patches/deepseek-harness/installed-ui-network-gate.patch"
   ],
   "productBundle": {
     "packageName": "@lencx/minke-harness-overlay",

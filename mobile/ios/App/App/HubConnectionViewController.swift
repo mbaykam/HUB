@@ -3,7 +3,7 @@ import WebKit
 import SafariServices
 import HubNative
 
-/// Remote HUB is deliberately a plain, unprivileged web view. No Capacitor
+/// Both installed static UI and remote HUB use a plain, unprivileged web view. No Capacitor
 /// bridge, script message handler, injected cookie, or agent-controlled native API.
 final class HubConnectionViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     private let savedOriginKey = HubClientConfiguration.serverPreferenceKey
@@ -14,6 +14,11 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private let recoveryVoice = UIButton(type: .system)
     private var probe: Task<Void, Never>?
     private var api: HubVoiceAPI?
+    private var uiAPI: HubInstalledUIAPI?
+    private var installedUI: HubInstalledUI?
+    private var usingInstalledUI = false
+    private var preferRemoteUI = false
+    private var installedProcessRecoveries = 0
     private var connectionGeneration = 0
     private var connected = false
     private var notificationDestination: HubNotificationDestination?
@@ -23,7 +28,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
     private var deviceState: HubDeviceState?
     private var keyboardObserver: NSObjectProtocol?
-    deinit { probe?.cancel(); api?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) } }
+    deinit { probe?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) } }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -34,12 +39,16 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         config.allowsInlineMediaPlayback = true
         config.applicationNameForUserAgent = "HUBiOS/0.2"
         // Do not add native message handlers to this configuration.
-        webView = WKWebView(frame: .zero, configuration: config)
+        webView = HubWebView(frame: .zero, configuration: config)
+        if let resources = Bundle.main.resourceURL {
+            installedUI = try? HubInstalledUI.load(from: resources.appendingPathComponent("public/installed-ui", isDirectory: true))
+        }
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.keyboardDismissMode = .interactive
         hideKeyboardShortcuts(in: webView)
         keyboardObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in guard let self else { return }; self.hideKeyboardShortcuts(in: self.webView) }
@@ -115,7 +124,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
         sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
         sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
-        sheet.addAction(UIAlertAction(title: "Reload", style: .default) { [weak self] _ in self?.afterOptions { $0.reload() } })
+        sheet.addAction(UIAlertAction(title: usingInstalledUI ? "Reload from HUB" : "Reload", style: .default) { [weak self] _ in self?.afterOptions {
+            if $0.usingInstalledUI, let server = $0.server {
+                $0.preferRemoteUI = true
+                $0.connected = false
+                $0.loadRemote(server.origin)
+            } else { $0.reload() }
+        } })
         sheet.addAction(UIAlertAction(title: "Sign out on this iPhone", style: .destructive) { [weak self] _ in self?.afterOptions { $0.confirmSignOut() } })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         sheet.popoverPresentationController?.sourceView = view
@@ -158,7 +173,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let nativeState = HubDeviceState(server: value, store: HubKeychainStore())
         deviceState = nativeState
         api?.invalidate()
-        api = HubVoiceAPI(server: value) { [weak webView] in
+        uiAPI?.invalidate()
+        preferRemoteUI = false
+        installedProcessRecoveries = 0
+        let cookies: () async -> [HTTPCookie] = { [weak webView] in
             await withCheckedContinuation { continuation in
                 DispatchQueue.main.async {
                     if UIApplication.shared.applicationState == .background {
@@ -170,19 +188,36 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 }
             }
         }
+        api = HubVoiceAPI(server: value, cookies: cookies)
+        uiAPI = HubInstalledUIAPI(server: value, cookies: cookies)
         // Only a canonical origin is saved. The web data store owns HttpOnly cookies.
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         message.text = "Connecting to \(value.origin.host ?? "HUB")…"
         showContent()
-        webView.load(URLRequest(url: value.origin))
+        loadHub(value)
+    }
+
+    private func loadHub(_ value: HubServer) {
+        // Only static, checksum-verified resources from the signed app are used.
+        // The selected HTTPS origin and WebKit's own cookie store remain intact;
+        // there is no native fetch proxy, JS bridge or restored user snapshot.
+        if !preferRemoteUI, let installedUI {
+            usingInstalledUI = true
+            webView.loadHTMLString(installedUI.html, baseURL: value.origin)
+        } else { loadRemote(value.origin) }
+    }
+    private func loadRemote(_ url: URL) {
+        usingInstalledUI = false
+        webView.load(URLRequest(url: url))
     }
 
     private func reload() {
         if server == nil { showConnection(); return }
+        installedProcessRecoveries = 0
         showContent()
-        if !connected, let server { webView.load(URLRequest(url: server.origin)); return }
+        if (!connected || usingInstalledUI), let server { loadHub(server); return }
         if let url = webView.url, server?.contains(url) == true { webView.reload() }
-        else if let server { webView.load(URLRequest(url: server.origin)) }
+        else if let server { loadHub(server) }
     }
 
     private func confirmSignOut() {
@@ -208,7 +243,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 group.notify(queue: .main) {
                     // Destroy the old web view, including its active sockets and
                     // media, instead of merely hiding a still-running signed-in page.
-                    self.api?.invalidate()
+                    self.api?.invalidate(); self.uiAPI?.invalidate()
                     self.view.window?.rootViewController = UINavigationController(rootViewController: HubConnectionViewController())
                 }
             }
@@ -259,7 +294,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 self?.connected == true && self?.connectionGeneration == generation && self?.server == server
             }, openDraft: { [weak self] url in
                 guard let self, self.connected, self.connectionGeneration == generation, server.contains(url) else { return }
-                self.webView.load(URLRequest(url: url))
+                self.loadRemote(url)
             })
             present(UINavigationController(rootViewController: screen), animated: true)
         } catch { showNotice("Files are unavailable. Unlock the iPhone and check the app's sharing setup; HUB's normal file button remains available.") }
@@ -298,7 +333,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
         // HTTPS authentication redirects may visit Access and the chosen identity
         // provider. Native API requests still target only the exact selected HUB.
-        if navigationAction.targetFrame == nil { decisionHandler(.cancel); webView.load(navigationAction.request); return }
+        if navigationAction.targetFrame == nil { decisionHandler(.cancel); usingInstalledUI = false; webView.load(navigationAction.request); return }
         decisionHandler(.allow)
     }
 
@@ -319,6 +354,17 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 _ = try await api.status()
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration,
                       let url = self.webView.url, expected.contains(url) else { return }
+                if self.usingInstalledUI, let installedUI = self.installedUI, let uiAPI = self.uiAPI {
+                    let compatibility = try await uiAPI.compatibility()
+                    guard !Task.isCancelled, generation == self.connectionGeneration else { return }
+                    if compatibility != installedUI.manifest.compatibility {
+                        // Keep the normal authenticated PWA available when a
+                        // newer host requires a different installed renderer.
+                        self.preferRemoteUI = true
+                        self.loadRemote(expected.origin)
+                        return
+                    }
+                }
                 self.connected = true
                 self.showContent()
                 self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
@@ -333,6 +379,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             } catch {
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration else { return }
                 self.connected = false
+                if self.usingInstalledUI, error as? HubVoiceAPIError == .signInRequired {
+                    // Authentication is completed in the original HTTPS gate,
+                    // never in a local imitation or through copied login tokens.
+                    self.preferRemoteUI = true
+                    self.loadRemote(expected.origin)
+                    return
+                }
                 self.message.text = error as? HubVoiceAPIError == .signInRequired
                     ? "Sign in to HUB, then choose Reload."
                     : "Connection interrupted. Check Connection or choose Reload."
@@ -343,7 +396,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func openNotification(_ destination: HubNotificationDestination) {
         notificationDestination = destination
         if connected { openPendingNotification() }
-        else if let server { webView.load(URLRequest(url: server.origin)) }
+        else if let server { loadHub(server) }
         else { message.text = "Connect to the HUB used by this notification first." }
     }
     private func openPendingNotification() {
@@ -353,7 +406,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             message.text = "This notification belongs to a different HUB. Your connection was not changed."
             return
         }
-        webView.load(URLRequest(url: url))
+        loadRemote(url)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showFailure(error) }
@@ -362,7 +415,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         if (error as NSError).code != NSURLErrorCancelled { showRecovery("Could not open HUB. Check your connection, then retry or choose another connection.") }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        showRecovery("HUB needs to reconnect. Tap Retry to continue.")
+        connected = false
+        if let server, installedUI != nil, !preferRemoteUI, installedProcessRecoveries < 1 {
+            installedProcessRecoveries += 1
+            // Fresh Home, not a cached conversation or a restored screen.
+            showContent(); loadHub(server)
+        } else { showRecovery("HUB needs to reconnect. Tap Retry to continue.") }
     }
 
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {

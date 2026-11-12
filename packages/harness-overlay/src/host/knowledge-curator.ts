@@ -41,6 +41,11 @@ export class KnowledgeCurator {
     this.status=this.restoredWork?.state==="needs-review"?"restored-work-paused":[...this.jobs.values()].some(j=>j.status==="failed")?"needs-attention":"ready";
   }
   private jobFile(id:string){return join(this.store.root,"jobs",`${digest(id)}.json`);}
+  private async saveJob(job:KnowledgeJob){
+    job.updatedAt=Date.now();
+    if(job.startedAt&&job.status!=="working"&&job.status!=="queued"&&!job.finishedAt)job.finishedAt=Date.now();
+    await atomicJson(this.jobFile(job.id),job);
+  }
   async enqueue(source:KnowledgeSource,pass?:KnowledgeJob["pass"]){
     // Serialized check + durable enqueue prevents duplicate events/imports.
     const task=this.writing.then(()=>this.store.mutations.run(async()=>{
@@ -53,7 +58,7 @@ export class KnowledgeCurator {
       }
       if(typeof source.id!=="string" || !source.id || source.id.length>200 || !Number.isSafeInteger(source.completedAt) || source.completedAt<1 || typeof source.content!=="string" || !source.content.trim() || source.content.length>24000 || typeof source.channel!=="string" || source.channel.length>100)throw new Error("Invalid source episode");
       const cleaned=cleanKnowledgeSource(source);
-      const job:KnowledgeJob={id:jobId,...(pass?{pass}:{}),source:{...cleaned,content:redactKnowledgeSecrets(cleaned.content)},status:"queued",attempts:0,updatedAt:Date.now(),queuedAt:Date.now()};await atomicJson(this.jobFile(job.id),job);this.jobs.set(job.id,job);return true;
+      const job:KnowledgeJob={id:jobId,...(pass?{pass}:{}),source:{...cleaned,content:redactKnowledgeSecrets(cleaned.content)},status:"queued",attempts:0,updatedAt:Date.now(),queuedAt:Date.now()};await this.saveJob(job);this.jobs.set(job.id,job);return true;
     }));this.writing=task.catch(()=>{});return task;
   }
   /** Explicitly selected, already admitted records only. Each host-issued pass
@@ -70,7 +75,7 @@ export class KnowledgeCurator {
       await this.enqueue(source,{id,sourceHash:digest(n.body),policyHash:digest(JSON.stringify(this.settings)),registryRevision:registry.revision,...(focus?{focus}:{})});ids.push(id);}
     return {passId,queued:ids.length,jobIds:ids,automatic:this.settings.enabled&&this.settings.mode!=="manual"};
   }
-  async repairProjections(){await this.store.organization.repairPending();for(const job of this.jobs.values())if(job.error?.code==="KNOWLEDGE_PROJECTION_PENDING"){job.error=undefined;job.reason="Saved organization and Obsidian projection repaired; no model call needed.";await atomicJson(this.jobFile(job.id),job);}this.status="ready";}
+  async repairProjections(){await this.store.organization.repairPending();for(const job of this.jobs.values())if(job.error?.code==="KNOWLEDGE_PROJECTION_PENDING"){job.error=undefined;job.reason="Saved organization and Obsidian projection repaired; no model call needed.";await this.saveJob(job);}this.status="ready";}
   /** Read-only passes for admitted brain notes missing a domain. The source
    * version is the durable identity, so a skipped/reviewed/failed version is
    * not charged again on each scan or restart. Chat originals stay separate. */
@@ -117,9 +122,10 @@ export class KnowledgeCurator {
   }
   private routeKey(){return JSON.stringify([this.settings.provider,this.settings.model,this.settings.reasoningEffort]);}
   async retry(id:string){const j=this.jobs.get(id);if(!j||!["failed","waiting-credit"].includes(j.status))throw new Error("Only failed or credit-waiting jobs may be retried");
+    j.previousAttempts=[...(j.previousAttempts??[]),{attempt:j.attempts,startedAt:j.startedAt,finishedAt:j.finishedAt,status:j.status,reason:j.reason,error:j.error}].slice(-30);j.retryAt=Date.now();
     const receipt=await readFile(join(this.store.root,"distill",`${digest(id)}.json`),"utf8").catch((e:any)=>{if(e.code!=="ENOENT")throw e;return undefined;});
-    if(receipt){const saved=JSON.parse(receipt);if(digest(saved.source.content)!==digest(j.source.content))throw Error("Source changed; inspect before recovering extracted memories");const result=await distillMemories(this.store,saved.plan,j.source,this.settings,j.pass?.id??j.id);j.memoryRevision=result.revision;j.memoryCount=result.count;j.status="done";j.outcome=j.revision?"organized":"skipped";j.reason="Recovered sourced notes from the saved response without another model request.";j.error=undefined;j.updatedAt=Date.now();await atomicJson(this.jobFile(id),j);this.status="ready";return;}
-    j.source=cleanKnowledgeSource(j.source);j.status="queued";j.updatedAt=Date.now();j.reason=undefined;j.error=undefined;await atomicJson(this.jobFile(id),j);}
+    if(receipt){const saved=JSON.parse(receipt);if(digest(saved.source.content)!==digest(j.source.content))throw Error("Source changed; inspect before recovering extracted memories");const result=await distillMemories(this.store,saved.plan,j.source,this.settings,j.pass?.id??j.id);j.memoryRevision=result.revision;j.memoryCount=result.count;j.status="done";j.outcome=j.revision?"organized":"skipped";j.reason="Recovered sourced notes from the saved response without another model request.";j.error=undefined;j.updatedAt=Date.now();await this.saveJob(j);this.status="ready";return;}
+    j.source=cleanKnowledgeSource(j.source);j.status="queued";j.startedAt=undefined;j.finishedAt=undefined;j.updatedAt=Date.now();j.reason=undefined;j.error=undefined;await this.saveJob(j);}
   async retryFailed(){const ids=[...this.jobs.values()].filter(j=>["failed","waiting-credit"].includes(j.status)).map(j=>j.id);
     const cached=await Promise.all(ids.map(id=>readFile(join(this.store.root,"distill",`${digest(id)}.json`),"utf8").then(()=>true,(e:any)=>{if(e.code!=="ENOENT")throw e;return false;})));
     if(cached.some(value=>!value))await this.checkModel();
@@ -155,13 +161,13 @@ export class KnowledgeCurator {
     const latest=new Map<string,number>();for(const j of this.jobs.values())latest.set(family(j),Math.max(latest.get(family(j))??0,j.queuedAt??j.updatedAt));
     const job=[...this.jobs.values()].filter(j=>j.status==="queued" && (force||Date.now()-(latest.get(family(j))??j.updatedAt)>=this.settings.idleSeconds*1000)).sort((a,b)=>a.source.completedAt-b.source.completedAt)[0];
     if(!job)return;const settings={...this.settings};
-    if(!await this.store.admission.allows(job.source)){job.status="done";job.outcome="skipped";job.reason="Source admission was withdrawn or replaced; no model call made.";job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);return;}
-    if(job.pass){const current=(await this.store.scan()).find(n=>n.id===job.source.conversationId);if(!current||digest(current.body)!==job.pass.sourceHash){job.status="failed";job.reason="Selected source changed; queue a fresh pass after reading it.";job.error={phase:"source validation",code:"KNOWLEDGE_SOURCE_CHANGED",message:job.reason};job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);this.status="needs-attention";return;}}
+    if(!await this.store.admission.allows(job.source)){job.status="done";job.outcome="skipped";job.reason="Source admission was withdrawn or replaced; no model call made.";job.updatedAt=Date.now();await this.saveJob(job);return;}
+    if(job.pass){const current=(await this.store.scan()).find(n=>n.id===job.source.conversationId);if(!current||digest(current.body)!==job.pass.sourceHash){job.status="failed";job.reason="Selected source changed; queue a fresh pass after reading it.";job.error={phase:"source validation",code:"KNOWLEDGE_SOURCE_CHANGED",message:job.reason};job.updatedAt=Date.now();await this.saveJob(job);this.status="needs-attention";return;}}
     if(this.blockedRoute?.key===this.routeKey()){this.status=this.blockedRoute.quota?"waiting-credit":"model-unavailable";return;}
     if(await this.gate?.reason(settings.provider)){this.status="waiting-credit";return;}
-    if(!settings.channels.includes(sourceChannel(job.source))){job.status="done";job.outcome="skipped";job.reason="Seçili kanalların dışında; bilgi çıkarılmadı.";await atomicJson(this.jobFile(job.id),job);return;}
-    if(job.source.completedAt<=await this.store.cutoff()){job.status="done";job.outcome="skipped";job.reason="Skipped: source is older than the saved forget policy.";await atomicJson(this.jobFile(job.id),job);return;}
-    if(sourceChannel(job.source)==="workers"&&settings.assistantEvidence==="confirmed-only"){job.status="done";job.outcome="archive-only";job.reason="Görev sonucu arşivlendi. Seçili kurala göre kalıcı bilgi için kullanıcı doğrulaması gerekiyor.";await atomicJson(this.jobFile(job.id),job);return;}
+    if(!settings.channels.includes(sourceChannel(job.source))){job.status="done";job.outcome="skipped";job.reason="Seçili kanalların dışında; bilgi çıkarılmadı.";await this.saveJob(job);return;}
+    if(job.source.completedAt<=await this.store.cutoff()){job.status="done";job.outcome="skipped";job.reason="Skipped: source is older than the saved forget policy.";await this.saveJob(job);return;}
+    if(sourceChannel(job.source)==="workers"&&settings.assistantEvidence==="confirmed-only"){job.status="done";job.outcome="archive-only";job.reason="Görev sonucu arşivlendi. Seçili kurala göre kalıcı bilgi için kullanıcı doğrulaması gerekiyor.";await this.saveJob(job);return;}
     job.source=await withKnowledgeAssetExcerpts(job.source,this.store.assets);
     const searchText=job.source.content+"\n"+(job.source.assetExcerpts??[]).map(e=>e.text).join("\n");
     const candidates=(await this.store.search(searchText,12)).map(n=>({...n,contentHash:digest(n.body),body:memoryExcerpt(n.body,searchText,6000,n.retrieval?.chunk)}));
@@ -169,7 +175,7 @@ export class KnowledgeCurator {
     const reserve=((Buffer.byteLength(prompt)+12000)*settings.inputPrice+6000*settings.outputPrice)/1e6;
     if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget){this.status="budget-paused";return;}
     this.costs[day()]=(this.costs[day()]??0)+reserve;await atomicJson(join(this.store.root,"costs.json"),this.costs);
-    job.status="working";job.attempts++;job.cost=(job.cost??0)+reserve;job.updatedAt=Date.now();this.status="processing";await atomicJson(this.jobFile(job.id),job);
+    job.startedAt=Date.now();job.finishedAt=undefined;job.status="working";job.attempts++;job.cost=(job.cost??0)+reserve;job.updatedAt=Date.now();this.status="processing";await this.saveJob(job);
     let phase="model response",proposed:KnowledgeCuration|undefined;
     try{
       const result=await this.generate(prompt,settings,this.lifetime.signal);phase="organization validation";
@@ -185,12 +191,12 @@ export class KnowledgeCurator {
       if(plan.memories?.length&&(settings.extractMemories===false||plan.memories.some(m=>!settings.categories.includes(m.category))||graph.nodes.find(n=>n.id===job.source.conversationId)?.kind==="note"))throw Error("Memory extraction exceeded selected permissions");
       if(settings.linking==="off"&&plan.relations.length||plan.relations.length>settings.maxLinks||settings.reflections===false&&plan.reflections.length||settings.profileSuggestions===false&&plan.profileSuggestions.length)throw Error("Organization exceeded selected permissions");
       if(settings.mode==="review"&&plan.decision==="organize"){
-        await atomicJson(join(this.store.root,"reviews",`${digest(job.id)}.json`),plan);job.status="review";job.reason=plan.reason;job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);this.status="awaiting-review";return;
+        await atomicJson(join(this.store.root,"reviews",`${digest(job.id)}.json`),plan);job.status="review";job.reason=plan.reason;job.updatedAt=Date.now();await this.saveJob(job);this.status="awaiting-review";return;
       }
       phase="organization write";const revision=await this.store.organization.apply(plan,job.source,job.pass?.id);
       // Persist a validated receipt BEFORE note writes. A write failure can be
       // recovered without another model call or losing the organization result.
-      job.revision=revision??undefined;await atomicJson(this.jobFile(job.id),job);
+      job.revision=revision??undefined;await this.saveJob(job);
       await atomicJson(join(this.store.root,"distill",`${digest(job.id)}.json`),{plan,source:job.source,settings});
       phase="memory extraction";const memories=await distillMemories(this.store,plan,job.source,settings,job.pass?.id??job.id);job.memoryRevision=memories.revision;job.memoryCount=memories.count;
       job.status="done";job.outcome=revision?"organized":plan.decision==="archive-only"?"archive-only":"skipped";job.revision=revision??undefined;job.error=undefined;job.reason=plan.reason;this.status="ready";
@@ -206,12 +212,12 @@ export class KnowledgeCurator {
       }
       if(e.code==="KNOWLEDGE_SOURCE_NOT_ADMITTED"){job.status="done";job.outcome="skipped";job.error=undefined;job.reason="Source admission was withdrawn during processing; the response was not saved.";this.status="ready";}
     }
-    job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);
+    job.updatedAt=Date.now();await this.saveJob(job);
   }
   monthCost(){return Object.entries(this.costs).filter(([d])=>d.startsWith(day().slice(0,7))).reduce((s,[,v])=>s+v,0);}
   async undoNote(revision:string){
     await this.store.undo(revision);
-    for(const job of this.jobs.values())if(job.memoryRevision===revision){job.memoryCount=0;job.memoryRevision=undefined;job.reason="Extracted notes undone; the original conversation and its organization are preserved.";job.updatedAt=Date.now();await atomicJson(this.jobFile(job.id),job);}
+    for(const job of this.jobs.values())if(job.memoryRevision===revision){job.memoryCount=0;job.memoryRevision=undefined;job.reason="Extracted notes undone; the original conversation and its organization are preserved.";job.updatedAt=Date.now();await this.saveJob(job);}
   }
   async review(id:string){const job=this.jobs.get(id);if(job?.status!=="review")throw new Error("No pending review");const saved=JSON.parse(await readFile(join(this.store.root,"reviews",`${digest(id)}.json`),"utf8")) as KnowledgeCuration,registry=await this.store.organization.domains(),stale=saved.version===2&&!!saved.domainOps?.length&&saved.expectedRegistryRevision!==registry.revision,plan=stale?{...saved,expectedRegistryRevision:registry.revision}:saved;if(stale)changeKnowledgeDomains(registry,plan.domainOps!,{actor:"curator",source:job.source,knownNodeIds:(await this.store.scan()).filter(n=>n.kind!=="conversation").map(n=>n.id),expectedRevision:registry.revision,revisionId:"preview"});return {source:job.source,plan,stale,reviewHash:digest(JSON.stringify([plan,digest(job.source.content),registry.revision]))};}
   async decideReview(id:string,approve:boolean,reviewHash?:string){
@@ -227,7 +233,7 @@ export class KnowledgeCurator {
       const memories=await distillMemories(this.store,review.plan,review.source,this.settings,job.pass?.id??job.id);job.memoryRevision=memories.revision;job.memoryCount=memories.count;
       job.outcome=job.revision?"organized":"skipped";job.reason=job.error?.message??"Approved; original text preserved, relationships/reflections and sourced notes saved.";
     }else{job.outcome="rejected";job.reason="Rejected; original records unchanged.";}
-    job.status="done";job.updatedAt=Date.now();await atomicJson(this.jobFile(id),job);this.status=job.error?"projection-pending":"ready";
+    job.status="done";job.updatedAt=Date.now();await this.saveJob(job);this.status=job.error?"projection-pending":"ready";
   }
   async snapshot():Promise<KnowledgeStatus>{
     const counts={queued:0,working:0,review:0,done:0,failed:0,"waiting-credit":0},outcomes:Record<string,number>={},jobs=[...this.jobs.values()];

@@ -1,34 +1,65 @@
 # Installed UI origin probe
 
-This isolated Swift package tests `WKWebView.loadHTMLString(_:baseURL:)` using only public WebKit APIs. Run on a Mac with a logged-in graphical session:
+This isolated Swift package tests public WKWebView loadHTMLString APIs. Run in a graphical macOS session:
 
 ```sh
 HUB_RUN_WEBKIT_PROBE=1 swift test --package-path mobile/probes/InstalledUIOrigin
 ```
 
-The document is synthetic, the HTTPS hostname uses reserved `.invalid`, CSP blocks network, and cookies are synthetic in a nonpersistent store. Tests check the document origin, secure context, relative API/WebSocket URL construction and JavaScript cookie visibility, including HttpOnly exclusion. No production code or project settings load this probe. A macOS pass is evidence for that WebKit build only; it does not establish iPhone behavior, authenticated fetch, WebSocket handshakes, persistent-store restoration or login recovery. This source has not been compiled on the Windows development host.
+The test skips unless enabled. After actual didFinish it checks origin, href, webView.url, base URI, secure context, API/WSS URL construction and cookie visibility, including HttpOnly exclusion. Synthetic cookies use nonpersistent storage, a reserved .invalid hostname and network-blocking CSP. No production project settings load the probe.
 
-Before enabling an installed UI, run equivalent tests on every supported iOS baseline using an isolated controlled HTTPS fixture and the app's persistent WebKit store. The fixture must verify Secure/HttpOnly/SameSite cookie receipt for same-origin fetch and WSS, return distinguishable JSON instead of an HTML login page, test expired sessions and redirects, and inspect request Origin/Referer/Sec-Fetch-Site. Repeat after process termination, sign-out and a change of host. Never use real account cookies for these probes. Keep the existing remote document as the default until those tests pass.
+A macOS pass is evidence for that WebKit build only. It does not establish iPhone behavior, authenticated fetch, WebSocket handshakes, persistent restoration or login recovery. This source has not been compiled on the Windows development host.
 
-## Export prerequisite
+Before default activation, test supported iOS baselines with an isolated controlled HTTPS fixture and persistent WebKit store. Verify Secure/HttpOnly/SameSite receipt for fetch and WSS, distinguish JSON from login HTML, test expiry/redirects and inspect Origin/Referer/Sec-Fetch-Site. Repeat after process termination, sign-out and host changes. Never use real account cookies. Keep remote UI default until those tests pass. See the [implemented pure static exporter](../../INSTALLED_UI.md) for separate build and synthetic renderer evidence.
+## Native navigation guard evidence
 
-There is currently no hermetic installed UI exporter. `scripts/harness/boot-manifest.mjs` parses a served page, while `ClientModuleRegistry` composes its graph from the running host's plugin tree. `pwa-client.js` is one plugin factory, not the complete renderer. Copying it into `mobile/src` cannot mount the existing panels.
+The origin test also clicks a synthetic anchor and cancels it in the public navigation delegate before any request. The delegate logs and asserts the inputs used by `HubConnectionViewController`. These are expected values, **not newly observed Mac/iPhone results**:
 
-A clean build must first expose the following metadata, generated from a fixed product profile in a temporary empty home with no user settings, credentials, environment providers or host activity:
+| Public API | Expected value |
+| --- | --- |
+| `webView.url`, JavaScript `location.href`, `document.baseURI` | `https://installed-ui-probe.invalid/` |
+| JavaScript `location.origin` | `https://installed-ui-probe.invalid` |
+| `navigationAction.sourceFrame.request.url` | `https://installed-ui-probe.invalid/` |
+| `navigationAction.request.url` | `https://installed-ui-probe.invalid/navigation-guard-probe` |
+| Source and target `isMainFrame` | `true` |
+| `navigationType == .linkActivated` | `true` |
+| Source `securityOrigin` protocol, host, port | `https`, `installed-ui-probe.invalid`, `0` (implicit default port) |
 
-- The exact `WebBootGraph` from `ClientModuleRegistry.graph()`, including all entries, inject/external dependencies, batch membership and content revisions.
-- The module-loader bootstrap queue and required static index injection rows, with an explicit allowlist; no live theme/account/config injection or rendered live host HTML.
-- A complete URL-to-build-file map and SHA-256 for all graph batches, Vite shell JS/CSS and recursively referenced chunks/fonts/icons, plus overlay lazy assets and licenses.
-- A host API compatibility identifier and the fixed product profile identity. Include no machine paths or private runtime configuration.
+A usable base URI does not establish the native frame request URL. A mismatch must fail the probe and be reviewed against the guard. Do not normalize away `about:blank`, a missing URL, or a different origin to make the test pass. The cancelled navigation must leave the web view at its original URL.
 
-The exporter should fail on unknown injection kinds, missing assets, remote static URLs, symlinks escaping the build directory or incompatible graphs. It must take only these build artifacts, not a live host address. Register all client factories before starting `AppWebEntry`; the existing module system skips its HTTP transport for already registered factories. Inline the shell and styles or rewrite every static dependency to an audited bundled transport. Disable service-worker registration and host-driven module hot replacement for this installed document. Keep ordinary authenticated API/WSS traffic on the verified HTTPS origin, with no native bridge or auth bypass.
+## Isolated authenticated HTTPS/WSS transport
 
-Acceptance requires cold offline launch to mount the real existing renderer and panels without any static network requests. Data-dependent content must show the renderer's actual empty/loading/error state; no conversation, screen or draft snapshots may be restored. Host compatibility checking must be asynchronous and must not make an offline shell appear authenticated or enable incompatible mutations. PWA behavior remains separate and unchanged.
+Run separately on the same graphical Mac, with `python3` and `openssl` on `PATH`:
 
-## Exact build API missing
+```sh
+HUB_RUN_WEBKIT_PROBE=1 HUB_RUN_WEBKIT_TRANSPORT_PROBE=1 swift test --package-path mobile/probes/InstalledUIOrigin
+```
 
-Code inspection found a second obstacle beyond a clean profile: `ClientModuleRegistry.processOne()` deliberately ignores loader entries without an active `fiber`. Instantiating the registry with disabled host plugins therefore produces an incomplete graph; activating them executes their host startup effects. The existing smoke launcher inherits the caller's environment and project working directory. It is not an export-only profile and must not be reused as a hermetic exporter without additional isolation.
+`Fixtures/transport.py` binds only `127.0.0.1` on an ephemeral port and generates a one-day certificate with an IP subject alternative name in a temporary directory. `TransportTests.swift` accepts only that exact certificate's DER bytes at that exact loopback port, inside its own navigation delegate. It never installs a root, changes the trust store, relaxes production TLS, or contacts HUB/Cloudflare. The subprocess and temporary certificate/key directory are removed on normal test completion. Interrupted tests may leave a `hub-origin-probe-*` temporary directory containing only synthetic fixture keys and startup metadata.
 
-The bounded prerequisite is a pure build API alongside the registry, accepting an explicit ordered list of resolved product client manifests and built bundle paths. It must reuse `parseDshClient`, `clientExportOf`, `orderByModuleGraph`, batch partitioning and `buildBatch`, without constructing host fibers or reading a home directory. It must return the graph, `bootInjections(graph)` and batch bytes directly, avoiding an HTTP server. These composition functions are currently private except `orderByModuleGraph` and `bootInjections`; duplicating them into a mobile script would create a competing graph implementation.
+The actual WebKit document uses `loadHTMLString` with this HTTPS base, nonpersistent storage and CSP restricted to that single HTTPS/WSS origin. It must receive a synthetic `Secure; HttpOnly; SameSite=Strict` cookie from HTTPS, include it in same-origin fetch and WSS, exclude it from `document.cookie`, then reject authenticated operations after expiry. Assertions check JSON content type/status, fetch Referer and Sec-Fetch-Site, WSS Origin and received cookies. Synthetic header observations are printed for review; GET fetch may omit Origin. Each request has a bounded timeout. A self-signed WSS failure fails the test; it is not permission to install the certificate or disable WebKit TLS checks.
 
-The product build must supply that API's explicit package list from the selected clean profile after include/patch composition, without importing plugin implementations or evaluating arbitrary user config. Existing initial row revisions include `randomBytes(8)` through `allocateInitialRevision()`, so a deterministic build export must use content revisions instead of persisting a live registry's random graph. Repeat exports should be byte-identical, and fixture tests should reject unresolved externals, missing bootstrap, duplicate packages, missing bundles and files escaping the staging root. This requires a focused Harness build seam before `mobile/scripts/export-installed-ui.mjs` can honestly be a complete exporter. No host process was launched during this investigation.
+Windows protocol smoke, without OpenSSL, TLS, WebKit or browser cookie semantics:
+
+```sh
+python mobile/probes/InstalledUIOrigin/Fixtures/test_transport.py
+```
+
+Its two tests verify the loopback fixture's JSON/cookie/expiry contract and WebSocket handshake/frame encoding. They passed on Windows. **The added Swift navigation and transport probes remain uncompiled and unexecuted here.** A macOS pass would cover that WebKit build only; physical iPhone behavior, persistent restoration, sign-out, host changes and login/redirect recovery still require separate acceptance.
+
+## Actual exported renderer in macOS WebKit
+
+CI can supply the complete static document generated by `export-installed-ui.mjs`:
+
+```sh
+HUB_RUN_WEBKIT_PROBE=1 \
+HUB_INSTALLED_UI_DOCUMENT_PATH=/absolute/path/to/document.html \
+HUB_INSTALLED_UI_EVIDENCE_DIR=/absolute/path/to/evidence \
+swift test --package-path mobile/probes/InstalledUIOrigin
+```
+
+`RendererTests.swift` loads those exact exported HTML bytes with only a test CSP inserted before the first script. It uses a 390×844 `WKWebView`, an iPhone-like user agent ending in `HUBiOS/0.2`, a reserved `.invalid` HTTPS base, and a fresh nonpersistent store. CSP denies all connections and external resources; the navigation delegate also cancels subsequent navigations. Inline/blob scripts and inline/data/blob styles/assets can execute from the actual export. The test supplies no replacement UI, session, native bridge, account state, request responses or product DOM.
+
+After `didFinish`, it waits up to 30 seconds for the real `[data-hub-home-nav]` seam. It records viewport, origin/href, actual available composer/control rectangles and visibility, root child count, script errors and bounded empty/offline body text. If a compact composer and all three controls exist in this offline state, assertions require a thin card and menu → voice → Send ordering. Missing controls are reported as unavailable, not passed composer acceptance. Renderer mounting itself is required.
+
+When an evidence directory is supplied, JSON metrics are written to `renderer-offline-webkit-390x844.json`, including mount failures. The test attempts a public `WKWebView.takeSnapshot` without creating a window. A nonuniform snapshot is saved as `renderer-offline-webkit-390x844.png`; an unavailable or blank snapshot is reported and omitted. Any saved PNG still requires visual review. The test does not claim iPhone execution, authentication, persistent storage, audio quality, or full composer acceptance from an offline empty renderer. This new Swift source has not been compiled or run on the Windows development host.

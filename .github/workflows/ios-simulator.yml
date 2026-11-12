@@ -22,6 +22,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  installed-ui:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/ios-installed-ui.yml
   foundation:
     name: Check iOS preparation
     runs-on: ubuntu-24.04
@@ -48,7 +51,7 @@ jobs:
   simulator:
     name: Build unsigned iOS foundation
     if: github.event_name == 'workflow_dispatch'
-    needs: foundation
+    needs: [foundation, installed-ui]
     runs-on: ${{ inputs.toolchain == 'xcode-27' && 'xcode-27' || 'macos-latest' }}
     timeout-minutes: 25
     defaults:
@@ -69,7 +72,15 @@ jobs:
           cache-dependency-path: mobile/pnpm-lock.yaml
       - name: Install the isolated iOS dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: HUB-installed-ui-${{ github.sha }}
+          path: mobile/build
+      - name: Verify installed renderer provenance
+        run: node scripts/verify-installed-ui-artifact.mjs verify
       - name: Prepare bundled content and native dependencies
+        env:
+          HUB_REQUIRE_INSTALLED_UI: '1'
         run: pnpm ios:prepare
       - name: Check native configuration and bridge boundary
         run: pnpm check
@@ -78,6 +89,9 @@ jobs:
       - name: Probe installed document origin with isolated synthetic cookies
         env:
           HUB_RUN_WEBKIT_PROBE: '1'
+          HUB_RUN_WEBKIT_TRANSPORT_PROBE: '1'
+          HUB_INSTALLED_UI_DOCUMENT_PATH: ${{ github.workspace }}/mobile/build/installed-ui/document.html
+          HUB_INSTALLED_UI_EVIDENCE_DIR: ${{ github.workspace }}/mobile/build/installed-ui-evidence
         run: swift test --package-path probes/InstalledUIOrigin
       - name: Probe screen capture SDK availability without conditional imports
         id: screen-sdk
@@ -107,3 +121,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+      - name: Save isolated installed-renderer WebKit evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: HUB-installed-ui-webkit-${{ github.sha }}
+          path: mobile/build/installed-ui-evidence
+          if-no-files-found: warn
+          retention-days: 7

@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.7.0",
   "engines": { "node": ">=24" },
   "scripts": {
-    "check": "node scripts/check.mjs && node --test test/foundation.test.mjs test/simulator-source.test.mjs && node scripts/check-signing.mjs",
+    "check": "node scripts/check.mjs && node --test test/foundation.test.mjs test/simulator-source.test.mjs test/installed-ui-bundle.test.mjs && node scripts/check-signing.mjs",
     "web:build": "node scripts/build-web.mjs",
     "ios:prepare": "node scripts/prepare-ios.mjs",
     "ios:build:simulator": "node scripts/build-simulator.mjs"

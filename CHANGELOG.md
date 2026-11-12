@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.2
+
+- Add a read-only Knowledge AI activity log beside the sidebar Knowledge tile,
+  with committed changes, sources, recorded timing and failure/retry explanations.
+- Prepare the matching iPhone client's installed renderer and nonblocking local
+  boot, preserving authenticated compatibility checks and HTTPS web recovery.
+- Remove the WebKit form accessory through its public responder override;
+  retain the normal keyboard/editor and verify actual simulator behavior.
+
 ## 1.10.1
 
 - Repair the compact phone composer against actual input slot wrappers, keeping

@@ -6,6 +6,7 @@ import { readFile,lstat } from "node:fs/promises";
 import { randomUUID,createHash } from "node:crypto";
 import { KnowledgeStore, digest, atomicJson } from "./knowledge-store.ts";
 import { KnowledgeCurator, validateSettings, redactKnowledgeSecrets } from "./knowledge-curator.ts";
+import { knowledgeActivity } from "./knowledge-activity.ts";
 import { createMemoryGenerator } from "./memory-worker.ts";
 import { knowledgeTurnSources } from "./knowledge-episodes.ts";
 import {KnowledgeImportBatches} from "./knowledge-import-batches.ts";
@@ -208,6 +209,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
         if(view==="client"){res.writeHead(200,{"content-type":"text/javascript; charset=utf-8","cache-control":"no-store"});res.end(await readFile(new URL("./memory-graph-browser.js",import.meta.url)));return;}
         if(view!=="asset"&&req.headers["x-hub-memory"]!=="1"){send(res,403,{error:"header-required"});return;}
         if(view==="organization"){send(res,200,await store.organization.snapshot());return;}
+        if(view==="activity"){send(res,200,await knowledgeActivity(curator,Number(query.get("offset")??0)));return;}
         if(view==="import-batches"){send(res,200,await imports.list(Number(query.get("offset")??0)));return;}
         if(view==="import-batch"){send(res,200,await imports.preview(query.get("id")??"",Number(query.get("offset")??0)));return;}
         if(view==="import-record"){send(res,200,await imports.record(query.get("id")??"",query.get("record")??"",Number(query.get("offset")??0)));return;}

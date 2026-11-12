@@ -1,0 +1,48 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-modules/lib/index.js b/node_modules/@deepseek-ai/dsh-client-modules/lib/index.js
+--- a/node_modules/@deepseek-ai/dsh-client-modules/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-client-modules/lib/index.js
+@@ -861,1 +861,43 @@
+-export { ClientModuleRegistry, ClientModuleRegistry as default, bootInjections, orderByModuleGraph, stripClientSuffix };
++/** Build deterministic browser batches from explicit build inputs; never activates host plugins. */
++function buildStaticClientGraph(inputs, staticModules) {
++ const table = new Map();
++ for (const input of inputs) {
++  const { manifest, bundle } = input;
++  const id = manifest.name;
++  if (typeof id !== "string" || !/^(@[a-z0-9_-]+\/)?[a-z0-9_.-]+$/.test(id)) throw new Error("Invalid static client package name");
++  if (table.has(id)) throw new Error(`Duplicate static client package: ${id}`);
++  const decl = parseDshClient(id, manifest.dsh?.client);
++  if (decl?.platform !== "web" || clientExportOf(id, manifest.exports) === void 0) throw new Error(`Missing web client export: ${id}`);
++  if (!Buffer.isBuffer(bundle) || bundle.length === 0) throw new Error(`Missing client bundle: ${id}`);
++  const prefix = `window.__ModuleLoader__.load({id:${JSON.stringify(id)},`;
++  if (!bundle.toString("utf8").slice(0, 512).replace(/\s/g, "").startsWith(prefix)) throw new Error(`Unexpected client registration: ${id}`);
++  const meta = { inject: decl.inject, external: decl.external ?? [], immediately: decl.immediately === true };
++  table.set(id, { entry: graphRow(id, artifactRevision(bundle), meta), meta, bundle });
++ }
++ if (!table.has(CLIENT_MODULES_ID)) throw new Error("Missing client module bootstrap");
++ const baseline = new Set(staticModules);
++ for (const record of table.values()) {
++  for (const name of record.entry.inject ?? []) {
++   if (!baseline.has(name) && !table.has(stripClientSuffix(name))) throw new Error(`Missing injected client: ${name}`);
++  }
++  for (const name of record.entry.external ?? []) {
++   if (!baseline.has(name) && !table.has(stripClientSuffix(name))) throw new Error(`Unresolved client external: ${name}`);
++  }
++ }
++ const entries = orderByModuleGraph([...table.values()].map(record => record.entry));
++ const bootstrapIds = new Set(PARSER_PRELOAD_IDS);
++ const artifacts = [];
++ for (const phase of ["bootstrap", "application"]) {
++  const records = entries.filter(entry => bootstrapIds.has(entry.id) === (phase === "bootstrap")).map(entry => table.get(entry.id));
++  for (const batch of partitionComboRecords(records)) artifacts.push(buildBatch(phase, batch));
++ }
++ const batches = artifacts.map(artifact => artifact.descriptor);
++ const graph = { rev: shortHash(JSON.stringify({ entries, batches })), entries, batches };
++ return { graph, injections: bootInjections(graph), assets: artifacts.map(artifact => ({
++  url: artifact.url,
++  // Installed release bundles deliberately exclude debug maps and filesystem paths.
++  body: Buffer.from(artifact.script.toString("utf8").replace(SOURCE_MAP_TRAILER, "")),
++  contentType: "text/javascript; charset=utf-8"
++ })) };
++}
++export { ClientModuleRegistry, ClientModuleRegistry as default, bootInjections, orderByModuleGraph, stripClientSuffix, buildStaticClientGraph };

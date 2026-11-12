@@ -27,9 +27,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  installed-ui:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.HUB_IOS_SIGNING_ENABLED == 'true'
+    uses: ./.github/workflows/ios-installed-ui.yml
   sign:
     if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.HUB_IOS_SIGNING_ENABLED == 'true'
     environment: ios-signing
+    needs: installed-ui
     runs-on: xcode-27
     timeout-minutes: 75
     defaults:
@@ -50,10 +54,27 @@ jobs:
           cache: pnpm
           cache-dependency-path: mobile/pnpm-lock.yaml
       - name: Prepare and check without signing credentials
+        env:
+          HUB_REQUIRE_INSTALLED_UI: '1'
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: HUB-installed-ui-${{ github.sha }}
+          path: mobile/build
+      - name: Check the exact installed renderer and native source
+        env:
+          HUB_REQUIRE_INSTALLED_UI: '1'
+          HUB_RUN_WEBKIT_PROBE: '1'
+          HUB_RUN_WEBKIT_TRANSPORT_PROBE: '1'
+          HUB_INSTALLED_UI_DOCUMENT_PATH: ${{ github.workspace }}/mobile/build/installed-ui/document.html
+          HUB_INSTALLED_UI_EVIDENCE_DIR: ${{ github.workspace }}/mobile/build/installed-ui-evidence
+        run: |
+          node scripts/verify-installed-ui-artifact.mjs verify
           pnpm ios:prepare
           pnpm check
+          swift test --package-path native
+          swift test --package-path probes/InstalledUIOrigin
       - name: Validate protected signing context, archive and optionally upload once
         run: python3 scripts/signing_runner.py
         env:

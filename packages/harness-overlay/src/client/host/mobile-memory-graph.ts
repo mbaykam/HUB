@@ -5,7 +5,9 @@ import type { openMemoryGraph } from "../memory/graph-browser.ts";
 import {projectKnowledgePreview} from "../memory/knowledge-layout.ts";
 import {knowledgeRecordCounts} from "../../knowledge-record-scope.ts";
 import styles from "./mobile-memory-graph.css";
-const installStyles = defineOverlayStyle("hub-memory-graph-tile", styles);
+import activityStyles from "./mobile-knowledge-activity.css";
+import { createKnowledgeActivity } from "./mobile-knowledge-activity.ts";
+const installStyles = defineOverlayStyle("hub-memory-graph-tile", [styles,activityStyles]);
 
 /** A light preview only. The graph engine is downloaded after opening the tile. */
 export function installMobileMemoryGraph(container: HTMLElement, root: Document): () => void {
@@ -16,7 +18,9 @@ export function installMobileMemoryGraph(container: HTMLElement, root: Document)
   const title = root.createElement("strong"); title.textContent = "Knowledge";
   const hint = root.createElement("span"); hint.textContent = "Explore your memory";
   const preview = root.createElementNS("http://www.w3.org/2000/svg", "svg"); preview.setAttribute("viewBox", "0 0 240 110"); preview.setAttribute("aria-hidden", "true");
-  tile.append(title, preview, hint); container.prepend(tile);
+  const tiles=root.createElement("div");tiles.dataset.hubKnowledgeTiles="";
+  const activity=createKnowledgeActivity(root,id=>void openGraph(id));
+  tile.append(title, preview, hint);tiles.append(tile,activity.tile);container.prepend(tiles);
   const lifetime = new AbortController();
   let data: MemoryGraphPage | undefined, pending: Promise<void> | undefined, opening = false;
   let closeViewer: (() => void) | undefined;
@@ -45,7 +49,7 @@ export function installMobileMemoryGraph(container: HTMLElement, root: Document)
       const counts=knowledgeRecordCounts(data.nodes as {kind?:string}[]);hint.textContent = data.nodes.length ? `${counts.brain} brain notes · ${counts.chats} chats · explore` : "No knowledge records yet · open to explore";
     } catch { data = undefined; preview.replaceChildren(); hint.textContent = "Memory unavailable · tap to retry"; }
   }
-  tile.addEventListener("click", async () => {
+  async function openGraph(noteId?:string) {
     if (opening) return;
     opening = true; tile.setAttribute("aria-busy", "true");
     try {
@@ -54,11 +58,12 @@ export function installMobileMemoryGraph(container: HTMLElement, root: Document)
       const endpoint = pwaUiAsset(root, "memory-graph-browser.js", "/api/hub/memory?view=client");
       const module = await import(/* @vite-ignore */ endpoint) as { openMemoryGraph: typeof openMemoryGraph };
       if (lifetime.signal.aborted) return;
-      closeViewer?.(); closeViewer = module.openMemoryGraph(container, root, data, () => { tile.focus(); void refresh(); });
+      closeViewer?.(); closeViewer = module.openMemoryGraph(container, root, data, () => { tile.focus(); void refresh(); },noteId);
     } catch { hint.textContent = "Couldn’t open the graph · tap to retry"; }
     finally { opening = false; tile.removeAttribute("aria-busy"); }
-  });
+  }
+  tile.addEventListener("click",()=>void openGraph());
   const observer = typeof view.IntersectionObserver === "function" ? new view.IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) void refresh(); }) : undefined;
   observer?.observe(tile);
-  return () => { lifetime.abort(); observer?.disconnect(); closeViewer?.(); tile.remove(); removeStyles(); };
+  return () => { lifetime.abort(); observer?.disconnect(); closeViewer?.(); activity.dispose();tiles.remove(); removeStyles(); };
 }

@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLicenses } from "./browser-licenses.mjs";
 import { createPwaFactory } from "./pwa-factory.mjs";
+import { canonicalHostSource } from "./ui-host-source.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const overlayPackageRoot = join(
@@ -413,7 +414,7 @@ const compatibilityFiles = [
 ];
 const compatibility = createHash("sha256");
 for (const name of compatibilityFiles.sort()) {
-  compatibility.update(name + "\0").update(await readFile(join(projectRoot, name))).update("\0");
+  compatibility.update(name + "\0").update(canonicalHostSource(await readFile(join(projectRoot, name)))).update("\0");
 }
 await writeFile(join(overlayOutputRoot, "ui-host.json"), JSON.stringify({ schema: 1, compatibility: compatibility.digest("hex") }) + "\n");
 

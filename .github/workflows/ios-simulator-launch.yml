@@ -16,6 +16,10 @@ on:
         type: choice
         default: stable
         options: [stable, xcode-27]
+      installed_ui:
+        description: Open the actual installed renderer with a synthetic offline origin
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +33,7 @@ jobs:
     env:
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       SOURCE_SHA: ${{ inputs.source_sha }}
+      TEST_INSTALLED_UI: ${{ inputs.installed_ui && '1' || '0' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

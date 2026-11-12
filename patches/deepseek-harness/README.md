@@ -78,6 +78,15 @@ not part of that Session persistence contract.
 
 After changing the upstream pin or a patch, run:
 
+`static-client-export.patch` adds `buildStaticClientGraph(inputs, staticModules)`
+to the modules package's host JavaScript export. It reuses the existing graph
+ordering, declaration validation and batch composition without constructing
+Cordis host fibers. The installed iPhone UI build supplies a fixed explicit
+package roster and built bytes; content revisions replace live startup nonces.
+The normal host registry and PWA graph remain unchanged. Build tests exercise
+determinism, dependency rejection, factory nonexecution and real offline renderer
+mounting; this does not establish iPhone WebKit origin or authentication behavior.
+
 ```sh
 pnpm harness:verify
 pnpm harness:stage

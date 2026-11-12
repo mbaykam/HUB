@@ -16,6 +16,14 @@ not this copied resource directory. At HUB's pinned runtime revision:
 Optional speech models and external runtimes are downloaded/configured
 separately and retain their own license/model-card terms.
 
+`SIL-OFL-1.1.txt` is the verbatim official SIL Open Font License 1.1 text,
+downloaded from https://openfontlicense.org/documents/OFL.txt. Its example
+copyright header is retained as published; the installed UI build separately
+preserves the actual copyright/license/reserved-name records embedded in the
+pinned KaTeX fonts and verifies staged font bytes against those originals.
+The retained resource SHA-256 is
+`1d361a8f8e8ce6e68457dcd93fb56e162e6baa3bbb7e7573a290d44399f6b57e`.
+
 Knowledge lexical candidate filtering adapts Graphify's trigram index into
 TypeScript. See [Graphify attribution and changes](graphify-NOTICE),
 [Apache-2.0 license](graphify-LICENSE), and the preserved historical

@@ -9,6 +9,27 @@ and notifications and system sharing require the matching host configuration and
 physical-device acceptance described below. Windows HUB and
 its PWA continue to use their existing release.
 
+## Installed interface
+
+The matching development build includes the actual renderer, styles/fonts and
+lazy graph/voice assets from a fixed product profile. It opens a fresh Home from
+those verified app resources using the selected HTTPS origin and WebKit's own
+cookie store. It does not restore a previous screen, chat or draft snapshot.
+Data still comes from HUB; opening the interface alone does not run an assistant.
+Network requests and stream creation wait for the authenticated compatibility
+check. Expired sign-in and incompatible hosts use the normal HTTPS web interface.
+**Settings → iPhone → Reload from HUB** also offers explicit web recovery.
+The view has no Capacitor bridge or native script message handler.
+
+The public `HubWebView.inputAccessoryView` override removes WebKit's form toolbar;
+the regular keyboard and existing web editor remain. A separate keyboard probe
+compares default and product WebKit views on a disposable simulator, including
+real keyboard presentation and English/Turkish input. Device acceptance still
+needs the intended iPhone and keyboard settings.
+
+See [installed UI build/verification](INSTALLED_UI.md) and
+[real keyboard checks](probes/KeyboardAccessory/README.md) for the evidence scope.
+
 ## Connect a development build
 
 Enter the root HTTPS address of your HUB, without a login token or extra path.

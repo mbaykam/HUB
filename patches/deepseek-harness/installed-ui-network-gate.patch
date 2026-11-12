@@ -1,0 +1,19 @@
+diff --git a/node_modules/@deepseek-ai/dsh-api-gateway/lib/client.js b/node_modules/@deepseek-ai/dsh-api-gateway/lib/client.js
+--- a/node_modules/@deepseek-ai/dsh-api-gateway/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-api-gateway/lib/client.js
+@@ -399,6 +399,15 @@
+ 				await this.keepAlive;
+ 			}
+ 			connect() {
++				const ready = globalThis.__HUB_INSTALLED_UI_READY__;
++				if (typeof ready !== "function") return this.connectVerified();
++				const revision = this.revision;
++				return Promise.resolve().then(() => ready()).then(() => {
++					if (this.disposed || !this.running || this.revision !== revision) throw new Error("api gateway: Remote stream connection cancelled");
++					return this.connectVerified();
++				});
++			}
++			connectVerified() {
+ 				const socket = new WebSocket(remoteStreamUrl());
+ 				return new Promise((resolve, reject) => {
+ 					let settled = false;

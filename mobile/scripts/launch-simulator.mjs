@@ -39,6 +39,15 @@ try{
   stage='install';console.log('Installing the verified existing bundle');
   try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
   sim('install',device,app);
+  const testInstalledUI=process.env.TEST_INSTALLED_UI==='1';
+  if(testInstalledUI){
+    const manifest=JSON.parse(await readFile(resolve(app,'public/installed-ui/manifest.json'),'utf8'));
+    if(manifest.schema!==1||manifest.profile!=='hub-installed-web-v1')throw Error('The simulator app has no installed renderer.');
+    const container=resolve(sim('get_app_container',device,'com.mbaykam.hub','data'));
+    if(!container.includes(sep+device+sep)||!container.includes(sep+'Containers'+sep+'Data'+sep+'Application'+sep))throw Error('Unexpected isolated simulator data container.');
+    const preferences=resolve(container,'Library/Preferences');await mkdir(preferences,{recursive:true});
+    run('/usr/bin/defaults',['write',resolve(preferences,'com.mbaykam.hub'),'hub.ios.server-origin.v1','-string','https://installed-ui-simulator.invalid/']);
+  }
   stage='launch';console.log('Launching HUB');
   const launch=sim('launch',device,'com.mbaykam.hub'),pid=Number(launch.match(/:\s*(\d+)$/)?.[1]);
   if(!pid)throw Error('The app did not report a process ID.');
@@ -49,7 +58,7 @@ try{
   // Newer iPhone runtime seeds can expose multiple displays. Capture the
   // primary phone display explicitly rather than relying on simctl's default.
   stage='screenshot';sim('io',device,'screenshot','--display=1',resolve(folder,'native-first-launch.png'));
-  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:false,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
+  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI,syntheticOfflineOrigin:testInstalledUI,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
   await writeFile(resolve(folder,'launch-failure.json'),JSON.stringify({...source,stage,runtime:selected.runtime,baselineMode,code:error.code??null,signal:error.signal??null,message:String(error.message).slice(0,4000),stdout:String(error.stdout??'').slice(-12000),stderr:String(error.stderr??'').slice(-12000)},null,2));

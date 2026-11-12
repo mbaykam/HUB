@@ -53,6 +53,7 @@ import {
 } from "./stage-plan.mjs";
 import { runtimeEntrySource } from "./runtime-entry.mjs";
 import { runtimeAdapterSources } from "./runtime-adapters.mjs";
+import { retainFrontendNotices } from "./frontend-notices.mjs";
 import {
   applyHarnessRuntimePatches,
   verifyHarnessRuntimePatchesApplied,
@@ -85,6 +86,9 @@ const runtimeFingerprintPaths = [
   "scripts/harness/runtime-state.mjs",
   "scripts/harness/stage-plan.mjs",
   "scripts/harness/stage.mjs",
+  "scripts/harness/frontend-notices.mjs",
+  "mobile/scripts/installed-ui-notices.mjs",
+  "resources/licenses/SIL-OFL-1.1.txt",
 ];
 
 async function fingerprintRuntimeCore(contract, harnessRoot, commit) {
@@ -664,6 +668,7 @@ async function validateRuntime(
 ) {
   const required = [
     join(runtimeRoot, "index.mjs"),
+    join(runtimeRoot, "node_modules", ...contract.frontendPackageName.split("/"), "NOTICE.frontend-dependencies.txt"),
     join(
       runtimeRoot,
       "node_modules",
@@ -962,6 +967,7 @@ async function main() {
       contract,
       productBundle,
     );
+    await retainFrontendNotices({ harnessRoot, runtimeRoot: activeRuntimeRoot, frontendPackageName: contract.frontendPackageName });
     await inspectPrunedRuntime(activeRuntimeRoot, contract);
     const expectedRuntime = {
       ...expectedRuntimeBase,
@@ -1104,6 +1110,7 @@ async function main() {
     );
     await pruneNodePtyPrebuilds(candidateRuntimeRoot);
     const pruneReport = await pruneRuntimeArtifacts(candidateRuntimeRoot);
+    await retainFrontendNotices({ harnessRoot, runtimeRoot: candidateRuntimeRoot, frontendPackageName: contract.frontendPackageName });
     await hardenHarnessBrowserLaunches(candidateRuntimeRoot);
     const runtimeInspection = await inspectPrunedRuntime(
       candidateRuntimeRoot,

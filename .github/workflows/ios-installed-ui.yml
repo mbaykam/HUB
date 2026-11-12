@@ -1,0 +1,47 @@
+name: Build installed iPhone UI resources
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'mbaykam/HUB'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build a clean staged product without starting a host
+        run: pnpm run harness:stage
+      - name: Export actual static renderer and verify offline boot
+        env:
+          HUB_RUN_INSTALLED_UI_RENDER_TEST: '1'
+        run: |
+          node mobile/scripts/export-installed-ui.mjs
+          node --test mobile/test/installed-ui-export.test.mjs
+          node --experimental-transform-types --import ./scripts/register-path-aliases.mts --test tests/installed-ui-network.test.mjs tests/ui-installed-assets.test.mjs tests/installed-ui-shell.test.mjs
+          node mobile/scripts/verify-installed-ui-artifact.mjs write
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: HUB-installed-ui-${{ github.sha }}
+          path: |
+            mobile/build/installed-ui/document.html
+            mobile/build/installed-ui/manifest.json
+            mobile/build/installed-ui-proof.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6

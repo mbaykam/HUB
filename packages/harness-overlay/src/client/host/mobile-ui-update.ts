@@ -3,6 +3,10 @@ function version(root: Document): UiVersion | undefined {
   return (root.defaultView as (Window & { __HUB_UI_RELEASE__?: UiVersion }) | null)?.__HUB_UI_RELEASE__;
 }
 export function pwaUiAsset(root: Document, file: "memory-graph-browser.js" | "voice-browser.js", fallback: string): string {
+  if (file !== "memory-graph-browser.js" && file !== "voice-browser.js") return fallback;
+  const view = root.defaultView as (Window & { __HUB_INSTALLED_UI_ASSET__?: (name: string) => string | undefined }) | null;
+  const installed = view?.__HUB_INSTALLED_UI_ASSET__?.(file);
+  if (installed?.startsWith("blob:") && new URL(installed).origin === view?.location.origin) return installed;
   const id = version(root)?.id;
   return id && /^[a-f0-9]{64}$/.test(id) ? `/api/hub/ui/asset?release=${id}&file=${file}` : fallback;
 }
