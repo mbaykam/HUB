@@ -239,7 +239,7 @@ struct HubHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     connectionRow
-                    section("Knowledge", symbol: "circle.hexagongrid", open: showKnowledge) {
+                    section("Knowledge", actionLabel: "Explore knowledge", open: showKnowledge) {
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
                             Text("\(notes.count) Brain notes  ·  \(value.domains?.filter { $0.status == "active" && $0.parentId == nil }.count ?? 0) Domains  ·  \(value.edges.count) Connections  ·  \(value.nodes.count - notes.count) Chat archive")
@@ -249,7 +249,7 @@ struct HubHomeView: View {
                         }
 
                     }
-                    section("Your day", symbol: "calendar", open: {
+                    section("Your day", actionLabel: "Open ↗", open: {
                         hideKeyboard()
                         plannerOpen = true
                     }) {
@@ -259,9 +259,9 @@ struct HubHomeView: View {
 
                     }
                     if let work = model.work {
-                        section("Your work", symbol: "clock") { workSummary(work) }
+                        section("Your work") { workSummary(work) }
                     } else if model.workUnavailable {
-                        section("Your work", symbol: "clock") {
+                        section("Your work") {
                             Button("Retry loading work", action: connect)
                         }
                     }
@@ -337,9 +337,18 @@ struct HubHomeView: View {
     private func panelContent(_ destination: Panel) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(destination == .history ? "Chat history" : "Workspace")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
+                if destination == .history {
+                    Text("Chat history").font(.headline).accessibilityAddTraits(.isHeader)
+                } else {
+                    Button {
+                        closePanel()
+                        settingsOpen = true
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                }
                 Spacer()
                 Button(action: closePanel) {
                     Image(systemName: "xmark").frame(width: 44, height: 44)
@@ -349,32 +358,7 @@ struct HubHomeView: View {
             if destination == .history {
                 historyPanel
             } else {
-                Button(action: showKnowledge) {
-                    Label("Knowledge", systemImage: "circle.hexagongrid").frame(minHeight: 44)
-                }
-                Button {
-                    closePanel()
-                    knowledgeActivityOpen = true
-                } label: { Label("Knowledge AI Activity", systemImage: "clock.arrow.circlepath").frame(minHeight: 44) }
-                .disabled(model.connection != .connected)
-                Button {
-                    closePanel()
-                    tasksOpen = true
-                } label: { Label("Tasks", systemImage: "checklist").frame(minHeight: 44) }
-                .disabled(model.connection != .connected)
-                Button {
-                    closePanel()
-                    usageOpen = true
-                } label: { Label("Usage limits", systemImage: "chart.bar.xaxis").frame(minHeight: 44) }
-                .disabled(model.connection != .connected)
-                Button {
-                    closePanel()
-                    settingsOpen = true
-                } label: { Label("Settings", systemImage: "gearshape").frame(minHeight: 44) }
-                Button {
-                    closePanel()
-                    workspace()
-                } label: { Label("Open workspace", systemImage: "arrow.up.right").frame(minHeight: 44) }
+                workspaceTools
                 .disabled(model.connection != .connected)
                 Spacer()
             }
@@ -383,6 +367,63 @@ struct HubHomeView: View {
         .padding(.horizontal, 18)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(card.ignoresSafeArea())
+    }
+
+    private var workspaceTools: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 8) {
+                    section("Knowledge", actionLabel: "Explore", open: showKnowledge) {
+                        if let graph = model.knowledge {
+                            HubKnowledgeGraphView(graph: graph, height: 90, overview: true, showsControls: false, select: selectKnowledgeNode)
+                            let chats = graph.nodes.filter { $0.kind == "conversation" }.count
+                            Text("\(graph.nodes.count - chats) brain notes · \(chats) chats")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    VStack(spacing: 8) {
+                        toolTile("Activity", icon: "clock.arrow.circlepath") {
+                            closePanel()
+                            knowledgeActivityOpen = true
+                        }
+                        toolTile("Usage", icon: "chart.bar.xaxis") {
+                            closePanel()
+                            usageOpen = true
+                        }
+                    }
+                    .frame(width: 78)
+                    .disabled(model.connection != .connected)
+                }
+                Button {
+                    closePanel()
+                    tasksOpen = true
+                } label: {
+                    section("Tasks") {
+                        Text("Goals, schedules & conditions").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(model.connection != .connected)
+                Button {
+                    closePanel()
+                    workspace()
+                } label: { Label("Open workspace", systemImage: "arrow.up.right").frame(minHeight: 44) }
+                .font(.footnote)
+            }
+        }
+    }
+
+    private func toolTile(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: icon).font(.title3)
+                Text(title).font(.caption)
+            }
+            .frame(maxWidth: .infinity, minHeight: 72)
+            .background(card, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
     }
 
     private var historyPanel: some View {
@@ -970,15 +1011,16 @@ struct HubHomeView: View {
         }
     }
 
-    private func section<Content: View>(_ title: String, symbol: String, open: (() -> Void)? = nil, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(_ title: String, actionLabel: String = "Open", open: (() -> Void)? = nil,
+                                        @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label(title, systemImage: symbol)
+                Text(title)
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
                 if let open {
                     Spacer()
-                    Button(action: open) { Image(systemName: "arrow.up.right").frame(width: 44, height: 44) }
+                    Button(action: open) { Text(actionLabel).font(.footnote).frame(minHeight: 40) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Open \(title)")
                 }
@@ -988,6 +1030,7 @@ struct HubHomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(card, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08)))
     }
 
 }

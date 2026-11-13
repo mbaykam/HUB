@@ -8,6 +8,7 @@ struct HubKnowledgeGraphView: View {
     let height: CGFloat
     var scope = Scope.all
     var overview = false
+    var showsControls = true
     let select: (String) -> Void
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -106,7 +107,7 @@ struct HubKnowledgeGraphView: View {
                     .accessibilityLabel(byID[item.id]?.title ?? "Knowledge record")
                 }
             }
-            HStack(spacing: 2) {
+            if showsControls { HStack(spacing: 2) {
                 Button { scale = max(0.5, scale / 1.25) } label: { Image(systemName: "minus").frame(width: 44, height: 44) }
                     .accessibilityLabel("Zoom out")
                 Button("Fit") { scale = 1; offset = .zero }.frame(minWidth: 44, minHeight: 44)
@@ -117,6 +118,7 @@ struct HubKnowledgeGraphView: View {
             .font(.caption)
             .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
             .padding(4)
+            }
         }
         .clipped()
         .accessibilityLabel("Knowledge graph")
