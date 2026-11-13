@@ -196,6 +196,26 @@ final class HubConversationTests: XCTestCase {
                        ["/api/settings/describe", "/api/settings/update", "/api/settings/describe"])
     }
 
+    func testCreatingAChatUsesTheSelectedWorkspaceAndDoesNotUseItsPath() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/create")
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let command = try XCTUnwrap(arguments["request"] as? [String: String])
+            XCTAssertEqual(command["workspaceId"], "owned-workspace")
+            XCTAssertNil(command["cwd"])
+            let session = try XCTUnwrap(command["sessionId"])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": ["sessionId": session]],
+            ]))
+        }
+        let id = try await api.createChat(workspaceID: "owned-workspace")
+        XCTAssertTrue(id.hasPrefix("session-"))
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

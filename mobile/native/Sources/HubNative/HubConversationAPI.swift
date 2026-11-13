@@ -257,6 +257,33 @@ public struct HubChatPreferences {
     }
 }
 
+public struct HubWorkspaceItem: Decodable, Identifiable {
+    public let workspaceId: String
+    public let path: String
+    public let title: String
+    public let sessionIds: [String]
+    public var id: String { workspaceId }
+
+    fileprivate var isValid: Bool {
+        HubVoiceAPI.validID(id) && !path.isEmpty && path.utf8.count <= 32_768 &&
+            !title.isEmpty && title.utf8.count <= 4_096 &&
+            sessionIds.allSatisfy(HubVoiceAPI.validID) && Set(sessionIds).count == sessionIds.count
+    }
+}
+
+public struct HubWorkspaceDirectory: Decodable {
+    public struct Entry: Decodable, Identifiable {
+        public let name: String
+        public let path: String
+        public let hidden: Bool
+        public var id: String { path }
+    }
+    public let path: String
+    public let crumbs: [Entry]
+    public let entries: [Entry]
+    public let truncated: Bool
+}
+
 public struct HubChatArtifacts: Decodable {
     public let screenshots: [HubChatScreenshot]
     public let artifacts: [HubConversationApp]?
@@ -1157,9 +1184,14 @@ public final class HubConversationAPI {
         return sessionID
     }
 
-    public func createChat() async throws -> String {
+    public func createChat(workspaceID: String? = nil) async throws -> String {
         let sessionID = "session-" + UUID().uuidString.lowercased()
-        let created = try await rpc("session/create", request: ["sessionId": sessionID])
+        var request = ["sessionId": sessionID]
+        if let workspaceID {
+            guard HubVoiceAPI.validID(workspaceID) else { throw HubChatSendError.rejected }
+            request["workspaceId"] = workspaceID
+        }
+        let created = try await rpc("session/create", request: request)
         guard created["sessionId"] as? String == sessionID else { throw HubChatSendError.rejected }
         return sessionID
     }
@@ -1340,6 +1372,102 @@ public final class HubConversationAPI {
         return try await chatPreferences()
     }
 
+    public func workspaces() async throws -> [HubWorkspaceItem] {
+        struct Baseline: Decodable {
+            let type: String
+            let value: Value
+            struct Value: Decodable { let items: [HubWorkspaceItem] }
+        }
+        let (socket, streamSession) = try await remoteSocket()
+        defer { streamSession.invalidateAndCancel() }
+        let streamID = UUID().uuidString.lowercased()
+        let frame = try Self.remoteOpen(streamID: streamID, endpoint: "workspace/follow", arguments: [:])
+        let deadline = Task {
+            try await Task.sleep(nanoseconds: 12_000_000_000)
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        defer { deadline.cancel(); socket.cancel(with: .normalClosure, reason: nil) }
+        return try await withTaskCancellationHandler(operation: {
+            try Task.checkCancellation()
+            socket.resume()
+            try await socket.send(.string(frame))
+            while !Task.isCancelled {
+                guard case .string(let text) = try await socket.receive(),
+                      let envelope = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+                    throw HubAttachmentError.invalidResponse
+                }
+                guard envelope["streamId"] as? String == streamID else { continue }
+                guard envelope["type"] as? String == "item", let item = envelope["value"] as? [String: Any] else {
+                    throw HubAttachmentError.unavailable
+                }
+                let baseline = try JSONDecoder().decode(Baseline.self, from: JSONSerialization.data(withJSONObject: item))
+                let workspaces = baseline.value.items
+                guard baseline.type == "baseline", workspaces.allSatisfy(\.isValid),
+                      Set(workspaces.map(\.id)).count == workspaces.count else { throw HubAttachmentError.invalidResponse }
+                return workspaces
+            }
+            throw CancellationError()
+        }, onCancel: { socket.cancel(with: .goingAway, reason: nil) })
+    }
+
+    public func workspaceDirectory(_ path: String?) async throws -> HubWorkspaceDirectory {
+        let arguments: [String: Any]
+        if let path { arguments = ["path": path] } else { arguments = [:] }
+        let value = try await rpc("directoryPicker/list", arguments: arguments, maxBytes: 4_194_304)
+        return try JSONDecoder().decode(HubWorkspaceDirectory.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+
+    public func workspaceChatTitles() async throws -> [String: HubConversationChoice] {
+        struct Catalog: Decodable {
+            let items: [Item]
+            struct Item: Decodable {
+                let sessionId: String
+                let updatedAt: Double
+                let projections: Projection?
+                struct Projection: Decodable {
+                    let values: Values?
+                    struct Values: Decodable { let title: String? }
+                }
+            }
+        }
+        let result = try await rpc("session/list", request: [:], maxBytes: 8_388_608)
+        let catalog = try JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: result))
+        return catalog.items.reduce(into: [:]) { byID, item in
+            guard HubVoiceAPI.validID(item.sessionId), item.updatedAt.isFinite, item.updatedAt >= 0 else { return }
+            let title = item.projections?.values?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            byID[item.sessionId] = HubConversationChoice(sessionId: item.sessionId,
+                title: title.isEmpty ? "Untitled conversation" : String(title.prefix(240)), updatedAt: item.updatedAt)
+        }
+    }
+
+    public func createWorkspace(path: String) async throws -> HubWorkspaceItem {
+        guard !path.isEmpty, path.utf8.count <= 32_768, !path.contains("\0") else { throw HubChatSendError.rejected }
+        let value = try await rpc("workspace/create", request: ["path": path], maxBytes: 4_194_304)
+        return try Self.workspaceMutation(value)
+    }
+
+    public func renameWorkspace(id: String, title: String) async throws -> HubWorkspaceItem {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard HubVoiceAPI.validID(id), !name.isEmpty, name.utf8.count <= 4_096 else { throw HubChatSendError.rejected }
+        let value = try await rpc("workspace/rename", request: ["workspaceId": id, "title": name], maxBytes: 4_194_304)
+        let item = try Self.workspaceMutation(value)
+        guard item.id == id else { throw HubAttachmentError.invalidResponse }
+        return item
+    }
+
+    public func removeWorkspace(id: String) async throws {
+        guard HubVoiceAPI.validID(id) else { throw HubChatSendError.rejected }
+        let value = try await rpc("workspace/delete", request: ["workspaceId": id])
+        guard value["deleted"] as? Bool == true else { throw HubAttachmentError.invalidResponse }
+    }
+
+    private static func workspaceMutation(_ value: [String: Any]) throws -> HubWorkspaceItem {
+        guard let record = value["workspace"] as? [String: Any] else { throw HubAttachmentError.invalidResponse }
+        let item = try JSONDecoder().decode(HubWorkspaceItem.self, from: JSONSerialization.data(withJSONObject: record))
+        guard item.isValid else { throw HubAttachmentError.invalidResponse }
+        return item
+    }
+
     public func chatScreenshot(sessionID: String, id: String) async throws -> Data {
         guard HubVoiceAPI.validID(sessionID), Self.isScreenshotID(id) else { throw HubAttachmentError.invalidResponse }
         return try await requestData("api/hub/artifacts", headers: [
@@ -1369,8 +1497,7 @@ public final class HubConversationAPI {
         id.utf8.count == 64 && id.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
-    public func followChat(sessionID: String, update: @MainActor (HubChatSnapshot) async -> Void) async throws {
-        guard HubVoiceAPI.validID(sessionID) else { throw HubChatSendError.rejected }
+    private func remoteSocket() async throws -> (URLSessionWebSocketTask, URLSession) {
         let httpsURL = server.origin.appendingPathComponent("api/remote.mux")
         guard var components = URLComponents(url: httpsURL, resolvingAgainstBaseURL: false) else {
             throw HubAttachmentError.invalidResponse
@@ -1382,15 +1509,26 @@ public final class HubConversationAPI {
         let streamConfiguration = session.configuration
         streamConfiguration.timeoutIntervalForResource = 604_800
         let streamSession = URLSession(configuration: streamConfiguration, delegate: HubNoRedirects(), delegateQueue: nil)
-        defer { streamSession.invalidateAndCancel() }
         let socket = streamSession.webSocketTask(with: request)
         socket.maximumMessageSize = 4 * 1_024 * 1_024
-        let streamID = UUID().uuidString.lowercased()
+        return (socket, streamSession)
+    }
+
+    private static func remoteOpen(streamID: String, endpoint: String, arguments: [String: Any]) throws -> String {
         let envelope: [String: Any] = [
-            "type": "open", "streamId": streamID, "endpoint": "session/follow",
-            "payload": ["args": ["request": ["address": ["kind": "session", "sessionId": sessionID], "maxMessages": 40]]],
+            "type": "open", "streamId": streamID, "endpoint": endpoint, "payload": ["args": arguments],
         ]
-        let message = String(decoding: try JSONSerialization.data(withJSONObject: envelope), as: UTF8.self)
+        return String(decoding: try JSONSerialization.data(withJSONObject: envelope), as: UTF8.self)
+    }
+
+    public func followChat(sessionID: String, update: @MainActor (HubChatSnapshot) async -> Void) async throws {
+        guard HubVoiceAPI.validID(sessionID) else { throw HubChatSendError.rejected }
+        let (socket, streamSession) = try await remoteSocket()
+        defer { streamSession.invalidateAndCancel() }
+        let streamID = UUID().uuidString.lowercased()
+        let message = try Self.remoteOpen(streamID: streamID, endpoint: "session/follow", arguments: [
+            "request": ["address": ["kind": "session", "sessionId": sessionID], "maxMessages": 40],
+        ])
         let deadline = Task {
             try await Task.sleep(nanoseconds: 12_000_000_000)
             socket.cancel(with: .goingAway, reason: nil)

@@ -82,6 +82,16 @@ struct HubHomeView: View {
     @State private var bookmarksBusy = false
     @State private var pinnedExpanded = false
     @State private var creatingChat = false
+    @State private var workspaces: [HubWorkspaceItem]?
+    @State private var workspaceChats: [String: HubConversationChoice] = [:]
+    @State private var expandedWorkspaces: Set<String> = []
+    @State private var workspaceAttempt = 0
+    @State private var workspaceError: String?
+    @State private var workspaceBusy = false
+    @State private var workspaceDirectoryOpen = false
+    @State private var workspaceToRemove: HubWorkspaceItem?
+    @State private var workspaceToRename: HubWorkspaceItem?
+    @State private var workspaceTitle = ""
     @State private var voiceHistoryOpen = false
     @State private var todoDraft = ""
     @State private var todoDraftID = UUID()
@@ -169,6 +179,28 @@ struct HubHomeView: View {
         .sheet(isPresented: $voiceHistoryOpen) {
             if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
         }
+        .sheet(isPresented: $workspaceDirectoryOpen) {
+            if let api = chatAPI() {
+                HubWorkspaceDirectoryView(api: api) { workspaceAttempt += 1 }
+            }
+        }
+        .alert("Rename workspace", isPresented: Binding(
+            get: { workspaceToRename != nil }, set: { if !$0 { workspaceToRename = nil } }), presenting: workspaceToRename) { item in
+            TextField("Workspace name", text: $workspaceTitle)
+            Button("Rename") {
+                let name = workspaceTitle
+                Task { await renameWorkspace(item, title: name) }
+            }
+            .disabled(workspaceTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Remove workspace?", isPresented: Binding(
+            get: { workspaceToRemove != nil }, set: { if !$0 { workspaceToRemove = nil } }), presenting: workspaceToRemove) { item in
+            Button("Remove", role: .destructive) { Task { await removeWorkspace(item) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            Text("\(item.title) will be removed from the workspace list. Its files and conversations stay on HUB.")
+        }
         .task(id: model.connection == .connected ? chatAPI().map { ObjectIdentifier($0) } : nil) {
             guard model.connection == .connected, let api = chatAPI(),
                   let value = try? await api.chatPreferences(), !Task.isCancelled else { return }
@@ -191,6 +223,12 @@ struct HubHomeView: View {
                 settingsOpen = false
                 plannerOpen = false
                 plannerEditor = nil
+                workspaces = nil
+                workspaceChats = [:]
+                expandedWorkspaces = []
+                workspaceDirectoryOpen = false
+                workspaceToRename = nil
+                workspaceToRemove = nil
             }
         }
     }
@@ -468,8 +506,14 @@ struct HubHomeView: View {
                     } else {
                         ProgressView(query.isEmpty ? "Loading conversations…" : "Searching…").padding(.vertical, 8)
                     }
+                    if query.isEmpty { workspaceHistory }
                 }
             }
+            Button { workspaceDirectoryOpen = true } label: {
+                Label("New workspace", systemImage: "folder.badge.plus").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.connection != .connected)
             Button { Task { await newChat() } } label: {
                 Label("New Session", systemImage: "plus.square").frame(maxWidth: .infinity, minHeight: 44)
             }
@@ -485,6 +529,9 @@ struct HubHomeView: View {
             .disabled(model.connection != .connected)
         }
         .task(id: model.connection == .connected) { await loadBookmarks() }
+        .task(id: WorkspaceRequest(connected: model.connection == .connected, attempt: workspaceAttempt)) {
+            if model.connection == .connected { await loadWorkspaces() }
+        }
         .task(id: HistoryRequest(query: query, attempt: historyAttempt, connected: model.connection == .connected)) {
             historyResults = nil
             historyFailed = false
@@ -496,6 +543,107 @@ struct HubHomeView: View {
             } catch {
                 if !Task.isCancelled { historyFailed = true }
             }
+        }
+    }
+
+    private struct WorkspaceRequest: Equatable {
+        let connected: Bool
+        let attempt: Int
+    }
+
+    private var workspaceHistory: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Workspaces").font(.subheadline.bold()).foregroundStyle(.secondary).padding(.vertical, 10)
+            if let workspaceError {
+                Text(workspaceError).font(.footnote).foregroundStyle(.secondary)
+                Button("Refresh workspaces") { workspaceAttempt += 1 }.frame(minHeight: 44)
+            }
+            if let workspaces {
+                if workspaces.isEmpty { Text("No workspaces").font(.footnote).foregroundStyle(.secondary) }
+                ForEach(workspaces) { item in
+                    DisclosureGroup(isExpanded: Binding(
+                        get: { expandedWorkspaces.contains(item.id) },
+                        set: { if $0 { expandedWorkspaces.insert(item.id) } else { expandedWorkspaces.remove(item.id) } }
+                    )) {
+                        ForEach(item.sessionIds, id: \.self) { id in
+                            historyRow(workspaceChats[id] ?? HubConversationChoice(sessionId: id,
+                                title: "Untitled conversation", updatedAt: 0))
+                        }
+                        Button {
+                            Task { await newChat(workspaceID: item.id) }
+                        } label: {
+                            Label("New chat in workspace", systemImage: "plus").frame(minHeight: 44)
+                        }
+                        .disabled(creatingChat || workspaceBusy)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Label(item.title, systemImage: "folder").lineLimit(1)
+                            Spacer()
+                            Menu {
+                                Button("Rename") { workspaceTitle = item.title; workspaceToRename = item }
+                                Button("Remove workspace", role: .destructive) { workspaceToRemove = item }
+                            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                            .disabled(workspaceBusy)
+                            .accessibilityLabel("Options for \(item.title)")
+                        }
+                        .frame(minHeight: 44)
+                    }
+                }
+            } else if workspaceError == nil && model.connection == .connected {
+                ProgressView("Loading workspaces…")
+            }
+            if workspaces != nil && workspaceError == nil {
+                Button { workspaceAttempt += 1 } label: {
+                    Label("Refresh workspaces", systemImage: "arrow.clockwise").font(.footnote).frame(minHeight: 44)
+                }
+            }
+        }
+        .disabled(model.connection != .connected)
+    }
+
+    private func loadWorkspaces() async {
+        guard let api = chatAPI() else { return }
+        workspaceError = nil
+        do {
+            let items = try await api.workspaces()
+            guard !Task.isCancelled, chatAPI() === api else { return }
+            workspaces = items
+            if items.contains(where: { !$0.sessionIds.isEmpty }) {
+                let titles = try await api.workspaceChatTitles()
+                guard !Task.isCancelled, chatAPI() === api else { return }
+                workspaceChats = titles
+            }
+        } catch {
+            if !Task.isCancelled && chatAPI() === api { workspaceError = "Could not refresh workspaces." }
+        }
+    }
+
+    private func renameWorkspace(_ item: HubWorkspaceItem, title: String) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false }
+        do {
+            let updated = try await api.renameWorkspace(id: item.id, title: title)
+            guard chatAPI() === api else { return }
+            workspaces = workspaces?.map { $0.id == updated.id ? updated : $0 }
+            workspaceAttempt += 1
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the new workspace name. Refresh to check." }
+        }
+    }
+
+    private func removeWorkspace(_ item: HubWorkspaceItem) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false }
+        do {
+            try await api.removeWorkspace(id: item.id)
+            guard chatAPI() === api else { return }
+            workspaces?.removeAll { $0.id == item.id }
+            expandedWorkspaces.remove(item.id)
+            workspaceAttempt += 1
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm removal. Refresh to check." }
         }
     }
 
@@ -567,16 +715,19 @@ struct HubHomeView: View {
         }
     }
 
-    private func newChat() async {
+    private func newChat(workspaceID: String? = nil) async {
         guard !creatingChat, let api = chatAPI() else { return }
         creatingChat = true
         defer { creatingChat = false }
         do {
-            let id = try await api.createChat()
+            let id = try await api.createChat(workspaceID: workspaceID)
             guard chatAPI() === api else { return }
             showChat(HubConversationChoice(sessionId: id, title: "New chat", updatedAt: 0))
         } catch {
-            if chatAPI() === api { model.sendError = "Could not open a new conversation. Try again when connected." }
+            if chatAPI() === api {
+                if workspaceID != nil { workspaceError = "Could not open a chat in this workspace." }
+                else { model.sendError = "Could not open a new conversation. Try again when connected." }
+            }
         }
     }
 
