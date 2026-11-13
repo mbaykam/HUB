@@ -21,6 +21,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var showingHome = true
     private var signingIn = false
     private var firstAppearance = true
+    #if DEBUG && targetEnvironment(simulator)
+    private let showHomeFixture = ProcessInfo.processInfo.arguments.contains("--hub-native-home-fixture")
+    #endif
     private var initialServer: HubServer?
     private let bootstrapStarted = ProcessInfo.processInfo.systemUptime
     private var networkMonitor: NWPathMonitor?
@@ -168,6 +171,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         controller.didMove(toParent: self)
+        #if DEBUG && targetEnvironment(simulator)
+        if showHomeFixture {
+            seedHomeFixture()
+            return
+        }
+        #endif
         if let address = UserDefaults.standard.string(forKey: savedOriginKey), let saved = try? HubServer(address: address) {
             initialServer = saved
             home.connection = .connecting
@@ -181,6 +190,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         if firstAppearance {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - bootstrapStarted) * 1000)
             launchLog.info("Native Home appeared in \(elapsed, privacy: .public) ms")
+            #if DEBUG && targetEnvironment(simulator)
+            if showHomeFixture {
+                firstAppearance = false
+                return
+            }
+            #endif
             if let initialServer { connect(initialServer) }
             initialServer = nil
             firstAppearance = false
@@ -188,6 +203,36 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             monitorHomeNetwork()
         }
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private func seedHomeFixture() {
+        let decoder = JSONDecoder()
+        let graph = """
+            {"nodes":[{"id":"note-project","title":"Planning a coding project","kind":"note"},
+             {"id":"note-device","title":"Mobile development","kind":"note"},
+             {"id":"note-research","title":"Research notes","kind":"note"},
+             {"id":"archive-1","title":"An earlier conversation","kind":"conversation"}],
+             "edges":[{"source":"note-device","target":"note-project"},{"source":"note-project","target":"note-research"}],
+             "domains":[{"id":"coding","title":"Coding Projects","status":"active"},
+             {"id":"research","title":"Knowledge AI","status":"active"}],
+             "memberships":[{"nodeId":"note-project","domainId":"coding"},{"nodeId":"note-device","domainId":"coding"},
+             {"nodeId":"note-research","domainId":"research"}]}
+            """
+        let planner = """
+            {"revision":1,"items":[{"id":"11111111-1111-4111-8111-111111111111","title":"Review the weekly plan",
+             "kind":"todo","state":"open","horizon":"near","deleted":false,"version":1}]}
+            """
+        let work = """
+            {"byId":{"fixture-work":{"title":"Collect reading notes","running":true,"completed":false,
+             "failed":false,"stopped":false,"updatedAt":1794500000000}}}
+            """
+        home.knowledge = try? decoder.decode(HubHomeKnowledge.self, from: Data(graph.utf8))
+        home.planner = try? decoder.decode(HubHomePlanner.self, from: Data(planner.utf8))
+        home.work = try? decoder.decode(HubHomeWork.self, from: Data(work.utf8))
+        home.conversations = [HubConversationChoice(sessionId: "fixture-work", title: "Collect reading notes", updatedAt: 0)]
+        home.connection = .connected
+    }
+    #endif
 
     private func monitorHomeNetwork() {
         let monitor = NWPathMonitor()
@@ -422,6 +467,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func refreshHome() {
+        #if DEBUG && targetEnvironment(simulator)
+        if showHomeFixture { return }
+        #endif
         guard showingHome, !home.sending, !home.plannerSaving else { return }
         let started = ProcessInfo.processInfo.systemUptime
         let attempt = homeState.begin(hasServer: server != nil)

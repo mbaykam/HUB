@@ -59,7 +59,7 @@ try{
     // Writing the preferences plist on the host can race the simulator's cfprefsd.
     launchArguments.push('-hub.ios.server-origin.v1', 'https://installed-ui-simulator.invalid/');
   }
-  if(nativeDevelopment)launchArguments.push('-hub.ios.server-origin.v1','https://native-workspace-simulator.invalid/');
+  if(nativeDevelopment)launchArguments.push('--hub-native-home-fixture');
   stage='launch';console.log('Launching HUB');
   const launch=sim('launch',device,'com.mbaykam.hub',...launchArguments),pid=Number(launch.match(/:\s*(\d+)$/)?.[1]);
   if(!pid)throw Error('The app did not report a process ID.');
@@ -100,7 +100,7 @@ try{
   }else{
     sim('io',device,'screenshot','--display=1',screenshot);
   }
-  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI||nativeDevelopment,syntheticOfflineOrigin:testInstalledUI||nativeDevelopment,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
+  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI,syntheticOfflineOrigin:testInstalledUI,nativeHomeFixture:nativeDevelopment,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
   await writeFile(resolve(folder,'launch-failure.json'),JSON.stringify({...source,stage,runtime:selected.runtime,baselineMode,code:error.code??null,signal:error.signal??null,message:String(error.message).slice(0,4000),stdout:String(error.stdout??'').slice(-12000),stderr:String(error.stderr??'').slice(-12000)},null,2));
