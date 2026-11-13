@@ -63,13 +63,43 @@ try{
   stage='launch';console.log('Launching HUB');
   const launch=sim('launch',device,'com.mbaykam.hub',...launchArguments),pid=Number(launch.match(/:\s*(\d+)$/)?.[1]);
   if(!pid)throw Error('The app did not report a process ID.');
-  // Allow the initial window + queued native Connect sheet to render.
+  // A process can exist before SwiftUI replaces the launch screen.
   await new Promise(resolve=>setTimeout(resolve,4000));
   stage='process';const processName=run('/bin/ps',['-ww','-p',String(pid),'-o','comm=']);
   if(processName!=='App'&&!processName.endsWith('/App.app/App'))throw Error('HUB did not stay running after first launch.');
   // Newer iPhone runtime seeds can expose multiple displays. Capture the
   // primary phone display explicitly rather than relying on simctl's default.
-  stage='screenshot';sim('io',device,'screenshot','--display=1',resolve(folder,'native-first-launch.png'));
+  stage='screenshot';
+  const screenshot=resolve(folder,'native-first-launch.png');
+  if(nativeDevelopment){
+    const candidate=resolve(folder,'native-launch-candidate.png');
+    const checker=resolve('mobile/scripts/check-native-home-image.mjs');
+    let visible=false;
+    for(let attempt=0;attempt<6&&!visible;attempt++){
+      if(attempt>0)await new Promise(resolve=>setTimeout(resolve,3500));
+      for(const display of ['default','1','0']){
+        try{
+          const displayArgs=display==='default'?[]:['--display='+display];
+          sim('io',device,'screenshot',...displayArgs,candidate);
+          run(process.execPath,[checker,candidate]);
+          await copyFile(candidate,screenshot);
+          visible=true;
+          break;
+        }catch(error){
+          console.warn('Native Home not visible on display '+display+': '+String(error.stderr??error.message).trim().slice(-400));
+        }
+      }
+    }
+    if(!visible){
+      let logs='';
+      try{logs=run('xcrun',['simctl','spawn',device,'log','show','--last','2m','--info','--predicate','process == "App" OR subsystem == "com.mbaykam.hub"'],20_000).slice(-20_000);}
+      catch(error){logs=String(error.message).slice(0,1000);}
+      await writeFile(resolve(folder,'native-launch-diagnostics.json'),JSON.stringify({logs},null,2));
+      throw Error('Native workspace did not appear on a simulator display.');
+    }
+  }else{
+    sim('io',device,'screenshot','--display=1',screenshot);
+  }
   await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI||nativeDevelopment,syntheticOfflineOrigin:testInstalledUI||nativeDevelopment,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
