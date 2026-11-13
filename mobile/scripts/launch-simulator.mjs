@@ -29,7 +29,10 @@ if((await lstat(app)).isSymbolicLink()||!(await realpath(app)).startsWith(extrac
 const info=JSON.parse(run('/usr/bin/plutil',['-convert','json','-o','-',resolve(app,'Info.plist')]));
 if(info.CFBundleIdentifier!=='com.mbaykam.hub'||!info.CFBundleSupportedPlatforms?.includes('iPhoneSimulator')||info.CFBundleExecutable!=='App')throw Error('Not the expected HUB simulator app.');
 const available=JSON.parse(sim('list','devices','available','-j')).devices;
-const selected=selectSimulatorSeed(available);
+// Prefer the ordinary iOS runtime used for the phone-sized acceptance
+// fixture. A model-specific Duo runtime booted but hung installing App.app.
+const ordinary=Object.fromEntries(Object.entries(available).filter(([runtime]) => /\.iOS-\d+(?:-\d+)*$/.test(runtime)));
+const selected=selectSimulatorSeed(nativeDevelopment && Object.keys(ordinary).length ? ordinary : available);
 const baselineMode=nativeDevelopment?'fresh-isolated-device':'cloned-runner-seed';
 let device,stage='create-device',displayMode='headless';
 try{
@@ -59,8 +62,10 @@ try{
   stage='bootstatus';console.log('Waiting for native simulator startup');
   run('xcrun',['simctl','bootstatus',device,'-b'],480000);
   stage='install';console.log('Installing the verified existing bundle');
-  try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
-  sim('install',device,app);
+  if(!nativeDevelopment){
+    try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
+  }
+  run('xcrun',['simctl','install',device,app],120000);
   const testInstalledUI=process.env.TEST_INSTALLED_UI==='1';
   const launchArguments = [];
   if(testInstalledUI){
