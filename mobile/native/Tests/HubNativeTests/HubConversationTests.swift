@@ -297,6 +297,35 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(id, "saved-goal")
     }
 
+    func testRoutineEditorUsesTheRegistryRevisionAndPreservesEventCondition() async throws {
+        let api = try client()
+        let source = #"""
+        {"revision":14,"characters":[{"id":"hub","name":"HUB","route":{"provider":"fixture","model":"local"}}],
+         "automations":[{"id":"routine-id","revision":2,"status":"paused","title":"Original","prompt":"Read",
+            "characterId":"hub","trigger":{"kind":"event","event":"task.completed","operator":"equals","path":"status","value":"done"},
+            "missed":"skip","tools":["web_fetch"],"allowWrites":false,"maxOutputTokens":2048,"maxSteps":3,
+            "dailyMaxRuns":6,"dailyBudget":0.2,"inputPrice":0.1,"outputPrice":0.5,"notification":"pwa"}]}
+        """#
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/automations")
+            if request.httpMethod == "GET" { return (200, Data(source.utf8)) }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "save")
+            XCTAssertEqual(command["id"] as? String, "routine-id")
+            XCTAssertEqual(command["revision"] as? Int, 14)
+            let routine = try XCTUnwrap(command["automation"] as? [String: Any])
+            XCTAssertEqual(routine["title"] as? String, "Renamed")
+            XCTAssertEqual((routine["trigger"] as? [String: String])?["operator"], "equals")
+            XCTAssertNil(routine["status"])
+            return (200, Data(#"{"revision":15}"#.utf8))
+        }
+        let loaded = try await api.routineEditor(id: "routine-id")
+        var draft = loaded.draft
+        draft.title = "Renamed"
+        try await api.saveRoutine(draft, from: loaded)
+        XCTAssertEqual(CatalogFixture.requests.count, 2)
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

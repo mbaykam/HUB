@@ -563,6 +563,67 @@ public struct HubGoalEditorData {
     fileprivate let revision: Int
 }
 
+public struct HubRoutineEditorData {
+    public struct Trigger: Codable {
+        public enum Kind: String, Codable, CaseIterable { case once, interval, calendar, watch, event }
+        public var kind: Kind = .once
+        public var at: Int64?
+        public var seconds: Int?
+        public var hour: Int?
+        public var minute: Int?
+        public var days: [Int]?
+        public var timezone: String?
+        public var url: String?
+        public var rule: String?
+        public var value: String?
+        public var jsonPath: String?
+        public var fireOnFirst: Bool?
+        public var event: String?
+        public var path: String?
+        public var operatorName: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case kind, at, seconds, hour, minute, days, timezone, url, rule, value, jsonPath, fireOnFirst, event, path
+            case operatorName = "operator"
+        }
+        public init(kind: Kind) { self.kind = kind }
+    }
+
+    public struct Draft: Codable {
+        public var title: String
+        public var prompt: String
+        public var characterId: String
+        public var trigger: Trigger
+        public var missed: String
+        public var tools: [String]
+        public var allowWrites: Bool
+        public var maxOutputTokens: Int
+        public var maxSteps: Int
+        public var dailyMaxRuns: Int
+        public var dailyBudget: Double
+        public var inputPrice: Double
+        public var outputPrice: Double
+        public var notification: String
+        public var sourceSessionId: String?
+        public var goalId: String?
+
+        fileprivate static func new(character: String) -> Self {
+            var trigger = Trigger(kind: .once)
+            trigger.at = Int64(Date().addingTimeInterval(3_600).timeIntervalSince1970 * 1_000)
+            return Self(title: "", prompt: "", characterId: character, trigger: trigger, missed: "catch-up",
+                        tools: ["web_search", "web_fetch", "camofox_search", "camofox_open", "camofox_snapshot", "camofox_close",
+                                "hub_knowledge_search", "hub_knowledge_read"],
+                        allowWrites: false, maxOutputTokens: 2_048, maxSteps: 3, dailyMaxRuns: 6,
+                        dailyBudget: 0.2, inputPrice: 0.1, outputPrice: 0.5, notification: "pwa")
+        }
+    }
+
+    public let draft: Draft
+    public let characters: [HubGoalEditorData.Character]
+    fileprivate let revision: Int
+    fileprivate let id: String?
+}
+
 struct HubChatStreamFrame: Decodable {
     struct Entry: Decodable {
         struct Event: Decodable {
@@ -1254,6 +1315,60 @@ public final class HubConversationAPI {
             throw HubAttachmentError.invalidResponse
         }
         return receipt.changedId
+    }
+
+    public func routineEditor(id: String? = nil) async throws -> HubRoutineEditorData {
+        struct Catalog: Decodable {
+            struct Record: Decodable {
+                let id: String
+                let status: String
+                let draft: HubRoutineEditorData.Draft
+
+                init(from decoder: Decoder) throws {
+                    let box = try decoder.container(keyedBy: CodingKeys.self)
+                    id = try box.decode(String.self, forKey: .id)
+                    status = try box.decode(String.self, forKey: .status)
+                    draft = try HubRoutineEditorData.Draft(from: decoder)
+                }
+                private enum CodingKeys: String, CodingKey { case id, status }
+            }
+            let revision: Int
+            let characters: [HubGoalEditorData.Character]
+            let automations: [Record]
+        }
+        if let id, !HubVoiceAPI.validID(id) { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/automations", headers: ["x-hub-automations": "1"], maxBytes: 8_388_608)
+        let catalog = try JSONDecoder().decode(Catalog.self, from: data)
+        guard catalog.revision >= 0 else { throw HubAttachmentError.invalidResponse }
+        let draft: HubRoutineEditorData.Draft
+        if let id {
+            guard let job = catalog.automations.first(where: { $0.id == id }),
+                  !["running", "checking"].contains(job.status) else { throw HubAttachmentError.unavailable }
+            draft = job.draft
+        } else {
+            draft = .new(character: catalog.characters.first(where: { $0.route != nil })?.id ?? "")
+        }
+        return HubRoutineEditorData(draft: draft, characters: catalog.characters, revision: catalog.revision, id: id)
+    }
+
+    public func saveRoutine(_ draft: HubRoutineEditorData.Draft, from loaded: HubRoutineEditorData) async throws {
+        struct Command: Encodable {
+            let action = "save"
+            let id: String?
+            let revision: Int
+            let automation: HubRoutineEditorData.Draft
+        }
+        struct Receipt: Decodable { let revision: Int }
+        guard !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, draft.title.utf16.count <= 160,
+              !draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, draft.prompt.utf16.count <= 12_000,
+              loaded.characters.contains(where: { $0.id == draft.characterId && $0.route != nil }),
+              draft.sourceSessionId == loaded.draft.sourceSessionId else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONEncoder().encode(Command(id: loaded.id, revision: loaded.revision, automation: draft))
+        guard body.count <= 50_000 else { throw HubAttachmentError.tooLarge }
+        let response = try await requestData("api/hub/automations", headers: ["x-hub-automations": "1"],
+                                             body: body, maxBytes: 8_388_608)
+        let receipt = try JSONDecoder().decode(Receipt.self, from: response)
+        guard receipt.revision > loaded.revision else { throw HubAttachmentError.invalidResponse }
     }
 
     public func changeWorkspaceTask(_ action: HubWorkspaceTaskAction, id: String, revision: Int,

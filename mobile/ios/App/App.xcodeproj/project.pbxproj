@@ -12,6 +12,7 @@
 		A1C000000000000000000015 /* HubWorkspaceDirectoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000016 /* HubWorkspaceDirectoryView.swift */; };
 		A1C000000000000000000017 /* HubKnowledgeDomainsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000018 /* HubKnowledgeDomainsView.swift */; };
 		A1C000000000000000000019 /* HubGoalEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000001A /* HubGoalEditorView.swift */; };
+		A1C00000000000000000001B /* HubRoutineEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000001C /* HubRoutineEditorView.swift */; };
 		A1C00000000000000000000F /* HubConversationAppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000010 /* HubConversationAppsView.swift */; };
 		A1C00000000000000000000D /* HubPlannerEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000000E /* HubPlannerEditor.swift */; };
 		A1C00000000000000000000B /* HubCharactersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000000C /* HubCharactersSettingsView.swift */; };
@@ -60,6 +61,7 @@ A17000000000000000000007 = {isa = PBXBuildFile; fileRef = A170000000000000000000
 		A1C000000000000000000016 /* HubWorkspaceDirectoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubWorkspaceDirectoryView.swift; sourceTree = "<group>"; };
 		A1C000000000000000000018 /* HubKnowledgeDomainsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubKnowledgeDomainsView.swift; sourceTree = "<group>"; };
 		A1C00000000000000000001A /* HubGoalEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubGoalEditorView.swift; sourceTree = "<group>"; };
+		A1C00000000000000000001C /* HubRoutineEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubRoutineEditorView.swift; sourceTree = "<group>"; };
 		A1C000000000000000000010 /* HubConversationAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubConversationAppsView.swift; sourceTree = "<group>"; };
 		A1C00000000000000000000E /* HubPlannerEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubPlannerEditor.swift; sourceTree = "<group>"; };
 		A1C00000000000000000000C /* HubCharactersSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubCharactersSettingsView.swift; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 				A1C000000000000000000016 /* HubWorkspaceDirectoryView.swift */,
 				A1C000000000000000000018 /* HubKnowledgeDomainsView.swift */,
 				A1C00000000000000000001A /* HubGoalEditorView.swift */,
+				A1C00000000000000000001C /* HubRoutineEditorView.swift */,
 				A1C000000000000000000004 /* HubLiveChatView.swift */,
 				A1C000000000000000000006 /* HubUsageView.swift */,
 				A1B000000000000000000002 /* HubHomeView.swift */,
@@ -305,6 +308,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				A1C000000000000000000015 /* HubWorkspaceDirectoryView.swift in Sources */,
 				A1C000000000000000000017 /* HubKnowledgeDomainsView.swift in Sources */,
 				A1C000000000000000000019 /* HubGoalEditorView.swift in Sources */,
+				A1C00000000000000000001B /* HubRoutineEditorView.swift in Sources */,
 				A1C000000000000000000003 /* HubLiveChatView.swift in Sources */,
 				A1C000000000000000000005 /* HubUsageView.swift in Sources */,
 				A1B000000000000000000001 /* HubHomeView.swift in Sources */,
