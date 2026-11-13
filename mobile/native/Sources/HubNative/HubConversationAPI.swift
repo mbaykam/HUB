@@ -21,6 +21,13 @@ public struct HubChatBookmarks: Decodable {
     public let sessionIds: [String]
 }
 
+public struct HubVoiceHistoryItem: Decodable, Identifiable {
+    public let sessionId: String
+    public let saved: Bool
+    public let createdAt: Double
+    public var id: String { sessionId }
+}
+
 public struct HubChatCharacterPicker: Decodable {
     public struct Character: Decodable, Identifiable {
         public let id: String
@@ -625,6 +632,28 @@ public final class HubConversationAPI {
 
     public func chatBookmarks() async throws -> HubChatBookmarks {
         try await bookmarksRequest()
+    }
+
+    public func voiceHistory() async throws -> [HubVoiceHistoryItem] {
+        struct History: Decodable { let conversations: [HubVoiceHistoryItem] }
+        let data = try await requestData("api/hub/voice/history", headers: [:], maxBytes: 5_242_880)
+        let records = try JSONDecoder().decode(History.self, from: data).conversations
+        guard records.count <= 20_000, Set(records.map(\.sessionId)).count == records.count,
+              records.allSatisfy({ HubVoiceAPI.validID($0.sessionId) && $0.createdAt >= 0 }) else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return records.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    public func saveVoiceConversation(sessionID: String) async throws {
+        guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
+        struct Receipt: Decodable { let sessionId: String; let saved: Bool; let kind: String }
+        let data = try await requestData("api/hub/voice/history", headers: ["x-hub-voice-history": "1"],
+                                         body: JSONEncoder().encode(["sessionId": sessionID]))
+        let receipt = try JSONDecoder().decode(Receipt.self, from: data)
+        guard receipt.sessionId == sessionID, receipt.saved, receipt.kind == "voice" else {
+            throw HubAttachmentError.invalidResponse
+        }
     }
 
     public func setChatPinned(sessionID: String, pinned: Bool) async throws -> HubChatBookmarks {

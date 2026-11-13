@@ -82,6 +82,7 @@ struct HubHomeView: View {
     @State private var bookmarksBusy = false
     @State private var pinnedExpanded = false
     @State private var creatingChat = false
+    @State private var voiceHistoryOpen = false
     @State private var todoDraft = ""
     @State private var todoDraftID = UUID()
     @State private var todoHorizon = HubHomePlanner.Horizon.near
@@ -162,6 +163,9 @@ struct HubHomeView: View {
         .sheet(isPresented: $knowledgeActivityOpen) {
             if let api = chatAPI() { HubKnowledgeActivityView(api: api) }
         }
+        .sheet(isPresented: $voiceHistoryOpen) {
+            if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
+        }
         .onChange(of: model.openNativeChat) { request in
             if let request { showChat(request); model.openNativeChat = nil }
         }
@@ -174,6 +178,7 @@ struct HubHomeView: View {
                 knowledgeActivityOpen = false
                 selectedChat = nil
                 bookmarks = nil
+                voiceHistoryOpen = false
                 settingsOpen = false
                 plannerOpen = false
                 plannerEditor = nil
@@ -418,6 +423,14 @@ struct HubHomeView: View {
             }
             .buttonStyle(.bordered)
             .disabled(creatingChat || model.connection != .connected)
+            Button {
+                closePanel()
+                voiceHistoryOpen = true
+            } label: {
+                Label("Voice History", systemImage: "waveform").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(model.connection != .connected)
         }
         .task(id: model.connection == .connected) { await loadBookmarks() }
         .task(id: HistoryRequest(query: query, attempt: historyAttempt, connected: model.connection == .connected)) {
@@ -540,6 +553,7 @@ struct HubHomeView: View {
             tasksOpen = false
             usageOpen = false
             settingsOpen = false
+            voiceHistoryOpen = false
             plannerOpen = false
             plannerEditor = nil
             knowledgeActivityOpen = false
@@ -976,6 +990,91 @@ struct HubHomeView: View {
         .background(card, in: RoundedRectangle(cornerRadius: 20))
     }
 
+}
+
+@MainActor
+private struct HubVoiceHistoryView: View {
+    let api: HubConversationAPI
+    let recent: [HubConversationChoice]
+    let open: (HubConversationChoice) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [HubVoiceHistoryItem]?
+    @State private var busy = false
+    @State private var failed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Voice History").font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            .padding(.horizontal, 16)
+            if failed {
+                Button("Retry voice history") { Task { await load() } }.padding(.horizontal, 16)
+            }
+            if let items {
+                if items.isEmpty {
+                    Text("No voice conversations yet.").foregroundStyle(.secondary).padding(.horizontal, 16)
+                    Spacer()
+                } else {
+                    List(items) { item in
+                        row(item)
+                    }
+                    .listStyle(.plain)
+                }
+            } else if !failed {
+                ProgressView("Loading voice conversations…").padding(.horizontal, 16)
+                Spacer()
+            }
+        }
+        .padding(.top, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .task { await load() }
+    }
+
+    private func row(_ item: HubVoiceHistoryItem) -> some View {
+        let choice = recent.first(where: { $0.sessionId == item.sessionId })
+            ?? HubConversationChoice(sessionId: item.sessionId, title: "Voice conversation", updatedAt: item.createdAt)
+        return HStack {
+            Button {
+                open(choice)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(choice.title).lineLimit(2)
+                    Text(Date(timeIntervalSince1970: item.createdAt / 1000).formatted()).font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            if !item.saved {
+                Button("Save") { Task { await save(item.sessionId) } }
+                    .buttonStyle(.borderless)
+                    .disabled(busy)
+            }
+        }
+    }
+
+    private func load() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do { items = try await api.voiceHistory(); failed = false }
+        catch { if !Task.isCancelled { failed = true } }
+    }
+
+    private func save(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await api.saveVoiceConversation(sessionID: id)
+            items = try await api.voiceHistory()
+            failed = false
+        } catch { failed = true }
+    }
 }
 
 @MainActor
