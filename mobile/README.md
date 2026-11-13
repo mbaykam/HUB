@@ -17,20 +17,21 @@ The current draft stays in memory while the app is open. Reopening starts fresh.
 
 Send creates a conversation and submits the text through HUB's existing
 authenticated chat API. An uncertain response keeps the draft and links to the
-conversation so you can check delivery. Detailed views open on demand through
-Open workspace or a recent chat. The app records time to native Home and time
+conversation so you can check delivery. Open a recent or workspace conversation
+from the left panel. Settings, Knowledge and Tasks open from the right panel.
+The app records time to native Home and time
 to live Home data separately in the local HomeLaunch log category.
 
 ## Installed interface
 
 The matching development build includes the actual renderer, styles/fonts and
-lazy graph/voice assets from a fixed product profile. The detailed workspace can open from
-those verified app resources using the selected HTTPS origin and WebKit's own
-cookie store. It does not restore a previous screen, chat or draft snapshot.
+lazy graph/voice assets from a fixed product profile. The installed web renderer
+remains available to the connection recovery code. The ordinary workspace
+opens in SwiftUI. It starts without a previous screen, chat or draft snapshot.
 Data still comes from HUB; opening the interface alone does not run an assistant.
 Network requests and stream creation wait for the authenticated compatibility
-check. Expired sign-in and incompatible hosts use the normal HTTPS web interface.
-**Settings → iPhone → Reload from HUB** also offers explicit web recovery.
+check. Expired sign-in opens the existing HTTPS authentication flow. Canvas and
+HTML apps render in an isolated document view.
 The view has no Capacitor bridge or native script message handler.
 
 The public `HubWebView.inputAccessoryView` override removes WebKit's form toolbar;
@@ -56,12 +57,9 @@ a fresh verified session. After reboot it is unavailable until the first unlock.
 Reopening uses the saved server address and existing web state; expired sessions
 still need sign-in. Passwords and cookies are never stored in app preferences.
 
-Native Home uses a compact connection row when there is a status to show. The
-detailed web workspace opens under a small **Home** back control. **Settings → iPhone** offers
-**Voice**, **Files**, **Notifications**, **Connection**, **Reload**, and **Sign out on
-this iPhone**. This entry is shown only by a supporting native client; ordinary
-Safari and older wrappers keep their existing controls. It opens a native menu,
-not an automatic command or privileged JavaScript bridge. Offline/first-connect
+Native Home uses a compact connection row when there is a status to show.
+**Settings → iPhone settings** offers **Voice**, **Files**, **Notifications**,
+**Connection**, **Refresh HUB**, and **Sign out on this iPhone**. Offline/first-connect
 recovery retains explicit Connect/Retry actions and controls for an active call.
 Signing out clears native saved access and web sign-in cookies, and closes its web
 view, without deleting anything on the HUB server. External links open in a

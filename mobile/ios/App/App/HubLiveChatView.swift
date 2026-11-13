@@ -759,7 +759,7 @@ struct HubLiveChatView: View {
             renamedTitle = snapshot?.title == title ? nil : title
             renamed(title)
         } catch {
-            error = "Could not confirm the new title. Reopen the chat to check."
+            self.error = "Could not confirm the new title. Reopen the chat to check."
         }
     }
 
