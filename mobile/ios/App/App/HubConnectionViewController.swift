@@ -120,7 +120,6 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
 
         let screen = HubHomeView(model: home, connect: { [weak self] in self?.performHomeConnectionAction() },
             voice: { [weak self] in self?.openHomeVoice() }, options: { [weak self] in self?.showOptions() },
-            workspace: { [weak self] in self?.openWorkspace() },
             openChat: { [weak self] id in self?.openChat(id) },
             send: { [weak self] in self?.sendHomeDraft() },
             addTodo: { [weak self] id, title, horizon in
@@ -374,13 +373,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         sheet.addAction(UIAlertAction(title: voice?.isActive == true ? "Open voice controls" : "Voice", style: .default) { [weak self] _ in self?.afterOptions { $0.showVoice() } })
         sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
         sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
-        if showingHome, connected {
-            sheet.addAction(UIAlertAction(title: "Open workspace", style: .default) { [weak self] _ in
-                self?.afterOptions { $0.openWorkspace() }
-            })
-        }
         sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
-        sheet.addAction(UIAlertAction(title: usingInstalledUI ? "Reload from HUB" : "Reload", style: .default) { [weak self] _ in self?.afterOptions {
+        sheet.addAction(UIAlertAction(title: showingHome ? "Refresh HUB" : (usingInstalledUI ? "Reload from HUB" : "Retry sign-in"), style: .default) { [weak self] _ in self?.afterOptions {
             if $0.usingInstalledUI, let server = $0.server {
                 $0.preferRemoteUI = true
                 $0.connected = false
@@ -620,12 +614,6 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         else { performHomeConnectionAction() }
     }
 
-    private func openWorkspace() {
-        guard !home.sending else { return }
-        guard connected, let server else { performHomeConnectionAction(); return }
-        loadHub(server)
-    }
-
     private func openChat(_ id: String) {
         guard !home.sending, let server, let destination = try? HubNotificationDestination(server: server, sessionID: id) else { return }
         if home.uncertainChat == id, connected {
@@ -721,6 +709,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func reload() {
         if showingHome { refreshHome(); return }
         if server == nil { showConnection(); return }
+        if signingIn, let server { loadRemote(server.origin); return }
         installedProcessRecoveries = 0
         showContent()
         if (!connected || usingInstalledUI), let server { loadHub(server); return }
@@ -952,6 +941,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         guard !showingHome else { return }
         cancelPageDeadline()
         connected = false
+        if signingIn { showRecovery("Sign-in was interrupted. Tap Retry to continue."); return }
         if UIApplication.shared.applicationState != .background, let server, installedUI != nil, !preferRemoteUI, installedProcessRecoveries < 1 {
             installedProcessRecoveries += 1
             // Fresh Home, not a cached conversation or a restored screen.

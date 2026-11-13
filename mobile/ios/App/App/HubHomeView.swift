@@ -35,7 +35,6 @@ struct HubHomeView: View {
     var connect: () -> Void
     var voice: () -> Void
     var options: () -> Void
-    var workspace: () -> Void
     var openChat: (String) -> Void
     var send: () -> Void
     var addTodo: (UUID, String, HubHomePlanner.Horizon) async -> Bool
@@ -404,11 +403,6 @@ struct HubHomeView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.connection != .connected)
-                Button {
-                    closePanel()
-                    workspace()
-                } label: { Label("Open workspace", systemImage: "arrow.up.right").frame(minHeight: 44) }
-                .font(.footnote)
             }
         }
     }
