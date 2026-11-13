@@ -1133,6 +1133,7 @@ private struct HubTasksView: View {
         let task: HubWorkspaceTask
         let routine: Bool
         var approvalID: String?
+        var approvalDescription: String?
     }
 
     var body: some View {
@@ -1177,7 +1178,7 @@ private struct HubTasksView: View {
                 Task { await change(command) }
             }
         } message: { command in
-            Text(command.task.title)
+            Text(command.approvalDescription ?? command.task.title)
         }
     }
 
@@ -1244,7 +1245,11 @@ private struct HubTasksView: View {
                 ForEach(approvals) { approval in
                     Text(approval.description)
                     Text(approval.tool).font(.caption)
-                    taskAction("Deny request", action: .deny, task: task, routine: false, approvalID: approval.id)
+                    if let arguments = approval.arguments, !arguments.displayText.isEmpty {
+                        Text(arguments.displayText).font(.footnote.monospaced()).textSelection(.enabled)
+                        taskAction("Approve once", action: .approve, task: task, routine: false, approval: approval)
+                    }
+                    taskAction("Deny request", action: .deny, task: task, routine: false, approval: approval)
                 }
             }
         }
@@ -1257,7 +1262,8 @@ private struct HubTasksView: View {
             taskAction("Credits restored", action: .resumeCredit, task: task, routine: routine)
         }
         if routine {
-            if ["active", "paused"].contains(task.state) {
+            if task.state != "cancelled" {
+                taskAction("Run once", action: .runOnce, task: task, routine: true)
                 taskAction("Cancel routine", action: .cancel, task: task, routine: true)
             }
         } else {
@@ -1268,13 +1274,17 @@ private struct HubTasksView: View {
             if ["completed", "stopped"].contains(task.state) {
                 taskAction("Archive goal", action: .archive, task: task, routine: false)
             }
+            if task.status == "needs-approval", task.approvals?.contains(where: { $0.status == "pending" }) != true {
+                taskAction("Accept result", action: .acceptResult, task: task, routine: false)
+            }
         }
     }
 
     private func taskAction(_ label: String, action: HubWorkspaceTaskAction, task: HubWorkspaceTask,
-                            routine: Bool, approvalID: String? = nil) -> some View {
+                            routine: Bool, approval: HubWorkspaceTask.Approval? = nil) -> some View {
         Button(label) {
-            let command = PendingAction(action: action, label: label, task: task, routine: routine, approvalID: approvalID)
+            let command = PendingAction(action: action, label: label, task: task, routine: routine,
+                                        approvalID: approval?.id, approvalDescription: approval?.description)
             if action == .pause { Task { await change(command) } }
             else { pending = command }
         }

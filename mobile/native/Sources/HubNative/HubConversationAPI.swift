@@ -294,6 +294,7 @@ public struct HubWorkspaceTask: Decodable, Identifiable {
         public let description: String
         public let tool: String
         public let status: String
+        public let arguments: HubTaskArgument?
     }
     public struct Milestone: Decodable, Identifiable {
         public let id: String
@@ -320,6 +321,37 @@ public struct HubWorkspaceTask: Decodable, Identifiable {
     public let plan: [Milestone]?
     public let approvals: [Approval]?
     public let checkpoint: Checkpoint?
+}
+
+public enum HubTaskArgument: Decodable {
+    case text(String), number(Double), boolean(Bool), object([String: HubTaskArgument]), array([HubTaskArgument]), null
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(String.self) { self = .text(value) }
+        else if let value = try? container.decode(Bool.self) { self = .boolean(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode([String: HubTaskArgument].self) { self = .object(value) }
+        else { self = .array(try container.decode([HubTaskArgument].self)) }
+    }
+
+    public var displayText: String {
+        guard let data = try? JSONSerialization.data(withJSONObject: json, options: [.fragmentsAllowed, .prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return "" }
+        return text
+    }
+
+    private var json: Any {
+        switch self {
+        case .text(let value): return value
+        case .number(let value): return value
+        case .boolean(let value): return value
+        case .object(let value): return value.mapValues(\.json)
+        case .array(let value): return value.map(\.json)
+        case .null: return NSNull()
+        }
+    }
 }
 
 public enum HubWorkspaceTaskAction: String {
