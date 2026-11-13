@@ -202,6 +202,35 @@ public struct HubChatSnapshot {
     public let activity: [HubChatActivity]
     public let title: String?
     public let model: HubChatModelSelection?
+    public let usageByTurn: [Int: HubChatTurnUsage]
+}
+
+public struct HubChatTurnUsage {
+    public private(set) var recordedResponses = 0
+    public private(set) var input = 0
+    public private(set) var output = 0
+    public private(set) var cacheRead = 0
+    public private(set) var cacheWrite = 0
+
+    fileprivate mutating func add(_ receipt: HubChatStreamFrame.Entry.Event.Payload.Usage) {
+        guard let input = receipt.inputTokens, let output = receipt.outputTokens,
+              (0...1_000_000_000).contains(input), (0...1_000_000_000).contains(output) else { return }
+        recordedResponses += 1
+        self.input += input
+        self.output += output
+        if let value = receipt.cacheReadTokens, (0...1_000_000_000).contains(value) { cacheRead += value }
+        if let value = receipt.cacheWriteTokens, (0...1_000_000_000).contains(value) { cacheWrite += value }
+    }
+
+    public func combining(_ other: HubChatTurnUsage) -> HubChatTurnUsage {
+        var combined = self
+        combined.recordedResponses += other.recordedResponses
+        combined.input += other.input
+        combined.output += other.output
+        combined.cacheRead += other.cacheRead
+        combined.cacheWrite += other.cacheWrite
+        return combined
+    }
 }
 
 public struct HubChatModelSelection: Decodable, Equatable {
@@ -244,6 +273,7 @@ public struct HubChatHistoryPage {
     public let hasMore: Bool
     public let firstSequence: Int?
     public let activity: [HubChatActivity]
+    public let usageByTurn: [Int: HubChatTurnUsage]
 }
 
 public struct HubChatActivity: Identifiable {
@@ -650,6 +680,12 @@ struct HubChatStreamFrame: Decodable {
                     let config: HubChatModelSelection?
                 }
                 struct ToolError: Decodable { let name: String?; let code: String? }
+                struct Usage: Decodable {
+                    let inputTokens: Int?
+                    let outputTokens: Int?
+                    let cacheReadTokens: Int?
+                    let cacheWriteTokens: Int?
+                }
                 let message: Message?
                 let content: [Block]?
                 let source: Source?
@@ -664,6 +700,7 @@ struct HubChatStreamFrame: Decodable {
                 let arguments: String?
                 let error: ToolError?
                 let title: String?
+                let usage: Usage?
             }
             let type: String
             let seq: Int
@@ -676,6 +713,7 @@ struct HubChatStreamFrame: Decodable {
             let title: String?
             let modelSelection: HubChatModelSelection?
             let modelRequest: HubChatModelSelection?
+            let usage: (turn: Int, receipt: Payload.Usage)?
 
             struct Replacement: Decodable { let op: String; let start: Int; let end: Int }
             private enum CodingKeys: String, CodingKey { case type, seq, data, surfaceOp }
@@ -688,6 +726,11 @@ struct HubChatStreamFrame: Decodable {
                 title = type == "session/title" ? payload?.title : nil
                 modelSelection = type == "model/selection" ? (try? values.decode(HubChatModelSelection.self, forKey: .data)) : nil
                 modelRequest = type == "request/header" ? payload?.header?.config : nil
+                if type == "assistant/message", let turn = payload?.turn, let receipt = payload?.usage {
+                    usage = (turn, receipt)
+                } else {
+                    usage = nil
+                }
                 replacement = try? values.decode(Replacement.self, forKey: .surfaceOp)
                 if let chunk = payload?.chunk, chunk.type == "text-delta", let index = chunk.index, let text = chunk.text {
                     delta = (index, text)
@@ -783,6 +826,7 @@ struct HubChatTimeline {
     private var title: String?
     private var model: HubChatModelSelection?
     private var pendingModel: HubChatModelSelection?
+    private var usageReceipts: [Int: (turn: Int, receipt: HubChatStreamFrame.Entry.Event.Payload.Usage)] = [:]
 
     mutating func start(_ frame: HubChatStreamFrame.Value) {
         hasMore = frame.hasMore ?? false
@@ -805,10 +849,12 @@ struct HubChatTimeline {
                 return sequence >= replace.start && sequence < replace.end
             }
             activity.removeAll { $0.sequence >= replace.start && $0.sequence < replace.end }
+            usageReceipts = usageReceipts.filter { !(replace.start..<replace.end).contains($0.key) }
             blocks.removeAll()
         }
         if event.announcesScreenshot { latestScreenshotSequence = event.seq }
         if let entry = event.activity { activity.append(entry) }
+        if let usage = event.usage { usageReceipts[event.seq] = usage }
         if let title = event.title { self.title = title }
         if let selection = event.modelSelection { pendingModel = selection; model = selection }
         if let used = event.modelRequest {
@@ -838,10 +884,14 @@ struct HubChatTimeline {
     }
 
     var snapshot: HubChatSnapshot {
-        HubChatSnapshot(messages: messages, hasMore: hasMore, running: running,
+        var totals: [Int: HubChatTurnUsage] = [:]
+        for record in usageReceipts.values {
+            totals[record.turn, default: HubChatTurnUsage()].add(record.receipt)
+        }
+        return HubChatSnapshot(messages: messages, hasMore: hasMore, running: running,
                         partial: blocks.keys.sorted().compactMap { blocks[$0] }.joined(), failure: failure,
                         latestScreenshotSequence: latestScreenshotSequence, historyCursor: historyCursor,
-                        firstSequence: firstSequence, activity: activity, title: title, model: model)
+                        firstSequence: firstSequence, activity: activity, title: title, model: model, usageByTurn: totals)
     }
 }
 
@@ -1561,6 +1611,17 @@ public final class HubConversationAPI {
         return saved
     }
 
+    public func branchChat(sessionID: String, at sequence: Int) async throws -> String {
+        guard HubVoiceAPI.validID(sessionID), (0...9_007_199_254_740_991).contains(sequence) else {
+            throw HubChatSendError.rejected
+        }
+        let result = try await rpc("session/fork", request: ["sessionId": sessionID, "atSeq": sequence])
+        guard let branch = result["sessionId"] as? String, HubVoiceAPI.validID(branch), branch != sessionID else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return branch
+    }
+
     private func promptText(_ draft: String) throws -> String {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text.utf8.count <= 32_768 else { throw HubChatSendError.invalidDraft }
@@ -1945,8 +2006,9 @@ public final class HubConversationAPI {
               !page.hasMore || !events.isEmpty else { throw HubAttachmentError.invalidResponse }
         var timeline = HubChatTimeline()
         for event in events { timeline.apply(event) }
-        return HubChatHistoryPage(messages: timeline.snapshot.messages, hasMore: page.hasMore,
-                                  firstSequence: events.first?.seq, activity: timeline.snapshot.activity)
+        let snapshot = timeline.snapshot
+        return HubChatHistoryPage(messages: snapshot.messages, hasMore: page.hasMore,
+                                  firstSequence: events.first?.seq, activity: snapshot.activity, usageByTurn: snapshot.usageByTurn)
     }
 
     private func rpc(_ method: String, request payload: [String: Any], maxBytes: Int = 65_536) async throws -> [String: Any] {

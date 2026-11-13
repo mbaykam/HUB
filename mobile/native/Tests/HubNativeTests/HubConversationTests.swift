@@ -238,6 +238,24 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(timeline.snapshot.model?.reasoningEffort, "high")
     }
 
+    func testRecordedTurnTokensExcludeMissingReceiptsAndReplacedEvents() throws {
+        let decoder = JSONDecoder()
+        var timeline = HubChatTimeline()
+        let events = [
+            #"{"type":"assistant/message","seq":1,"data":{"turn":3,"usage":{"inputTokens":30,"outputTokens":10}}}"#,
+            #"{"type":"assistant/message","seq":2,"data":{"turn":3,"usage":{"inputTokens":2}}}"#,
+            #"{"type":"assistant/message","seq":3,"surfaceOp":{"op":"replace","start":1,"end":2},"data":{"turn":3,"usage":{"inputTokens":5,"outputTokens":4,"cacheReadTokens":12}}}"#,
+        ]
+        for source in events {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8)))
+        }
+        let usage = try XCTUnwrap(timeline.snapshot.usageByTurn[3])
+        XCTAssertEqual(usage.recordedResponses, 1)
+        XCTAssertEqual(usage.input, 5)
+        XCTAssertEqual(usage.output, 4)
+        XCTAssertEqual(usage.cacheRead, 12)
+    }
+
     func testKnowledgeMembershipWritesOnlyTheRequestedOperationAndRevision() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

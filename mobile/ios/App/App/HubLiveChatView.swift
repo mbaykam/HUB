@@ -36,6 +36,7 @@ struct HubLiveChatView: View {
     @State private var error: String?
     @State private var olderMessages: [HubChatMessage] = []
     @State private var olderActivity: [HubChatActivity] = []
+    @State private var olderUsage: [Int: HubChatTurnUsage] = [:]
     @State private var olderPage: HubChatHistoryPage?
     @State private var historyLoading = false
     @State private var historyError = false
@@ -69,6 +70,7 @@ struct HubLiveChatView: View {
     @State private var renameOpen = false
     @State private var renameDraft = ""
     @State private var renaming = false
+    @State private var branching = false
     @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
 
     private struct LoadedVisual {
@@ -408,6 +410,7 @@ struct HubLiveChatView: View {
                             }
                             let messages = olderMessages + snapshot.messages
                             let activity = Dictionary(grouping: olderActivity + snapshot.activity, by: \.turn)
+                            let usage = olderUsage.merging(snapshot.usageByTurn) { $0.combining($1) }
                             let currentTurn = snapshot.running ? messages.last?.turn : nil
                             ForEach(messages) { message in
                                 if message.role == "user" {
@@ -416,6 +419,7 @@ struct HubLiveChatView: View {
                                         VStack(alignment: .trailing, spacing: 8) {
                                             if !message.text.isEmpty { Text(message.text) }
                                             chatPhotos(message)
+                                            if !message.text.isEmpty { copyMessage(message.text) }
                                         }
                                         .padding(14)
                                         .background(panel, in: RoundedRectangle(cornerRadius: 18))
@@ -433,6 +437,11 @@ struct HubLiveChatView: View {
                                         ForEach(screenshots.filter { $0.turn == turn }) { screenshot in
                                             screenshotImage(screenshot)
                                         }
+                                        if turn != currentTurn {
+                                            messageActions(message, usage: usage[turn])
+                                        }
+                                    } else if !message.text.isEmpty {
+                                        copyMessage(message.text)
                                     }
                                 }
                             }
@@ -497,6 +506,44 @@ struct HubLiveChatView: View {
         }
     }
 
+    private func copyMessage(_ text: String) -> some View {
+        Button { UIPasteboard.general.string = text } label: {
+            Image(systemName: "doc.on.doc").frame(width: 44, height: 36)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Copy message")
+    }
+
+    private func messageActions(_ message: HubChatMessage, usage: HubChatTurnUsage?) -> some View {
+        HStack(spacing: 6) {
+            if !message.text.isEmpty { copyMessage(message.text) }
+            if let sequence = Int(message.id) {
+                Button {
+                    Task { await branch(sequence) }
+                } label: {
+                    Image(systemName: "arrow.triangle.branch").frame(width: 44, height: 36)
+                }
+                .buttonStyle(.plain)
+                .disabled(connectionLost || branching)
+                .accessibilityLabel("Branch conversation from this turn")
+            }
+            if let usage, usage.recordedResponses > 0 {
+                Menu {
+                    Text("Input · \(usage.input.formatted())")
+                    Text("Output · \(usage.output.formatted())")
+                    if usage.cacheRead > 0 { Text("Cache read · \(usage.cacheRead.formatted())") }
+                    if usage.cacheWrite > 0 { Text("Cache write · \(usage.cacheWrite.formatted())") }
+                    Text("Recorded responses · \(usage.recordedResponses)")
+                } label: {
+                    Label("Tokens", systemImage: "chart.bar").frame(minHeight: 36)
+                }
+                .accessibilityLabel("Recorded token usage for this turn")
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+
     private struct LatestChatOffset: PreferenceKey {
         static let defaultValue: CGFloat? = nil
         static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
@@ -528,6 +575,7 @@ struct HubLiveChatView: View {
             let anchor = olderMessages.first?.id ?? snapshot.messages.first?.id
             olderMessages.insert(contentsOf: page.messages, at: 0)
             olderActivity.insert(contentsOf: page.activity, at: 0)
+            olderUsage.merge(page.usageByTurn) { $0.combining($1) }
             olderPage = page
             historyAnchor = anchor
         } catch {
@@ -726,6 +774,7 @@ struct HubLiveChatView: View {
                 if snapshot?.historyCursor != value.historyCursor {
                     olderMessages = []
                     olderActivity = []
+                    olderUsage = [:]
                     olderPage = nil
                     historyError = false
                 }
@@ -760,6 +809,18 @@ struct HubLiveChatView: View {
             renamed(title)
         } catch {
             self.error = "Could not confirm the new title. Reopen the chat to check."
+        }
+    }
+
+    private func branch(_ sequence: Int) async {
+        guard !branching else { return }
+        branching = true
+        defer { branching = false }
+        do {
+            let id = try await api.branchChat(sessionID: chat.sessionId, at: sequence)
+            openChat(HubConversationChoice(sessionId: id, title: "Branched conversation", updatedAt: 0))
+        } catch {
+            self.error = "Could not confirm the branch. Check Recents before trying again."
         }
     }
 
