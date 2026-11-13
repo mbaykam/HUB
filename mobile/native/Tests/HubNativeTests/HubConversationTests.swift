@@ -48,6 +48,40 @@ final class HubConversationTests: XCTestCase {
         XCTAssertTrue(CatalogFixture.requests.allSatisfy { $0.httpMethod == "GET" })
     }
 
+    func testPlannerWritesUseStableDraftIDAndServerItemVersion() async throws {
+        let api = try client()
+        let id = UUID()
+        let key = id.uuidString.lowercased()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/planner")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-planner"), "1")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+            let body = try Self.requestBody(request)
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let complete = command["action"] as? String == "complete"
+            if complete {
+                XCTAssertEqual(command["id"] as? String, key)
+                XCTAssertEqual(command["version"] as? Int, 3)
+            } else {
+                XCTAssertEqual(command["action"] as? String, "save")
+                let item = try XCTUnwrap(command["item"] as? [String: Any])
+                XCTAssertEqual(item["id"] as? String, key)
+                XCTAssertEqual(item["version"] as? Int, 0)
+                XCTAssertEqual(item["title"] as? String, "Read notes")
+            }
+            let state = complete ? "done" : "open"
+            return (200, Data("""
+                {"revision":5,"items":[{"id":"\(key)","title":"Read notes","kind":"todo","state":"\(state)","deleted":false,"version":3}]}
+                """.utf8))
+        }
+        let created = try await api.addTodo(id: id, title: " Read notes ")
+        let item = try XCTUnwrap(created.items.first)
+        let completed = try await api.completeTodo(item)
+        XCTAssertEqual(completed.items.first?.state, "done")
+        XCTAssertEqual(CatalogFixture.requests.count, 2)
+    }
+
     func testNewChatPostsOneCorrelatedPromptAndDoesNotReplayAnUncertainDelivery() async throws {
         let api = try client()
         var accepted = false

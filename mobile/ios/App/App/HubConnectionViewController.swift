@@ -117,7 +117,31 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             voice: { [weak self] in self?.openHomeVoice() }, options: { [weak self] in self?.showOptions() },
             workspace: { [weak self] in self?.openWorkspace() },
             openChat: { [weak self] id in self?.openChat(id) },
-            send: { [weak self] in self?.sendHomeDraft() })
+            send: { [weak self] in self?.sendHomeDraft() },
+            addTodo: { [weak self] id, title in
+                await self?.changeHomePlanner { try await $0.addTodo(id: id, title: title) } ?? false
+            },
+            completeTodo: { [weak self] item in
+                Task { [weak self] in _ = await self?.changeHomePlanner { try await $0.completeTodo(item) } }
+            }, readKnowledgeNote: { [weak self] id in
+                guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
+                let generation = self.connectionGeneration
+                let note = try await api.knowledgeNote(id: id)
+                guard generation == self.connectionGeneration else { throw CancellationError() }
+                return note
+            }, readChat: { [weak self] id in
+                guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
+                let generation = self.connectionGeneration
+                let snapshot = try await api.chatSnapshot(sessionID: id)
+                guard generation == self.connectionGeneration else { throw CancellationError() }
+                return snapshot
+            }, readTasks: { [weak self] in
+                guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
+                let generation = self.connectionGeneration
+                let tasks = try await api.workspaceTasks()
+                guard generation == self.connectionGeneration else { throw CancellationError() }
+                return tasks
+            })
         let controller = UIHostingController(rootView: screen)
         homeController = controller
         addChild(controller)
@@ -372,6 +396,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         home.knowledge = nil
         home.planner = nil
+        home.plannerSaving = false
+        home.plannerError = nil
         home.conversations = nil
         home.uncertainChat = nil
         home.sendError = nil
@@ -379,7 +405,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func refreshHome() {
-        guard showingHome, !home.sending else { return }
+        guard showingHome, !home.sending, !home.plannerSaving else { return }
         let started = ProcessInfo.processInfo.systemUptime
         let attempt = homeState.begin(hasServer: server != nil)
         connected = false
@@ -427,8 +453,36 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func loadHomePlanner(_ api: HubConversationAPI, attempt: UInt64) async {
         do {
             let value = try await api.planner()
-            if showingHome, !Task.isCancelled, homeState.isCurrent(attempt) { home.planner = value }
+            if showingHome, !Task.isCancelled, homeState.isCurrent(attempt), !home.plannerSaving,
+               (value.revision ?? 0) >= (home.planner?.revision ?? 0) { home.planner = value }
         } catch { homeDataFailed(error, attempt: attempt) }
+    }
+
+    private func changeHomePlanner(_ operation: (HubConversationAPI) async throws -> HubHomePlanner) async -> Bool {
+        guard showingHome, home.connection == .connected, !home.plannerSaving,
+              let conversationAPI else { return false }
+        let generation = connectionGeneration
+        home.plannerSaving = true
+        home.plannerError = nil
+        defer { if generation == connectionGeneration { home.plannerSaving = false } }
+        do {
+            let planner = try await operation(conversationAPI)
+            guard generation == connectionGeneration else { return false }
+            home.planner = planner
+            return true
+        } catch {
+            guard generation == connectionGeneration else { return false }
+            if error as? HubAttachmentError == .signInRequired {
+                let attempt = homeState.begin(hasServer: true)
+                homeConnectionFailed(error, attempt: attempt)
+            } else {
+                home.plannerError = "Could not confirm the change. Check your planner before trying again."
+                if let planner = try? await conversationAPI.planner(), generation == connectionGeneration {
+                    home.planner = planner
+                }
+            }
+            return false
+        }
     }
 
     private func loadHomeChats(_ api: HubConversationAPI, attempt: UInt64) async {
@@ -553,6 +607,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func showWorkspace() {
+        view.endEditing(true)
         if showingHome {
             probe?.cancel()
             _ = homeState.begin(hasServer: server != nil)
@@ -594,7 +649,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func confirmSignOut() {
-        guard !home.sending else { return }
+        guard !home.sending, !home.plannerSaving else { return }
         guard voice?.isActive != true else { showEndVoiceFirst(); return }
         let alert = UIAlertController(title: "Sign out on this iPhone?", message: "Your conversations, files and settings on HUB will stay intact.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
