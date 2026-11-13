@@ -264,6 +264,13 @@ struct HubHomeView: View {
                             Button("Retry loading work", action: connect)
                         }
                     }
+                    if model.connection == .connected, let api = chatAPI() {
+                        HubBrowserPreviewView(api: api, conversations: model.conversations ?? [],
+                                              visible: selectedChat == nil && panel == nil &&
+                                                !knowledgeOpen && !plannerOpen && !tasksOpen &&
+                                                !settingsOpen && !usageOpen && !knowledgeActivityOpen)
+                            .id(ObjectIdentifier(api))
+                    }
                 }
                 .padding(.top, 12)
                 .padding(.horizontal, 16)

@@ -133,6 +133,34 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(CatalogFixture.requests.count, 3)
     }
 
+    func testBrowserPreviewRejectsAFrameFromAnotherConversation() async throws {
+        let api = try client()
+        let tab: [String: String] = [
+            "sessionId": "browser-a", "ownerSessionId": "chat-a",
+            "title": "Fixture", "url": "https://example.com", "status": "ready", "owner": "agent",
+        ]
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/hub/browser-view")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-browser-view"), "1")
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: String])
+            if command == ["type": "list"] { return (200, try JSONSerialization.data(withJSONObject: [tab])) }
+            XCTAssertEqual(command, ["type": "frame", "sessionId": "browser-a", "ownerSessionId": "chat-a"])
+            var foreign = tab
+            foreign["ownerSessionId"] = "chat-b"
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "tab": foreign, "capturedAt": 42, "width": 12, "height": 8,
+                "mimeType": "image/jpeg", "data": "/9j/",
+            ]))
+        }
+        let tabs = try await api.browserTabs()
+        let selected = try XCTUnwrap(tabs.first)
+        do {
+            _ = try await api.browserFrame(for: selected)
+            XCTFail("The frame must match both the tab and its owner")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

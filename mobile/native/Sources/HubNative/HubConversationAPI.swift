@@ -206,6 +206,29 @@ public struct HubChatPresentation: Decodable, Equatable, Identifiable {
     }
 }
 
+public struct HubBrowserTab: Decodable, Equatable, Identifiable {
+    public enum Owner: String, Decodable { case agent, human }
+    public let sessionId: String
+    public let ownerSessionId: String
+    public let title: String
+    public let url: String
+    public let status: String
+    public let owner: Owner
+    public var id: String { "\(ownerSessionId)/\(sessionId)" }
+
+    fileprivate var isValid: Bool {
+        HubVoiceAPI.validID(sessionId) && HubVoiceAPI.validID(ownerSessionId) &&
+            [title, url, status].allSatisfy { $0.utf16.count <= 8_192 }
+    }
+}
+
+public struct HubBrowserFrame {
+    public let tab: HubBrowserTab
+    public let width: Int
+    public let height: Int
+    public let jpeg: Data
+}
+
 public struct HubChatArtifacts: Decodable {
     public let screenshots: [HubChatScreenshot]
     public let artifacts: [HubConversationApp]?
@@ -1217,6 +1240,42 @@ public final class HubConversationAPI {
             throw HubAttachmentError.invalidResponse
         }
         return document
+    }
+
+    public func browserTabs() async throws -> [HubBrowserTab] {
+        let body = Data(#"{"type":"list"}"#.utf8)
+        let data = try await requestData("api/hub/browser-view", headers: ["x-hub-browser-view": "1"],
+                                         body: body, maxBytes: 5_000_000)
+        let tabs = try JSONDecoder().decode([HubBrowserTab].self, from: data)
+        guard tabs.count <= 32, tabs.allSatisfy(\.isValid), Set(tabs.map(\.id)).count == tabs.count else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return tabs
+    }
+
+    public func browserFrame(for tab: HubBrowserTab) async throws -> HubBrowserFrame {
+        struct Frame: Decodable {
+            let tab: HubBrowserTab
+            let capturedAt: Int64
+            let width: Int
+            let height: Int
+            let mimeType: String
+            let data: String
+        }
+        guard tab.isValid else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONEncoder().encode([
+            "type": "frame", "sessionId": tab.sessionId, "ownerSessionId": tab.ownerSessionId,
+        ])
+        let data = try await requestData("api/hub/browser-view", headers: ["x-hub-browser-view": "1"],
+                                         body: body, maxBytes: 3_300_000)
+        let frame = try JSONDecoder().decode(Frame.self, from: data)
+        guard frame.tab.isValid, frame.tab.id == tab.id, frame.mimeType == "image/jpeg",
+              (0...9_007_199_254_740_991).contains(frame.capturedAt), (1...1_024).contains(frame.width),
+              (1...4_096).contains(frame.height), frame.data.utf8.count <= 3_000_000,
+              let jpeg = Data(base64Encoded: frame.data), jpeg.starts(with: [0xff, 0xd8, 0xff]) else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return HubBrowserFrame(tab: frame.tab, width: frame.width, height: frame.height, jpeg: jpeg)
     }
 
     public func chatScreenshot(sessionID: String, id: String) async throws -> Data {
