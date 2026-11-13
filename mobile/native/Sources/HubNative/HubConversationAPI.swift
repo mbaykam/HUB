@@ -272,6 +272,31 @@ public struct HubUsageSnapshot: Decodable {
 }
 
 public struct HubWorkspaceTask: Decodable, Identifiable {
+    public struct Run: Decodable, Identifiable {
+        public let id: String
+        public let sessionId: String
+        public let at: Double
+        public let status: String
+        public let estimatedCost: Double
+        public let summary: String?
+        public let result: String?
+        public let error: String?
+    }
+    public struct Approval: Decodable, Identifiable {
+        public let id: String
+        public let description: String
+        public let tool: String
+        public let status: String
+    }
+    public struct Milestone: Decodable, Identifiable {
+        public let id: String
+        public let title: String
+        public let status: String
+    }
+    public struct Checkpoint: Decodable {
+        public let summary: String
+        public let nextAction: String
+    }
     public let id: String
     public let title: String
     public let state: String
@@ -281,6 +306,20 @@ public struct HubWorkspaceTask: Decodable, Identifiable {
     public let objective: String?
     public let prompt: String?
     public let revision: Int?
+    public let reason: String?
+    public let lastError: String?
+    public let rounds: [Run]?
+    public let runs: [Run]?
+    public let plan: [Milestone]?
+    public let approvals: [Approval]?
+    public let checkpoint: Checkpoint?
+}
+
+public enum HubWorkspaceTaskAction: String {
+    case start, pause, resume, stop, archive, approve, deny, cancel
+    case runOnce = "run-once"
+    case resumeCredit = "resume-credit"
+    case acceptResult = "accept-result"
 }
 
 public struct HubWorkspaceTasks {
@@ -773,8 +812,8 @@ public final class HubConversationAPI {
             let automations: [HubWorkspaceTask]
             let revision: Int?
         }
-        async let goals = requestData("api/hub/goals", headers: ["x-hub-goals": "1"])
-        async let routines = requestData("api/hub/automations", headers: ["x-hub-automations": "1"])
+        async let goals = requestData("api/hub/goals", headers: ["x-hub-goals": "1"], maxBytes: 8_388_608)
+        async let routines = requestData("api/hub/automations", headers: ["x-hub-automations": "1"], maxBytes: 8_388_608)
         let (goalData, routineData) = try await (goals, routines)
         let decoder = JSONDecoder()
         let routineCatalog = try decoder.decode(Routines.self, from: routineData)
@@ -782,13 +821,19 @@ public final class HubConversationAPI {
                                      routines: routineCatalog.automations, routinesRevision: routineCatalog.revision)
     }
 
-    public func setWorkspaceTaskPaused(_ paused: Bool, id: String, revision: Int, routine: Bool) async throws {
+    public func changeWorkspaceTask(_ action: HubWorkspaceTaskAction, id: String, revision: Int,
+                                    routine: Bool, approvalID: String? = nil) async throws {
         guard HubVoiceAPI.validID(id), revision >= 0 else { throw HubAttachmentError.invalidResponse }
+        if let approvalID {
+            guard !routine, action == .approve || action == .deny, HubVoiceAPI.validID(approvalID) else {
+                throw HubAttachmentError.invalidResponse
+            }
+        }
         let resource = routine ? "automations" : "goals"
-        let data = try JSONSerialization.data(withJSONObject: [
-            "action": paused ? "pause" : "resume", "id": id, "revision": revision,
-        ])
-        _ = try await requestData("api/hub/" + resource, headers: ["x-hub-" + resource: "1"], body: data)
+        var command: [String: Any] = ["action": action.rawValue, "id": id, "revision": revision]
+        if let approvalID { command["approvalId"] = approvalID }
+        let data = try JSONSerialization.data(withJSONObject: command)
+        _ = try await requestData("api/hub/" + resource, headers: ["x-hub-" + resource: "1"], body: data, maxBytes: 8_388_608)
     }
 
     public func usage() async throws -> HubUsageSnapshot {

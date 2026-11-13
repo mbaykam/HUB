@@ -124,7 +124,7 @@ struct HubHomeView: View {
         .preferredColorScheme(.dark)
         .sheet(isPresented: $knowledgeOpen, onDismiss: clearKnowledgeSelection) { knowledgeScreen }
         .sheet(isPresented: $tasksOpen) {
-            if let api = chatAPI() { HubTasksView(load: readTasks, api: api) }
+            if let api = chatAPI() { HubTasksView(load: readTasks, api: api, openChat: showChat) }
         }
         .sheet(isPresented: $plannerOpen) {
             VStack(alignment: .leading, spacing: 12) {
@@ -946,8 +946,18 @@ private struct HubTasksView: View {
     @State private var attempt = 0
     @State private var changing = false
     @State private var changeError = false
+    @State private var pending: PendingAction?
     var load: () async throws -> HubWorkspaceTasks
     let api: HubConversationAPI
+    let openChat: (HubConversationChoice) -> Void
+
+    private struct PendingAction {
+        let action: HubWorkspaceTaskAction
+        let label: String
+        let task: HubWorkspaceTask
+        let routine: Bool
+        var approvalID: String?
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -984,6 +994,15 @@ private struct HubTasksView: View {
         .foregroundStyle(.white)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .confirmationDialog(pending?.label ?? "Confirm task action",
+                            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                            titleVisibility: .visible, presenting: pending) { command in
+            Button(command.label, role: destructive(command.action) ? .destructive : nil) {
+                Task { await change(command) }
+            }
+        } message: { command in
+            Text(command.task.title)
+        }
     }
 
     private func taskSection(_ title: String, _ items: [HubWorkspaceTask], routine: Bool) -> some View {
@@ -994,16 +1013,12 @@ private struct HubTasksView: View {
             ForEach(visible) { task in
                 DisclosureGroup {
                     if let detail = task.objective ?? task.prompt { Text(detail).textSelection(.enabled) }
+                    if let reason = task.reason ?? task.lastError { Text(reason).font(.footnote).foregroundStyle(.secondary) }
                     if let nextAt = task.nextAt, task.state == "active" {
                         Text(Date(timeIntervalSince1970: nextAt / 1_000).formatted()).foregroundStyle(.secondary)
                     }
-                    if ["active", "paused"].contains(task.state),
-                       let revision = routine ? tasks?.routinesRevision : task.revision {
-                        Button(task.state == "active" ? "Pause" : "Resume") {
-                            Task { await change(task, revision: revision, routine: routine) }
-                        }
-                        .disabled(changing)
-                    }
+                    taskDetails(task, routine: routine)
+                    taskActions(task, routine: routine)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(task.title).font(.body.weight(.medium))
@@ -1016,12 +1031,93 @@ private struct HubTasksView: View {
         }
     }
 
-    private func change(_ task: HubWorkspaceTask, revision: Int, routine: Bool) async {
-        guard !changing else { return }
+    @ViewBuilder private func taskDetails(_ task: HubWorkspaceTask, routine: Bool) -> some View {
+        if let checkpoint = task.checkpoint {
+            DisclosureGroup("Checkpoint") {
+                Text(checkpoint.summary).textSelection(.enabled)
+                Text(checkpoint.nextAction).font(.footnote)
+            }
+        }
+        if let plan = task.plan, !plan.isEmpty {
+            DisclosureGroup("Milestones") {
+                ForEach(plan) { step in
+                    Label(step.title, systemImage: step.status == "done" ? "checkmark.circle" : "circle")
+                }
+            }
+        }
+        if let runs = task.runs ?? task.rounds, !runs.isEmpty {
+            DisclosureGroup("Runs") {
+                ForEach(Array(runs.suffix(20).reversed())) { run in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(run.status.capitalized).font(.subheadline.bold())
+                        Text(Date(timeIntervalSince1970: run.at / 1000).formatted()).font(.caption)
+                        Text("Estimated cost $\(run.estimatedCost, specifier: "%.4f")").font(.caption)
+                        if let detail = run.result ?? run.summary ?? run.error {
+                            Text(detail).lineLimit(4)
+                        }
+                        Button("Open work session") {
+                            openChat(HubConversationChoice(sessionId: run.sessionId, title: task.title, updatedAt: run.at))
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        if !routine, let approvals = task.approvals?.filter({ $0.status == "pending" }), !approvals.isEmpty {
+            DisclosureGroup("Pending approvals") {
+                ForEach(approvals) { approval in
+                    Text(approval.description)
+                    Text(approval.tool).font(.caption)
+                    taskAction("Deny request", action: .deny, task: task, routine: false, approvalID: approval.id)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func taskActions(_ task: HubWorkspaceTask, routine: Bool) -> some View {
+        if task.state == "active" { taskAction("Pause", action: .pause, task: task, routine: routine) }
+        if task.state == "paused" { taskAction("Resume", action: .resume, task: task, routine: routine) }
+        if task.status == "waiting-credit" {
+            taskAction("Credits restored", action: .resumeCredit, task: task, routine: routine)
+        }
+        if routine {
+            if ["active", "paused"].contains(task.state) {
+                taskAction("Cancel routine", action: .cancel, task: task, routine: true)
+            }
+        } else {
+            if task.state == "draft" { taskAction("Start goal", action: .start, task: task, routine: false) }
+            if ["active", "paused", "draft"].contains(task.state) {
+                taskAction("Stop goal", action: .stop, task: task, routine: false)
+            }
+            if ["completed", "stopped"].contains(task.state) {
+                taskAction("Archive goal", action: .archive, task: task, routine: false)
+            }
+        }
+    }
+
+    private func taskAction(_ label: String, action: HubWorkspaceTaskAction, task: HubWorkspaceTask,
+                            routine: Bool, approvalID: String? = nil) -> some View {
+        Button(label) {
+            let command = PendingAction(action: action, label: label, task: task, routine: routine, approvalID: approvalID)
+            if action == .pause { Task { await change(command) } }
+            else { pending = command }
+        }
+        .disabled(changing || (routine ? tasks?.routinesRevision : task.revision) == nil)
+    }
+
+    private func destructive(_ action: HubWorkspaceTaskAction) -> Bool {
+        [.stop, .archive, .cancel, .deny].contains(action)
+    }
+
+    private func change(_ command: PendingAction) async {
+        guard !changing, let revision = command.routine ? tasks?.routinesRevision : command.task.revision else { return }
         changing = true
         changeError = false
         defer { changing = false }
-        do { try await api.setWorkspaceTaskPaused(task.state == "active", id: task.id, revision: revision, routine: routine) }
+        do {
+            try await api.changeWorkspaceTask(command.action, id: command.task.id, revision: revision,
+                                              routine: command.routine, approvalID: command.approvalID)
+        }
         catch { changeError = true }
         attempt += 1
     }
