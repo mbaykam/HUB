@@ -532,6 +532,35 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubChatCharacterPicker.self, from: data)
     }
 
+    public func characterSettings() async throws -> HubCharacterSettings {
+        let data = try await requestData("api/hub/characters", headers: ["x-hub-characters": "1"])
+        return try JSONDecoder().decode(HubCharacterSettings.self, from: data)
+    }
+
+    public func saveCharacter(_ character: HubCharacterSettings.Character, revision: Int, creating: Bool) async throws -> HubCharacterSettings {
+        guard UUID(uuidString: character.id) != nil, revision >= 0 else { throw HubAttachmentError.invalidResponse }
+        let encoded = try JSONEncoder().encode(character)
+        guard var value = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            throw HubAttachmentError.invalidResponse
+        }
+        for key in ["route", "speech", "delegateTo"] where value[key] == nil { value[key] = NSNull() }
+        if creating { value.removeValue(forKey: "id") }
+        return try await characterCommand([
+            "action": creating ? "create" : "save", "revision": revision, "character": value,
+        ])
+    }
+
+    public func changeCharacterRole(_ action: HubCharacterRoleAction, id: String, revision: Int) async throws -> HubCharacterSettings {
+        guard UUID(uuidString: id) != nil, revision >= 0 else { throw HubAttachmentError.invalidResponse }
+        return try await characterCommand(["action": action.rawValue, "id": id, "revision": revision])
+    }
+
+    private func characterCommand(_ command: [String: Any]) async throws -> HubCharacterSettings {
+        let body = try JSONSerialization.data(withJSONObject: command)
+        let data = try await requestData("api/hub/characters", headers: ["x-hub-characters": "1"], body: body)
+        return try JSONDecoder().decode(HubCharacterSettings.self, from: data)
+    }
+
     public func selectChatCharacter(sessionID: String, id: String, revision: Int) async throws -> Bool {
         guard HubVoiceAPI.validID(sessionID), HubVoiceAPI.validID(id), revision >= 0 else {
             throw HubAttachmentError.invalidResponse

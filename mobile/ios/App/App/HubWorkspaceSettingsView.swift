@@ -11,6 +11,9 @@ struct HubWorkspaceSettingsView: View {
         NavigationView {
             List {
                 if let api {
+                    NavigationLink(destination: HubCharactersSettingsView(api: api)) {
+                        Label("Characters", systemImage: "person.2")
+                    }
                     NavigationLink(destination: HubModelsView(api: api)) {
                         Label("Models & providers", systemImage: "cpu")
                     }
@@ -270,8 +273,8 @@ private struct HubInstructionEditor: View {
         .navigationTitle(file.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if file.editable {
-                ToolbarItem(placement: .confirmationAction) {
+            ToolbarItem(placement: .confirmationAction) {
+                if file.editable {
                     Button("Save") { Task { await save() } }.disabled(busy || draft == file.content)
                 }
             }
