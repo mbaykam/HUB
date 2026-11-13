@@ -2,6 +2,10 @@ import UIKit
 import Capacitor
 import UserNotifications
 
+final class HubWorkspaceNavigationController: UINavigationController {
+    override var childForStatusBarStyle: UIViewController? { topViewController }
+}
+
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
@@ -9,7 +13,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = UINavigationController(rootViewController: HubConnectionViewController())
+        window?.rootViewController = HubWorkspaceNavigationController(rootViewController: HubConnectionViewController())
         window?.makeKeyAndVisible()
 
         if let response = connectionOptions.notificationResponse,

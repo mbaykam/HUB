@@ -1,9 +1,8 @@
 # HUB iPhone development foundation
 
-This is an isolated iOS development project. Its first connection screen opens
-your existing HTTPS HUB in a persistent, unprivileged WebKit view. Sign in through
-your existing access provider; no server or model-provider key is copied to the
-iPhone. It is not yet a finished daily-use client: native voice is in development
+This is an isolated iOS development project. Native Home opens first. Sign in to
+your existing HTTPS HUB through its access provider in an unprivileged WebKit
+view. Server and model-provider keys stay on HUB. Native voice is in development
 and requires device acceptance; Siri/Live Activities are also development-only,
 and notifications and system sharing require the matching host configuration and
 physical-device acceptance described below. Windows HUB and
@@ -57,8 +56,8 @@ a fresh verified session. After reboot it is unavailable until the first unlock.
 Reopening uses the saved server address and existing web state; expired sessions
 still need sign-in. Passwords and cookies are never stored in app preferences.
 
-The connected screen has no native header or connection-status row. The PWA fills
-the space below the iPhone's system status area. **Settings → iPhone** offers
+Native Home uses a compact connection row when there is a status to show. The
+detailed web workspace opens under a small **Home** back control. **Settings → iPhone** offers
 **Voice**, **Files**, **Notifications**, **Connection**, **Reload**, and **Sign out on
 this iPhone**. This entry is shown only by a supporting native client; ordinary
 Safari and older wrappers keep their existing controls. It opens a native menu,

@@ -40,16 +40,16 @@ try{
   try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
   sim('install',device,app);
   const testInstalledUI=process.env.TEST_INSTALLED_UI==='1';
+  const launchArguments = [];
   if(testInstalledUI){
     const manifest=JSON.parse(await readFile(resolve(app,'public/installed-ui/manifest.json'),'utf8'));
     if(manifest.schema!==1||manifest.profile!=='hub-installed-web-v1')throw Error('The simulator app has no installed renderer.');
-    const container=resolve(sim('get_app_container',device,'com.mbaykam.hub','data'));
-    if(!container.includes(sep+device+sep)||!container.includes(sep+'Containers'+sep+'Data'+sep+'Application'+sep))throw Error('Unexpected isolated simulator data container.');
-    const preferences=resolve(container,'Library/Preferences');await mkdir(preferences,{recursive:true});
-    run('/usr/bin/defaults',['write',resolve(preferences,'com.mbaykam.hub'),'hub.ios.server-origin.v1','-string','https://installed-ui-simulator.invalid/']);
+    // The simulator process reads this through its UserDefaults argument domain.
+    // Writing the preferences plist on the host can race the simulator's cfprefsd.
+    launchArguments.push('-hub.ios.server-origin.v1', 'https://installed-ui-simulator.invalid/');
   }
   stage='launch';console.log('Launching HUB');
-  const launch=sim('launch',device,'com.mbaykam.hub'),pid=Number(launch.match(/:\s*(\d+)$/)?.[1]);
+  const launch=sim('launch',device,'com.mbaykam.hub',...launchArguments),pid=Number(launch.match(/:\s*(\d+)$/)?.[1]);
   if(!pid)throw Error('The app did not report a process ID.');
   // Allow the initial window + queued native Connect sheet to render.
   await new Promise(resolve=>setTimeout(resolve,4000));

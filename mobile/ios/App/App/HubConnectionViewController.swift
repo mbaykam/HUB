@@ -54,9 +54,11 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var showingPageLoad = false
     deinit { networkMonitor?.cancel(); sendTask?.cancel(); probe?.cancel(); pageDeadline?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) } }
 
+    override var preferredStatusBarStyle: UIStatusBarStyle { showingHome ? .lightContent : .default }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = HubHomeView.backgroundColor
         navigationController?.setNavigationBarHidden(true, animated: false)
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.validateForegroundPage() }
@@ -536,6 +538,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func returnHome() {
         signingIn = false
         showingHome = true
+        view.backgroundColor = HubHomeView.backgroundColor
+        navigationController?.setNeedsStatusBarAppearanceUpdate()
         activeNavigation = nil
         cancelPageDeadline()
         probe?.cancel()
@@ -554,6 +558,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             _ = homeState.begin(hasServer: server != nil)
         }
         showingHome = false
+        view.backgroundColor = .systemBackground
+        navigationController?.setNeedsStatusBarAppearanceUpdate()
         homeController.view.isHidden = true
         workspaceBar.isHidden = false
         prepareWebView()
@@ -613,7 +619,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                     // Destroy the old web view, including its active sockets and
                     // media, instead of merely hiding a still-running signed-in page.
                     self.api?.invalidate(); self.uiAPI?.invalidate()
-                    self.view.window?.rootViewController = UINavigationController(rootViewController: HubConnectionViewController())
+                    self.view.window?.rootViewController = HubWorkspaceNavigationController(rootViewController: HubConnectionViewController())
                 }
             }
         })

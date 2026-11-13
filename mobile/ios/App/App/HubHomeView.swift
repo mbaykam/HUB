@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import HubNative
 
 @MainActor
@@ -18,6 +19,8 @@ final class HubHomeModel: ObservableObject {
 
 @MainActor
 struct HubHomeView: View {
+    static let backgroundColor = UIColor(red: 0.045, green: 0.064, blue: 0.105, alpha: 1)
+
     @ObservedObject var model: HubHomeModel
     var connect: () -> Void
     var voice: () -> Void
@@ -26,7 +29,6 @@ struct HubHomeView: View {
     var openChat: (String) -> Void
     var send: () -> Void
 
-    private let background = Color(red: 0.045, green: 0.064, blue: 0.105)
     private let card = Color(red: 0.085, green: 0.105, blue: 0.165)
     private let accent = Color(red: 0.75, green: 0.80, blue: 1.0)
 
@@ -99,7 +101,7 @@ struct HubHomeView: View {
         }
         .foregroundStyle(.white)
         .tint(accent)
-        .background(background.ignoresSafeArea())
+        .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
 
@@ -138,7 +140,7 @@ struct HubHomeView: View {
                     .disabled(model.connection != .connected)
             }
             HStack(spacing: 3) {
-                TextField("Chat…", text: $model.draft)
+                TextField("Chat…", text: $model.draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
                     .accessibilityIdentifier("hub.home.draft")
                     .submitLabel(.send)
                     .onSubmit(send)
