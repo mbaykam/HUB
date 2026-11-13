@@ -21,6 +21,7 @@ struct HubLiveChatView: View {
     let attachments: () -> HubChatAttachmentContext?
     let requestID: UUID
     let preferences: HubChatPreferences
+    let renamed: (String) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var composerFocused: Bool
     @State private var snapshot: HubChatSnapshot?
@@ -62,6 +63,12 @@ struct HubLiveChatView: View {
     @State private var visualLoadFailed = false
     @State private var visualRetry = 0
     @State private var visualReset = UUID()
+    @State private var modelPickerOpen = false
+    @State private var selectedModel: HubChatModelSelection?
+    @State private var renamedTitle: String?
+    @State private var renameOpen = false
+    @State private var renameDraft = ""
+    @State private var renaming = false
     @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
 
     private struct LoadedVisual {
@@ -147,6 +154,20 @@ struct HubLiveChatView: View {
             .navigationViewStyle(.stack)
         }
         .sheet(isPresented: $appsOpen) { HubConversationAppsView(api: api, sessionID: chat.sessionId) }
+        .sheet(isPresented: $modelPickerOpen) {
+            HubChatModelPicker(api: api, sessionID: chat.sessionId, current: selectedModel ?? snapshot?.model) {
+                selectedModel = snapshot?.model == $0 ? nil : $0
+            }
+        }
+        .alert("Rename chat", isPresented: $renameOpen) {
+            TextField("Chat title", text: $renameDraft)
+            Button("Rename") {
+                let title = renameDraft
+                Task { await saveTitle(title) }
+            }
+            .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        }
         .sheet(item: $researchMode) { mode in
             HubResearchView(sessionID: chat.sessionId, api: api, question: draft, showJobs: mode == .jobs,
                             didStart: { question in
@@ -167,8 +188,11 @@ struct HubLiveChatView: View {
                     Label("Home", systemImage: "chevron.left").frame(minHeight: 44)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
+                    Text(renamedTitle ?? snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
                     if let character { Text(character).font(.caption).foregroundStyle(.secondary) }
+                    if let model = selectedModel ?? snapshot?.model {
+                        Text(model.model).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 Spacer()
                 if tab == .chat, requestedVisual == nil, let latestVisual {
@@ -183,6 +207,20 @@ struct HubLiveChatView: View {
                     }
                     .accessibilityLabel("Hide keyboard")
                 }
+                Menu {
+                    Button {
+                        composerFocused = false
+                        modelPickerOpen = true
+                    } label: { Label("Model & reasoning", systemImage: "cpu") }
+                    .disabled(connectionLost || snapshot?.running == true || awaitingAfter != nil)
+                    Button {
+                        composerFocused = false
+                        renameDraft = renamedTitle ?? snapshot?.title ?? chat.title
+                        renameOpen = true
+                    } label: { Label("Rename chat", systemImage: "pencil") }
+                    .disabled(connectionLost || renaming)
+                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                .accessibilityLabel("Chat options")
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
@@ -692,6 +730,8 @@ struct HubLiveChatView: View {
                     historyError = false
                 }
                 snapshot = value
+                if selectedModel == value.model { selectedModel = nil }
+                if renamedTitle == value.title { renamedTitle = nil }
                 if value.running || completed || (awaitingAfter != nil && value.messages.last?.id != awaitingAfter) {
                     awaitingAfter = nil
                 }
@@ -707,6 +747,19 @@ struct HubLiveChatView: View {
     private func loadScreenshots() async {
         if let result = try? await api.chatScreenshots(sessionID: chat.sessionId), !Task.isCancelled {
             screenshots = result
+        }
+    }
+
+    private func saveTitle(_ name: String) async {
+        guard !renaming else { return }
+        renaming = true
+        defer { renaming = false }
+        do {
+            let title = try await api.renameChat(sessionID: chat.sessionId, title: name)
+            renamedTitle = snapshot?.title == title ? nil : title
+            renamed(title)
+        } catch {
+            error = "Could not confirm the new title. Reopen the chat to check."
         }
     }
 
@@ -773,6 +826,148 @@ struct HubLiveChatView: View {
             } catch {
                 self.error = "Could not confirm that HUB received Stop."
             }
+        }
+    }
+}
+
+@MainActor
+private struct HubChatModelPicker: View {
+    let api: HubConversationAPI
+    let sessionID: String
+    let current: HubChatModelSelection?
+    let onSelect: (HubChatModelSelection) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var catalog: HubChatModels?
+    @State private var query = ""
+    @State private var model: HubChatModels.Provider.Model?
+    @State private var provider: String?
+    @State private var effort = ""
+    @State private var attempt = 0
+    @State private var loading = true
+    @State private var saving = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if let model, let provider { options(model, provider: provider) }
+                else { catalogue }
+            }
+            .navigationTitle(model == nil ? "Model & reasoning" : "Model options")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(model == nil ? "Close" : "Models") {
+                        if model == nil { dismiss() }
+                        else { model = nil; provider = nil; error = nil }
+                    }
+                    .disabled(saving)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(saving)
+        .task(id: attempt) {
+            loading = true
+            error = nil
+            defer { loading = false }
+            do {
+                let value = try await api.chatModels()
+                if !Task.isCancelled { catalog = value }
+            } catch {
+                if !Task.isCancelled { self.error = "Could not load the available models." }
+            }
+        }
+    }
+
+    private var catalogue: some View {
+        List {
+            if loading { ProgressView("Loading models…") }
+            if let error {
+                Text(error).foregroundStyle(.secondary)
+                Button("Retry") { attempt += 1 }
+            }
+            if let catalog {
+                let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                let groups = catalog.groups.compactMap { group -> FilteredGroup? in
+                    let models = group.models.filter { search.isEmpty ||
+                        "\($0.name) \($0.id) \(group.name)".localizedCaseInsensitiveContains(search) }
+                    return models.isEmpty ? nil : FilteredGroup(id: group.id, name: group.name, models: models)
+                }
+                if groups.isEmpty {
+                    Text(search.isEmpty ? "No configured models" : "No matching models").foregroundStyle(.secondary)
+                }
+                ForEach(groups) { group in
+                    Section(group.name) {
+                        ForEach(group.models) { choice in
+                            Button {
+                                model = choice
+                                provider = group.id
+                                effort = current?.provider == group.id && current?.model == choice.id ? (current?.reasoningEffort ?? "") : ""
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(choice.name)
+                                        Text(choice.id).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if current?.provider == group.id, current?.model == choice.id {
+                                        Image(systemName: "checkmark").accessibilityLabel("Current model")
+                                    }
+                                }
+                                .frame(minHeight: 44)
+                            }
+                        }
+                    }
+                }
+                if !catalog.failures.isEmpty {
+                    Text("Unavailable providers · \(catalog.failures.map(\.name).joined(separator: ", "))")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .searchable(text: $query, prompt: "Find a model…")
+    }
+
+    private struct FilteredGroup: Identifiable {
+        let id: String
+        let name: String
+        let models: [HubChatModels.Provider.Model]
+    }
+
+    private func options(_ choice: HubChatModels.Provider.Model, provider: String) -> some View {
+        Form {
+            Section {
+                Text(choice.name).font(.headline)
+                if let description = choice.description { Text(description).font(.footnote) }
+            }
+            if let efforts = choice.reasoning?.efforts, !efforts.isEmpty {
+                Picker("Reasoning effort", selection: $effort) {
+                    Text("Provider default").tag("")
+                    if !effort.isEmpty && !efforts.contains(where: { $0.id == effort }) { Text(effort).tag(effort) }
+                    ForEach(efforts) { Text($0.name).tag($0.id) }
+                }
+            }
+            if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if saving { ProgressView() }
+            Button("Use in this chat") {
+                Task { await select(choice, provider: provider) }
+            }
+        }
+        .disabled(saving)
+    }
+
+    private func select(_ choice: HubChatModels.Provider.Model, provider: String) async {
+        guard !saving else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            let selected = try await api.selectChatModel(sessionID: sessionID, provider: provider, model: choice.id,
+                effort: choice.reasoning?.efforts.isEmpty == false ? effort : nil)
+            onSelect(selected)
+            dismiss()
+        } catch {
+            self.error = "Could not confirm the selection. Reopen the chat to check its model."
         }
     }
 }

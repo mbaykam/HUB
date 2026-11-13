@@ -126,7 +126,9 @@ struct HubHomeView: View {
             if let selectedChat {
                 HubLiveChatView(chat: selectedChat.request.choice, api: selectedChat.api,
                                 back: { self.selectedChat = nil }, voice: voice, openChat: showChat, attachments: attachments,
-                                requestID: selectedChat.request.id, preferences: chatPreferences)
+                                requestID: selectedChat.request.id, preferences: chatPreferences) { name in
+                    if chatAPI() === selectedChat.api { updateChatTitle(selectedChat.request.choice.sessionId, name: name) }
+                }
                     .id(selectedChat.request.choice.sessionId)
             }
         }
@@ -729,6 +731,14 @@ struct HubHomeView: View {
                 else { model.sendError = "Could not open a new conversation. Try again when connected." }
             }
         }
+    }
+
+    private func updateChatTitle(_ id: String, name: String) {
+        let choice = HubConversationChoice(sessionId: id, title: name, updatedAt: Date().timeIntervalSince1970 * 1_000)
+        if let recent = model.conversations, recent.contains(where: { $0.sessionId == id }) {
+            model.conversations = recent.map { $0.sessionId == id ? choice : $0 }
+        }
+        workspaceChats[id] = choice
     }
 
     private struct HistoryRequest: Equatable {

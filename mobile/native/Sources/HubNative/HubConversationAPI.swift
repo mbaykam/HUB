@@ -158,6 +158,42 @@ public struct HubChatSnapshot {
     public let firstSequence: Int?
     public let activity: [HubChatActivity]
     public let title: String?
+    public let model: HubChatModelSelection?
+}
+
+public struct HubChatModelSelection: Decodable, Equatable {
+    public let provider: String
+    public let model: String
+    public let reasoningEffort: String?
+}
+
+public struct HubChatModels: Decodable {
+    public struct Provider: Decodable, Identifiable {
+        public struct Model: Decodable, Identifiable {
+            public struct Reasoning: Decodable {
+                public struct Effort: Decodable, Identifiable {
+                    public let id: String
+                    public let name: String
+                    public let description: String?
+                }
+                public let efforts: [Effort]
+                public let defaultEffort: String?
+            }
+            public let id: String
+            public let name: String
+            public let description: String?
+            public let reasoning: Reasoning?
+        }
+        public let id: String
+        public let name: String
+        public let models: [Model]
+    }
+    public struct Failure: Decodable, Identifiable {
+        public let id: String
+        public let name: String
+    }
+    public let groups: [Provider]
+    public let failures: [Failure]
 }
 
 public struct HubChatHistoryPage {
@@ -481,6 +517,7 @@ struct HubChatStreamFrame: Decodable {
                 }
                 struct RequestHeader: Decodable {
                     let system: String?
+                    let config: HubChatModelSelection?
                 }
                 struct ToolError: Decodable { let name: String?; let code: String? }
                 let message: Message?
@@ -496,6 +533,7 @@ struct HubChatStreamFrame: Decodable {
                 let name: String?
                 let arguments: String?
                 let error: ToolError?
+                let title: String?
             }
             let type: String
             let seq: Int
@@ -505,6 +543,9 @@ struct HubChatStreamFrame: Decodable {
             let announcesScreenshot: Bool
             let activity: HubChatActivity?
             let replacement: Replacement?
+            let title: String?
+            let modelSelection: HubChatModelSelection?
+            let modelRequest: HubChatModelSelection?
 
             struct Replacement: Decodable { let op: String; let start: Int; let end: Int }
             private enum CodingKeys: String, CodingKey { case type, seq, data, surfaceOp }
@@ -514,6 +555,9 @@ struct HubChatStreamFrame: Decodable {
                 type = try values.decode(String.self, forKey: .type)
                 seq = try values.decode(Int.self, forKey: .seq)
                 let payload = try? values.decode(Payload.self, forKey: .data)
+                title = type == "session/title" ? payload?.title : nil
+                modelSelection = type == "model/selection" ? (try? values.decode(HubChatModelSelection.self, forKey: .data)) : nil
+                modelRequest = type == "request/header" ? payload?.header?.config : nil
                 replacement = try? values.decode(Replacement.self, forKey: .surfaceOp)
                 if let chunk = payload?.chunk, chunk.type == "text-delta", let index = chunk.index, let text = chunk.text {
                     delta = (index, text)
@@ -573,7 +617,14 @@ struct HubChatStreamFrame: Decodable {
     }
     struct Value: Decodable {
         struct Projections: Decodable {
-            struct Values: Decodable { let title: String? }
+            struct Values: Decodable {
+                struct ModelProjection: Decodable {
+                    let next: HubChatModelSelection?
+                    let lastUsed: HubChatModelSelection?
+                }
+                let title: String?
+                let modelSelection: ModelProjection?
+            }
             let values: Values
         }
         let type: String
@@ -600,13 +651,19 @@ struct HubChatTimeline {
     private var firstSequence: Int?
     private var activity: [HubChatActivity] = []
     private var title: String?
+    private var model: HubChatModelSelection?
+    private var pendingModel: HubChatModelSelection?
 
     mutating func start(_ frame: HubChatStreamFrame.Value) {
         hasMore = frame.hasMore ?? false
         historyCursor = frame.cursor
         firstSequence = frame.records?.first?.event.seq
-        title = frame.projections?.values.title
         for record in frame.records ?? [] { apply(record.event) }
+        title = frame.projections?.values.title ?? title
+        if let projection = frame.projections?.values.modelSelection {
+            model = projection.next
+            pendingModel = projection.next == projection.lastUsed ? nil : projection.next
+        }
     }
 
     mutating func apply(_ event: HubChatStreamFrame.Entry.Event) {
@@ -622,6 +679,12 @@ struct HubChatTimeline {
         }
         if event.announcesScreenshot { latestScreenshotSequence = event.seq }
         if let entry = event.activity { activity.append(entry) }
+        if let title = event.title { self.title = title }
+        if let selection = event.modelSelection { pendingModel = selection; model = selection }
+        if let used = event.modelRequest {
+            if pendingModel == used { pendingModel = nil }
+            model = pendingModel ?? used
+        }
         switch event.type {
         case "turn/start":
             running = true
@@ -648,7 +711,7 @@ struct HubChatTimeline {
         HubChatSnapshot(messages: messages, hasMore: hasMore, running: running,
                         partial: blocks.keys.sorted().compactMap { blocks[$0] }.joined(), failure: failure,
                         latestScreenshotSequence: latestScreenshotSequence, historyCursor: historyCursor,
-                        firstSequence: firstSequence, activity: activity, title: title)
+                        firstSequence: firstSequence, activity: activity, title: title, model: model)
     }
 }
 
@@ -1194,6 +1257,29 @@ public final class HubConversationAPI {
         let created = try await rpc("session/create", request: request)
         guard created["sessionId"] as? String == sessionID else { throw HubChatSendError.rejected }
         return sessionID
+    }
+
+    public func chatModels() async throws -> HubChatModels {
+        let response = try await rpc("session/modelCatalog", arguments: [:], maxBytes: 8_388_608)
+        return try JSONDecoder().decode(HubChatModels.self, from: JSONSerialization.data(withJSONObject: response))
+    }
+
+    public func selectChatModel(sessionID: String, provider: String, model: String, effort: String?) async throws -> HubChatModelSelection {
+        guard HubVoiceAPI.validID(sessionID), !provider.isEmpty, provider.utf8.count <= 200,
+              !model.isEmpty, model.utf8.count <= 512, (effort?.utf8.count ?? 0) <= 200 else { throw HubChatSendError.rejected }
+        var request = ["sessionId": sessionID, "provider": provider, "model": model]
+        if let effort, !effort.isEmpty { request["reasoningEffort"] = effort }
+        let response = try await rpc("session/selectModel", request: request)
+        guard let selected = response["selected"] as? [String: Any] else { throw HubAttachmentError.invalidResponse }
+        return try JSONDecoder().decode(HubChatModelSelection.self, from: JSONSerialization.data(withJSONObject: selected))
+    }
+
+    public func renameChat(sessionID: String, title: String) async throws -> String {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard HubVoiceAPI.validID(sessionID), !name.isEmpty, name.utf8.count <= 960 else { throw HubChatSendError.rejected }
+        let response = try await rpc("session/rename", request: ["sessionId": sessionID, "title": name])
+        guard let saved = response["title"] as? String, !saved.isEmpty else { throw HubAttachmentError.invalidResponse }
+        return saved
     }
 
     private func promptText(_ draft: String) throws -> String {

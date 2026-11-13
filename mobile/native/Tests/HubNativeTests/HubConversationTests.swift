@@ -216,6 +216,28 @@ final class HubConversationTests: XCTestCase {
         XCTAssertTrue(id.hasPrefix("session-"))
     }
 
+    func testChatKeepsAPendingModelThroughThePreviousModelsRequest() throws {
+        let decoder = JSONDecoder()
+        let start = try decoder.decode(HubChatStreamFrame.Value.self, from: Data(#"""
+        {"type":"snapshot","records":[],"projections":{"values":{"title":"Previous","modelSelection":{
+          "next":{"provider":"fixture","model":"new","reasoningEffort":"high"},
+          "lastUsed":{"provider":"fixture","model":"old"}
+        }}}}
+        """#.utf8))
+        var timeline = HubChatTimeline()
+        timeline.start(start)
+        let changes = [
+            #"{"type":"request/header","seq":1,"data":{"header":{"config":{"provider":"fixture","model":"old"}}}}"#,
+            #"{"type":"session/title","seq":2,"data":{"title":"Renamed"}}"#,
+        ]
+        for source in changes {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8)))
+        }
+        XCTAssertEqual(timeline.snapshot.title, "Renamed")
+        XCTAssertEqual(timeline.snapshot.model?.model, "new")
+        XCTAssertEqual(timeline.snapshot.model?.reasoningEffort, "high")
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in
