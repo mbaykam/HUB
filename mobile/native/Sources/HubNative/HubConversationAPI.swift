@@ -537,6 +537,32 @@ public struct HubWorkspaceTasks {
     public let routinesRevision: Int?
 }
 
+public struct HubGoalEditorData {
+    public struct Character: Decodable, Identifiable {
+        public let id: String
+        public let name: String
+        public let route: HubChatModelSelection?
+    }
+    public struct Draft {
+        public var title: String
+        public var objective: String
+        public var criteria: [String]
+        public var characterID: String
+        public var approach: String
+        public var instructions: String
+        public var humanApproval: Bool
+        public var activeMinutes: Int
+        public var knowledge: Bool
+        public var browser: Bool
+    }
+    public let draft: Draft
+    public let characters: [Character]
+    public let isResearch: Bool
+    fileprivate let original: [String: Any]
+    fileprivate let id: String?
+    fileprivate let revision: Int
+}
+
 struct HubChatStreamFrame: Decodable {
     struct Entry: Decodable {
         struct Event: Decodable {
@@ -1152,6 +1178,82 @@ public final class HubConversationAPI {
         let routineCatalog = try decoder.decode(Routines.self, from: routineData)
         return try HubWorkspaceTasks(goals: decoder.decode(Goals.self, from: goalData).goals,
                                      routines: routineCatalog.automations, routinesRevision: routineCatalog.revision)
+    }
+
+    public func goalEditor(id: String? = nil) async throws -> HubGoalEditorData {
+        if let id, !HubVoiceAPI.validID(id) { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/goals", headers: ["x-hub-goals": "1"], maxBytes: 8_388_608)
+        guard let snapshot = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = snapshot["characters"] as? [[String: Any]] else { throw HubAttachmentError.invalidResponse }
+        let characters = try JSONDecoder().decode([HubGoalEditorData.Character].self, from: JSONSerialization.data(withJSONObject: choices))
+        let definition: [String: Any]
+        let revision: Int
+        if let id {
+            guard let value = (snapshot["goals"] as? [[String: Any]])?.first(where: { $0["id"] as? String == id }),
+                  let current = value["revision"] as? Int,
+                  !["stopped", "archived"].contains(value["state"] as? String ?? "") else {
+                throw HubAttachmentError.unavailable
+            }
+            definition = value
+            revision = current
+        } else {
+            guard let defaults = snapshot["defaults"] as? [String: Any], let current = snapshot["revision"] as? Int else {
+                throw HubAttachmentError.invalidResponse
+            }
+            definition = defaults
+            revision = current
+        }
+        guard revision >= 0, let limits = definition["limits"] as? [String: Any], let active = limits["activeMinutes"] as? Int,
+              let resources = definition["resources"] as? [String: Any], let knowledge = resources["knowledge"] as? Bool,
+              let browser = resources["browser"] as? Bool, let approach = definition["approach"] as? String,
+              let approval = definition["humanApproval"] as? Bool else { throw HubAttachmentError.invalidResponse }
+        let defaultCharacter = characters.first { $0.name == "HUB" && $0.route != nil } ?? characters.first { $0.route != nil }
+        let draft = HubGoalEditorData.Draft(title: definition["title"] as? String ?? "", objective: definition["objective"] as? String ?? "",
+            criteria: definition["criteria"] as? [String] ?? [], characterID: definition["characterId"] as? String ?? defaultCharacter?.id ?? "",
+            approach: approach, instructions: definition["instructions"] as? String ?? "", humanApproval: approval,
+            activeMinutes: active, knowledge: knowledge, browser: browser)
+        let fields: Set<String> = ["research", "title", "objective", "criteria", "characterId", "approach",
+            "instructions", "helpers", "verifierId", "fallbacks", "resources", "limits", "schedule", "recovery",
+            "humanApproval", "notification", "sourceSessionId"]
+        return HubGoalEditorData(draft: draft, characters: characters, isResearch: definition["research"] is [String: Any],
+            original: definition.filter { fields.contains($0.key) }, id: id, revision: revision)
+    }
+
+    public func saveGoal(_ draft: HubGoalEditorData.Draft, from loaded: HubGoalEditorData) async throws -> String {
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let objective = draft.objective.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.utf16.count <= 160, !objective.isEmpty, objective.utf16.count <= 12_000,
+              (1...20).contains(draft.criteria.count), draft.criteria.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 2_000 }),
+              ["quick", "balanced", "thorough", "custom"].contains(draft.approach), draft.instructions.utf16.count <= 12_000,
+              !draft.characterID.isEmpty, (1...10_080).contains(draft.activeMinutes),
+              var resources = loaded.original["resources"] as? [String: Any],
+              var limits = loaded.original["limits"] as? [String: Any] else { throw HubAttachmentError.invalidResponse }
+        var value = loaded.original
+        value["title"] = title
+        value["objective"] = draft.objective
+        value["criteria"] = draft.criteria
+        value["characterId"] = draft.characterID
+        value["approach"] = draft.approach
+        value["instructions"] = draft.instructions
+        value["humanApproval"] = draft.humanApproval
+        if !loaded.isResearch {
+            resources["knowledge"] = draft.knowledge
+            resources["browser"] = draft.browser
+            limits["activeMinutes"] = draft.activeMinutes
+        }
+        value["resources"] = resources
+        value["limits"] = limits
+        var command: [String: Any] = ["action": "save", "revision": loaded.revision, "goal": value]
+        if let id = loaded.id { command["id"] = id }
+        let body = try JSONSerialization.data(withJSONObject: command)
+        guard body.count <= 100_000 else { throw HubAttachmentError.tooLarge }
+        let data = try await requestData("api/hub/goals", headers: ["x-hub-goals": "1"], body: body, maxBytes: 8_388_608)
+        struct Receipt: Decodable { let changedId: String }
+        let receipt = try JSONDecoder().decode(Receipt.self, from: data)
+        guard HubVoiceAPI.validID(receipt.changedId), loaded.id == nil || loaded.id == receipt.changedId else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return receipt.changedId
     }
 
     public func changeWorkspaceTask(_ action: HubWorkspaceTaskAction, id: String, revision: Int,

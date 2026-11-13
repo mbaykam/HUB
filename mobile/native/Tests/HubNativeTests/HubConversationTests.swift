@@ -261,6 +261,42 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(CatalogFixture.requests.count, 2)
     }
 
+    func testGoalEditPreservesPermissionsScheduleAndUneditedAllowance() async throws {
+        let api = try client()
+        let original = #"""
+        {"characters":[{"id":"hub","name":"HUB","route":null}],"goals":[{
+          "id":"saved-goal","state":"paused","revision":7,"title":"Original","objective":"Outcome",
+          "criteria":["Verify result"],"characterId":"hub","approach":"balanced","instructions":"",
+          "resources":{"knowledge":true,"browser":false,"folders":["C:/Fixture"],"writeFolders":[],
+                       "tools":["read"],"files":[],"knowledgeOutput":false},
+          "limits":{"activeMinutes":30,"dailyBudget":0.2,"totalBudget":1},
+          "schedule":{"trigger":{"kind":"interval","seconds":1800},"repeat":"continue","missed":"skip"},
+          "recovery":"ask","humanApproval":true,"notification":"pwa","plan":[{"id":"milestone"}]
+        }]}
+        """#
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/goals")
+            if request.httpMethod == "GET" { return (200, Data(original.utf8)) }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "save")
+            XCTAssertEqual(command["id"] as? String, "saved-goal")
+            XCTAssertEqual(command["revision"] as? Int, 7)
+            XCTAssertNil(command["plan"])
+            let goal = try XCTUnwrap(command["goal"] as? [String: Any])
+            XCTAssertEqual(goal["title"] as? String, "Renamed")
+            XCTAssertEqual((goal["resources"] as? [String: Any])?["folders"] as? [String], ["C:/Fixture"])
+            XCTAssertEqual((goal["limits"] as? [String: Any])?["dailyBudget"] as? Double, 0.2)
+            XCTAssertEqual((goal["schedule"] as? [String: Any])?["missed"] as? String, "skip")
+            XCTAssertNil(goal["state"])
+            return (200, Data(#"{"changedId":"saved-goal"}"#.utf8))
+        }
+        let editor = try await api.goalEditor(id: "saved-goal")
+        var draft = editor.draft
+        draft.title = "Renamed"
+        let id = try await api.saveGoal(draft, from: editor)
+        XCTAssertEqual(id, "saved-goal")
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

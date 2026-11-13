@@ -1327,6 +1327,7 @@ private struct HubTasksView: View {
     @State private var changing = false
     @State private var changeError = false
     @State private var pending: PendingAction?
+    @State private var goalEditor: GoalEdit?
     var load: () async throws -> HubWorkspaceTasks
     let api: HubConversationAPI
     let openChat: (HubConversationChoice) -> Void
@@ -1338,6 +1339,11 @@ private struct HubTasksView: View {
         let routine: Bool
         var approvalID: String?
         var approvalDescription: String?
+    }
+
+    private struct GoalEdit: Identifiable {
+        let id: String
+        let goalID: String?
     }
 
     var body: some View {
@@ -1375,6 +1381,9 @@ private struct HubTasksView: View {
         .foregroundStyle(.white)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .sheet(item: $goalEditor) { edit in
+            HubGoalEditorView(api: api, id: edit.goalID) { attempt += 1 }
+        }
         .confirmationDialog(pending?.label ?? "Confirm task action",
                             isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
                             titleVisibility: .visible, presenting: pending) { command in
@@ -1388,7 +1397,15 @@ private struct HubTasksView: View {
 
     private func taskSection(_ title: String, _ items: [HubWorkspaceTask], routine: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+            HStack {
+                Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                Spacer()
+                if !routine {
+                    Button { goalEditor = GoalEdit(id: "new-goal", goalID: nil) } label: {
+                        Label("New goal", systemImage: "plus").frame(minHeight: 44)
+                    }
+                }
+            }
             let visible = items.filter { $0.state != "archived" }.sorted { $0.updatedAt > $1.updatedAt }
             if visible.isEmpty { Text("No \(title.lowercased())").foregroundStyle(.secondary) }
             ForEach(visible) { task in
@@ -1400,6 +1417,9 @@ private struct HubTasksView: View {
                     }
                     taskDetails(task, routine: routine)
                     taskActions(task, routine: routine)
+                    if !routine && !["stopped", "archived"].contains(task.state) {
+                        Button("Edit goal") { goalEditor = GoalEdit(id: task.id, goalID: task.id) }.frame(minHeight: 44)
+                    }
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(task.title).font(.body.weight(.medium))
