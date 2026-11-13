@@ -201,3 +201,16 @@ public struct HubKnowledgeStatus: Decodable {
     public let notes: Int
     public let embedding: String
 }
+
+public struct HubTelegramStatus: Decodable {
+    public struct Pairing: Decodable {
+        public let requestId: String
+        public let code: String
+        public let senderLabel: String
+        public let expiresAt: Double?
+    }
+    public let state: String
+    public let accountLabel: String?
+    public let issue: String?
+    public let request: Pairing?
+}

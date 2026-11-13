@@ -699,6 +699,34 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubInstructionCatalog.self, from: data)
     }
 
+    public func telegramStatus() async throws -> HubTelegramStatus {
+        try await telegramRequest(nil)
+    }
+
+    public func reconnectTelegram() async throws -> HubTelegramStatus {
+        try await telegramRequest(["action": "reconnect"])
+    }
+
+    public func connectTelegram(token: String) async throws -> HubTelegramStatus {
+        guard token.range(of: #"^\d{6,16}:[A-Za-z0-9_-]{30,100}$"#, options: .regularExpression) != nil else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return try await telegramRequest(["action": "connect", "token": token])
+    }
+
+    public func approveTelegram(requestID: String) async throws -> HubTelegramStatus {
+        guard requestID.range(of: #"^[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return try await telegramRequest(["action": "approve", "requestId": requestID])
+    }
+
+    private func telegramRequest(_ command: [String: String]?) async throws -> HubTelegramStatus {
+        let body = try command.map { try JSONEncoder().encode($0) }
+        let data = try await requestData("api/hub/telegram", headers: ["x-hub-telegram": "1"], body: body)
+        return try JSONDecoder().decode(HubTelegramStatus.self, from: data)
+    }
+
     public func chatCharacters(sessionID: String) async throws -> HubChatCharacterPicker {
         guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
         let data = try await requestData("api/hub/characters", headers: ["x-hub-characters": "1"], query: [

@@ -88,6 +88,7 @@ struct HubHomeView: View {
     @State private var agendaDate = Date()
     @State private var plannerTab = PlannerTab.todos
     @State private var plannerOpen = false
+    @State private var calendarExpanded = false
     @State private var plannerEditor: PlannerEdit?
     @FocusState private var composerFocused: Bool
     @FocusState private var todoFocused: Bool
@@ -798,12 +799,26 @@ struct HubHomeView: View {
             .pickerStyle(.segmented)
             if plannerTab == .agenda {
                 HStack {
-                    DatePicker("Day", selection: $agendaDate, displayedComponents: .date).datePickerStyle(.compact)
+                    Button {
+                        calendarExpanded.toggle()
+                    } label: {
+                        Label(agendaDate.formatted(date: .abbreviated, time: .omitted),
+                              systemImage: calendarExpanded ? "chevron.up" : "chevron.down")
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityLabel(calendarExpanded ? "Collapse calendar" : "Expand calendar")
+                    Spacer()
                     Button {
                         plannerEditor = PlannerEdit(item: nil, kind: .event)
                     } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
                     .accessibilityLabel("Add event")
                     .disabled(!canEditPlanner)
+                }
+                if calendarExpanded {
+                    DatePicker("Choose a day", selection: $agendaDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical).labelsHidden()
+                } else {
+                    agendaWeek
                 }
                 let events = planner.items.filter {
                     !$0.deleted && $0.state == "open" && $0.kind == "event" && $0.occurs(on: agendaDate)
@@ -832,6 +847,31 @@ struct HubHomeView: View {
             }
             if model.plannerSaving { ProgressView().accessibilityLabel("Saving to planner") }
             if let error = model.plannerError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+        }
+    }
+
+    private var agendaWeek: some View {
+        let calendar = Calendar.current
+        let offset = ((calendar.dateComponents([.weekday], from: agendaDate).weekday ?? 2) + 5) % 7
+        let first = calendar.date(byAdding: .day, value: -offset, to: agendaDate) ?? agendaDate
+        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: first) }
+        return HStack(spacing: 2) {
+            ForEach(days, id: \.self) { day in
+                let selected = calendar.isDate(day, inSameDayAs: agendaDate)
+                Button {
+                    agendaDate = day
+                } label: {
+                    VStack(spacing: 4) {
+                        Text(day.formatted(.dateTime.weekday(.narrow))).font(.caption2).foregroundStyle(.secondary)
+                        Text(day.formatted(.dateTime.day())).font(.callout.weight(selected ? .semibold : .regular))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(selected ? accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
         }
     }
 

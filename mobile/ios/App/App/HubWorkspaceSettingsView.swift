@@ -23,6 +23,9 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
                         Label("Knowledge AI", systemImage: "circle.hexagongrid")
                     }
+                    NavigationLink(destination: HubTelegramSettingsView(api: api)) {
+                        Label("Telegram", systemImage: "paperplane")
+                    }
                     NavigationLink(destination: HubUsageView(api: api)) {
                         Label("Usage limits", systemImage: "chart.bar.xaxis")
                     }
@@ -42,6 +45,69 @@ struct HubWorkspaceSettingsView: View {
         }
         .navigationViewStyle(.stack)
         .preferredColorScheme(.dark)
+    }
+}
+
+@MainActor
+private struct HubTelegramSettingsView: View {
+    let api: HubConversationAPI
+    @State private var status: HubTelegramStatus?
+    @State private var token = ""
+    @State private var busy = false
+    @State private var failed = false
+    @State private var confirmApproval = false
+
+    var body: some View {
+        Form {
+            if busy { ProgressView("Checking Telegram…") }
+            if failed { Text("Could not confirm the operation. Refresh Telegram status to check.").foregroundStyle(.secondary) }
+            if let status {
+                Section("Connection") {
+                    Text(status.state.replacingOccurrences(of: "-", with: " ").capitalized)
+                    if let label = status.accountLabel { Text(label) }
+                    if let issue = status.issue { Text(issue).font(.footnote).foregroundStyle(.secondary) }
+                    Button("Reconnect") { Task { await update { try await api.reconnectTelegram() } } }
+                }
+                if let pairing = status.request {
+                    Section("Pairing request") {
+                        Text(pairing.senderLabel)
+                        Text(pairing.code).font(.body.monospaced()).textSelection(.enabled)
+                        if let expires = pairing.expiresAt {
+                            Text(Date(timeIntervalSince1970: expires / 1000).formatted()).font(.caption)
+                        }
+                        Button("Approve pairing") { confirmApproval = true }
+                    }
+                }
+            }
+            Section("Bot setup") {
+                SecureField("Bot token", text: $token)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button("Connect bot") {
+                    let submitted = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                    token = ""
+                    Task { await update { try await api.connectTelegram(token: submitted) } }
+                }
+                .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Button("Refresh") { Task { await update { try await api.telegramStatus() } } }
+        }
+        .disabled(busy)
+        .navigationTitle("Telegram")
+        .task { await update { try await api.telegramStatus() } }
+        .confirmationDialog("Approve this Telegram account?", isPresented: $confirmApproval,
+                            titleVisibility: .visible, presenting: status?.request) { pairing in
+            Button("Approve pairing") { Task { await update { try await api.approveTelegram(requestID: pairing.requestId) } } }
+        } message: { pairing in
+            Text(pairing.senderLabel)
+        }
+    }
+
+    private func update(_ operation: () async throws -> HubTelegramStatus) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do { status = try await operation(); failed = false }
+        catch { if !Task.isCancelled { failed = true } }
     }
 }
 
