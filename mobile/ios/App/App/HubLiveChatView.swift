@@ -32,6 +32,7 @@ struct HubLiveChatView: View {
     @State private var stopping = false
     @State private var error: String?
     @State private var olderMessages: [HubChatMessage] = []
+    @State private var olderActivity: [HubChatActivity] = []
     @State private var olderPage: HubChatHistoryPage?
     @State private var historyLoading = false
     @State private var historyError = false
@@ -49,6 +50,9 @@ struct HubLiveChatView: View {
     @State private var attachmentBusy = false
     @State private var instructionsOpen = false
     @State private var appsOpen = false
+    @State private var tab = ChatTab.chat
+
+    private enum ChatTab: String { case chat = "Chat", trajectory = "Trajectory" }
 
     private enum ResearchMode: String, Identifiable {
         case new, jobs
@@ -65,7 +69,7 @@ struct HubLiveChatView: View {
                     Label("Home", systemImage: "chevron.left").frame(minHeight: 44)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(chat.title).font(.headline).lineLimit(1)
+                    Text(snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
                     if let character { Text(character).font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer()
@@ -78,6 +82,13 @@ struct HubLiveChatView: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
+            Picker("Conversation view", selection: $tab) {
+                Text("Chat").tag(ChatTab.chat)
+                Text("Trajectory").tag(ChatTab.trajectory)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
             Divider()
             if connectionLost {
                 HStack {
@@ -87,10 +98,14 @@ struct HubLiveChatView: View {
                 }
                 .padding(12)
             }
-            transcript
+            if tab == .chat { transcript }
+            else { trajectory }
             composer
         }
         .task(id: attempt) { await follow() }
+        .task(id: historyRequest) {
+            if historyRequest != 0 { await loadEarlierMessages() }
+        }
         .task(id: snapshot?.latestScreenshotSequence) { await loadScreenshots() }
         .task(id: requestID) { await loadFileDrafts() }
         .fileImporter(isPresented: $filePickerOpen, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -133,6 +148,35 @@ struct HubLiveChatView: View {
         .tint(accent)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(.dark)
+    }
+
+    private var trajectory: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                if olderPage?.hasMore ?? snapshot?.hasMore ?? false {
+                    Button(historyError ? "Retry loading earlier activity" : "Load earlier activity") {
+                        historyRequest += 1
+                    }
+                    .disabled(historyLoading || connectionLost)
+                }
+                let entries = olderActivity + (snapshot?.activity ?? [])
+                if entries.isEmpty { Text("No recorded activity").foregroundStyle(.secondary) }
+                ForEach(entries) { item in
+                    if let detail = item.detail, !detail.isEmpty {
+                        DisclosureGroup {
+                            Text(detail).font(.footnote.monospaced()).textSelection(.enabled)
+                        } label: {
+                            Text(item.title).foregroundStyle(item.failed ? Color.red : Color.primary)
+                        }
+                    } else {
+                        Text(item.title).foregroundStyle(item.failed ? Color.red : Color.primary)
+                    }
+                    Divider()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+        }
     }
 
     private var transcript: some View {
@@ -217,9 +261,6 @@ struct HubLiveChatView: View {
                 .onChange(of: historyAnchor) { anchor in
                     if let anchor { scroll.scrollTo(anchor, anchor: .top); historyAnchor = nil }
                 }
-                .task(id: historyRequest) {
-                    if historyRequest != 0 { await loadEarlierMessages() }
-                }
                 .overlay(alignment: .bottomTrailing) {
                     if !readingLatest && !latestVisible {
                         Button {
@@ -267,6 +308,7 @@ struct HubLiveChatView: View {
             guard !Task.isCancelled, self.snapshot?.historyCursor == cursor else { return }
             let anchor = olderMessages.first?.id ?? snapshot.messages.first?.id
             olderMessages.insert(contentsOf: page.messages, at: 0)
+            olderActivity.insert(contentsOf: page.activity, at: 0)
             olderPage = page
             historyAnchor = anchor
         } catch {
@@ -461,6 +503,7 @@ struct HubLiveChatView: View {
                 let completed = snapshot?.running == true && !value.running
                 if snapshot?.historyCursor != value.historyCursor {
                     olderMessages = []
+                    olderActivity = []
                     olderPage = nil
                     historyError = false
                 }

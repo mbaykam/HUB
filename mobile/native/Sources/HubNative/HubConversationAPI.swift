@@ -149,12 +149,24 @@ public struct HubChatSnapshot {
     public let latestScreenshotSequence: Int?
     public let historyCursor: Int?
     public let firstSequence: Int?
+    public let activity: [HubChatActivity]
+    public let title: String?
 }
 
 public struct HubChatHistoryPage {
     public let messages: [HubChatMessage]
     public let hasMore: Bool
     public let firstSequence: Int?
+    public let activity: [HubChatActivity]
+}
+
+public struct HubChatActivity: Identifiable {
+    public let sequence: Int
+    public let title: String
+    public let detail: String?
+    public let turn: Int?
+    public let failed: Bool
+    public var id: Int { sequence }
 }
 
 public struct HubChatScreenshot: Decodable, Identifiable {
@@ -298,6 +310,10 @@ struct HubChatStreamFrame: Decodable {
                     let kind: String
                     let message: String?
                 }
+                struct RequestHeader: Decodable {
+                    let system: String?
+                }
+                struct ToolError: Decodable { let name: String?; let code: String? }
                 let message: Message?
                 let content: [Block]?
                 let source: Source?
@@ -307,6 +323,10 @@ struct HubChatStreamFrame: Decodable {
                 let reason: Reason?
                 let turn: Int?
                 let meta: Metadata?
+                let header: RequestHeader?
+                let name: String?
+                let arguments: String?
+                let error: ToolError?
             }
             let type: String
             let seq: Int
@@ -314,14 +334,18 @@ struct HubChatStreamFrame: Decodable {
             let delta: (index: Int, text: String)?
             let failure: String?
             let announcesScreenshot: Bool
+            let activity: HubChatActivity?
+            let replacement: Replacement?
 
-            private enum CodingKeys: String, CodingKey { case type, seq, data }
+            struct Replacement: Decodable { let op: String; let start: Int; let end: Int }
+            private enum CodingKeys: String, CodingKey { case type, seq, data, surfaceOp }
 
             init(from decoder: Decoder) throws {
                 let values = try decoder.container(keyedBy: CodingKeys.self)
                 type = try values.decode(String.self, forKey: .type)
                 seq = try values.decode(Int.self, forKey: .seq)
                 let payload = try? values.decode(Payload.self, forKey: .data)
+                replacement = try? values.decode(Replacement.self, forKey: .surfaceOp)
                 if let chunk = payload?.chunk, chunk.type == "text-delta", let index = chunk.index, let text = chunk.text {
                     delta = (index, text)
                 } else if type == "chunkrow/text-chunks", let index = payload?.index, let texts = payload?.texts {
@@ -332,6 +356,34 @@ struct HubChatStreamFrame: Decodable {
                 failure = type == "turn/end" && payload?.reason?.kind == "error"
                     ? (payload?.reason?.message ?? "This turn failed.") : nil
                 announcesScreenshot = type == "tool/result" && payload?.meta?.kind == "hub-screenshot"
+                let activityTitle: String?
+                let detail: String?
+                switch type {
+                case "request/header":
+                    activityTitle = payload?.header?.system?.isEmpty == false ? "System prompt" : nil
+                    detail = payload?.header?.system
+                case "tool/call":
+                    activityTitle = payload?.name ?? "Tool call"
+                    detail = payload?.arguments
+                case "tool/result":
+                    activityTitle = payload?.error == nil ? "Tool result" : "Tool failed"
+                    detail = payload?.error?.code
+                case "request/context":
+                    activityTitle = "Context updated"
+                    detail = nil
+                case "turn/end":
+                    activityTitle = failure == nil ? nil : "This turn failed"
+                    detail = failure
+                default:
+                    activityTitle = nil
+                    detail = nil
+                }
+                if let activityTitle {
+                    activity = HubChatActivity(sequence: seq, title: activityTitle, detail: detail,
+                                               turn: payload?.turn, failed: failure != nil || payload?.error != nil)
+                } else {
+                    activity = nil
+                }
                 guard type == "user/message" || type == "assistant/message",
                       let payload,
                       type != "user/message" || payload.source?.kind == "user" else {
@@ -351,11 +403,16 @@ struct HubChatStreamFrame: Decodable {
         let event: Event
     }
     struct Value: Decodable {
+        struct Projections: Decodable {
+            struct Values: Decodable { let title: String? }
+            let values: Values
+        }
         let type: String
         let records: [Entry]?
         let hasMore: Bool?
         let event: Entry.Event?
         let cursor: Int?
+        let projections: Projections?
     }
     let streamId: String?
     let type: String
@@ -372,18 +429,30 @@ struct HubChatTimeline {
     private var latestScreenshotSequence: Int?
     private var historyCursor: Int?
     private var firstSequence: Int?
+    private var activity: [HubChatActivity] = []
+    private var title: String?
 
     mutating func start(_ frame: HubChatStreamFrame.Value) {
         hasMore = frame.hasMore ?? false
         historyCursor = frame.cursor
         firstSequence = frame.records?.first?.event.seq
+        title = frame.projections?.values.title
         for record in frame.records ?? [] { apply(record.event) }
     }
 
     mutating func apply(_ event: HubChatStreamFrame.Entry.Event) {
         guard event.seq > lastSequence else { return }
         lastSequence = event.seq
+        if let replace = event.replacement, replace.op == "replace", replace.start <= replace.end {
+            messages.removeAll {
+                guard let sequence = Int($0.id) else { return false }
+                return sequence >= replace.start && sequence < replace.end
+            }
+            activity.removeAll { $0.sequence >= replace.start && $0.sequence < replace.end }
+            blocks.removeAll()
+        }
         if event.announcesScreenshot { latestScreenshotSequence = event.seq }
+        if let entry = event.activity { activity.append(entry) }
         switch event.type {
         case "turn/start":
             running = true
@@ -410,7 +479,7 @@ struct HubChatTimeline {
         HubChatSnapshot(messages: messages, hasMore: hasMore, running: running,
                         partial: blocks.keys.sorted().compactMap { blocks[$0] }.joined(), failure: failure,
                         latestScreenshotSequence: latestScreenshotSequence, historyCursor: historyCursor,
-                        firstSequence: firstSequence)
+                        firstSequence: firstSequence, activity: activity, title: title)
     }
 }
 
@@ -1012,8 +1081,10 @@ public final class HubConversationAPI {
         guard events.allSatisfy({ (0..<sequence).contains($0.seq) }),
               zip(events, events.dropFirst()).allSatisfy({ $0.0.seq < $0.1.seq }),
               !page.hasMore || !events.isEmpty else { throw HubAttachmentError.invalidResponse }
-        return HubChatHistoryPage(messages: events.compactMap(\.message), hasMore: page.hasMore,
-                                  firstSequence: events.first?.seq)
+        var timeline = HubChatTimeline()
+        for event in events { timeline.apply(event) }
+        return HubChatHistoryPage(messages: timeline.snapshot.messages, hasMore: page.hasMore,
+                                  firstSequence: events.first?.seq, activity: timeline.snapshot.activity)
     }
 
     private func rpc(_ method: String, request payload: [String: Any], maxBytes: Int = 65_536) async throws -> [String: Any] {
