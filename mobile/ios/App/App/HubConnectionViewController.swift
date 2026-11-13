@@ -38,6 +38,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var installedProcessRecoveries = 0
     private var connectionGeneration = 0
     private var connected = false
+    private var chatAttachmentStore: HubAttachmentStore?
+    private var chatAttachmentAPI: HubAttachmentAPI?
     private var notificationDestination: HubNotificationDestination?
     private var voice: HubNativeVoice? {
         get { HubAssistantCoordinator.shared.voice }
@@ -131,6 +133,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 let note = try await api.knowledgeNote(id: id)
                 guard generation == self.connectionGeneration else { throw CancellationError() }
                 return note
+            }, attachments: { [weak self] in
+                guard let self, self.connected, let server = self.server, let upload = self.chatAttachmentAPI else { return nil }
+                if self.chatAttachmentStore == nil,
+                   let base = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                          appropriateFor: nil, create: true) {
+                    self.chatAttachmentStore = try? HubAttachmentStore(root: base.appendingPathComponent("HubAttachmentOutbox", isDirectory: true))
+                }
+                guard let store = self.chatAttachmentStore else { return nil }
+                return HubChatAttachmentContext(server: server, store: store, upload: upload)
             }, chatAPI: { [weak self] in
                 guard let self, self.connected else { return nil }
                 return self.conversationAPI
@@ -392,6 +403,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         api = HubVoiceAPI(server: value, cookies: cookies)
         uiAPI = HubInstalledUIAPI(server: value, cookies: cookies)
         conversationAPI = HubConversationAPI(server: value, cookies: cookies)
+        chatAttachmentAPI = HubAttachmentAPI(server: value, cookies: cookies)
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         home.knowledge = nil
         home.planner = nil
@@ -584,7 +596,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 guard let self, generation == self.connectionGeneration else { return }
                 self.home.sending = false
                 self.home.draft = ""
-                self.home.openNativeChat = HubConversationChoice(sessionId: id, title: "New chat", updatedAt: Date().timeIntervalSince1970 * 1000)
+                self.home.openNativeChat = HubNativeChatRequest(choice: HubConversationChoice(
+                    sessionId: id, title: "New chat", updatedAt: Date().timeIntervalSince1970 * 1000))
             } catch {
                 guard let self, generation == self.connectionGeneration else { return }
                 self.home.sending = false
@@ -737,9 +750,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         do {
             let screen = try HubSharedFilesViewController(server: server, state: state, stillConnected: { [weak self] in
                 self?.connected == true && self?.connectionGeneration == generation && self?.server == server
-            }, openDraft: { [weak self] url in
-                guard let self, self.connected, self.connectionGeneration == generation, server.contains(url) else { return }
-                self.loadRemote(url)
+            }, openDraft: { [weak self] draft in
+                guard let self, self.connected, self.connectionGeneration == generation,
+                      draft.origin == server.origin.absoluteString else { return }
+                self.openChat(draft.sessionID)
             })
             present(UINavigationController(rootViewController: screen), animated: true)
         } catch { showNotice("Files are unavailable. Unlock the iPhone and check the app's sharing setup; HUB's normal file button remains available.") }
@@ -872,8 +886,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             return
         }
         if !showingHome { returnHome(refresh: false) }
-        home.openNativeChat = home.conversations?.first(where: { $0.sessionId == destination.sessionID })
+        let choice = home.conversations?.first(where: { $0.sessionId == destination.sessionID })
             ?? HubConversationChoice(sessionId: destination.sessionID, title: "Conversation", updatedAt: 0)
+        home.openNativeChat = HubNativeChatRequest(choice: choice)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { if navigation === activeNavigation { showFailure(error) } }

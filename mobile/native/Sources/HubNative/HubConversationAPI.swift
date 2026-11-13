@@ -100,10 +100,18 @@ public struct HubKnowledgeNote: Decodable {
 }
 
 public struct HubChatMessage: Identifiable {
+    public struct Photo: Decodable, Identifiable {
+        public let attachmentId: String
+        public let name: String?
+        public let bytes: Int
+        public let mediaType: String
+        public var id: String { attachmentId }
+    }
     public let id: String
     public let role: String
     public let text: String
     public let turn: Int?
+    public let photos: [Photo]
 }
 
 public struct HubChatSnapshot {
@@ -127,6 +135,18 @@ public struct HubChatScreenshot: Decodable, Identifiable {
     public let id: String
     public let name: String
     public let turn: Int
+}
+
+public struct HubChatPhoto {
+    public let name: String
+    public let mediaType: String
+    public let data: Data
+
+    public init(name: String, mediaType: String, data: Data) {
+        self.name = name
+        self.mediaType = mediaType
+        self.data = data
+    }
 }
 
 public struct HubUsageSnapshot: Decodable {
@@ -219,7 +239,11 @@ struct HubChatStreamFrame: Decodable {
     struct Entry: Decodable {
         struct Event: Decodable {
             struct Payload: Decodable {
-                struct Block: Decodable { let type: String; let text: String? }
+                struct Block: Decodable {
+                    let type: String
+                    let text: String?
+                    let attachment: HubChatMessage.Photo?
+                }
                 struct Message: Decodable { let content: [Block]? }
                 struct Source: Decodable { let kind: String }
                 struct Metadata: Decodable { let kind: String? }
@@ -272,10 +296,14 @@ struct HubChatStreamFrame: Decodable {
                     message = nil
                     return
                 }
-                let text = (payload.message?.content ?? payload.content ?? [])
-                    .filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n")
-                message = text.isEmpty ? nil : HubChatMessage(id: String(seq), role: type == "user/message" ? "user" : "assistant",
-                                                              text: text, turn: payload.turn)
+                let content = payload.message?.content ?? payload.content ?? []
+                let text = content.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n")
+                var seen: Set<String> = []
+                let photos = content.filter { $0.type == "image" }.compactMap(\.attachment)
+                    .filter { seen.insert($0.attachmentId).inserted }
+                message = text.isEmpty && photos.isEmpty ? nil : HubChatMessage(
+                    id: String(seq), role: type == "user/message" ? "user" : "assistant",
+                    text: text, turn: payload.turn, photos: photos)
             }
         }
         let event: Event
@@ -444,6 +472,56 @@ public final class HubConversationAPI {
         let work = try JSONDecoder().decode(HubHomeWork.self, from: data)
         guard work.byId.keys.allSatisfy(HubVoiceAPI.validID) else { throw HubAttachmentError.invalidResponse }
         return work
+    }
+
+    public func modelCatalog(refresh: Bool = false) async throws -> HubModelCatalog {
+        try await modelRequest(refresh ? ["action": "refresh"] : nil)
+    }
+
+    public func setModelFavorite(_ model: HubModelCatalog.Model, selected: Bool) async throws -> HubModelCatalog {
+        try await modelRequest(["action": "favorite", "provider": model.provider, "model": model.modelID, "selected": selected])
+    }
+
+    public func enableCatalogModel(_ model: HubModelCatalog.Model) async throws {
+        struct Availability: Decodable {
+            struct Selection: Decodable { let provider: String; let model: String }
+            let available: Selection
+        }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "action": "enable", "provider": model.provider, "model": model.modelID,
+        ])
+        let data = try await requestData("api/hub/models", headers: ["x-hub-models": "1"], body: body)
+        let receipt = try JSONDecoder().decode(Availability.self, from: data)
+        guard receipt.available.provider == model.provider, receipt.available.model == model.modelID else {
+            throw HubAttachmentError.invalidResponse
+        }
+    }
+
+    private func modelRequest(_ command: [String: Any]?) async throws -> HubModelCatalog {
+        let body = try command.map { try JSONSerialization.data(withJSONObject: $0) }
+        let data = try await requestData("api/hub/models", headers: ["x-hub-models": "1"], body: body, maxBytes: 4_194_304)
+        return try JSONDecoder().decode(HubModelCatalog.self, from: data)
+    }
+
+    public func instructions(sessionID: String? = nil) async throws -> HubInstructionCatalog {
+        var query: [URLQueryItem] = []
+        if let sessionID {
+            guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
+            query.append(URLQueryItem(name: "sessionId", value: sessionID))
+        }
+        let data = try await requestData("api/hub/instructions", headers: ["x-hub-instructions": "1"], query: query)
+        return try JSONDecoder().decode(HubInstructionCatalog.self, from: data)
+    }
+
+    public func saveInstruction(_ file: HubInstructionCatalog.File, content: String) async throws -> HubInstructionCatalog {
+        guard file.editable, let hash = file.hash, Self.isScreenshotID(hash),
+              file.id == "SOUL.md" || file.id == "USER.md" || file.id.hasPrefix("character:") else {
+            throw HubAttachmentError.invalidResponse
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["id": file.id, "hash": hash, "content": content])
+        guard body.count <= 80_000 else { throw HubAttachmentError.tooLarge }
+        let data = try await requestData("api/hub/instructions", headers: ["x-hub-instructions": "1"], body: body)
+        return try JSONDecoder().decode(HubInstructionCatalog.self, from: data)
     }
 
     public func chatCharacters(sessionID: String) async throws -> HubChatCharacterPicker {
@@ -618,15 +696,26 @@ public final class HubConversationAPI {
         return text
     }
 
-    public func sendChat(_ draft: String, sessionID: String) async throws {
+    public func sendChat(_ draft: String, sessionID: String, files: [String] = [], photos: [HubChatPhoto] = []) async throws {
         guard HubVoiceAPI.validID(sessionID) else { throw HubChatSendError.rejected }
-        let text = try promptText(draft)
+        let input = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard input.utf8.count <= 32_768, !input.isEmpty || !files.isEmpty || !photos.isEmpty,
+              files.count + photos.count <= 8, files.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 262_144 }),
+              photos.allSatisfy({ photo in
+                  ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(photo.mediaType) &&
+                      !photo.data.isEmpty && photo.data.count <= 20 * 1_024 * 1_024 && photo.name.utf8.count <= 240
+              }) else { throw HubChatSendError.invalidDraft }
+        let text = ([input].filter { !$0.isEmpty } + files).joined(separator: "\n\n")
+        var content = text.isEmpty ? [] : [["type": "text", "text": text]]
+        content.append(contentsOf: photos.map {
+            ["type": "image", "mediaType": $0.mediaType, "name": $0.name, "data": $0.data.base64EncodedString()]
+        })
         do {
             let receipt = try await rpc("session/prompt", request: [
                 "requestId": UUID().uuidString.lowercased(),
                 "sessionId": sessionID,
                 "mode": "queue",
-                "content": [["type": "text", "text": text]],
+                "content": content,
                 "clientTimeZone": TimeZone.current.identifier,
             ])
             guard receipt["accepted"] as? Bool == true else {
@@ -664,6 +753,24 @@ public final class HubConversationAPI {
         return try await requestData("api/hub/artifacts", headers: [
             "x-hub-daily-use": "1", "x-hub-session": sessionID, "x-hub-screenshot": id,
         ], mediaTypes: ["image/png", "image/jpeg", "image/webp"], maxBytes: 8 * 1024 * 1024)
+    }
+
+    public func chatPhoto(sessionID: String, photo: HubChatMessage.Photo) async throws -> Data {
+        let maxBytes = 20 * 1_024 * 1_024
+        guard HubVoiceAPI.validID(sessionID), photo.attachmentId.hasPrefix("sha256:"),
+              Self.isScreenshotID(String(photo.attachmentId.dropFirst(7))),
+              (1...maxBytes).contains(photo.bytes),
+              ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(photo.mediaType) else {
+            throw HubAttachmentError.invalidResponse
+        }
+        let response = try await rpc("session/attachment", request: [
+            "sessionId": sessionID, "attachmentId": photo.attachmentId,
+        ], maxBytes: maxBytes * 2)
+        guard let ref = response["attachment"] as? [String: Any], ref["attachmentId"] as? String == photo.attachmentId,
+              ref["mediaType"] as? String == photo.mediaType, ref["bytes"] as? Int == photo.bytes,
+              let encoded = response["data"] as? String, let bytes = Data(base64Encoded: encoded),
+              bytes.count == photo.bytes else { throw HubAttachmentError.invalidResponse }
+        return bytes
     }
 
     private static func isScreenshotID(_ id: String) -> Bool {

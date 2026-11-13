@@ -6,7 +6,7 @@ public final class HubAttachmentAPI {
     private let server: HubServer
     private let cookies: () async -> [HTTPCookie]
     private let session: URLSession
-    private struct Receipt: Decodable { let id: UUID; let name: String; let bytes: Int }
+    private struct Receipt: Decodable { let id: UUID; let name: String; let bytes: Int; let text: String? }
     public init(server: HubServer, configuration: URLSessionConfiguration = .ephemeral, cookies: @escaping () async -> [HTTPCookie]) {
         self.server = server; self.cookies = cookies
         let config = configuration.copy() as! URLSessionConfiguration
@@ -16,6 +16,19 @@ public final class HubAttachmentAPI {
     }
     deinit { session.invalidateAndCancel() }
     public func upload(_ draft: HubAttachmentDraft, bytes: Data) async throws {
+        _ = try await receipt(draft, bytes: bytes)
+    }
+
+    public func prepareChatFile(_ draft: HubAttachmentDraft, bytes: Data) async throws -> String {
+        guard draft.callID == "text-composer" else { throw HubAttachmentError.wrongConversation }
+        let value = try await receipt(draft, bytes: bytes)
+        let id = draft.id.uuidString.lowercased()
+        guard let text = value.text, text.utf8.count <= 262_144,
+              text.contains("{HUB_ATTACHMENT:\(id)}") else { throw HubAttachmentError.invalidResponse }
+        return text
+    }
+
+    private func receipt(_ draft: HubAttachmentDraft, bytes: Data) async throws -> Receipt {
         guard draft.origin == server.origin.absoluteString, HubVoiceAPI.validID(draft.sessionID),
               draft.bytes == bytes.count, bytes.count > 0, bytes.count <= HubAttachmentStore.maximumBytes,
               draft.sha256 == HubAttachmentStore.digest(bytes), !draft.name.isEmpty,
@@ -45,5 +58,6 @@ public final class HubAttachmentAPI {
         guard response.mimeType == "application/json", data.count <= 262_144 else { throw HubAttachmentError.invalidResponse }
         let receipt = try JSONDecoder().decode(Receipt.self, from: data)
         guard receipt.id == draft.id, receipt.bytes == draft.bytes else { throw HubAttachmentError.invalidResponse }
+        return receipt
     }
 }

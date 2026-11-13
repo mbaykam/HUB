@@ -1,6 +1,15 @@
 import SwiftUI
 import UIKit
 import HubNative
+import UniformTypeIdentifiers
+import PhotosUI
+import ImageIO
+
+struct HubChatAttachmentContext {
+    let server: HubServer
+    let store: HubAttachmentStore
+    let upload: HubAttachmentAPI
+}
 
 @MainActor
 struct HubLiveChatView: View {
@@ -9,6 +18,8 @@ struct HubLiveChatView: View {
     let back: () -> Void
     let voice: () -> Void
     let openChat: (HubConversationChoice) -> Void
+    let attachments: () -> HubChatAttachmentContext?
+    let requestID: UUID
     @FocusState private var composerFocused: Bool
     @State private var snapshot: HubChatSnapshot?
     @State private var screenshots: [HubChatScreenshot] = []
@@ -32,6 +43,11 @@ struct HubLiveChatView: View {
     @State private var characterPickerOpen = false
     @State private var character: String?
     @State private var researchMode: ResearchMode?
+    @State private var filePickerOpen = false
+    @State private var photoPickerOpen = false
+    @State private var fileDrafts: [HubAttachmentDraft] = []
+    @State private var attachmentBusy = false
+    @State private var instructionsOpen = false
 
     private enum ResearchMode: String, Identifiable {
         case new, jobs
@@ -75,10 +91,34 @@ struct HubLiveChatView: View {
         }
         .task(id: attempt) { await follow() }
         .task(id: snapshot?.latestScreenshotSequence) { await loadScreenshots() }
+        .task(id: requestID) { await loadFileDrafts() }
+        .fileImporter(isPresented: $filePickerOpen, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls): Task { await stageFiles(urls) }
+            case .failure: error = "Could not open the selected files."
+            }
+        }
+        .sheet(isPresented: $photoPickerOpen) {
+            HubChatPhotoPicker { result in
+                switch result {
+                case .success(let data): Task { await stagePhoto(data) }
+                case .failure: error = "Could not add this photo."
+                }
+            }
+        }
         .sheet(isPresented: $characterPickerOpen) {
             HubChatCharacterView(sessionID: chat.sessionId, api: api) { name in
                 character = name
             }
+        }
+        .sheet(isPresented: $instructionsOpen) {
+            NavigationView {
+                HubInstructionsView(api: api, sessionID: chat.sessionId)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Done") { instructionsOpen = false } }
+                    }
+            }
+            .navigationViewStyle(.stack)
         }
         .sheet(item: $researchMode) { mode in
             HubResearchView(sessionID: chat.sessionId, api: api, question: draft, showJobs: mode == .jobs,
@@ -112,16 +152,22 @@ struct HubLiveChatView: View {
                                 if message.role == "user" {
                                     HStack {
                                         Spacer(minLength: 48)
-                                        Text(message.text)
-                                            .padding(14)
-                                            .background(panel, in: RoundedRectangle(cornerRadius: 18))
+                                        VStack(alignment: .trailing, spacing: 8) {
+                                            if !message.text.isEmpty { Text(message.text) }
+                                            chatPhotos(message)
+                                        }
+                                        .padding(14)
+                                        .background(panel, in: RoundedRectangle(cornerRadius: 18))
                                     }
                                 } else {
                                     let formatted = try? AttributedString(markdown: message.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
-                                    Text(formatted ?? AttributedString(message.text)).textSelection(.enabled)
+                                    if !message.text.isEmpty {
+                                        Text(formatted ?? AttributedString(message.text)).textSelection(.enabled)
+                                    }
+                                    chatPhotos(message)
                                     if let turn = message.turn, messages.last(where: { $0.turn == turn && $0.role == "assistant" })?.id == message.id {
                                         ForEach(screenshots.filter { $0.turn == turn }) { screenshot in
-                                            HubChatScreenshotView(screenshot: screenshot, sessionID: chat.sessionId, api: api)
+                                            screenshotImage(screenshot)
                                         }
                                     }
                                 }
@@ -129,7 +175,7 @@ struct HubLiveChatView: View {
                             ForEach(screenshots.filter { screenshot in
                                 !messages.contains { $0.role == "assistant" && $0.turn == screenshot.turn }
                             }) { screenshot in
-                                HubChatScreenshotView(screenshot: screenshot, sessionID: chat.sessionId, api: api)
+                                screenshotImage(screenshot)
                             }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
@@ -194,6 +240,20 @@ struct HubLiveChatView: View {
         static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
     }
 
+    private func chatPhotos(_ message: HubChatMessage) -> some View {
+        ForEach(message.photos) { photo in
+            HubChatImageView(name: photo.name ?? "Photo") {
+                try await api.chatPhoto(sessionID: chat.sessionId, photo: photo)
+            }
+        }
+    }
+
+    private func screenshotImage(_ screenshot: HubChatScreenshot) -> some View {
+        HubChatImageView(name: screenshot.name) {
+            try await api.chatScreenshot(sessionID: chat.sessionId, id: screenshot.id)
+        }
+    }
+
     private func loadEarlierMessages() async {
         guard !historyLoading, let snapshot, let cursor = snapshot.historyCursor,
               let sequence = olderPage?.firstSequence ?? snapshot.firstSequence else { return }
@@ -215,6 +275,27 @@ struct HubLiveChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if !fileDrafts.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(fileDrafts, id: \.id) { file in
+                            HStack(spacing: 4) {
+                                Label(file.name, systemImage: "paperclip").lineLimit(1)
+                                Button {
+                                    Task { await removeFile(file) }
+                                } label: {
+                                    Image(systemName: "xmark").frame(width: 34, height: 44)
+                                }
+                                .accessibilityLabel("Remove \(file.name)")
+                                .disabled(sending || attachmentBusy || deliveryUncertain)
+                            }
+                            .font(.caption)
+                            .padding(.leading, 8)
+                            .background(panel, in: Capsule())
+                        }
+                    }
+                }
+            }
             HStack(spacing: 6) {
                 TextField("Chat…", text: $draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
                     .focused($composerFocused)
@@ -224,16 +305,31 @@ struct HubLiveChatView: View {
                 Menu {
                     Button {
                         composerFocused = false
+                        filePickerOpen = true
+                    } label: { Label("Files", systemImage: "paperclip") }
+                    .disabled(sending || connectionLost || attachmentBusy || deliveryUncertain)
+                    Button {
+                        composerFocused = false
+                        photoPickerOpen = true
+                    } label: { Label("Photos", systemImage: "photo") }
+                    .disabled(sending || connectionLost || attachmentBusy || deliveryUncertain)
+                    Button {
+                        composerFocused = false
                         characterPickerOpen = true
                     } label: { Label("Choose character", systemImage: "person.crop.circle") }
                     Button {
                         composerFocused = false
                         researchMode = .new
                     } label: { Label("Research…", systemImage: "magnifyingglass") }
+                    .disabled(!fileDrafts.isEmpty)
                     Button {
                         composerFocused = false
                         researchMode = .jobs
                     } label: { Label("Research tasks", systemImage: "list.bullet.rectangle") }
+                    Button {
+                        composerFocused = false
+                        instructionsOpen = true
+                    } label: { Label("Instructions", systemImage: "doc.text") }
                 } label: {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }
@@ -270,8 +366,85 @@ struct HubLiveChatView: View {
     }
 
     private var canSend: Bool {
-        snapshot != nil && !sending && awaitingAfter == nil && !deliveryUncertain && snapshot?.running == false && !connectionLost &&
-            !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        snapshot != nil && !sending && !attachmentBusy && awaitingAfter == nil && !deliveryUncertain &&
+            snapshot?.running == false && !connectionLost &&
+            (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !fileDrafts.isEmpty)
+    }
+
+    private func loadFileDrafts() async {
+        guard let context = attachments() else { return }
+        do {
+            let values = try await context.store.recovery().drafts
+            guard !Task.isCancelled else { return }
+            fileDrafts = values.filter {
+                $0.origin == context.server.origin.absoluteString && $0.sessionID == chat.sessionId && $0.callID == "text-composer"
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        } catch {
+            if !Task.isCancelled { self.error = "Could not read files saved for this conversation." }
+        }
+    }
+
+    private func stageFiles(_ urls: [URL]) async {
+        guard !attachmentBusy, !sending, let context = attachments() else { return }
+        attachmentBusy = true
+        error = nil
+        defer { attachmentBusy = false }
+        for url in urls.prefix(max(0, 8 - fileDrafts.count)) {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let file = try await context.store.stage(source: url, server: context.server,
+                                                         sessionID: chat.sessionId, callID: "text-composer")
+                fileDrafts.append(file)
+            } catch {
+                self.error = "Could not add \(url.lastPathComponent). Choose a nonempty file up to 25 MB."
+            }
+        }
+    }
+
+    private func removeFile(_ file: HubAttachmentDraft) async {
+        guard !sending, !attachmentBusy, let context = attachments() else { return }
+        attachmentBusy = true
+        defer { attachmentBusy = false }
+        do {
+            try await context.store.discard(file)
+            fileDrafts.removeAll { $0.id == file.id }
+        } catch {
+            self.error = "Could not remove the local copy."
+        }
+    }
+
+    private func stagePhoto(_ data: Data) async {
+        guard !attachmentBusy, !sending, fileDrafts.count < 8, let context = attachments() else { return }
+        attachmentBusy = true
+        defer { attachmentBusy = false }
+        do {
+            let file = try await context.store.stage(data: data, name: "Photo.jpg", server: context.server,
+                                                     sessionID: chat.sessionId, callID: "text-composer")
+            fileDrafts.append(file)
+            error = nil
+        } catch {
+            self.error = "Could not save this photo to the draft."
+        }
+    }
+
+    private func prepareFiles(_ files: [HubAttachmentDraft], context: HubChatAttachmentContext) async throws -> ([String], [HubChatPhoto]) {
+        var references: [String] = []
+        var photos: [HubChatPhoto] = []
+        for file in files {
+            let data = try await context.store.bytes(file, server: context.server, sessionID: chat.sessionId, callID: "text-composer")
+            let fileType = UTType(filenameExtension: (file.name as NSString).pathExtension)
+            let type = fileType?.preferredMIMEType
+            if let type, ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(type) {
+                photos.append(HubChatPhoto(name: file.name, mediaType: type, data: data))
+            } else if fileType?.conforms(to: .image) == true {
+                throw HubAttachmentError.invalidFile
+            } else {
+                references.append(try await context.upload.prepareChatFile(file, bytes: data))
+            }
+        }
+        return (references, photos)
     }
 
     private func follow() async {
@@ -307,6 +480,7 @@ struct HubLiveChatView: View {
     private func send() {
         guard canSend else { return }
         let text = draft
+        let files = fileDrafts
         let previous = snapshot?.messages.last?.id ?? ""
         composerFocused = false
         readingLatest = true
@@ -316,8 +490,23 @@ struct HubLiveChatView: View {
         Task {
             defer { sending = false }
             do {
-                try await api.sendChat(text, sessionID: chat.sessionId)
+                var prepared: ([String], [HubChatPhoto]) = ([], [])
+                let context = attachments()
+                if !files.isEmpty {
+                    guard let context else { throw HubAttachmentError.signInRequired }
+                    prepared = try await prepareFiles(files, context: context)
+                }
+                try await api.sendChat(text, sessionID: chat.sessionId, files: prepared.0, photos: prepared.1)
                 if draft == text { draft = "" }
+                for file in files {
+                    do {
+                        try await context?.store.discard(file)
+                        fileDrafts.removeAll { $0.id == file.id }
+                    } catch {
+                        self.error = "Message sent. A local attachment copy could not be cleared."
+                        fileDrafts.removeAll { $0.id == file.id }
+                    }
+                }
                 if !connectionLost, snapshot?.running != true, (snapshot?.messages.last?.id ?? "") == previous {
                     awaitingAfter = previous
                     try? await Task.sleep(nanoseconds: 12_000_000_000)
@@ -330,6 +519,8 @@ struct HubLiveChatView: View {
             } catch HubChatSendError.unknownDelivery(_) {
                 deliveryUncertain = true
                 error = "Delivery could not be confirmed. Check this conversation before sending again."
+            } catch HubAttachmentError.invalidFile {
+                self.error = "One attachment could not be sent. Photos must be JPEG, PNG, GIF or WebP."
             } catch {
                 self.error = "Message could not be sent. Your text is still here."
             }
@@ -441,10 +632,9 @@ private struct HubChatCharacterView: View {
 }
 
 @MainActor
-private struct HubChatScreenshotView: View {
-    let screenshot: HubChatScreenshot
-    let sessionID: String
-    let api: HubConversationAPI
+private struct HubChatImageView: View {
+    let name: String
+    let load: () async throws -> Data
     @State private var image: UIImage?
     @State private var failed = false
     @State private var attempt = 0
@@ -452,20 +642,74 @@ private struct HubChatScreenshotView: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(screenshot.name)
+                Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(name)
             } else if failed {
-                Button("Retry loading screenshot") { failed = false; attempt += 1 }
+                Button("Retry loading image") { failed = false; attempt += 1 }
             } else {
-                ProgressView("Loading screenshot…")
+                ProgressView("Loading image…")
             }
         }
         .task(id: attempt) {
             do {
-                let bytes = try await api.chatScreenshot(sessionID: sessionID, id: screenshot.id)
+                let bytes = try await load()
                 guard let decoded = UIImage(data: bytes) else { throw HubAttachmentError.invalidResponse }
                 if !Task.isCancelled { image = decoded }
             } catch {
                 if !Task.isCancelled { failed = true }
+            }
+        }
+    }
+}
+
+@MainActor
+private struct HubChatPhotoPicker: UIViewControllerRepresentable {
+    let completion: (Result<Data, Error>) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration()
+        configuration.filter = .images
+        configuration.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(dismiss: { dismiss() }, completion: completion)
+    }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let dismiss: () -> Void
+        let completion: (Result<Data, Error>) -> Void
+
+        init(dismiss: @escaping () -> Void, completion: @escaping (Result<Data, Error>) -> Void) {
+            self.dismiss = dismiss
+            self.completion = completion
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            dismiss()
+            guard let provider = results.first?.itemProvider else { return }
+            let completion = completion
+            provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, _ in
+                let result = Result {
+                    guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceThumbnailMaxPixelSize: 2400,
+                          ] as CFDictionary) else { throw HubAttachmentError.invalidFile }
+                    let data = NSMutableData()
+                    guard let encoder = CGImageDestinationCreateWithData(data as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil)
+                    else { throw HubAttachmentError.invalidFile }
+                    CGImageDestinationAddImage(encoder, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+                    guard CGImageDestinationFinalize(encoder) else { throw HubAttachmentError.invalidFile }
+                    return data as Data
+                }
+                DispatchQueue.main.async { completion(result) }
             }
         }
     }

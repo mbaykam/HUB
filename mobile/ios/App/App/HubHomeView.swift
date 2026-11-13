@@ -19,7 +19,12 @@ final class HubHomeModel: ObservableObject {
     @Published var work: HubHomeWork?
     @Published var workUnavailable = false
     @Published var hasActiveVoice = false
-    @Published var openNativeChat: HubConversationChoice?
+    @Published var openNativeChat: HubNativeChatRequest?
+}
+
+struct HubNativeChatRequest: Equatable {
+    let id = UUID()
+    let choice: HubConversationChoice
 }
 
 @MainActor
@@ -37,6 +42,7 @@ struct HubHomeView: View {
     var completeTodo: (HubHomePlanner.Item) -> Void
     var restorePlannerItem: (HubHomePlanner.Item) -> Void
     var readKnowledgeNote: (String) async throws -> HubKnowledgeNote
+    var attachments: () -> HubChatAttachmentContext?
     var chatAPI: () -> HubConversationAPI?
     var readTasks: () async throws -> HubWorkspaceTasks
 
@@ -55,9 +61,11 @@ struct HubHomeView: View {
     @State private var noteAttempt = 0
     @State private var knowledgeScope = HubKnowledgeGraphView.Scope.all
     @State private var knowledgeQuery = ""
-    @State private var selectedChat: (choice: HubConversationChoice, api: HubConversationAPI)?
+    @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
     @State private var tasksOpen = false
     @State private var usageOpen = false
+    @State private var settingsOpen = false
+    @State private var openPhoneOptions = false
     @State private var knowledgeActivityOpen = false
     @State private var historyQuery = ""
     @State private var historyResults: HubConversationCatalog?
@@ -85,9 +93,10 @@ struct HubHomeView: View {
                 .allowsHitTesting(selectedChat == nil)
                 .accessibilityHidden(selectedChat != nil)
             if let selectedChat {
-                HubLiveChatView(chat: selectedChat.choice, api: selectedChat.api,
-                                back: { self.selectedChat = nil }, voice: voice, openChat: showChat)
-                    .id(selectedChat.choice.sessionId)
+                HubLiveChatView(chat: selectedChat.request.choice, api: selectedChat.api,
+                                back: { self.selectedChat = nil }, voice: voice, openChat: showChat, attachments: attachments,
+                                requestID: selectedChat.request.id)
+                    .id(selectedChat.request.choice.sessionId)
             }
         }
         .foregroundStyle(.white)
@@ -101,11 +110,22 @@ struct HubHomeView: View {
         .sheet(isPresented: $usageOpen) {
             if let api = chatAPI() { HubUsageView(api: api) }
         }
+        .sheet(isPresented: $settingsOpen, onDismiss: {
+            if openPhoneOptions {
+                openPhoneOptions = false
+                options()
+            }
+        }) {
+            HubWorkspaceSettingsView(api: chatAPI()) {
+                openPhoneOptions = true
+                settingsOpen = false
+            }
+        }
         .sheet(isPresented: $knowledgeActivityOpen) {
             if let api = chatAPI() { HubKnowledgeActivityView(api: api) }
         }
-        .onChange(of: model.openNativeChat) { chat in
-            if let chat { showChat(chat); model.openNativeChat = nil }
+        .onChange(of: model.openNativeChat) { request in
+            if let request { showChat(request); model.openNativeChat = nil }
         }
         .onChange(of: model.connection) { connection in
             if connection == .needsSetup || connection == .signInRequired {
@@ -299,8 +319,8 @@ struct HubHomeView: View {
                 .disabled(model.connection != .connected)
                 Button {
                     closePanel()
-                    options()
-                } label: { Label("iPhone settings", systemImage: "gearshape").frame(minHeight: 44) }
+                    settingsOpen = true
+                } label: { Label("Settings", systemImage: "gearshape").frame(minHeight: 44) }
                 Button {
                     closePanel()
                     workspace()
@@ -382,14 +402,19 @@ struct HubHomeView: View {
     }
 
     private func showChat(_ chat: HubConversationChoice) {
+        showChat(HubNativeChatRequest(choice: chat))
+    }
+
+    private func showChat(_ request: HubNativeChatRequest) {
         guard let api = chatAPI() else { return }
         dismissKeyboard {
             closePanel()
             knowledgeOpen = false
             tasksOpen = false
             usageOpen = false
+            settingsOpen = false
             knowledgeActivityOpen = false
-            selectedChat = (chat, api)
+            selectedChat = (request, api)
         }
     }
 
