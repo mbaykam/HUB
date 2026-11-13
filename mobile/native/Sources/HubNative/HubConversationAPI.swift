@@ -118,6 +118,11 @@ public struct HubKnowledgeNote: Decodable {
     public let id: String
     public let title: String
     public let content: String
+    public let hash: String?
+    public let kind: String?
+    public let protected: Bool?
+    public let backlinks: [HubHomeKnowledge.Node]?
+    public let links: [HubHomeKnowledge.Node]?
 }
 
 public struct HubChatMessage: Identifiable {
@@ -156,6 +161,22 @@ public struct HubChatScreenshot: Decodable, Identifiable {
     public let id: String
     public let name: String
     public let turn: Int
+}
+
+public struct HubConversationApp: Decodable, Identifiable {
+    public let id: String
+    public let name: String
+    public let at: Double
+}
+
+public struct HubConversationAppDocument: Decodable {
+    public let name: String
+    public let document: String
+}
+
+public struct HubChatArtifacts: Decodable {
+    public let screenshots: [HubChatScreenshot]
+    public let artifacts: [HubConversationApp]?
 }
 
 public struct HubChatPhoto {
@@ -406,6 +427,9 @@ public struct HubHomePlanner: Decodable {
         public let deleted: Bool
         public let date: String?
         public let start: String?
+        public let end: String?
+        public let details: String?
+        public let sourceSessionId: String?
         public let version: Int?
         public let timeZone: String?
         public let horizon: String?
@@ -418,11 +442,7 @@ public struct HubHomePlanner: Decodable {
                 return day == String(format: "%04d-%02d-%02d", selected.year ?? 0, selected.month ?? 0, selected.day ?? 0)
             }
             guard let start else { return false }
-            let parser = ISO8601DateFormatter()
-            parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let fractional = parser.date(from: start)
-            parser.formatOptions = [.withInternetDateTime]
-            guard let instant = fractional ?? parser.date(from: start) else { return false }
+            guard let instant = HubPlannerDraft.parseInstant(start) else { return false }
             if let timeZone, let zone = TimeZone(identifier: timeZone) { calendar.timeZone = zone }
             return calendar.dateComponents([.year, .month, .day], from: instant) == selected
         }
@@ -717,6 +737,19 @@ public final class HubConversationAPI {
         return note
     }
 
+    public func saveKnowledgeNote(_ note: HubKnowledgeNote, content: String) async throws -> HubKnowledgeNote {
+        guard !note.id.isEmpty, note.id.utf8.count <= 1_024, note.kind != "conversation", note.protected != true,
+              let hash = note.hash, Self.isScreenshotID(hash) else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "action": "save-note", "id": note.id, "hash": hash, "content": content,
+        ])
+        guard body.count <= 200_000 else { throw HubAttachmentError.tooLarge }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body)
+        let saved = try JSONDecoder().decode(HubKnowledgeNote.self, from: data)
+        guard saved.id == note.id else { throw HubAttachmentError.invalidResponse }
+        return saved
+    }
+
     public func knowledgeActivity(offset: Int = 0) async throws -> HubKnowledgeActivity {
         guard offset >= 0 else { throw HubAttachmentError.invalidResponse }
         let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
@@ -748,6 +781,40 @@ public final class HubConversationAPI {
         guard HubVoiceAPI.validID(item.id), item.deleted || item.state == "done",
               let version = item.version, version >= 0 else { throw HubAttachmentError.invalidResponse }
         return try await changePlanner(["action": item.deleted ? "restore" : "reopen", "id": item.id, "version": version])
+    }
+
+    public func removePlannerItem(_ item: HubHomePlanner.Item) async throws -> HubHomePlanner {
+        guard UUID(uuidString: item.id) != nil, !item.deleted, let version = item.version, version >= 0 else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return try await changePlanner(["action": "remove", "id": item.id, "version": version])
+    }
+
+    public func savePlannerItem(_ draft: HubPlannerDraft) async throws -> HubHomePlanner {
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard UUID(uuidString: draft.id) != nil, draft.version >= 0, !title.isEmpty, title.utf16.count <= 180,
+              draft.details.utf16.count <= 4_000, let zone = TimeZone(identifier: draft.timeZone),
+              draft.kind != .event || draft.date != nil || draft.start != nil else {
+            throw HubAttachmentError.invalidResponse
+        }
+        if let end = draft.end {
+            guard let start = draft.start, end > start else { throw HubAttachmentError.invalidResponse }
+        }
+        var value: [String: Any] = ["id": draft.id, "version": draft.version, "kind": draft.kind.rawValue,
+                                    "title": title, "details": draft.details, "horizon": draft.horizon.rawValue, "timeZone": zone.identifier]
+        let formatter = ISO8601DateFormatter()
+        if let start = draft.start {
+            value["start"] = formatter.string(from: start)
+            if let end = draft.end { value["end"] = formatter.string(from: end) }
+        } else if let date = draft.date {
+            let dateOnly = DateFormatter()
+            dateOnly.calendar = Calendar(identifier: .gregorian)
+            dateOnly.locale = Locale(identifier: "en_US_POSIX")
+            dateOnly.timeZone = zone
+            dateOnly.dateFormat = "yyyy-MM-dd"
+            value["date"] = dateOnly.string(from: date)
+        }
+        return try await changePlanner(["action": "save", "item": value])
     }
 
     private func changePlanner(_ command: [String: Any]) async throws -> HubHomePlanner {
@@ -818,15 +885,31 @@ public final class HubConversationAPI {
     }
 
     public func chatScreenshots(sessionID: String) async throws -> [HubChatScreenshot] {
+        try await chatArtifacts(sessionID: sessionID).screenshots
+    }
+
+    public func chatArtifacts(sessionID: String) async throws -> HubChatArtifacts {
         guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
-        struct Catalog: Decodable { let screenshots: [HubChatScreenshot] }
         let data = try await requestData("api/hub/artifacts", headers: ["x-hub-daily-use": "1", "x-hub-session": sessionID])
-        let catalog = try JSONDecoder().decode(Catalog.self, from: data)
+        let catalog = try JSONDecoder().decode(HubChatArtifacts.self, from: data)
         guard catalog.screenshots.allSatisfy({ Self.isScreenshotID($0.id) }),
-              Set(catalog.screenshots.map(\.id)).count == catalog.screenshots.count else {
+              Set(catalog.screenshots.map(\.id)).count == catalog.screenshots.count,
+              catalog.artifacts?.allSatisfy({ Self.isScreenshotID($0.id) }) != false else {
             throw HubAttachmentError.invalidResponse
         }
-        return catalog.screenshots
+        return catalog
+    }
+
+    public func chatAppDocument(sessionID: String, id: String) async throws -> HubConversationAppDocument {
+        guard HubVoiceAPI.validID(sessionID), Self.isScreenshotID(id) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/artifacts", headers: [
+            "x-hub-daily-use": "1", "x-hub-session": sessionID, "x-hub-artifact": id,
+        ], maxBytes: 10_000_000)
+        let document = try JSONDecoder().decode(HubConversationAppDocument.self, from: data)
+        guard document.document.hasPrefix("<!doctype html><html><head>"), document.document.utf8.count <= 6_000_000 else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return document
     }
 
     public func chatScreenshot(sessionID: String, id: String) async throws -> Data {

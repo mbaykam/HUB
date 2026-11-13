@@ -48,6 +48,7 @@ struct HubLiveChatView: View {
     @State private var fileDrafts: [HubAttachmentDraft] = []
     @State private var attachmentBusy = false
     @State private var instructionsOpen = false
+    @State private var appsOpen = false
 
     private enum ResearchMode: String, Identifiable {
         case new, jobs
@@ -120,6 +121,7 @@ struct HubLiveChatView: View {
             }
             .navigationViewStyle(.stack)
         }
+        .sheet(isPresented: $appsOpen) { HubConversationAppsView(api: api, sessionID: chat.sessionId) }
         .sheet(item: $researchMode) { mode in
             HubResearchView(sessionID: chat.sessionId, api: api, question: draft, showJobs: mode == .jobs,
                             didStart: { question in
@@ -330,6 +332,10 @@ struct HubLiveChatView: View {
                         composerFocused = false
                         instructionsOpen = true
                     } label: { Label("Instructions", systemImage: "doc.text") }
+                    Button {
+                        composerFocused = false
+                        appsOpen = true
+                    } label: { Label("Conversation apps", systemImage: "doc.richtext") }
                 } label: {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }

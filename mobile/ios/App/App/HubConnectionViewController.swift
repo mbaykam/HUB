@@ -127,6 +127,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 Task { [weak self] in _ = await self?.changeHomePlanner { try await $0.completeTodo(item) } }
             }, restorePlannerItem: { [weak self] item in
                 Task { [weak self] in _ = await self?.changeHomePlanner { try await $0.restorePlannerItem(item) } }
+            }, savePlannerItem: { [weak self] draft in
+                await self?.changeHomePlanner { try await $0.savePlannerItem(draft) } ?? false
+            }, removePlannerItem: { [weak self] item in
+                await self?.changeHomePlanner { try await $0.removePlannerItem(item) } ?? false
             }, readKnowledgeNote: { [weak self] id in
                 guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
                 let generation = self.connectionGeneration
