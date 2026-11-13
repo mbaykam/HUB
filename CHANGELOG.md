@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.4
+
+- Capture the primary Windows display for a direct screenshot request and show it in the same chat.
+- Reject transparent or invalid screenshots and report Windows capture failures clearly.
+
 ## 1.10.3
 
 - Repair phone composer control placement, Stop focus, and drawer navigation after Home.

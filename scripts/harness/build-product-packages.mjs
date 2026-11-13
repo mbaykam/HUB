@@ -3,6 +3,7 @@
 import { build } from "esbuild";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLicenses } from "./browser-licenses.mjs";
@@ -15,6 +16,7 @@ const overlayPackageRoot = join(
   "packages",
   "harness-overlay",
 );
+const overlayRequire = createRequire(join(overlayPackageRoot, "package.json"));
 const modelRuntimePackageRoot = join(
   projectRoot,
   "packages",
@@ -303,6 +305,11 @@ await Promise.all([
     outfile: join(overlayOutputRoot, "characters.js"),
     bundle: true, packages: "external", format: "esm", platform: "node",
     target: "es2022", tsconfig: tsconfigPath, sourcemap: true,
+    // The product overlay is injected after the Harness dependency deployment.
+    banner: {js: 'import { createRequire as screenshotRequire } from "node:module"; const require = screenshotRequire(import.meta.url);'},
+    plugins: [{name: "bundle-screenshot-decoder", setup(builder) {
+      builder.onResolve({filter: /^pngjs$/}, () => ({path: overlayRequire.resolve("pngjs")}));
+    }}],
   }),
   build({
     entryPoints: [join(overlayPackageRoot, "src", "models.ts")],

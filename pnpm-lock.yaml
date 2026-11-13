@@ -177,6 +177,9 @@ importers:
       dompurify:
         specifier: 3.4.14
         version: 3.4.14
+      pngjs:
+        specifier: 5.0.0
+        version: 5.0.0
       qrcode:
         specifier: 1.5.4
         version: 1.5.4

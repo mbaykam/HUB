@@ -29,6 +29,7 @@ export const AGENT_BROWSER_OPERATIONS = [
   "scroll",
   "wait",
   "screenshot",
+  "desktop-screenshot",
   "close",
 ] as const;
 
@@ -288,6 +289,11 @@ export interface AgentBrowserScreenshotResult
   readonly data: string;
 }
 
+export interface AgentDesktopScreenshotResult {
+  readonly mimeType: "image/png";
+  readonly data: string;
+}
+
 export interface AgentBrowserCloseResult {
   readonly sessionId: string;
   readonly closed: true;
@@ -300,6 +306,7 @@ export type AgentBrowserOperationResult =
   | AgentBrowserLocateResult
   | AgentBrowserScrollResult
   | AgentBrowserScreenshotResult
+  | AgentDesktopScreenshotResult
   | AgentBrowserCloseResult;
 
 export interface AgentBrowserRequest {
@@ -896,6 +903,9 @@ export function parseAgentBrowserToolPayload(
 ): Record<string, unknown> {
   const payload = record(value, `Agent Browser ${operation} payload`);
   switch (operation) {
+    case "desktop-screenshot":
+      if (!exactKeys(payload, [])) throw new TypeError("invalid desktop screenshot payload");
+      return {};
     case "open":
       if (!exactKeys(payload, ["url"])) {
         throw new TypeError("invalid Agent Browser open payload");
@@ -1788,6 +1798,15 @@ export function parseAgentBrowserOperationResult(
   operation: AgentBrowserOperation,
   value: unknown,
 ): AgentBrowserOperationResult {
+  if (operation === "desktop-screenshot") {
+    const result = record(value, "desktop screenshot result");
+    if (!exactKeys(result, ["mimeType", "data"]) || result.mimeType !== "image/png") {
+      throw new TypeError("invalid desktop screenshot result");
+    }
+    const data = boundedString(result.data, "desktop screenshot", MAX_SCREENSHOT_BASE64_LENGTH);
+    if (!/^[a-zA-Z0-9+/]+={0,2}$/u.test(data)) throw new TypeError("invalid desktop screenshot data");
+    return {mimeType: "image/png", data};
+  }
   if (operation === "close") {
     const result = record(value, "Agent Browser close result");
     if (

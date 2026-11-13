@@ -517,6 +517,7 @@ function runtimeFixture(options = {}) {
     cdpCommandTimeoutMs: options.cdpCommandTimeoutMs ?? 250,
     sessionCleanupTimeoutMs: options.sessionCleanupTimeoutMs,
     history: options.history,
+    captureDesktop: options.captureDesktop,
   });
   const ipc = new FakeIpc();
   const embedder = new FakeEmbedder();
@@ -534,6 +535,21 @@ function runtimeFixture(options = {}) {
     sessions,
   };
 }
+
+test("desktop capture routes through the parent without opening a browser tab", async () => {
+  const data = Buffer.from("fixture");
+  let count = 0;
+  const target = runtimeFixture({captureDesktop: async () => { count++; return data; }});
+  const request = createAgentBrowserRequest(1, "conversation-1", "desktop-screenshot", {});
+  const signal = new AbortController().signal;
+  assert.deepEqual(await target.runtime.handleProcessRequest(request, signal), {
+    mimeType: "image/png", data: data.toString("base64"),
+  });
+  assert.equal(count, 1);
+  assert.equal(target.sessions.size, 0);
+  const unavailable = runtimeFixture({captureDesktop: async () => { throw Error("private Windows diagnostic"); }});
+  await assert.rejects(unavailable.runtime.handleProcessRequest(request, signal), /primary Windows display could not be captured/);
+});
 
 test("Agent Browser runtime records trusted Web Tab visits as human", () => {
   const visits = [];
