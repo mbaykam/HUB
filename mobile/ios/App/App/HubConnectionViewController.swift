@@ -118,23 +118,22 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             workspace: { [weak self] in self?.openWorkspace() },
             openChat: { [weak self] id in self?.openChat(id) },
             send: { [weak self] in self?.sendHomeDraft() },
-            addTodo: { [weak self] id, title in
-                await self?.changeHomePlanner { try await $0.addTodo(id: id, title: title) } ?? false
+            addTodo: { [weak self] id, title, horizon in
+                await self?.changeHomePlanner { try await $0.addTodo(id: id, title: title, horizon: horizon) } ?? false
             },
             completeTodo: { [weak self] item in
                 Task { [weak self] in _ = await self?.changeHomePlanner { try await $0.completeTodo(item) } }
+            }, restorePlannerItem: { [weak self] item in
+                Task { [weak self] in _ = await self?.changeHomePlanner { try await $0.restorePlannerItem(item) } }
             }, readKnowledgeNote: { [weak self] id in
                 guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
                 let generation = self.connectionGeneration
                 let note = try await api.knowledgeNote(id: id)
                 guard generation == self.connectionGeneration else { throw CancellationError() }
                 return note
-            }, readChat: { [weak self] id in
-                guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
-                let generation = self.connectionGeneration
-                let snapshot = try await api.chatSnapshot(sessionID: id)
-                guard generation == self.connectionGeneration else { throw CancellationError() }
-                return snapshot
+            }, chatAPI: { [weak self] in
+                guard let self, self.connected else { return nil }
+                return self.conversationAPI
             }, readTasks: { [weak self] in
                 guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
                 let generation = self.connectionGeneration
@@ -399,6 +398,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         home.plannerSaving = false
         home.plannerError = nil
         home.conversations = nil
+        home.work = nil
+        home.workUnavailable = false
         home.uncertainChat = nil
         home.sendError = nil
         if !firstAppearance { returnHome() }
@@ -428,7 +429,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 async let knowledge: Void = self.loadHomeKnowledge(conversationAPI, attempt: attempt)
                 async let planner: Void = self.loadHomePlanner(conversationAPI, attempt: attempt)
                 async let chats: Void = self.loadHomeChats(conversationAPI, attempt: attempt)
-                _ = await (knowledge, planner, chats)
+                async let work: Void = self.loadHomeWork(conversationAPI, attempt: attempt)
+                _ = await (knowledge, planner, chats, work)
                 guard !Task.isCancelled, self.showingHome, self.homeState.isCurrent(attempt) else { return }
                 self.home.refreshing = false
                 let elapsed = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
@@ -492,6 +494,19 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         } catch { homeDataFailed(error, attempt: attempt) }
     }
 
+    private func loadHomeWork(_ api: HubConversationAPI, attempt: UInt64) async {
+        do {
+            let value = try await api.workActivity()
+            guard showingHome, !Task.isCancelled, homeState.isCurrent(attempt) else { return }
+            home.work = value
+            home.workUnavailable = false
+        } catch {
+            guard showingHome, !Task.isCancelled, homeState.isCurrent(attempt) else { return }
+            home.workUnavailable = true
+            if error as? HubAttachmentError == .signInRequired { homeDataFailed(error, attempt: attempt) }
+        }
+    }
+
     private func homeDataFailed(_ error: Error, attempt: UInt64) {
         guard showingHome, !Task.isCancelled, homeState.isCurrent(attempt) else { return }
         if error as? HubAttachmentError == .signInRequired {
@@ -509,7 +524,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         connected = false
         home.connection = homeState.connection
         home.refreshing = false
-        if signIn { home.knowledge = nil; home.planner = nil; home.conversations = nil }
+        if signIn { home.knowledge = nil; home.planner = nil; home.conversations = nil; home.work = nil }
     }
 
     private func saveWebSession(_ expected: HubServer) async {
@@ -569,7 +584,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 guard let self, generation == self.connectionGeneration else { return }
                 self.home.sending = false
                 self.home.draft = ""
-                self.openChat(id)
+                self.home.openNativeChat = HubConversationChoice(sessionId: id, title: "New chat", updatedAt: Date().timeIntervalSince1970 * 1000)
             } catch {
                 guard let self, generation == self.connectionGeneration else { return }
                 self.home.sending = false
@@ -589,7 +604,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
     }
 
-    private func returnHome() {
+    private func returnHome(refresh: Bool = true) {
         signingIn = false
         showingHome = true
         view.backgroundColor = HubHomeView.backgroundColor
@@ -603,7 +618,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         workspaceBar.isHidden = true
         homeController.view.isHidden = false
         home.hasActiveVoice = voice?.isActive == true
-        refreshHome()
+        if refresh { refreshHome() }
     }
 
     private func showWorkspace() {
@@ -852,11 +867,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func openPendingNotification() {
         guard connected, let server, let destination = notificationDestination else { return }
         notificationDestination = nil
-        guard let url = try? destination.url(for: server) else {
+        guard destination.server == server else {
             message.text = "This notification belongs to a different HUB. Your connection was not changed."
             return
         }
-        loadRemote(url)
+        if !showingHome { returnHome(refresh: false) }
+        home.openNativeChat = home.conversations?.first(where: { $0.sessionId == destination.sessionID })
+            ?? HubConversationChoice(sessionId: destination.sessionID, title: "Conversation", updatedAt: 0)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { if navigation === activeNavigation { showFailure(error) } }
