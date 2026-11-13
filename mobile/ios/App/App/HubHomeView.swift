@@ -56,6 +56,8 @@ struct HubHomeView: View {
 
     @State private var panel: Panel?
     @State private var knowledgeOpen = false
+    @State private var knowledgeDomainsOpen = false
+    @State private var knowledgeRefreshError = false
     @State private var selectedNoteID: String?
     @State private var selectedNote: HubKnowledgeNote?
     @State private var noteLoadFailed = false
@@ -215,6 +217,8 @@ struct HubHomeView: View {
             if connection == .needsSetup || connection == .signInRequired {
                 chatPreferences = .defaults
                 knowledgeOpen = false
+                knowledgeDomainsOpen = false
+                knowledgeRefreshError = false
                 clearKnowledgeSelection()
                 tasksOpen = false
                 usageOpen = false
@@ -799,6 +803,7 @@ struct HubHomeView: View {
                         .disabled(noteSaving || noteEditing)
                 } else {
                     Text("Knowledge").font(.headline).accessibilityAddTraits(.isHeader)
+                    Button("Domains") { knowledgeDomainsOpen = true }.disabled(model.connection != .connected)
                 }
                 Spacer()
                 Button("Done") { knowledgeOpen = false }.disabled(noteSaving || noteEditing)
@@ -837,6 +842,23 @@ struct HubHomeView: View {
         .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(.dark)
         .interactiveDismissDisabled(noteSaving || noteEditing)
+        .sheet(isPresented: $knowledgeDomainsOpen) {
+            if let api = chatAPI() {
+                HubKnowledgeDomainsView(api: api, changed: refreshKnowledgeGraph)
+            }
+        }
+    }
+
+    private func refreshKnowledgeGraph() async {
+        guard let api = chatAPI() else { return }
+        do {
+            let graph = try await api.knowledge()
+            guard chatAPI() === api else { return }
+            model.knowledge = graph
+            knowledgeRefreshError = false
+        } catch {
+            if chatAPI() === api { knowledgeRefreshError = true }
+        }
     }
 
     private func knowledgeNote(_ note: HubKnowledgeNote) -> some View {
@@ -905,6 +927,10 @@ struct HubHomeView: View {
         }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
+                if knowledgeRefreshError {
+                    Button("Retry refreshing Knowledge") { Task { await refreshKnowledgeGraph() } }
+                        .font(.footnote).frame(minHeight: 44)
+                }
                 Picker("Knowledge scope", selection: $knowledgeScope) {
                     ForEach(HubKnowledgeGraphView.Scope.allCases) { scope in Text(scope.rawValue).tag(scope) }
                 }

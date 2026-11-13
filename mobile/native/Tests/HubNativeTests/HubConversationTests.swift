@@ -238,6 +238,29 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(timeline.snapshot.model?.reasoningEffort, "high")
     }
 
+    func testKnowledgeMembershipWritesOnlyTheRequestedOperationAndRevision() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.query, "view=domains")
+                return (200, Data(#"{"revision":12,"maxActiveDomains":7,"domains":[],"memberships":[],"nodes":[]}"#.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "domains")
+            XCTAssertEqual(command["revision"] as? Int, 12)
+            XCTAssertEqual(command["operations"] as? [[String: String]], [
+                ["type": "unassign", "nodeId": "note-id", "domainId": "domain-id"],
+            ])
+            return (200, Data(#"{"revision":13}"#.utf8))
+        }
+        let registry = try await api.knowledgeDomains()
+        try await api.changeKnowledgeDomains([.membership(note: "note-id", domain: "domain-id", assigned: false)],
+                                             revision: registry.revision)
+        XCTAssertEqual(CatalogFixture.requests.count, 2)
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

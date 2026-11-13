@@ -97,6 +97,49 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
     public let communityCandidates: Communities?
 }
 
+public struct HubKnowledgeDomains: Decodable {
+    public struct Domain: Decodable, Identifiable {
+        public let id: String
+        public let title: String
+        public let parentId: String?
+        public let aliases: [String]
+        public let status: String
+    }
+    public struct Note: Decodable, Identifiable {
+        public let id: String
+        public let title: String
+    }
+    public let revision: Int
+    public let maxActiveDomains: Int
+    public let domains: [Domain]
+    public let memberships: [HubHomeKnowledge.Membership]
+    public let nodes: [Note]
+
+    public enum Change {
+        case create(title: String, aliases: [String], parent: String?)
+        case edit(id: String, title: String, aliases: [String], parent: String?)
+        case activate(id: String, active: Bool)
+        case membership(note: String, domain: String, assigned: Bool)
+
+        fileprivate var operations: [[String: Any]] {
+            switch self {
+            case .create(let title, let aliases, let parent):
+                var operation: [String: Any] = ["type": "create", "ref": "new-domain", "title": title, "aliases": aliases]
+                if let parent { operation["parentId"] = parent }
+                return [operation]
+            case .edit(let id, let title, let aliases, let parent):
+                var reparent = ["type": "reparent", "id": id]
+                if let parent { reparent["parentId"] = parent }
+                return [["type": "rename", "id": id, "title": title, "aliases": aliases], reparent]
+            case .activate(let id, let active):
+                return [["type": "status", "id": id, "status": active ? "active" : "inactive"]]
+            case .membership(let note, let domain, let assigned):
+                return [["type": assigned ? "assign" : "unassign", "nodeId": note, "domainId": domain]]
+            }
+        }
+    }
+}
+
 public struct HubKnowledgeActivity: Decodable {
     public struct Entry: Decodable, Identifiable {
         public struct Change: Decodable {
@@ -1167,6 +1210,25 @@ public final class HubConversationAPI {
     public func knowledgeStatus() async throws -> HubKnowledgeStatus {
         let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"])
         return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
+    }
+
+    public func knowledgeDomains() async throws -> HubKnowledgeDomains {
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
+            URLQueryItem(name: "view", value: "domains"),
+        ], maxBytes: 12_000_000)
+        let value = try JSONDecoder().decode(HubKnowledgeDomains.self, from: data)
+        guard value.revision >= 0, Set(value.domains.map(\.id)).count == value.domains.count,
+              Set(value.nodes.map(\.id)).count == value.nodes.count else { throw HubAttachmentError.invalidResponse }
+        return value
+    }
+
+    public func changeKnowledgeDomains(_ changes: [HubKnowledgeDomains.Change], revision: Int) async throws {
+        let operations = changes.flatMap(\.operations)
+        guard revision >= 0, !operations.isEmpty else { throw HubAttachmentError.invalidResponse }
+        let command: [String: Any] = ["action": "domains", "revision": revision, "operations": operations]
+        let body = try JSONSerialization.data(withJSONObject: command)
+        guard body.count <= 200_000 else { throw HubAttachmentError.invalidResponse }
+        _ = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, maxBytes: 12_000_000)
     }
 
     public func saveKnowledgeSettings(_ settings: HubKnowledgeSettings) async throws -> HubKnowledgeStatus {
