@@ -9,12 +9,16 @@ struct HubKnowledgeGraphView: View {
     var scope = Scope.all
     var overview = false
     var showsControls = true
+    var spatial = false
     let select: (String) -> Void
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @GestureState private var pinch: CGFloat = 1
     @GestureState private var drag: CGSize = .zero
     @State private var layout: HubKnowledgeLayout.Layout?
+    @State private var yaw = 0.2
+    @State private var pitch = 0.12
+    @State private var selectedID: String?
 
     enum Scope: String, CaseIterable, Identifiable {
         case all = "All knowledge"
@@ -32,7 +36,8 @@ struct HubKnowledgeGraphView: View {
         GeometryReader { geometry in
             Group {
                 if let layout {
-                    canvas(layout, size: geometry.size)
+                    if spatial { spatialCanvas(layout, size: geometry.size) }
+                    else { canvas(layout, size: geometry.size) }
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -51,6 +56,135 @@ struct HubKnowledgeGraphView: View {
             }
         }
         .frame(height: height)
+    }
+
+    private func spatialCanvas(_ layout: HubKnowledgeLayout.Layout, size: CGSize) -> some View {
+        let zoom = min(12, max(0.3, scale * pinch))
+        let cameraYaw = yaw + Double(drag.width) * 0.008
+        let cameraPitch = min(1.3, max(-1.3, pitch + Double(drag.height) * 0.008))
+        let roots = layout.groups.filter { $0.parentID == nil }
+        let radius = roots.reduce(135.0) { maximum, group in
+            max(maximum, sqrt(group.spatialX * group.spatialX + group.spatialY * group.spatialY +
+                              group.spatialZ * group.spatialZ) + group.radius)
+        }
+        let camera = max(900, radius * 3.5)
+        let factor = min(size.width, size.height) / CGFloat(radius * 2.5) * zoom
+        let cosineYaw = cos(cameraYaw), sineYaw = sin(cameraYaw)
+        let cosinePitch = cos(cameraPitch), sinePitch = sin(cameraPitch)
+        func project(_ x: Double, _ y: Double, _ z: Double) -> SpatialProjection {
+            let horizontal = x * cosineYaw - z * sineYaw
+            let rotatedZ = x * sineYaw + z * cosineYaw
+            let vertical = y * cosinePitch - rotatedZ * sinePitch
+            let depth = y * sinePitch + rotatedZ * cosinePitch
+            let perspective = camera + depth > camera * 0.12 ? CGFloat(camera / (camera + depth)) : 0
+            return SpatialProjection(point: CGPoint(x: size.width / 2 + CGFloat(horizontal) * factor * perspective,
+                                                      y: size.height / 2 + CGFloat(vertical) * factor * perspective),
+                                     depth: depth, perspective: perspective)
+        }
+        let ids = spatialSample(roots)
+        let projected = layout.points.filter { ids.contains($0.id) }.map { item in
+            SpatialNode(item: item, projection: project(item.spatialX, item.spatialY, item.spatialZ))
+        }.filter { $0.projection.perspective > 0 }.sorted { $0.projection.depth > $1.projection.depth }
+        let points = Dictionary(projected.map { ($0.item.id, $0.projection.point) }, uniquingKeysWith: { first, _ in first })
+        let selected = graph.nodes.first { $0.id == selectedID }
+
+        return ZStack(alignment: .bottomTrailing) {
+            Canvas { context, _ in
+                var lines = Path()
+                var highlighted = Path()
+                for edge in graph.edges {
+                    guard let from = points[edge.source], let to = points[edge.target] else { continue }
+                    if edge.source == selectedID || edge.target == selectedID {
+                        highlighted.move(to: from)
+                        highlighted.addLine(to: to)
+                    } else {
+                        lines.move(to: from)
+                        lines.addLine(to: to)
+                    }
+                }
+                for group in layout.groups where group.parentID == nil || zoom >= 1.6 {
+                    let center = project(group.spatialX, group.spatialY, group.spatialZ)
+                    let r = CGFloat(group.radius) * factor * center.perspective
+                    guard r > 3 else { continue }
+                    let ring = Path(ellipseIn: CGRect(x: center.point.x - r, y: center.point.y - r, width: r * 2, height: r * 2))
+                    let tone = color(group.hue, id: group.id)
+                    context.fill(ring, with: .color(tone.opacity(0.06)))
+                    context.stroke(ring, with: .color(tone.opacity(0.22)), style: StrokeStyle(lineWidth: 1,
+                        dash: group.id == HubKnowledgeLayout.archiveID ? [5, 4] : []))
+                    var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
+                    label.shading = .color(tone)
+                    context.draw(label, at: CGPoint(x: center.point.x, y: center.point.y - r - 11))
+                }
+                context.stroke(lines, with: .color(Color.white.opacity(0.16)), lineWidth: 1)
+                context.stroke(highlighted, with: .color(Color.white.opacity(0.52)), lineWidth: 1.5)
+                for node in projected {
+                    let point = node.projection.point
+                    let r: CGFloat = (node.item.id == selectedID ? 7 : 4) * sqrt(zoom) * node.projection.perspective
+                    let dot = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
+                    context.fill(Path(ellipseIn: dot), with: .color(color(node.item.hue, id: node.item.groupID)))
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .updating($drag) { value, state, _ in state = value.translation }
+                .onEnded { value in
+                    let displacement = value.translation
+                    if hypot(displacement.width, displacement.height) < 7 {
+                        selectedID = projected.reversed().first {
+                            hypot($0.projection.point.x - value.location.x, $0.projection.point.y - value.location.y) <= 18
+                        }?.item.id
+                    } else {
+                        yaw += Double(displacement.width) * 0.008
+                        pitch = min(1.3, max(-1.3, pitch + Double(displacement.height) * 0.008))
+                    }
+                })
+            .simultaneousGesture(MagnificationGesture().updating($pinch) { value, state, _ in state = value }
+                .onEnded { scale = min(12, max(0.3, scale * $0)) })
+            HStack(spacing: 4) {
+                if let selected {
+                    Button { select(selected.id) } label: {
+                        Text(selected.title ?? "Open record").lineLimit(1).frame(minHeight: 44)
+                    }
+                    .accessibilityLabel("Open selected record")
+                }
+                Spacer(minLength: 4)
+                Button { scale = max(0.3, scale / 1.25) } label: { Image(systemName: "minus").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Zoom out")
+                Button("Fit") { scale = 1; yaw = 0.2; pitch = 0.12 }.frame(minWidth: 44, minHeight: 44)
+                Button { scale = min(12, scale * 1.25) } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Zoom in")
+            }
+            .font(.caption).buttonStyle(.plain).padding(.horizontal, 6)
+            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+            .padding(4)
+        }
+        .clipped()
+        .accessibilityLabel("3D Knowledge graph")
+        .accessibilityHint("Drag to rotate. Use the record list to browse all notes.")
+    }
+
+    private func spatialSample(_ roots: [HubKnowledgeLayout.Group]) -> Set<String> {
+        var ids: Set<String> = []
+        if let selectedID { ids.insert(selectedID) }
+        let length = roots.map { $0.members.count }.max() ?? 0
+        for index in 0..<length {
+            for root in roots where root.members.indices.contains(index) {
+                ids.insert(root.members[index])
+                if ids.count >= 500 { return ids }
+            }
+        }
+        return ids
+    }
+
+    private struct SpatialProjection {
+        let point: CGPoint
+        let depth: Double
+        let perspective: CGFloat
+    }
+
+    private struct SpatialNode {
+        let item: HubKnowledgeLayout.Point
+        let projection: SpatialProjection
     }
 
     private func canvas(_ layout: HubKnowledgeLayout.Layout, size: CGSize) -> some View {

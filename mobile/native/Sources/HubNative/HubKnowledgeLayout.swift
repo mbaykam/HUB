@@ -9,6 +9,9 @@ public enum HubKnowledgeLayout {
         public let x: Double
         public let y: Double
         public let hue: Double
+        public let spatialX: Double
+        public let spatialY: Double
+        public let spatialZ: Double
     }
 
     public struct Group: Sendable {
@@ -17,6 +20,10 @@ public enum HubKnowledgeLayout {
         public let parentID: String?
         public let members: [String]
         public let hue: Double
+        public let spatialX: Double
+        public let spatialY: Double
+        public let spatialZ: Double
+        public let radius: Double
     }
 
     public struct Layout: Sendable {
@@ -150,7 +157,8 @@ public enum HubKnowledgeLayout {
         let points = world.compactMap { value -> Point? in
             guard visible.contains(value.id) else { return nil }
             if overview {
-                return Point(id: value.id, groupID: value.cloud, x: value.position.projectedX, y: value.position.projectedY, hue: value.hue)
+                return Point(id: value.id, groupID: value.cloud, x: value.position.projectedX, y: value.position.projectedY,
+                             hue: value.hue, spatialX: value.position.x, spatialY: value.position.y, spatialZ: value.position.z)
             }
             var root = value.cloud
             for _ in 0..<5 {
@@ -160,10 +168,12 @@ public enum HubKnowledgeLayout {
             guard let rootIndex = cloudIndices[root], let center = centers[root] else { return nil }
             let relative = value.position - clouds[rootIndex].center
             return Point(id: value.id, groupID: value.cloud, x: center.x + relative.projectedX,
-                         y: center.y + relative.projectedY, hue: value.hue)
+                         y: center.y + relative.projectedY, hue: value.hue,
+                         spatialX: value.position.x, spatialY: value.position.y, spatialZ: value.position.z)
         }
         let groups = (overview ? roots : clouds).filter { !$0.members.isEmpty }.map {
-            Group(id: $0.id, title: $0.title, parentID: $0.parentID, members: $0.members, hue: $0.hue)
+            Group(id: $0.id, title: $0.title, parentID: $0.parentID, members: $0.members, hue: $0.hue,
+                  spatialX: $0.center.x, spatialY: $0.center.y, spatialZ: $0.center.z, radius: $0.radius)
         }
         return Layout(points: points, groups: groups)
     }

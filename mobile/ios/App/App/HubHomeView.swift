@@ -67,6 +67,7 @@ struct HubHomeView: View {
     @State private var noteSaving = false
     @State private var noteSaveFailed = false
     @State private var knowledgeScope = HubKnowledgeGraphView.Scope.all
+    @State private var knowledgeSpatial = false
     @State private var knowledgeQuery = ""
     @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
     @State private var tasksOpen = false
@@ -935,8 +936,19 @@ struct HubHomeView: View {
                     ForEach(HubKnowledgeGraphView.Scope.allCases) { scope in Text(scope.rawValue).tag(scope) }
                 }
                 .pickerStyle(.segmented)
-                HubKnowledgeGraphView(graph: graph, height: 330, scope: knowledgeScope, select: selectKnowledgeNode)
-                    .id(knowledgeScope)
+                HubKnowledgeGraphView(graph: graph, height: 330, scope: knowledgeScope, spatial: knowledgeSpatial, select: selectKnowledgeNode)
+                    .id("\(knowledgeScope.rawValue)/\(knowledgeSpatial)")
+                    .overlay(alignment: .topTrailing) {
+                        Menu {
+                            Button("2D") { knowledgeSpatial = false }
+                            Button("3D") { knowledgeSpatial = true }
+                        } label: {
+                            Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("Graph view")
+                        .accessibilityValue(knowledgeSpatial ? "3D" : "2D")
+                    }
                 TextField("Find records", text: $knowledgeQuery).textFieldStyle(.roundedBorder)
                 if records.isEmpty { Text("No matching records").foregroundStyle(.secondary) }
                 ForEach(records, id: \.id) { node in
