@@ -20,6 +20,9 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubInstructionsView(api: api)) {
                         Label("Instructions", systemImage: "doc.text")
                     }
+                    NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
+                        Label("Knowledge AI", systemImage: "circle.hexagongrid")
+                    }
                     NavigationLink(destination: HubUsageView(api: api)) {
                         Label("Usage limits", systemImage: "chart.bar.xaxis")
                     }
@@ -39,6 +42,213 @@ struct HubWorkspaceSettingsView: View {
         }
         .navigationViewStyle(.stack)
         .preferredColorScheme(.dark)
+    }
+}
+
+@MainActor
+private struct HubKnowledgeSettingsView: View {
+    let api: HubConversationAPI
+    @State private var status: HubKnowledgeStatus?
+    @State private var draft: HubKnowledgeSettings?
+    @State private var models: HubModelCatalog?
+    @State private var error: String?
+    @State private var busy = false
+    @State private var showModels = false
+
+    var body: some View {
+        Form {
+            if let error { Text(error).foregroundStyle(.secondary) }
+            if busy { ProgressView("Updating Knowledge AI…") }
+            if let status, let draft {
+                form(status, draft: draft)
+            } else if !busy {
+                Button("Retry") { Task { await load() } }
+            }
+        }
+        .disabled(busy)
+        .navigationTitle("Knowledge AI")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                if let draft, let status {
+                    Button("Save") { Task { await save(draft) } }.disabled(busy || draft == status.settings)
+                }
+            }
+        }
+        .task { await load() }
+        .sheet(isPresented: $showModels) { modelPicker }
+    }
+
+    private func form(_ status: HubKnowledgeStatus, draft: HubKnowledgeSettings) -> some View {
+        Group {
+            Section("General") {
+                Toggle("Process knowledge", isOn: setting(\.enabled, fallback: draft.enabled))
+                Button {
+                    showModels = true
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Choose model")
+                        Text("\(draft.provider) · \(draft.model)").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let model = models?.models.first(where: { $0.provider == draft.provider && $0.modelID == draft.model }),
+                   let efforts = model.efforts, !efforts.isEmpty {
+                    Picker("Reasoning effort", selection: setting(\.reasoningEffort, fallback: draft.reasoningEffort)) {
+                        Text("Provider default").tag("")
+                        if !draft.reasoningEffort.isEmpty, !efforts.contains(where: { $0.id == draft.reasoningEffort }) {
+                            Text(draft.reasoningEffort).tag(draft.reasoningEffort)
+                        }
+                        ForEach(efforts) { Text($0.name).tag($0.id) }
+                    }
+                }
+                Picker("When to run", selection: setting(\.mode, fallback: draft.mode)) {
+                    Text("Automatically").tag("automatic")
+                    Text("Review proposals first").tag("review")
+                    Text("Only when started manually").tag("manual")
+                }
+                Picker("Wait after a chat", selection: setting(\.idleSeconds, fallback: draft.idleSeconds)) {
+                    Text("1 minute").tag(60)
+                    Text("5 minutes").tag(300)
+                    Text("15 minutes").tag(900)
+                    Text("1 hour").tag(3600)
+                    if ![60, 300, 900, 3600].contains(draft.idleSeconds) {
+                        Text("\(draft.idleSeconds) seconds").tag(draft.idleSeconds)
+                    }
+                }
+                Toggle("Extract lasting notes", isOn: flag(\.extractMemories))
+            }
+            Section("Sources") {
+                choices([("pwa", "HUB chats"), ("telegram", "Telegram"), ("voice", "Voice"),
+                         ("workers", "Delegated work"), ("imports", "Imports")], key: \.channels)
+                DisclosureGroup("What to remember") {
+                    choices([("preferences", "Personal preferences"), ("decisions", "Decisions"),
+                             ("projects", "Projects"), ("learning", "Learning"), ("summaries", "Summaries")], key: \.categories)
+                }
+                Picker("Assistant explanations", selection: setting(\.assistantEvidence, fallback: draft.assistantEvidence)) {
+                    Text("Confirmed information").tag("confirmed-only")
+                    Text("Include useful explanations").tag("useful-explanations")
+                }
+            }
+            Section("Links and reflections") {
+                Picker("Detail", selection: setting(\.detail, fallback: draft.detail)) {
+                    Text("Concise").tag("concise")
+                    Text("Balanced").tag("balanced")
+                    Text("Detailed").tag("detailed")
+                }
+                Picker("Language", selection: setting(\.language, fallback: draft.language)) {
+                    Text("Conversation language").tag("auto")
+                    Text("Türkçe").tag("tr")
+                    Text("English").tag("en")
+                }
+                Picker("New links", selection: setting(\.linking, fallback: draft.linking)) {
+                    Text("Link related records").tag("inline")
+                    Text("Off").tag("off")
+                }
+                Stepper("Maximum links · \(draft.maxLinks)", value: setting(\.maxLinks, fallback: draft.maxLinks), in: 1...12)
+                Toggle("Save sourced reflections", isOn: flag(\.reflections))
+                Toggle("Suggest profile edits", isOn: flag(\.profileSuggestions))
+                TextEditor(text: setting(\.instructions, fallback: draft.instructions))
+                    .frame(minHeight: 86).accessibilityLabel("Knowledge instructions")
+            }
+            Section("Usage and limits") {
+                Text(status.status.replacingOccurrences(of: "-", with: " ").capitalized)
+                Text("\(status.counts["queued"] ?? 0) queued · \(status.counts["working"] ?? 0) working · \(status.counts["failed"] ?? 0) failed")
+                Text("Today $\(status.todayEstimatedCost, specifier: "%.4f") · Month $\(status.monthEstimatedCost ?? 0, specifier: "%.4f")")
+                number("Daily budget (USD)", key: \.dailyBudget, fallback: draft.dailyBudget)
+                number("Monthly budget (USD)", key: \.monthlyBudget, fallback: draft.monthlyBudget)
+                number("Input price per 1M tokens", key: \.inputPrice, fallback: draft.inputPrice)
+                number("Output price per 1M tokens", key: \.outputPrice, fallback: draft.outputPrice)
+                NavigationLink("Knowledge AI Activity", destination: HubKnowledgeActivityView(api: api))
+            }
+        }
+    }
+
+    private var modelPicker: some View {
+        NavigationView {
+            List {
+                if let models {
+                    ForEach(models.models.filter { $0.available != false }) { model in
+                        Button {
+                            draft?.provider = model.provider
+                            draft?.model = model.modelID
+                            draft?.reasoningEffort = model.defaultEffort ?? ""
+                            if let pricing = model.pricing {
+                                draft?.inputPrice = max(0.001, pricing.input)
+                                draft?.outputPrice = max(0.001, pricing.output)
+                            }
+                            showModels = false
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(model.name).font(.headline)
+                                Text(model.provider).font(.caption)
+                            }
+                        }
+                    }
+                } else {
+                    ProgressView("Loading models…")
+                    Button("Retry") { Task { models = try? await api.modelCatalog() } }
+                }
+            }
+            .navigationTitle("Knowledge AI model")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showModels = false } } }
+            .task { if models == nil { models = try? await api.modelCatalog() } }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private func setting<Value>(_ key: WritableKeyPath<HubKnowledgeSettings, Value>, fallback: Value) -> Binding<Value> {
+        Binding(get: { draft?[keyPath: key] ?? fallback }, set: { draft?[keyPath: key] = $0 })
+    }
+
+    private func flag(_ key: WritableKeyPath<HubKnowledgeSettings, Bool?>) -> Binding<Bool> {
+        Binding(get: { draft?[keyPath: key] ?? false }, set: { draft?[keyPath: key] = $0 })
+    }
+
+    private func choices(_ options: [(String, String)], key: WritableKeyPath<HubKnowledgeSettings, [String]>) -> some View {
+        ForEach(options.indices, id: \.self) { index in
+            let option = options[index]
+            Toggle(option.1, isOn: Binding(get: { draft?[keyPath: key].contains(option.0) ?? false }, set: { enabled in
+                guard var value = draft?[keyPath: key] else { return }
+                value.removeAll { $0 == option.0 }
+                if enabled { value.append(option.0) }
+                draft?[keyPath: key] = value
+            }))
+        }
+    }
+
+    private func number(_ label: String, key: WritableKeyPath<HubKnowledgeSettings, Double>, fallback: Double) -> some View {
+        TextField(label, value: setting(key, fallback: fallback), format: .number).keyboardType(.decimalPad)
+    }
+
+    private func load() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let value = try await api.knowledgeStatus()
+            if !Task.isCancelled { status = value; draft = value.settings; error = nil }
+        } catch {
+            if !Task.isCancelled { self.error = "Could not load Knowledge AI settings." }
+        }
+    }
+
+    private func save(_ value: HubKnowledgeSettings) async {
+        guard !busy else { return }
+        guard value.instructions.utf16.count <= 4_000,
+              !value.channels.isEmpty, !value.categories.isEmpty,
+              [value.dailyBudget, value.monthlyBudget, value.inputPrice, value.outputPrice].allSatisfy({ $0.isFinite && $0 > 0 && $0 <= 100 }) else {
+            error = "Check the instruction length, sources, categories and budget values."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let saved = try await api.saveKnowledgeSettings(value)
+            status = saved
+            draft = saved.settings
+            error = nil
+        } catch {
+            self.error = "Could not confirm the save. Your settings draft is retained."
+        }
     }
 }
 

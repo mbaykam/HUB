@@ -829,6 +829,18 @@ public final class HubConversationAPI {
         return page
     }
 
+    public func knowledgeStatus() async throws -> HubKnowledgeStatus {
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"])
+        return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
+    }
+
+    public func saveKnowledgeSettings(_ settings: HubKnowledgeSettings) async throws -> HubKnowledgeStatus {
+        struct Command: Encodable { let action = "settings"; let settings: HubKnowledgeSettings }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"],
+                                         body: JSONEncoder().encode(Command(settings: settings)))
+        return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
+    }
+
     public func addTodo(id: UUID, title: String, horizon: HubHomePlanner.Horizon = .near) async throws -> HubHomePlanner {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title.utf16.count <= 180 else { throw HubAttachmentError.invalidResponse }

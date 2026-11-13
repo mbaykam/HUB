@@ -165,3 +165,39 @@ public struct HubCharacterSettings: Decodable {
 public enum HubCharacterRoleAction: String {
     case main, voice, delete
 }
+
+public struct HubKnowledgeSettings: Codable, Equatable {
+    public var enabled: Bool
+    public var provider: String
+    public var model: String
+    public var reasoningEffort: String
+    public var dailyBudget: Double
+    public var monthlyBudget: Double
+    public var inputPrice: Double
+    public var outputPrice: Double
+    public var idleSeconds: Int
+    public var mode: String
+    public var channels: [String]
+    public var categories: [String]
+    public var detail: String
+    public var language: String
+    public var assistantEvidence: String
+    public var linking: String
+    public var maxLinks: Int
+    public var duplicatePolicy: String
+    public var instructions: String
+    public var reflections: Bool?
+    public var profileSuggestions: Bool?
+    public var extractMemories: Bool?
+}
+
+public struct HubKnowledgeStatus: Decodable {
+    public let enabled: Bool
+    public let status: String
+    public let settings: HubKnowledgeSettings
+    public let todayEstimatedCost: Double
+    public let monthEstimatedCost: Double?
+    public let counts: [String: Int]
+    public let notes: Int
+    public let embedding: String
+}
