@@ -29,11 +29,22 @@ if((await lstat(app)).isSymbolicLink()||!(await realpath(app)).startsWith(extrac
 const info=JSON.parse(run('/usr/bin/plutil',['-convert','json','-o','-',resolve(app,'Info.plist')]));
 if(info.CFBundleIdentifier!=='com.mbaykam.hub'||!info.CFBundleSupportedPlatforms?.includes('iPhoneSimulator')||info.CFBundleExecutable!=='App')throw Error('Not the expected HUB simulator app.');
 const available=JSON.parse(sim('list','devices','available','-j')).devices;
-const selected=selectSimulatorSeed(available),baselineMode='cloned-runner-seed';
-let device,stage='clone',displayMode='headless';
+const selected=selectSimulatorSeed(available);
+const baselineMode=nativeDevelopment?'fresh-isolated-device':'cloned-runner-seed';
+let device,stage='create-device',displayMode='headless';
 try{
-  console.log('Cloning an isolated simulator without modifying its runner seed: '+JSON.stringify(selected));
-  device=sim('clone',selected.seed,'HUB isolated launch '+process.env.GITHUB_RUN_ID);
+  const name='HUB isolated launch '+process.env.GITHUB_RUN_ID;
+  if(nativeDevelopment){
+    // Clones of the hosted seed have repeatedly stalled in Data Migration.
+    const seed=available[selected.runtime].find(device=>device.udid===selected.seed);
+    const type=seed.deviceTypeIdentifier??JSON.parse(sim('list','devicetypes','-j')).devicetypes.find(type=>type.name===seed.name)?.identifier;
+    if(!/^com\.apple\.CoreSimulator\.SimDeviceType\.iPhone-[A-Za-z0-9-]+$/.test(type??''))throw Error('No device type for the isolated iPhone.');
+    console.log('Creating an isolated '+type+' for '+selected.runtime);
+    device=sim('create',name,type,selected.runtime);
+  }else{
+    console.log('Cloning an isolated simulator without modifying its runner seed: '+JSON.stringify(selected));
+    device=sim('clone',selected.seed,name);
+  }
   if(!/^[A-F0-9-]{36}$/i.test(device))throw Error('Invalid new simulator identity.');
   stage='boot';console.log('Booting '+device);sim('boot',device);
   // Hosted Xcode installations may not register Simulator with Launch Services.
@@ -100,7 +111,7 @@ try{
   }else{
     sim('io',device,'screenshot','--display=1',screenshot);
   }
-  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI,syntheticOfflineOrigin:testInstalledUI,nativeHomeFixture:nativeDevelopment,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
+  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:nativeDevelopment,serverSetupAttempted:testInstalledUI,syntheticOfflineOrigin:testInstalledUI,nativeHomeFixture:nativeDevelopment,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
   await writeFile(resolve(folder,'launch-failure.json'),JSON.stringify({...source,stage,runtime:selected.runtime,baselineMode,code:error.code??null,signal:error.signal??null,message:String(error.message).slice(0,4000),stdout:String(error.stdout??'').slice(-12000),stderr:String(error.stderr??'').slice(-12000)},null,2));

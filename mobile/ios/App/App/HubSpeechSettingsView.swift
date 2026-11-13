@@ -25,6 +25,7 @@ struct HubSpeechSettingsView: View {
     @State private var loading = true
     @State private var busy = false
     @State private var player: AVAudioPlayer?
+    @State private var previewTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -68,6 +69,7 @@ struct HubSpeechSettingsView: View {
             }
         }
         .onDisappear {
+            previewTask?.cancel()
             player?.stop()
             sonioxKey = ""
         }
@@ -124,10 +126,10 @@ struct HubSpeechSettingsView: View {
                 }
                 if selected.available {
                     if selected.engine != "piper" || !selected.model.hasPrefix("tr_") {
-                        Button("Listen in English") { Task { await preview("en") } }
+                        Button("Listen in English") { previewTask = Task { await preview("en") } }
                     }
                     if ["supertonic", "bilingual"].contains(selected.engine) || selected.model.hasPrefix("tr_") {
-                        Button("Türkçe dinle") { Task { await preview("tr") } }
+                        Button("Türkçe dinle") { previewTask = Task { await preview("tr") } }
                     }
                 }
             }
@@ -220,7 +222,7 @@ struct HubSpeechSettingsView: View {
         let phrases = wake.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         let valid = (1...3).contains(phrases.count) && phrases.allSatisfy {
             (1...40).contains($0.utf16.count) && $0.split(separator: " ").count <= 4 &&
-                $0.range(of: #"^\p{L}[\p{L} '’-]*$"#, options: .regularExpression) != nil
+                $0.range(of: #"^\p{L}[\p{L} '-]*$"#, options: .regularExpression) != nil
         }
         guard valid else { notice = "Enter one to three wake phrases, up to four words each."; return }
         settings.speech.stt = Engine(engine: stt.engine, model: stt.model, language: sttID.hasSuffix(".en") ? "en" : recognition)
@@ -247,7 +249,9 @@ struct HubSpeechSettingsView: View {
             player?.stop()
             player = sample
             notice = sample.play() ? nil : "Could not play this sample."
-        } catch { notice = "Could not load this voice sample." }
+        } catch {
+            if !Task.isCancelled { notice = "Could not load this voice sample." }
+        }
     }
 
     private func install(_ option: HubSpeechCatalog.Option) async {
@@ -276,7 +280,7 @@ struct HubSpeechSettingsView: View {
         do {
             soniox = try await api.sonioxConnection(key: key)
             catalog = try await api.speechCatalog()
-            notice = "Soniox connection settings updated."
+            notice = soniox == true ? "Soniox connection settings updated." : "HUB did not confirm the new API key."
         } catch { notice = "Could not confirm the connection update." }
     }
 }

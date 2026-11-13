@@ -77,7 +77,7 @@ struct HubConversationAppsView: View {
 /// HTML deliverables get a throwaway WebKit document with no HUB origin,
 /// persistent storage, credentials, permissions or native message handlers.
 @MainActor
-private struct HubContainedDocumentView: UIViewRepresentable {
+struct HubContainedDocumentView: UIViewRepresentable {
     let document: String
 
     func makeUIView(context: Context) -> WKWebView {

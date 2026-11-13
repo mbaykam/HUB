@@ -20,6 +20,7 @@ struct HubLiveChatView: View {
     let openChat: (HubConversationChoice) -> Void
     let attachments: () -> HubChatAttachmentContext?
     let requestID: UUID
+    @Environment(\.scenePhase) private var scenePhase
     @FocusState private var composerFocused: Bool
     @State private var snapshot: HubChatSnapshot?
     @State private var screenshots: [HubChatScreenshot] = []
@@ -51,6 +52,25 @@ struct HubLiveChatView: View {
     @State private var instructionsOpen = false
     @State private var appsOpen = false
     @State private var tab = ChatTab.chat
+    @State private var latestVisual: HubChatPresentation?
+    @State private var requestedVisual: HubChatPresentation?
+    @State private var loadedVisual: LoadedVisual?
+    @State private var seenVisualID: UUID?
+    @State private var visualExpanded = false
+    @State private var followVisuals = true
+    @State private var visualLoadFailed = false
+    @State private var visualRetry = 0
+    @State private var visualReset = UUID()
+
+    private struct LoadedVisual {
+        let summary: HubChatPresentation
+        let document: String
+    }
+
+    private struct VisualLoad: Equatable {
+        let id: UUID?
+        let retry: Int
+    }
 
     private enum ChatTab: String { case chat = "Chat", trajectory = "Trajectory" }
 
@@ -64,43 +84,31 @@ struct HubLiveChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button { composerFocused = false; back() } label: {
-                    Label("Home", systemImage: "chevron.left").frame(minHeight: 44)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
-                    if let character { Text(character).font(.caption).foregroundStyle(.secondary) }
-                }
-                Spacer()
-                if composerFocused {
-                    Button { composerFocused = false } label: {
-                        Image(systemName: "keyboard.chevron.compact.down").frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Hide keyboard")
-                }
+            VStack(spacing: 0) {
+                chatHeader
+                if tab == .chat { transcript }
+                else { trajectory }
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            Picker("Conversation view", selection: $tab) {
-                Text("Chat").tag(ChatTab.chat)
-                Text("Trajectory").tag(ChatTab.trajectory)
+            .frame(height: visualExpanded ? 0 : nil)
+            .clipped()
+            .allowsHitTesting(!visualExpanded)
+            .accessibilityHidden(visualExpanded)
+            if tab == .chat, let requestedVisual {
+                visualCard(requestedVisual)
+                    .frame(height: composerFocused ? 0 : nil)
+                    .clipped()
+                    .allowsHitTesting(!composerFocused)
+                    .accessibilityHidden(composerFocused)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            Divider()
-            if connectionLost {
-                HStack {
-                    Text("Connection interrupted").font(.footnote)
-                    Spacer()
-                    Button("Retry") { connectionLost = false; attempt += 1 }
-                }
-                .padding(12)
+            if !visualExpanded { composer }
+        }
+        .task(id: scenePhase == .active && tab == .chat) {
+            if scenePhase == .active && tab == .chat { await followPresentations() }
+        }
+        .task(id: VisualLoad(id: scenePhase == .active ? requestedVisual?.id : nil, retry: visualRetry)) {
+            if scenePhase == .active, let requestedVisual, loadedVisual?.summary.id != requestedVisual.id {
+                await loadVisual(requestedVisual)
             }
-            if tab == .chat { transcript }
-            else { trajectory }
-            composer
         }
         .task(id: attempt) { await follow() }
         .task(id: historyRequest) {
@@ -148,6 +156,151 @@ struct HubLiveChatView: View {
         .tint(accent)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(.dark)
+    }
+
+    private var chatHeader: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button { composerFocused = false; back() } label: {
+                    Label("Home", systemImage: "chevron.left").frame(minHeight: 44)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
+                    if let character { Text(character).font(.caption).foregroundStyle(.secondary) }
+                }
+                Spacer()
+                if tab == .chat, requestedVisual == nil, let latestVisual {
+                    Button { composerFocused = false; showVisual(latestVisual) } label: {
+                        Image(systemName: "rectangle.on.rectangle").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Open canvas")
+                }
+                if composerFocused {
+                    Button { composerFocused = false } label: {
+                        Image(systemName: "keyboard.chevron.compact.down").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Hide keyboard")
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            Picker("Conversation view", selection: $tab) {
+                Text("Chat").tag(ChatTab.chat)
+                Text("Trajectory").tag(ChatTab.trajectory)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            Divider()
+            if connectionLost {
+                HStack {
+                    Text("Connection interrupted").font(.footnote)
+                    Spacer()
+                    Button("Retry") { connectionLost = false; attempt += 1 }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func visualCard(_ requested: HubChatPresentation) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text(loadedVisual?.summary.title ?? requested.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Menu {
+                    Toggle("Live updates", isOn: $followVisuals)
+                    if let latestVisual, latestVisual.id != requested.id {
+                        Button("Show latest") { showVisual(latestVisual) }
+                    }
+                    if loadedVisual != nil {
+                        Button("Reset visual") { visualReset = UUID() }
+                    }
+                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                .accessibilityLabel("Canvas options")
+                Button {
+                    composerFocused = false
+                    visualExpanded.toggle()
+                } label: {
+                    Image(systemName: visualExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(visualExpanded ? "Back to chat" : "Expand canvas")
+                Button {
+                    visualExpanded = false
+                    requestedVisual = nil
+                    loadedVisual = nil
+                } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                .accessibilityLabel("Hide canvas")
+            }
+            .padding(.leading, 12)
+            if visualLoadFailed {
+                Button("Couldn’t open visual. Retry") {
+                    visualLoadFailed = false
+                    visualRetry += 1
+                }
+                .font(.footnote)
+                .padding(.bottom, 8)
+            }
+            if let loadedVisual {
+                HubContainedDocumentView(document: loadedVisual.document)
+                    .id(visualReset)
+                    .accessibilityLabel(loadedVisual.summary.title)
+                    .frame(height: visualExpanded ? nil : 230)
+                    .frame(maxHeight: visualExpanded ? .infinity : nil)
+            } else if !visualLoadFailed {
+                ProgressView("Opening visual…").padding(16)
+                    .frame(maxHeight: visualExpanded ? .infinity : nil)
+            } else if visualExpanded {
+                Spacer()
+            }
+        }
+        .background(panel, in: RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, visualExpanded ? 6 : 16)
+        .padding(.vertical, 4)
+    }
+
+    private func showVisual(_ visual: HubChatPresentation) {
+        seenVisualID = visual.id
+        visualLoadFailed = false
+        requestedVisual = visual
+    }
+
+    private func loadVisual(_ visual: HubChatPresentation) async {
+        do {
+            let document = try await api.chatPresentationDocument(sessionID: chat.sessionId, id: visual.id)
+            guard !Task.isCancelled, requestedVisual?.id == visual.id else { return }
+            loadedVisual = LoadedVisual(summary: visual, document: document)
+            visualReset = UUID()
+        } catch {
+            if !Task.isCancelled && requestedVisual?.id == visual.id { visualLoadFailed = true }
+        }
+    }
+
+    private func followPresentations() async {
+        var delay: UInt64 = 2_000_000_000
+        while !Task.isCancelled {
+            do {
+                let value = try await api.chatPresentation(sessionID: chat.sessionId)
+                guard !Task.isCancelled else { return }
+                latestVisual = value
+                if let value {
+                    if let requestedVisual {
+                        if followVisuals && value.id != requestedVisual.id { showVisual(value) }
+                    } else if value.id != seenVisualID && !composerFocused {
+                        showVisual(value)
+                    }
+                }
+                delay = snapshot?.running == true ? 2_000_000_000 : 5_000_000_000
+            } catch {
+                delay = 10_000_000_000
+            }
+            do { try await Task.sleep(nanoseconds: delay) }
+            catch { return }
+        }
     }
 
     private var trajectory: some View {

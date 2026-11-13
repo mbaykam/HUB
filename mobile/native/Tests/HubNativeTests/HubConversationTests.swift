@@ -100,6 +100,39 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(CatalogFixture.requests.count, 1)
     }
 
+    func testCanvasReadsOnlyTheSelectedChatAndCurrentDocument() async throws {
+        let api = try client()
+        let id = "850b7c3a-6376-4606-8d29-54080503fdaa"
+        let document = "<!doctype html><html><head></head><body>Fixture</body></html>"
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-session"), "owned-chat")
+            if request.url?.path == "/api/hub/presentation" {
+                return (200, Data("""
+                {"presentation":{"id":"\(id)","title":"Fixture","kind":"vega","createdAt":42}}
+                """.utf8))
+            }
+            XCTAssertEqual(request.url?.path, "/api/hub/presentation-document")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-presentation"), id)
+            return (200, try JSONSerialization.data(withJSONObject: ["document": document]))
+        }
+        let presentation = try await api.chatPresentation(sessionID: "owned-chat")
+        let selected = try XCTUnwrap(presentation)
+        XCTAssertEqual(selected.kind, .vega)
+        let html = try await api.chatPresentationDocument(sessionID: "owned-chat", id: selected.id)
+        XCTAssertEqual(html, document)
+        CatalogFixture.responder = nil
+        CatalogFixture.reply = #"{"presentation":null}"#
+        let empty = try await api.chatPresentation(sessionID: "owned-chat")
+        XCTAssertNil(empty)
+        do {
+            _ = try await api.chatPresentation(sessionID: "../other")
+            XCTFail("Invalid conversation IDs should never reach the host")
+        } catch {}
+        XCTAssertEqual(CatalogFixture.requests.count, 3)
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in
