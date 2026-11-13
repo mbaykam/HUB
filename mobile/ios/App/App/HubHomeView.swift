@@ -71,6 +71,11 @@ struct HubHomeView: View {
     @State private var historyResults: HubConversationCatalog?
     @State private var historyFailed = false
     @State private var historyAttempt = 0
+    @State private var bookmarks: HubChatBookmarks?
+    @State private var bookmarksError = false
+    @State private var bookmarksBusy = false
+    @State private var pinnedExpanded = false
+    @State private var creatingChat = false
     @State private var todoDraft = ""
     @State private var todoDraftID = UUID()
     @State private var todoHorizon = HubHomePlanner.Horizon.near
@@ -135,6 +140,8 @@ struct HubHomeView: View {
                 usageOpen = false
                 knowledgeActivityOpen = false
                 selectedChat = nil
+                bookmarks = nil
+                settingsOpen = false
             }
         }
     }
@@ -198,7 +205,7 @@ struct HubHomeView: View {
                             Text("\(notes.count) Brain notes  ·  \(value.domains?.filter { $0.status == "active" && $0.parentId == nil }.count ?? 0) Domains  ·  \(value.edges.count) Connections  ·  \(value.nodes.count - notes.count) Chat archive")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                            HubKnowledgeGraphView(graph: value, height: 230, scope: .notes, select: selectKnowledgeNode)
+                            HubKnowledgeGraphView(graph: value, height: 230, scope: .notes, overview: true, select: selectKnowledgeNode)
                         }
 
                     }
@@ -344,22 +351,17 @@ struct HubHomeView: View {
                 .disabled(model.connection != .connected)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if query.isEmpty {
+                        pinnedHistory
+                        Text("Recents").font(.subheadline.bold()).foregroundStyle(.secondary).padding(.vertical, 10)
+                    }
                     if let conversations = query.isEmpty ? model.conversations : historyResults?.conversations {
                         if conversations.isEmpty {
                             Text(query.isEmpty ? "No conversations yet" : "No matching conversations")
                                 .foregroundStyle(.secondary)
                         }
                         ForEach(conversations, id: \.sessionId) { chat in
-                            Button { showChat(chat) } label: {
-                                HStack {
-                                    Text(chat.title).lineLimit(2)
-                                    Spacer()
-                                    Image(systemName: "chevron.right").font(.caption)
-                                }
-                                .frame(minHeight: 44)
-                                .contentShape(Rectangle())
-                            }
-                            .disabled(model.connection != .connected)
+                            historyRow(chat)
                         }
                         if !query.isEmpty, historyResults?.hasMore == true {
                             Text("Narrow your search to see more matches.").font(.footnote).foregroundStyle(.secondary)
@@ -373,7 +375,13 @@ struct HubHomeView: View {
                     }
                 }
             }
+            Button { Task { await newChat() } } label: {
+                Label("New Session", systemImage: "plus.square").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .disabled(creatingChat || model.connection != .connected)
         }
+        .task(id: model.connection == .connected) { await loadBookmarks() }
         .task(id: HistoryRequest(query: query, attempt: historyAttempt, connected: model.connection == .connected)) {
             historyResults = nil
             historyFailed = false
@@ -385,6 +393,87 @@ struct HubHomeView: View {
             } catch {
                 if !Task.isCancelled { historyFailed = true }
             }
+        }
+    }
+
+    private var pinnedHistory: some View {
+        DisclosureGroup(isExpanded: $pinnedExpanded) {
+            if let bookmarks {
+                let byID = Dictionary(uniqueKeysWithValues: (model.conversations ?? []).map { ($0.sessionId, $0) })
+                if bookmarks.sessionIds.isEmpty {
+                    Text("No pinned conversations").font(.footnote).foregroundStyle(.secondary).padding(.vertical, 8)
+                }
+                ForEach(bookmarks.sessionIds, id: \.self) { id in
+                    historyRow(byID[id] ?? HubConversationChoice(sessionId: id, title: "Pinned conversation", updatedAt: 0))
+                }
+            }
+            if bookmarksError { Button("Retry loading pinned chats") { Task { await loadBookmarks() } } }
+        } label: {
+            HStack {
+                Text("Pinned").font(.headline)
+                Spacer()
+                if let bookmarks { Text("\(bookmarks.sessionIds.count)").foregroundStyle(.secondary) }
+                Image(systemName: "star")
+            }
+            .frame(minHeight: 44)
+        }
+    }
+
+    private func historyRow(_ chat: HubConversationChoice) -> some View {
+        HStack(spacing: 6) {
+            Button { showChat(chat) } label: {
+                Text(chat.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            if let bookmarks {
+                let pinned = bookmarks.sessionIds.contains(chat.sessionId)
+                Button { Task { await setPinned(chat.sessionId, pinned: !pinned) } } label: {
+                    Image(systemName: pinned ? "star.fill" : "star").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(pinned ? "Unpin \(chat.title)" : "Pin \(chat.title)")
+                .disabled(bookmarksBusy)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(model.connection != .connected)
+    }
+
+    private func loadBookmarks() async {
+        guard !bookmarksBusy, let api = chatAPI() else { return }
+        bookmarksBusy = true
+        defer { bookmarksBusy = false }
+        do {
+            let value = try await api.chatBookmarks()
+            if !Task.isCancelled { bookmarks = value; bookmarksError = false }
+        } catch {
+            if !Task.isCancelled { bookmarksError = true }
+        }
+    }
+
+    private func setPinned(_ id: String, pinned: Bool) async {
+        guard !bookmarksBusy, let api = chatAPI() else { return }
+        bookmarksBusy = true
+        defer { bookmarksBusy = false }
+        do {
+            let value = try await api.setChatPinned(sessionID: id, pinned: pinned)
+            guard chatAPI() === api else { return }
+            bookmarks = value
+            bookmarksError = false
+        } catch {
+            if chatAPI() === api { bookmarksError = true }
+        }
+    }
+
+    private func newChat() async {
+        guard !creatingChat, let api = chatAPI() else { return }
+        creatingChat = true
+        defer { creatingChat = false }
+        do {
+            let id = try await api.createChat()
+            guard chatAPI() === api else { return }
+            showChat(HubConversationChoice(sessionId: id, title: "New chat", updatedAt: 0))
+        } catch {
+            if chatAPI() === api { model.sendError = "Could not open a new conversation. Try again when connected." }
         }
     }
 

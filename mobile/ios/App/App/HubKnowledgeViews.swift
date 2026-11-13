@@ -7,11 +7,13 @@ struct HubKnowledgeGraphView: View {
     let graph: HubHomeKnowledge
     let height: CGFloat
     var scope = Scope.all
+    var overview = false
     let select: (String) -> Void
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @GestureState private var pinch: CGFloat = 1
     @GestureState private var drag: CGSize = .zero
+    @State private var layout: HubKnowledgeLayout.Layout?
 
     enum Scope: String, CaseIterable, Identifiable {
         case all = "All knowledge"
@@ -25,127 +27,128 @@ struct HubKnowledgeGraphView: View {
         }
     }
 
-    private struct Group {
-        let title: String
-        let color: Color
-        let center: CGPoint
-        let nodes: [HubHomeKnowledge.Node]
-    }
-
     var body: some View {
         GeometryReader { geometry in
-            let groups = layout(in: geometry.size)
-            let zoom = min(5, max(0.75, scale * pinch))
-            let translation = CGSize(width: offset.width + drag.width, height: offset.height + drag.height)
-            let points = positions(groups, zoom: zoom, offset: translation, size: geometry.size)
-            ZStack(alignment: .bottomTrailing) {
-                Canvas { context, _ in
-                    var lines = Path()
-                    for edge in graph.edges {
-                        guard let a = points[edge.source], let b = points[edge.target] else { continue }
-                        lines.move(to: a)
-                        lines.addLine(to: b)
-                    }
-                    context.stroke(lines, with: .color(.white.opacity(0.18)), lineWidth: 0.75)
-                    for group in groups {
-                        for node in group.nodes {
-                            guard let point = points[node.id] else { continue }
-                            let radius: CGFloat = node.kind == "conversation" ? 2.4 : 4
-                            let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
-                            context.fill(Path(ellipseIn: dot), with: .color(group.color))
-                        }
-                        let center = project(group.center, zoom: zoom, offset: translation, size: geometry.size)
-                        var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
-                        label.shading = .color(group.color)
-                        context.draw(label, at: CGPoint(x: center.x, y: center.y - 43 * zoom))
-                    }
+            Group {
+                if let layout {
+                    canvas(layout, size: geometry.size)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .contentShape(Rectangle())
-                .gesture(DragGesture().updating($drag) { value, state, _ in state = value.translation }
-                    .onEnded { value in
-                        offset = CGSize(width: offset.width + value.translation.width, height: offset.height + value.translation.height)
-                    })
-                .simultaneousGesture(MagnificationGesture().updating($pinch) { value, state, _ in state = value }
-                    .onEnded { scale = min(5, max(0.75, scale * $0)) })
-                ForEach(groups.flatMap { $0.nodes }.filter { $0.kind != "conversation" || zoom > 1.8 }, id: \.id) { node in
-                    if let point = points[node.id], CGRect(origin: .zero, size: geometry.size).contains(point) {
-                        Button { select(node.id) } label: {
-                            Color.clear.frame(width: 20, height: 20).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .position(point)
-                        .accessibilityLabel(node.title ?? "Knowledge record")
-                    }
-                }
-                HStack(spacing: 2) {
-                    Button { scale = max(0.75, scale / 1.3) } label: { Image(systemName: "minus").frame(width: 44, height: 44) }
-                        .accessibilityLabel("Zoom out")
-                    Button("Fit") { scale = 1; offset = .zero }.frame(minWidth: 44, minHeight: 44)
-                    Button { scale = min(5, scale * 1.3) } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
-                        .accessibilityLabel("Zoom in")
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
-                .padding(4)
             }
-            .clipped()
-            .accessibilityLabel("Knowledge graph")
+            .task(id: LayoutRequest(graph: graph, size: geometry.size, scope: scope)) {
+                let graph = graph
+                let aspect = Double(geometry.size.width / max(1, geometry.size.height))
+                let notes = scope != .archive
+                let archive = scope != .notes
+                let overview = overview
+                let result = await Task.detached(priority: .userInitiated) {
+                    HubKnowledgeLayout.project(graph, includesNotes: notes, includesArchive: archive,
+                                               overview: overview, aspect: aspect)
+                }.value
+                if !Task.isCancelled { layout = result }
+            }
         }
         .frame(height: height)
     }
 
-    private func layout(in size: CGSize) -> [Group] {
-        let domains = (graph.domains ?? []).filter { $0.status != "merged" }
-        let domainMap = Dictionary(domains.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let memberships = Dictionary(grouping: graph.memberships ?? [], by: \.nodeId)
-        let visibleNodes = graph.nodes.filter(scope.includes)
-        let groups = Dictionary(grouping: visibleNodes.sorted { $0.id < $1.id }) { node in
-            if node.kind == "conversation" { return "chat-archive" }
-            let ids = (memberships[node.id] ?? []).map(\.domainId).filter { domainMap[$0] != nil }.sorted()
-            guard var id = ids.first else { return "unassigned" }
-            for _ in 0..<5 {
-                guard let parent = domainMap[id]?.parentId, domainMap[parent] != nil, parent != id else { break }
-                id = parent
+    private func canvas(_ layout: HubKnowledgeLayout.Layout, size: CGSize) -> some View {
+        let byID = Dictionary(graph.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let zoom = min(4, max(0.5, scale * pinch))
+        let translation = CGSize(width: offset.width + drag.width, height: offset.height + drag.height)
+        let points = positions(layout.points, zoom: zoom, offset: translation, size: size)
+        return ZStack(alignment: .bottomTrailing) {
+            Canvas { context, _ in
+                var lines = Path()
+                for edge in graph.edges {
+                    guard let a = points[edge.source], let b = points[edge.target] else { continue }
+                    lines.move(to: a)
+                    lines.addLine(to: b)
+                }
+                context.stroke(lines, with: .color(Color(red: 0.64, green: 0.71, blue: 0.81).opacity(0.28)), lineWidth: 1)
+                for item in layout.points {
+                    guard let point = points[item.id] else { continue }
+                    let radius: CGFloat = item.groupID == HubKnowledgeLayout.archiveID ? 2.5 : 4.7
+                    let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
+                    context.fill(Path(ellipseIn: dot), with: .color(color(item.hue, id: item.groupID)))
+                }
+                for group in layout.groups where group.parentID == nil || zoom >= 1.6 {
+                    if overview, group.id == HubKnowledgeLayout.unassignedID { continue }
+                    let members = group.members.compactMap { points[$0] }
+                    guard let top = members.map(\.y).min() else { continue }
+                    let x = members.reduce(0) { $0 + $1.x } / CGFloat(members.count)
+                    var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
+                    label.shading = .color(color(group.hue, id: group.id))
+                    context.draw(label, at: CGPoint(x: x, y: top - 19))
+                }
+                if !overview, zoom >= 2.2 {
+                    for item in layout.points {
+                        guard let point = points[item.id], let title = byID[item.id]?.title,
+                              CGRect(origin: .zero, size: size).contains(point) else { continue }
+                        context.draw(Text(String(title.prefix(36))).font(.caption2), at: CGPoint(x: point.x, y: point.y + 11))
+                    }
+                }
             }
-            return id
+            .contentShape(Rectangle())
+            .gesture(DragGesture().updating($drag) { value, state, _ in state = value.translation }
+                .onEnded { value in
+                    offset = CGSize(width: offset.width + value.translation.width, height: offset.height + value.translation.height)
+                })
+            .simultaneousGesture(MagnificationGesture().updating($pinch) { value, state, _ in state = value }
+                .onEnded { scale = min(4, max(0.5, scale * $0)) })
+            ForEach(layout.points.filter { $0.groupID != HubKnowledgeLayout.archiveID || zoom > 1.8 }, id: \.id) { item in
+                if let point = points[item.id], CGRect(origin: .zero, size: size).contains(point) {
+                    Button { select(item.id) } label: {
+                        Color.clear.frame(width: 20, height: 20).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .position(point)
+                    .accessibilityLabel(byID[item.id]?.title ?? "Knowledge record")
+                }
+            }
+            HStack(spacing: 2) {
+                Button { scale = max(0.5, scale / 1.25) } label: { Image(systemName: "minus").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Zoom out")
+                Button("Fit") { scale = 1; offset = .zero }.frame(minWidth: 44, minHeight: 44)
+                Button { scale = min(4, scale * 1.25) } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Zoom in")
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+            .padding(4)
         }
-        let keys = groups.keys.sorted {
-            if $0 == "chat-archive" { return false }
-            if $1 == "chat-archive" { return true }
-            return $0 < $1
-        }
-        let columns = max(1, min(keys.count, size.width > 540 ? 3 : 2))
-        let rows = max(1, (keys.count + columns - 1) / columns)
-        let palette: [Color] = [.mint, .purple, .yellow, .pink, .green, .indigo]
-        return keys.enumerated().map { index, key in
-            let nodes = groups[key] ?? []
-            let center = CGPoint(x: size.width * (CGFloat(index % columns) + 0.5) / CGFloat(columns),
-                                 y: 43 + max(1, size.height - 85) * (CGFloat(index / columns) + 0.5) / CGFloat(rows))
-            let title = key == "chat-archive" ? "Chat archive" : (domainMap[key]?.title ?? "Unassigned")
-            let color = key == "chat-archive" ? Color.cyan : (key == "unassigned" ? .gray : palette[index % palette.count])
-            return Group(title: title, color: color, center: center, nodes: nodes)
-        }
+        .clipped()
+        .accessibilityLabel("Knowledge graph")
     }
 
-    private func positions(_ groups: [Group], zoom: CGFloat, offset: CGSize, size: CGSize) -> [String: CGPoint] {
-        let radius = min(size.width * 0.17, max(18, size.height / CGFloat(max(4, groups.count * 2))))
-        var points: [String: CGPoint] = [:]
-        for group in groups {
-            for (index, node) in group.nodes.enumerated() {
-                let angle = CGFloat(index) * 2.399963
-                let distance = group.nodes.count == 1 ? 0 : radius * sqrt(CGFloat(index + 1) / CGFloat(group.nodes.count))
-                let point = CGPoint(x: group.center.x + cos(angle) * distance, y: group.center.y + sin(angle) * distance * 0.66)
-                points[node.id] = project(point, zoom: zoom, offset: offset, size: size)
-            }
-        }
-        return points
+    private struct LayoutRequest: Equatable {
+        let graph: HubHomeKnowledge
+        let size: CGSize
+        let scope: Scope
     }
 
-    private func project(_ point: CGPoint, zoom: CGFloat, offset: CGSize, size: CGSize) -> CGPoint {
-        let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        return CGPoint(x: center.x + (point.x - center.x) * zoom + offset.width,
-                       y: center.y + (point.y - center.y) * zoom + offset.height)
+    private func positions(_ items: [HubKnowledgeLayout.Point], zoom: CGFloat, offset: CGSize, size: CGSize) -> [String: CGPoint] {
+        let x = items.map(\.x), y = items.map(\.y)
+        guard let minX = x.min(), let maxX = x.max(), let minY = y.min(), let maxY = y.max() else { return [:] }
+        let width = max(1, size.width - 40), height = max(1, size.height - 70)
+        let inset: CGFloat = overview ? 54 : 65
+        let fit = min(width / (CGFloat(maxX - minX) + inset), height / (CGFloat(maxY - minY) + inset)) * zoom
+        let centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2
+        return Dictionary(uniqueKeysWithValues: items.map { item in
+            let x = size.width / 2 + CGFloat(item.x - centerX) * fit + offset.width
+            let y = size.height / 2 - 8 + CGFloat(item.y - centerY) * fit + offset.height
+            return (item.id, CGPoint(x: x, y: y))
+        })
+    }
+
+    private func color(_ hue: Double, id: String) -> Color {
+        if id == HubKnowledgeLayout.archiveID { return Color(red: 0.54, green: 0.76, blue: 0.84) }
+        if id == HubKnowledgeLayout.unassignedID && !overview { return Color(red: 0.62, green: 0.65, blue: 0.7) }
+        let saturation = id == HubKnowledgeLayout.unassignedID ? 0.35 : 0.53
+        let light = id == HubKnowledgeLayout.unassignedID ? 0.68 : 0.72
+        let brightness = light + saturation * min(light, 1 - light)
+        return Color(hue: hue, saturation: 2 * (1 - light / brightness), brightness: brightness)
     }
 }
 

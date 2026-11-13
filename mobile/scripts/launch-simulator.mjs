@@ -1,13 +1,24 @@
 import {execFileSync} from 'node:child_process';
-import {mkdir,readFile,writeFile,lstat,realpath} from 'node:fs/promises';
+import {copyFile,mkdir,readFile,writeFile,lstat,realpath} from 'node:fs/promises';
 import {resolve,sep} from 'node:path';
 import {selectSimulatorSeed} from './simulator-source.mjs';
 
 if(process.platform!=='darwin')throw Error('Native simulator launch requires macOS/Xcode.');
 const run=(command,args,timeout=60000)=>execFileSync(command,args,{encoding:'utf8',timeout,killSignal:'SIGKILL',maxBuffer:10_000_000,stdio:['ignore','pipe','pipe']}).trim();
 const sim=(...args)=>run('xcrun',['simctl',...args]);
-const source=JSON.parse(await readFile('mobile/build/simulator-launch/source-run.json','utf8'));
-if(source.repository!=='mbaykam/HUB'||source.sha!==process.env.SOURCE_SHA||source.runId!==process.env.SOURCE_RUN_ID)throw Error('Simulator source proof does not match the requested build.');
+const nativeDevelopment=process.env.HUB_NATIVE_WORKSPACE_SIMULATOR==='1';
+let source;
+if(nativeDevelopment){
+  const {GITHUB_REPOSITORY:repository,GITHUB_REF:ref,GITHUB_SHA:sha,GITHUB_RUN_ID:runId}=process.env;
+  if(repository!=='mbaykam/HUB'||ref!=='refs/heads/codex/ios-native-workspace'||!/^[a-f0-9]{40}$/.test(sha??'')||
+      !/^\d{1,15}$/.test(runId??'')||run('git',['rev-parse','HEAD'])!==sha)throw Error('Unexpected development build source.');
+  source={repository,sha,runId,source:'same-run unsigned development build'};
+  await mkdir('mobile/build/simulator-download',{recursive:true});
+  await copyFile('mobile/build/HUB-ios-simulator.zip','mobile/build/simulator-download/HUB-ios-simulator.zip');
+}else{
+  source=JSON.parse(await readFile('mobile/build/simulator-launch/source-run.json','utf8'));
+  if(source.repository!=='mbaykam/HUB'||source.sha!==process.env.SOURCE_SHA||source.runId!==process.env.SOURCE_RUN_ID)throw Error('Simulator source proof does not match the requested build.');
+}
 const folder=resolve('mobile/build/simulator-launch'),extracted=resolve(folder,'extracted'),zip=resolve('mobile/build/simulator-download/HUB-ios-simulator.zip');
 await mkdir(extracted,{recursive:true});
 const entries=run('/usr/bin/unzip',['-Z1',zip]).split('\n');
@@ -48,6 +59,7 @@ try{
     // Writing the preferences plist on the host can race the simulator's cfprefsd.
     launchArguments.push('-hub.ios.server-origin.v1', 'https://installed-ui-simulator.invalid/');
   }
+  if(nativeDevelopment)launchArguments.push('-hub.ios.server-origin.v1','https://native-workspace-simulator.invalid/');
   stage='launch';console.log('Launching HUB');
   const launch=sim('launch',device,'com.mbaykam.hub',...launchArguments),pid=Number(launch.match(/:\s*(\d+)$/)?.[1]);
   if(!pid)throw Error('The app did not report a process ID.');
@@ -58,7 +70,7 @@ try{
   // Newer iPhone runtime seeds can expose multiple displays. Capture the
   // primary phone display explicitly rather than relying on simctl's default.
   stage='screenshot';sim('io',device,'screenshot','--display=1',resolve(folder,'native-first-launch.png'));
-  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI,syntheticOfflineOrigin:testInstalledUI,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
+  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI||nativeDevelopment,syntheticOfflineOrigin:testInstalledUI||nativeDevelopment,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
   await writeFile(resolve(folder,'launch-failure.json'),JSON.stringify({...source,stage,runtime:selected.runtime,baselineMode,code:error.code??null,signal:error.signal??null,message:String(error.message).slice(0,4000),stdout:String(error.stdout??'').slice(-12000),stderr:String(error.stderr??'').slice(-12000)},null,2));

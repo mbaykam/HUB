@@ -16,6 +16,11 @@ public struct HubConversationCatalog: Decodable {
     public let hasMore: Bool
 }
 
+public struct HubChatBookmarks: Decodable {
+    public let revision: Int
+    public let sessionIds: [String]
+}
+
 public struct HubChatCharacterPicker: Decodable {
     public struct Character: Decodable, Identifiable {
         public let id: String
@@ -43,30 +48,46 @@ public struct HubHomeWork: Decodable {
     public let byId: [String: Item]
 }
 
-public struct HubHomeKnowledge: Decodable {
-    public struct Node: Decodable {
+public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
+    public struct Node: Decodable, Equatable, Sendable {
         public let id: String
         public let kind: String?
         public let title: String?
     }
-    public struct Edge: Decodable {
+    public struct Edge: Decodable, Equatable, Sendable {
         public let source: String
         public let target: String
     }
-    public struct Domain: Decodable, Identifiable {
+    public struct Domain: Decodable, Identifiable, Equatable, Sendable {
         public let id: String
         public let title: String
         public let parentId: String?
         public let status: String
+        public let createdAt: Double?
     }
-    public struct Membership: Decodable {
+    public struct Membership: Decodable, Equatable, Sendable {
         public let nodeId: String
         public let domainId: String
+    }
+    public struct Similarity: Decodable, Equatable, Sendable {
+        public let source: String
+        public let target: String
+        public let score: Double
+    }
+    public struct Communities: Decodable, Equatable, Sendable {
+        public struct Group: Decodable, Equatable, Sendable {
+            public let id: String
+            public let label: String
+            public let memberIds: [String]
+        }
+        public let groups: [Group]
     }
     public let nodes: [Node]
     public let edges: [Edge]
     public let domains: [Domain]?
     public let memberships: [Membership]?
+    public let similarities: [Similarity]?
+    public let communityCandidates: Communities?
 }
 
 public struct HubKnowledgeActivity: Decodable {
@@ -474,6 +495,32 @@ public final class HubConversationAPI {
         return work
     }
 
+    public func chatBookmarks() async throws -> HubChatBookmarks {
+        try await bookmarksRequest()
+    }
+
+    public func setChatPinned(sessionID: String, pinned: Bool) async throws -> HubChatBookmarks {
+        guard Self.validBookmarkID(sessionID) else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "changes": [["sessionId": sessionID, "pinned": pinned]],
+        ])
+        return try await bookmarksRequest(body)
+    }
+
+    private func bookmarksRequest(_ body: Data? = nil) async throws -> HubChatBookmarks {
+        let data = try await requestData("hub/bookmarks", headers: ["x-hub-bookmarks": "1"], body: body, maxBytes: 6_000_000)
+        let value = try JSONDecoder().decode(HubChatBookmarks.self, from: data)
+        guard value.revision >= 0, value.sessionIds.count <= 20_000,
+              value.sessionIds.allSatisfy(Self.validBookmarkID) else { throw HubAttachmentError.invalidResponse }
+        return value
+    }
+
+    private static func validBookmarkID(_ id: String) -> Bool {
+        !id.isEmpty && id.utf8.count <= 256 && id.utf8.allSatisfy {
+            (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95
+        }
+    }
+
     public func modelCatalog(refresh: Bool = false) async throws -> HubModelCatalog {
         try await modelRequest(refresh ? ["action": "refresh"] : nil)
     }
@@ -711,11 +758,16 @@ public final class HubConversationAPI {
 
     public func sendNewChat(_ draft: String) async throws -> String {
         _ = try promptText(draft)
+        let sessionID = try await createChat()
+        try Task.checkCancellation()
+        try await sendChat(draft, sessionID: sessionID)
+        return sessionID
+    }
+
+    public func createChat() async throws -> String {
         let sessionID = "session-" + UUID().uuidString.lowercased()
         let created = try await rpc("session/create", request: ["sessionId": sessionID])
         guard created["sessionId"] as? String == sessionID else { throw HubChatSendError.rejected }
-        try Task.checkCancellation()
-        try await sendChat(draft, sessionID: sessionID)
         return sessionID
     }
 

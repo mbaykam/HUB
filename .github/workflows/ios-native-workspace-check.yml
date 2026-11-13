@@ -39,3 +39,17 @@ jobs:
       - run: pnpm check
       - run: swift test --package-path native
       - run: pnpm ios:build:simulator
+      - name: Launch the same unsigned build on an isolated iPhone
+        working-directory: .
+        env:
+          HUB_NATIVE_WORKSPACE_SIMULATOR: '1'
+        run: node mobile/scripts/launch-simulator.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: HUB-native-workspace-launch-${{ github.sha }}
+          path: |
+            mobile/build/simulator-launch/*.json
+            mobile/build/simulator-launch/*.png
+          if-no-files-found: ignore
+          retention-days: 7
