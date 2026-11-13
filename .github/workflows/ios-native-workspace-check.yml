@@ -16,7 +16,7 @@ concurrency:
 jobs:
   simulator:
     if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/codex/ios-native-workspace'
-    runs-on: macos-latest
+    runs-on: xcode-27
     timeout-minutes: 25
     defaults:
       run:
