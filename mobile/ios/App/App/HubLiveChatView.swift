@@ -20,6 +20,7 @@ struct HubLiveChatView: View {
     let openChat: (HubConversationChoice) -> Void
     let attachments: () -> HubChatAttachmentContext?
     let requestID: UUID
+    let preferences: HubChatPreferences
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var composerFocused: Bool
     @State private var snapshot: HubChatSnapshot?
@@ -61,6 +62,7 @@ struct HubLiveChatView: View {
     @State private var visualLoadFailed = false
     @State private var visualRetry = 0
     @State private var visualReset = UUID()
+    @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
 
     private struct LoadedVisual {
         let summary: HubChatPresentation
@@ -315,20 +317,40 @@ struct HubLiveChatView: View {
                 let entries = olderActivity + (snapshot?.activity ?? [])
                 if entries.isEmpty { Text("No recorded activity").foregroundStyle(.secondary) }
                 ForEach(entries) { item in
-                    if let detail = item.detail, !detail.isEmpty {
-                        DisclosureGroup {
-                            Text(detail).font(.footnote.monospaced()).textSelection(.enabled)
-                        } label: {
-                            Text(item.title).foregroundStyle(item.failed ? Color.red : Color.primary)
-                        }
-                    } else {
-                        Text(item.title).foregroundStyle(item.failed ? Color.red : Color.primary)
-                    }
+                    activityRow(item)
                     Divider()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
+        }
+    }
+
+    private func activityRow(_ item: HubChatActivity) -> some View {
+        let title = Text(item.title).foregroundStyle(item.failed ? Color.red : Color.primary)
+        return Group {
+            if let detail = item.detail, !detail.isEmpty {
+                DisclosureGroup {
+                    Text(detail).font(.footnote.monospaced()).textSelection(.enabled)
+                } label: { title }
+            } else {
+                title
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func transcriptActivity(_ entries: [HubChatActivity]) -> some View {
+        if preferences.transcript == .compact {
+            DisclosureGroup("Activity · \(entries.count)") {
+                ForEach(entries) { activityRow($0) }
+            }
+            .font(.footnote)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(entries) { activityRow($0) }
+            }
+            .font(.footnote)
         }
     }
 
@@ -347,6 +369,8 @@ struct HubLiveChatView: View {
                                 if historyLoading { ProgressView("Loading earlier messages…") }
                             }
                             let messages = olderMessages + snapshot.messages
+                            let activity = Dictionary(grouping: olderActivity + snapshot.activity, by: \.turn)
+                            let currentTurn = snapshot.running ? messages.last?.turn : nil
                             ForEach(messages) { message in
                                 if message.role == "user" {
                                     HStack {
@@ -365,6 +389,9 @@ struct HubLiveChatView: View {
                                     }
                                     chatPhotos(message)
                                     if let turn = message.turn, messages.last(where: { $0.turn == turn && $0.role == "assistant" })?.id == message.id {
+                                        if turn != currentTurn, let entries = activity[turn], !entries.isEmpty {
+                                            transcriptActivity(entries)
+                                        }
                                         ForEach(screenshots.filter { $0.turn == turn }) { screenshot in
                                             screenshotImage(screenshot)
                                         }
@@ -390,6 +417,7 @@ struct HubLiveChatView: View {
                                 }
                             }
                     }
+                    .font(.system(size: CGFloat(preferences.fontSize) * transcriptScale))
                     .padding(16)
                 }
                 .coordinateSpace(name: "chatViewport")
@@ -497,7 +525,7 @@ struct HubLiveChatView: View {
                 TextField("Chat…", text: $draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
                     .focused($composerFocused)
                     .submitLabel(.send)
-                    .onSubmit(send)
+                    .onSubmit { send(fromKeyboard: true) }
                     .padding(.leading, 12)
                 Menu {
                     Button {
@@ -545,7 +573,7 @@ struct HubLiveChatView: View {
                         .accessibilityLabel("Stop")
                         .disabled(stopping || connectionLost)
                 } else {
-                    Button(action: send) { Image(systemName: "arrow.up").frame(width: 44, height: 44) }
+                    Button { send() } label: { Image(systemName: "arrow.up").frame(width: 44, height: 44) }
                         .accessibilityLabel("Send")
                         .disabled(!canSend)
                 }
@@ -567,8 +595,11 @@ struct HubLiveChatView: View {
     }
 
     private var canSend: Bool {
-        snapshot != nil && !sending && !attachmentBusy && awaitingAfter == nil && !deliveryUncertain &&
-            snapshot?.running == false && !connectionLost &&
+        canSubmit && snapshot?.running == false
+    }
+
+    private var canSubmit: Bool {
+        snapshot != nil && !sending && !attachmentBusy && awaitingAfter == nil && !deliveryUncertain && !connectionLost &&
             (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !fileDrafts.isEmpty)
     }
 
@@ -679,8 +710,9 @@ struct HubLiveChatView: View {
         }
     }
 
-    private func send() {
-        guard canSend else { return }
+    private func send(fromKeyboard: Bool = false) {
+        guard (fromKeyboard ? canSubmit : canSend) else { return }
+        let delivery = snapshot?.running == true ? preferences.busyEnter : .queue
         let text = draft
         let files = fileDrafts
         let previous = snapshot?.messages.last?.id ?? ""
@@ -698,7 +730,7 @@ struct HubLiveChatView: View {
                     guard let context else { throw HubAttachmentError.signInRequired }
                     prepared = try await prepareFiles(files, context: context)
                 }
-                try await api.sendChat(text, sessionID: chat.sessionId, files: prepared.0, photos: prepared.1)
+                try await api.sendChat(text, sessionID: chat.sessionId, files: prepared.0, photos: prepared.1, delivery: delivery)
                 if draft == text { draft = "" }
                 for file in files {
                     do {

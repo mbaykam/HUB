@@ -161,6 +161,41 @@ final class HubConversationTests: XCTestCase {
         } catch HubAttachmentError.invalidResponse {}
     }
 
+    func testChatPreferencesUpdateOnlyTheSelectedFieldAndObservedRevision() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let value: [String: Any]
+            if request.url?.path == "/api/settings/describe" {
+                XCTAssertTrue(arguments.isEmpty)
+                value = ["writable": true, "namespaces": [
+                    ["ns": "ui-theme", "revision": 7, "value": ["fontSize": 16, "preference": "dark"]],
+                    ["ns": "ui-conversation", "revision": 3, "value": ["busyEnter": "steer"]],
+                    ["ns": "ui-chat", "revision": 2, "value": ["transcriptView": "normal"]],
+                ]]
+            } else {
+                XCTAssertEqual(request.url?.path, "/api/settings/update")
+                XCTAssertEqual(arguments["ns"] as? String, "ui-theme")
+                XCTAssertEqual(arguments["patch"] as? [String: Int], ["fontSize": 16])
+                XCTAssertEqual(arguments["expectedRevision"] as? Int, 7)
+                value = ["ns": "ui-theme"]
+            }
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": value],
+            ]))
+        }
+        let preferences = try await api.chatPreferences()
+        XCTAssertEqual(preferences.busyEnter, .steer)
+        XCTAssertEqual(preferences.transcript, .normal)
+        let updated = try await api.updateChatPreferences(.fontSize(16), from: preferences)
+        XCTAssertEqual(updated.fontSize, 16)
+        XCTAssertEqual(CatalogFixture.requests.map { $0.url?.path },
+                       ["/api/settings/describe", "/api/settings/update", "/api/settings/describe"])
+    }
+
     func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

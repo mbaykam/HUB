@@ -4,6 +4,7 @@ import HubNative
 @MainActor
 struct HubWorkspaceSettingsView: View {
     let api: HubConversationAPI?
+    let preferencesChanged: (HubChatPreferences) -> Void
     let iPhoneSettings: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -11,6 +12,9 @@ struct HubWorkspaceSettingsView: View {
         NavigationView {
             List {
                 if let api {
+                    NavigationLink(destination: HubGeneralSettingsView(api: api, changed: preferencesChanged)) {
+                        Label("General", systemImage: "slider.horizontal.3")
+                    }
                     NavigationLink(destination: HubCharactersSettingsView(api: api)) {
                         Label("Characters", systemImage: "person.2")
                     }
@@ -51,6 +55,74 @@ struct HubWorkspaceSettingsView: View {
         }
         .navigationViewStyle(.stack)
         .preferredColorScheme(.dark)
+    }
+}
+
+@MainActor
+private struct HubGeneralSettingsView: View {
+    let api: HubConversationAPI
+    let changed: (HubChatPreferences) -> Void
+    @State private var settings: HubChatPreferences?
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if let settings {
+                Section("Chat") {
+                    Stepper("Conversation text size · \(settings.fontSize)", value: Binding(
+                        get: { settings.fontSize }, set: { update(.fontSize($0)) }), in: 12...17)
+                    Picker("Return while working", selection: Binding(
+                        get: { settings.busyEnter }, set: { update(.busyEnter($0)) })) {
+                        Text("Queue message").tag(HubChatPreferences.Delivery.queue)
+                        Text("Steer current turn").tag(HubChatPreferences.Delivery.steer)
+                    }
+                    Picker("Transcript", selection: Binding(
+                        get: { settings.transcript }, set: { update(.transcript($0)) })) {
+                        Text("Normal").tag(HubChatPreferences.Transcript.normal)
+                        Text("Compact").tag(HubChatPreferences.Transcript.compact)
+                    }
+                }
+                .disabled(busy || !settings.writable)
+                if !settings.writable { Text("These preferences are read-only on this HUB.").font(.footnote) }
+            }
+            if busy { ProgressView() }
+            if error != nil && !busy { Button("Refresh settings") { Task { await load() } } }
+        }
+        .navigationTitle("General")
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let value = try await api.chatPreferences()
+            guard !Task.isCancelled else { return }
+            settings = value
+            changed(value)
+            error = nil
+        } catch {
+            if !Task.isCancelled { self.error = "Could not load chat preferences." }
+        }
+    }
+
+    private func update(_ change: HubChatPreferences.Change) {
+        guard !busy, let settings, settings.writable else { return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let value = try await api.updateChatPreferences(change, from: settings)
+                self.settings = value
+                changed(value)
+                error = nil
+            } catch {
+                self.error = "Could not confirm the change. Refresh to read the current value."
+            }
+        }
     }
 }
 

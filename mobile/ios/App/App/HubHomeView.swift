@@ -70,6 +70,7 @@ struct HubHomeView: View {
     @State private var tasksOpen = false
     @State private var usageOpen = false
     @State private var settingsOpen = false
+    @State private var chatPreferences = HubChatPreferences.defaults
     @State private var openPhoneOptions = false
     @State private var knowledgeActivityOpen = false
     @State private var historyQuery = ""
@@ -115,7 +116,7 @@ struct HubHomeView: View {
             if let selectedChat {
                 HubLiveChatView(chat: selectedChat.request.choice, api: selectedChat.api,
                                 back: { self.selectedChat = nil }, voice: voice, openChat: showChat, attachments: attachments,
-                                requestID: selectedChat.request.id)
+                                requestID: selectedChat.request.id, preferences: chatPreferences)
                     .id(selectedChat.request.choice.sessionId)
             }
         }
@@ -154,7 +155,10 @@ struct HubHomeView: View {
                 options()
             }
         }) {
-            HubWorkspaceSettingsView(api: chatAPI()) {
+            let api = chatAPI()
+            HubWorkspaceSettingsView(api: api, preferencesChanged: {
+                if let api, api === chatAPI() { chatPreferences = $0 }
+            }) {
                 openPhoneOptions = true
                 settingsOpen = false
             }
@@ -165,11 +169,17 @@ struct HubHomeView: View {
         .sheet(isPresented: $voiceHistoryOpen) {
             if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
         }
+        .task(id: model.connection == .connected ? chatAPI().map { ObjectIdentifier($0) } : nil) {
+            guard model.connection == .connected, let api = chatAPI(),
+                  let value = try? await api.chatPreferences(), !Task.isCancelled else { return }
+            chatPreferences = value
+        }
         .onChange(of: model.openNativeChat) { request in
             if let request { showChat(request); model.openNativeChat = nil }
         }
         .onChange(of: model.connection) { connection in
             if connection == .needsSetup || connection == .signInRequired {
+                chatPreferences = .defaults
                 knowledgeOpen = false
                 clearKnowledgeSelection()
                 tasksOpen = false

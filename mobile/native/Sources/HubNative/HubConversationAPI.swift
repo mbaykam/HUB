@@ -229,6 +229,34 @@ public struct HubBrowserFrame {
     public let jpeg: Data
 }
 
+public struct HubChatPreferences {
+    public enum Delivery: String, CaseIterable { case queue, steer }
+    public enum Transcript: String, CaseIterable { case normal, compact }
+
+    public let fontSize: Int
+    public let busyEnter: Delivery
+    public let transcript: Transcript
+    public let writable: Bool
+    fileprivate let revisions: [String: Int]
+
+    public static let defaults = HubChatPreferences(fontSize: 14, busyEnter: .queue, transcript: .compact,
+                                                     writable: false, revisions: [:])
+
+    public enum Change {
+        case fontSize(Int)
+        case busyEnter(Delivery)
+        case transcript(Transcript)
+
+        fileprivate var field: (namespace: String, key: String, value: Any) {
+            switch self {
+            case .fontSize(let size): return ("ui-theme", "fontSize", size)
+            case .busyEnter(let mode): return ("ui-conversation", "busyEnter", mode.rawValue)
+            case .transcript(let mode): return ("ui-chat", "transcriptView", mode.rawValue)
+            }
+        }
+    }
+}
+
 public struct HubChatArtifacts: Decodable {
     public let screenshots: [HubChatScreenshot]
     public let artifacts: [HubConversationApp]?
@@ -1142,7 +1170,8 @@ public final class HubConversationAPI {
         return text
     }
 
-    public func sendChat(_ draft: String, sessionID: String, files: [String] = [], photos: [HubChatPhoto] = []) async throws {
+    public func sendChat(_ draft: String, sessionID: String, files: [String] = [], photos: [HubChatPhoto] = [],
+                         delivery: HubChatPreferences.Delivery = .queue) async throws {
         guard HubVoiceAPI.validID(sessionID) else { throw HubChatSendError.rejected }
         let input = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard input.utf8.count <= 32_768, !input.isEmpty || !files.isEmpty || !photos.isEmpty,
@@ -1160,7 +1189,7 @@ public final class HubConversationAPI {
             let receipt = try await rpc("session/prompt", request: [
                 "requestId": UUID().uuidString.lowercased(),
                 "sessionId": sessionID,
-                "mode": "queue",
+                "mode": delivery.rawValue,
                 "content": content,
                 "clientTimeZone": TimeZone.current.identifier,
             ])
@@ -1278,6 +1307,39 @@ public final class HubConversationAPI {
         return HubBrowserFrame(tab: frame.tab, width: frame.width, height: frame.height, jpeg: jpeg)
     }
 
+    public func chatPreferences() async throws -> HubChatPreferences {
+        let description = try await rpc("settings/describe", arguments: [:], maxBytes: 4_194_304)
+        guard let namespaces = description["namespaces"] as? [[String: Any]],
+              let writable = description["writable"] as? Bool else { throw HubAttachmentError.invalidResponse }
+        var fields: [String: [String: Any]] = [:]
+        var revisions: [String: Int] = [:]
+        for item in namespaces {
+            guard let name = item["ns"] as? String, ["ui-theme", "ui-conversation", "ui-chat"].contains(name),
+                  let value = item["value"] as? [String: Any], let revision = item["revision"] as? Int, revision >= 0 else { continue }
+            guard revisions[name] == nil else { throw HubAttachmentError.invalidResponse }
+            fields[name] = value
+            revisions[name] = revision
+        }
+        guard let size = fields["ui-theme"]?["fontSize"] as? Int, (12...17).contains(size),
+              let enter = fields["ui-conversation"]?["busyEnter"] as? String, let delivery = HubChatPreferences.Delivery(rawValue: enter),
+              let view = fields["ui-chat"]?["transcriptView"] as? String, let transcript = HubChatPreferences.Transcript(rawValue: view) else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return HubChatPreferences(fontSize: size, busyEnter: delivery, transcript: transcript,
+                                  writable: writable, revisions: revisions)
+    }
+
+    public func updateChatPreferences(_ change: HubChatPreferences.Change, from preferences: HubChatPreferences) async throws -> HubChatPreferences {
+        let field = change.field
+        guard preferences.writable, let revision = preferences.revisions[field.namespace] else { throw HubChatSendError.rejected }
+        if case .fontSize(let size) = change, !(12...17).contains(size) { throw HubChatSendError.rejected }
+        let receipt = try await rpc("settings/update", arguments: [
+            "ns": field.namespace, "patch": [field.key: field.value], "expectedRevision": revision,
+        ])
+        guard receipt["ns"] as? String == field.namespace else { throw HubAttachmentError.invalidResponse }
+        return try await chatPreferences()
+    }
+
     public func chatScreenshot(sessionID: String, id: String) async throws -> Data {
         guard HubVoiceAPI.validID(sessionID), Self.isScreenshotID(id) else { throw HubAttachmentError.invalidResponse }
         return try await requestData("api/hub/artifacts", headers: [
@@ -1385,6 +1447,10 @@ public final class HubConversationAPI {
     }
 
     private func rpc(_ method: String, request payload: [String: Any], maxBytes: Int = 65_536) async throws -> [String: Any] {
+        try await rpc(method, arguments: ["request": payload], maxBytes: maxBytes)
+    }
+
+    private func rpc(_ method: String, arguments: [String: Any], maxBytes: Int = 65_536) async throws -> [String: Any] {
         let url = server.origin.appendingPathComponent("api/" + method)
         let rpcID = UUID().uuidString.lowercased()
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
@@ -1394,7 +1460,7 @@ public final class HubConversationAPI {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "type": "client-request", "rpcId": rpcID, "method": method,
-            "payload": ["args": ["request": payload]],
+            "payload": ["args": arguments],
         ])
         try Task.checkCancellation()
         let (data, response) = try await session.data(for: request)
