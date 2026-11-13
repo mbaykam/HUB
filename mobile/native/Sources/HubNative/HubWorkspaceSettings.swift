@@ -1,5 +1,44 @@
 import Foundation
 
+public struct HubToolCatalog: Decodable {
+    public struct Tool: Decodable, Identifiable {
+        public let name: String
+        public let description: String
+        public let parameters: HubTaskArgument?
+        public let hostRegistered: Bool
+        public let contexts: Int
+        public let characterContexts: [String]
+        public var id: String { name }
+        public var isRetired: Bool { name.hasPrefix("mcp__hub_memory__") }
+        public var isRegistered: Bool { hostRegistered || contexts > 0 }
+    }
+
+    public struct Character: Decodable, Identifiable {
+        public let id: String
+        public let name: String
+        public let configured: Bool
+        public let policy: HubCharacterSettings.Character.ToolPolicy
+
+        public func allows(_ tool: Tool) -> Bool {
+            !tool.isRetired && (policy.mode == "inherit" || policy.names?.contains(tool.name) == true)
+        }
+    }
+
+    public struct Services: Decodable {
+        public struct Browser: Decodable {
+            public let ready: Bool
+            public let installed: Bool
+            public let version: String?
+        }
+        public let browser: Browser?
+    }
+
+    public let tools: [Tool]
+    public let characters: [Character]
+    public let services: Services?
+    public let meaning: String
+}
+
 public struct HubModelCatalog: Decodable {
     public struct Provider: Decodable, Identifiable {
         public let id: String
@@ -122,15 +161,31 @@ public struct HubCharacterSettings: Decodable {
                 public var language: String?
                 public let steps: Int?
                 public let turkishVoice: String?
+                public var id: String { engine + ":" + model }
+
+                public init(engine: String, model: String, voice: String? = nil, language: String? = nil,
+                            steps: Int? = nil, turkishVoice: String? = nil) {
+                    self.engine = engine
+                    self.model = model
+                    self.voice = voice
+                    self.language = language
+                    self.steps = steps
+                    self.turkishVoice = turkishVoice
+                }
             }
             public struct Attention: Codable {
-                public let idleSeconds: Int
-                public let wakePhrases: [String]
-                public let contextSeconds: Int
+                public var idleSeconds: Int
+                public var wakePhrases: [String]
+                public var contextSeconds: Int
+                public init(idleSeconds: Int, wakePhrases: [String], contextSeconds: Int) {
+                    self.idleSeconds = idleSeconds
+                    self.wakePhrases = wakePhrases
+                    self.contextSeconds = contextSeconds
+                }
             }
             public var stt: Engine
             public var tts: Engine
-            public let attention: Attention?
+            public var attention: Attention?
         }
 
         public let id: String
@@ -160,6 +215,30 @@ public struct HubCharacterSettings: Decodable {
     public let characters: [Character]
     public let tools: [Tool]?
     public let warning: String?
+}
+
+public struct HubSpeechSettings: Codable {
+    public let revision: Int
+    public var speech: HubCharacterSettings.Character.Speech
+}
+
+public struct HubSpeechCatalog: Decodable {
+    public struct Option: Decodable, Identifiable {
+        public let engine: String
+        public let model: String
+        public let available: Bool
+        public let downloadable: Bool?
+        public let voices: [String]?
+        public let reason: String?
+        public var id: String { engine + ":" + model }
+    }
+    public let stt: [Option]
+    public let tts: [Option]
+}
+
+public struct HubSpeechDownload: Decodable {
+    public let model: String
+    public let phase: String
 }
 
 public enum HubCharacterRoleAction: String {

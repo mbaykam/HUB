@@ -20,6 +20,12 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubInstructionsView(api: api)) {
                         Label("Instructions", systemImage: "doc.text")
                     }
+                    NavigationLink(destination: HubToolCatalogView(api: api)) {
+                        Label("Tools", systemImage: "wrench.and.screwdriver")
+                    }
+                    NavigationLink(destination: HubSpeechSettingsView(api: api)) {
+                        Label("Speech", systemImage: "waveform")
+                    }
                     NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
                         Label("Knowledge AI", systemImage: "circle.hexagongrid")
                     }
@@ -45,6 +51,121 @@ struct HubWorkspaceSettingsView: View {
         }
         .navigationViewStyle(.stack)
         .preferredColorScheme(.dark)
+    }
+}
+
+@MainActor
+private struct HubToolCatalogView: View {
+    let api: HubConversationAPI
+    @State private var catalog: HubToolCatalog?
+    @State private var characterID = ""
+    @State private var filter = Filter.current
+    @State private var search = ""
+    @State private var failed = false
+    @State private var loading = true
+    @State private var attempt = 0
+
+    private enum Filter: String, CaseIterable {
+        case current = "Current tools"
+        case allowed = "Allowed by character"
+        case denied = "Disabled for character"
+        case unregistered = "Not registered"
+        case retired = "Retired tools"
+    }
+
+    var body: some View {
+        List {
+            if loading { ProgressView("Loading tools…") }
+            if failed {
+                Text("Could not load tools.").foregroundStyle(.secondary)
+                Button("Retry") { attempt += 1 }
+            }
+            if let catalog {
+                let character = catalog.characters.first { $0.id == characterID }
+                Section {
+                    Picker("Character", selection: $characterID) {
+                        ForEach(catalog.characters) { Text($0.name).tag($0.id) }
+                    }
+                    Picker("Tool access", selection: $filter) {
+                        ForEach(Filter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    if character?.configured == false {
+                        Text("This character needs a model before it can run.").foregroundStyle(.secondary)
+                    }
+                    if let browser = catalog.services?.browser {
+                        Text(browser.ready ? "Browser ready" : (browser.installed ? "Browser starts when needed" : "Browser setup needed on HUB"))
+                    }
+                    Button("Refresh") { attempt += 1 }.disabled(loading)
+                }
+                let tools = matchingTools(catalog.tools, character: character)
+                Section {
+                    if tools.isEmpty { Text("No matching tools").foregroundStyle(.secondary) }
+                    ForEach(tools) { tool in toolRow(tool, character: character) }
+                } header: { Text("\(tools.count) tools") }
+                Section { Text(catalog.meaning).font(.footnote).foregroundStyle(.secondary) }
+            }
+        }
+        .navigationTitle("Tools")
+        .searchable(text: $search, prompt: "Find a tool…")
+        .task(id: attempt) { await load() }
+        .refreshable { await load() }
+    }
+
+    private func matchingTools(_ tools: [HubToolCatalog.Tool], character: HubToolCatalog.Character?) -> [HubToolCatalog.Tool] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return tools.filter { tool in
+            guard tool.isRetired == (filter == .retired),
+                  query.isEmpty || "\(tool.name) \(tool.description)".localizedCaseInsensitiveContains(query) else { return false }
+            let allowed = character?.allows(tool) ?? !tool.isRetired
+            switch filter {
+            case .current, .retired: return true
+            case .allowed: return allowed
+            case .denied: return !allowed
+            case .unregistered: return !tool.isRegistered
+            }
+        }
+    }
+
+    private func toolRow(_ tool: HubToolCatalog.Tool, character: HubToolCatalog.Character?) -> some View {
+        DisclosureGroup {
+            Text(tool.isRetired ? "Use the current Knowledge and Skills tools." : tool.description)
+                .textSelection(.enabled)
+            if let parameters = tool.parameters {
+                DisclosureGroup("Tool inputs") {
+                    Text(parameters.displayText).font(.footnote.monospaced()).textSelection(.enabled)
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(tool.name)
+                Text(accessLabel(tool, character: character)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func accessLabel(_ tool: HubToolCatalog.Tool, character: HubToolCatalog.Character?) -> String {
+        if tool.isRetired { return "Retired" }
+        if character?.allows(tool) == false { return "Disabled" }
+        if !tool.isRegistered { return "Not registered" }
+        if tool.hostRegistered { return "Allowed · host tool" }
+        if let character, tool.characterContexts.contains(character.id) { return "Allowed · active context" }
+        return "Allowed · context dependent"
+    }
+
+    private func load() async {
+        loading = true
+        failed = false
+        defer { loading = false }
+        do {
+            let value = try await api.toolCatalog()
+            guard !Task.isCancelled else { return }
+            catalog = value
+            if !value.characters.contains(where: { $0.id == characterID }) {
+                characterID = value.characters.first?.id ?? ""
+            }
+        } catch {
+            if !Task.isCancelled { failed = true }
+        }
     }
 }
 

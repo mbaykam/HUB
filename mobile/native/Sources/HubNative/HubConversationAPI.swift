@@ -714,6 +714,53 @@ public final class HubConversationAPI {
         try await modelRequest(refresh ? ["action": "refresh"] : nil)
     }
 
+    public func toolCatalog() async throws -> HubToolCatalog {
+        let data = try await requestData("api/hub/tools", headers: ["x-hub-tools": "1"], maxBytes: 4_194_304)
+        return try JSONDecoder().decode(HubToolCatalog.self, from: data)
+    }
+
+    public func speechSettings() async throws -> HubSpeechSettings {
+        try await speechSettingsRequest(nil)
+    }
+
+    public func saveSpeechSettings(_ value: HubSpeechSettings) async throws -> HubSpeechSettings {
+        try await speechSettingsRequest(JSONEncoder().encode(value))
+    }
+
+    private func speechSettingsRequest(_ body: Data?) async throws -> HubSpeechSettings {
+        let data = try await requestData("api/hub/voice/settings", headers: ["x-hub-speech-settings": "1"], body: body)
+        return try JSONDecoder().decode(HubSpeechSettings.self, from: data)
+    }
+
+    public func speechCatalog() async throws -> HubSpeechCatalog {
+        struct Catalog: Decodable { let speech: HubSpeechCatalog }
+        let data = try await requestData("api/hub/voice/catalog", headers: [:])
+        return try JSONDecoder().decode(Catalog.self, from: data).speech
+    }
+
+    public func speechDownload(_ option: HubSpeechCatalog.Option? = nil) async throws -> HubSpeechDownload? {
+        struct Status: Decodable { let download: HubSpeechDownload? }
+        let body = try option.map { try JSONEncoder().encode(["engine": $0.engine, "model": $0.model]) }
+        let data = try await requestData("api/hub/voice/speech-models", headers: ["x-hub-speech-models": "1"], body: body)
+        return try JSONDecoder().decode(Status.self, from: data).download
+    }
+
+    public func speechPreview(_ voice: HubCharacterSettings.Character.Speech.Engine, language: String) async throws -> Data {
+        struct Sample: Encodable { let tts: HubCharacterSettings.Character.Speech.Engine; let language: String }
+        guard ["en", "tr"].contains(language) else { throw HubAttachmentError.invalidResponse }
+        return try await requestData("api/hub/voice/preview", headers: ["x-hub-speech-preview": "1"],
+                                     body: JSONEncoder().encode(Sample(tts: voice, language: language)),
+                                     mediaTypes: ["audio/wav"], maxBytes: 4_194_304)
+    }
+
+    public func sonioxConnection(key: String? = nil) async throws -> Bool {
+        struct Connection: Decodable { let configured: Bool }
+        if let key, !(16...512).contains(key.utf8.count) { throw HubAttachmentError.invalidResponse }
+        let body = try key.map { try JSONEncoder().encode(["apiKey": $0]) }
+        let data = try await requestData("api/hub/voice/soniox", headers: ["x-hub-speech-settings": "1"], body: body)
+        return try JSONDecoder().decode(Connection.self, from: data).configured
+    }
+
     public func setModelFavorite(_ model: HubModelCatalog.Model, selected: Bool) async throws -> HubModelCatalog {
         try await modelRequest(["action": "favorite", "provider": model.provider, "model": model.modelID, "selected": selected])
     }
