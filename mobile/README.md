@@ -9,10 +9,23 @@ and notifications and system sharing require the matching host configuration and
 physical-device acceptance described below. Windows HUB and
 its PWA continue to use their existing release.
 
+## Native Home
+
+The iPhone opens a fresh SwiftUI Home and editable chat field before checking
+the network. A single connection status handles setup, sign-in and reconnect.
+After authentication, Knowledge, the planner and recent chats load in parallel.
+The current draft stays in memory while the app is open. Reopening starts fresh.
+
+Send creates a conversation and submits the text through HUB's existing
+authenticated chat API. An uncertain response keeps the draft and links to the
+conversation so you can check delivery. Detailed views open on demand through
+Open workspace or a recent chat. The app records time to native Home and time
+to live Home data separately in the local HomeLaunch log category.
+
 ## Installed interface
 
 The matching development build includes the actual renderer, styles/fonts and
-lazy graph/voice assets from a fixed product profile. It opens a fresh Home from
+lazy graph/voice assets from a fixed product profile. The detailed workspace can open from
 those verified app resources using the selected HTTPS origin and WebKit's own
 cookie store. It does not restore a previous screen, chat or draft snapshot.
 Data still comes from HUB; opening the interface alone does not run an assistant.

@@ -1,6 +1,9 @@
 import UIKit
 import WebKit
 import SafariServices
+import SwiftUI
+import os
+import Network
 import HubNative
 
 /// Both installed static UI and remote HUB use a plain, unprivileged web view. No Capacitor
@@ -9,6 +12,20 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private let savedOriginKey = HubClientConfiguration.serverPreferenceKey
     private var server: HubServer?
     private var webView: WKWebView!
+    private let home = HubHomeModel()
+    private var homeState = HubHomeState()
+    private var homeController: UIHostingController<HubHomeView>!
+    private let workspaceBar = UIStackView()
+    private var conversationAPI: HubConversationAPI?
+    private var sendTask: Task<Void, Never>?
+    private var showingHome = true
+    private var signingIn = false
+    private var firstAppearance = true
+    private var initialServer: HubServer?
+    private let bootstrapStarted = ProcessInfo.processInfo.systemUptime
+    private var networkMonitor: NWPathMonitor?
+    private var networkWasAvailable: Bool?
+    private let launchLog = Logger(subsystem: "com.mbaykam.hub", category: "HomeLaunch")
     private let message = UILabel()
     private let recovery = UIStackView()
     private let recoveryVoice = UIButton(type: .system)
@@ -35,34 +52,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var inspectingPageEpoch: Int?
     private var activeNavigation: WKNavigation?
     private var showingPageLoad = false
-    deinit { probe?.cancel(); pageDeadline?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) } }
+    deinit { networkMonitor?.cancel(); sendTask?.cancel(); probe?.cancel(); pageDeadline?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) } }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         navigationController?.setNavigationBarHidden(true, animated: false)
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
-        config.allowsInlineMediaPlayback = true
-        config.applicationNameForUserAgent = "HUBiOS/0.2"
-        // Do not add native message handlers to this configuration.
-        webView = HubWebView(frame: .zero, configuration: config)
-        if let resources = Bundle.main.resourceURL {
-            installedUI = try? HubInstalledUI.load(from: resources.appendingPathComponent("public/installed-ui", isDirectory: true))
-        }
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.isOpaque = false
-        webView.backgroundColor = .systemBackground
-        webView.scrollView.backgroundColor = .systemBackground
-        webView.allowsBackForwardNavigationGestures = true
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.scrollView.keyboardDismissMode = .interactive
-        hideKeyboardShortcuts(in: webView)
-        keyboardObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in guard let self else { return }; self.hideKeyboardShortcuts(in: self.webView) }
-        }
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.validateForegroundPage() }
         })
@@ -90,23 +85,119 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         recoveryVoice.isHidden = true
         let recoveryControls: [UIView] = [message, connectButton, retryButton, recoveryVoice]
         recoveryControls.forEach { recovery.addArrangedSubview($0) }
-        view.addSubview(webView)
+        workspaceBar.translatesAutoresizingMaskIntoConstraints = false
+        workspaceBar.alignment = .center
+        workspaceBar.isLayoutMarginsRelativeArrangement = true
+        workspaceBar.layoutMargins = UIEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+        let homeButton = UIButton(type: .system)
+        homeButton.setTitle("‹ Home", for: .normal)
+        homeButton.addAction(UIAction { [weak self] _ in self?.returnHome() }, for: .touchUpInside)
+        workspaceBar.addArrangedSubview(homeButton)
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        homeButton.setContentHuggingPriority(.required, for: .horizontal)
+        workspaceBar.addArrangedSubview(spacer)
+        view.addSubview(workspaceBar)
         view.addSubview(recovery)
         NSLayoutConstraint.activate([
-            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            workspaceBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            workspaceBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            workspaceBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            workspaceBar.heightAnchor.constraint(equalToConstant: 44),
             recovery.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
             recovery.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             recovery.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)
         ])
-        HubNotifications.shared.destinationHandler = { [weak self] destination in self?.openNotification(destination) }
+        workspaceBar.isHidden = true
+        recovery.isHidden = true
+
+        let screen = HubHomeView(model: home, connect: { [weak self] in self?.performHomeConnectionAction() },
+            voice: { [weak self] in self?.openHomeVoice() }, options: { [weak self] in self?.showOptions() },
+            workspace: { [weak self] in self?.openWorkspace() },
+            openChat: { [weak self] id in self?.openChat(id) },
+            send: { [weak self] in self?.sendHomeDraft() })
+        let controller = UIHostingController(rootView: screen)
+        homeController = controller
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        controller.didMove(toParent: self)
         if let address = UserDefaults.standard.string(forKey: savedOriginKey), let saved = try? HubServer(address: address) {
-            connect(saved)
-        } else {
-            DispatchQueue.main.async { [weak self] in self?.showConnection() }
+            initialServer = saved
+            home.connection = .connecting
         }
+        HubNotifications.shared.destinationHandler = { [weak self] destination in self?.openNotification(destination) }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        home.hasActiveVoice = voice?.isActive == true
+        if firstAppearance {
+            let elapsed = Int((ProcessInfo.processInfo.systemUptime - bootstrapStarted) * 1000)
+            launchLog.info("Native Home appeared in \(elapsed, privacy: .public) ms")
+            if let initialServer { connect(initialServer) }
+            initialServer = nil
+            firstAppearance = false
+            refreshHome()
+            monitorHomeNetwork()
+        }
+    }
+
+    private func monitorHomeNetwork() {
+        let monitor = NWPathMonitor()
+        networkMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            let available = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let restored = self.networkWasAvailable == false && available
+                self.networkWasAvailable = available
+                if restored, self.showingHome, self.home.connection == .unavailable,
+                   UIApplication.shared.applicationState == .active {
+                    self.refreshHome()
+                }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.mbaykam.hub.connectivity"))
+    }
+
+    private func prepareWebView() {
+        guard webView == nil else { return }
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        config.allowsInlineMediaPlayback = true
+        config.applicationNameForUserAgent = "HUBiOS/0.2"
+        // Do not add native message handlers to this configuration.
+        webView = HubWebView(frame: .zero, configuration: config)
+        if let resources = Bundle.main.resourceURL {
+            installedUI = try? HubInstalledUI.load(from: resources.appendingPathComponent("public/installed-ui", isDirectory: true))
+        }
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.isOpaque = false
+        webView.backgroundColor = .systemBackground
+        webView.scrollView.backgroundColor = .systemBackground
+        webView.allowsBackForwardNavigationGestures = true
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.keyboardDismissMode = .interactive
+        hideKeyboardShortcuts(in: webView)
+        keyboardObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in guard let self, let webView = self.webView else { return }; self.hideKeyboardShortcuts(in: webView) }
+        }
+        view.insertSubview(webView, belowSubview: recovery)
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: workspaceBar.bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -126,7 +217,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         cancelPageDeadline(); showingPageLoad = false
         activeNavigation = nil
         probe?.cancel(); connected = false
-        webView.stopLoading()
+        webView?.stopLoading()
         message.text = text; recoveryVoice.isHidden = voice?.isActive != true
         recovery.isHidden = false; webView.isHidden = true
     }
@@ -173,6 +264,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
     }
     private func validateForegroundPage() {
+        guard !firstAppearance else { return }
+        if showingHome {
+            home.hasActiveVoice = voice?.isActive == true
+            refreshHome()
+            return
+        }
         guard isViewLoaded, view.window != nil, let server, recovery.isHidden || showingPageLoad else { return }
         // Inspect first; never reload a healthy page or a user's current draft.
         watchPage(timeout: showingPageLoad ? 25 : 8)
@@ -192,6 +289,11 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         sheet.addAction(UIAlertAction(title: voice?.isActive == true ? "Open voice controls" : "Voice", style: .default) { [weak self] _ in self?.afterOptions { $0.showVoice() } })
         sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
         sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
+        if showingHome, connected {
+            sheet.addAction(UIAlertAction(title: "Open workspace", style: .default) { [weak self] _ in
+                self?.afterOptions { $0.openWorkspace() }
+            })
+        }
         sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
         sheet.addAction(UIAlertAction(title: usingInstalledUI ? "Reload from HUB" : "Reload", style: .default) { [weak self] _ in self?.afterOptions {
             if $0.usingInstalledUI, let server = $0.server {
@@ -211,6 +313,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func showConnection(error: String? = nil, address: String? = nil) {
+        guard !home.sending else { return }
         guard voice?.isActive != true else { showEndVoiceFirst(); return }
         let sheet = UIAlertController(title: "Connect to HUB", message: error ?? "Enter your secure HUB address. Sign in on the next screen; your session stays on this iPhone.", preferredStyle: .alert)
         sheet.addTextField { field in
@@ -234,7 +337,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func connect(_ value: HubServer) {
-        if let server, server != value { HubNotifications.shared.disable() }
+        if let server, server != value {
+            HubNotifications.shared.disable()
+            home.draft = ""
+        }
         connectionGeneration += 1
         probe?.cancel()
         connected = false
@@ -245,28 +351,216 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         uiAPI?.invalidate()
         preferRemoteUI = false
         installedProcessRecoveries = 0
-        let cookies: () async -> [HTTPCookie] = { [weak webView] in
+        let cookies: () async -> [HTTPCookie] = {
             await withCheckedContinuation { continuation in
                 DispatchQueue.main.async {
                     if UIApplication.shared.applicationState == .background {
                         continuation.resume(returning: (try? nativeState.cookies()) ?? [])
-                        return
+                    } else {
+                        WKWebsiteDataStore.default().httpCookieStore.getAllCookies {
+                            continuation.resume(returning: $0)
+                        }
                     }
-                    guard let webView else { continuation.resume(returning: []); return }
-                    webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
                 }
             }
         }
         api = HubVoiceAPI(server: value, cookies: cookies)
         uiAPI = HubInstalledUIAPI(server: value, cookies: cookies)
-        // Only a canonical origin is saved. The web data store owns HttpOnly cookies.
+        conversationAPI = HubConversationAPI(server: value, cookies: cookies)
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
-        message.text = "Connecting to \(value.origin.host ?? "HUB")…"
-        showContent()
-        loadHub(value)
+        home.knowledge = nil
+        home.planner = nil
+        home.conversations = nil
+        home.uncertainChat = nil
+        home.sendError = nil
+        if !firstAppearance { returnHome() }
+    }
+
+    private func refreshHome() {
+        guard showingHome, !home.sending else { return }
+        let started = ProcessInfo.processInfo.systemUptime
+        let attempt = homeState.begin(hasServer: server != nil)
+        connected = false
+        home.connection = homeState.connection
+        home.refreshing = false
+        home.incomplete = false
+        guard let server, let uiAPI, let conversationAPI else { return }
+        probe?.cancel()
+        probe = Task { [weak self] in
+            do {
+                _ = try await uiAPI.compatibility()
+                guard let self, !Task.isCancelled, self.showingHome,
+                      self.homeState.resolve(.connected, attempt: attempt) else { return }
+                self.connected = true
+                self.home.connection = .connected
+                self.home.refreshing = true
+                self.message.text = "Connected"
+                self.openPendingNotification()
+                guard self.showingHome else { return }
+                async let knowledge: Void = self.loadHomeKnowledge(conversationAPI, attempt: attempt)
+                async let planner: Void = self.loadHomePlanner(conversationAPI, attempt: attempt)
+                async let chats: Void = self.loadHomeChats(conversationAPI, attempt: attempt)
+                _ = await (knowledge, planner, chats)
+                guard !Task.isCancelled, self.showingHome, self.homeState.isCurrent(attempt) else { return }
+                self.home.refreshing = false
+                let elapsed = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
+                if !self.home.incomplete {
+                    self.launchLog.info("Native Home live data ready in \(elapsed, privacy: .public) ms")
+                }
+                await self.saveWebSession(server)
+            } catch {
+                guard let self, !Task.isCancelled, self.showingHome else { return }
+                self.homeConnectionFailed(error, attempt: attempt)
+            }
+        }
+    }
+
+    private func loadHomeKnowledge(_ api: HubConversationAPI, attempt: UInt64) async {
+        do {
+            let value = try await api.knowledge()
+            if showingHome, !Task.isCancelled, homeState.isCurrent(attempt) { home.knowledge = value }
+        } catch { homeDataFailed(error, attempt: attempt) }
+    }
+
+    private func loadHomePlanner(_ api: HubConversationAPI, attempt: UInt64) async {
+        do {
+            let value = try await api.planner()
+            if showingHome, !Task.isCancelled, homeState.isCurrent(attempt) { home.planner = value }
+        } catch { homeDataFailed(error, attempt: attempt) }
+    }
+
+    private func loadHomeChats(_ api: HubConversationAPI, attempt: UInt64) async {
+        do {
+            let value = try await api.list()
+            if showingHome, !Task.isCancelled, homeState.isCurrent(attempt) { home.conversations = value.conversations }
+        } catch { homeDataFailed(error, attempt: attempt) }
+    }
+
+    private func homeDataFailed(_ error: Error, attempt: UInt64) {
+        guard showingHome, !Task.isCancelled, homeState.isCurrent(attempt) else { return }
+        if error as? HubAttachmentError == .signInRequired {
+            let next = homeState.begin(hasServer: server != nil)
+            homeConnectionFailed(error, attempt: next)
+        } else {
+            home.incomplete = true
+        }
+    }
+
+    private func homeConnectionFailed(_ error: Error, attempt: UInt64) {
+        let signIn = (error as? HubVoiceAPIError) == .signInRequired
+            || (error as? HubAttachmentError) == .signInRequired
+        guard homeState.resolve(signIn ? .signInRequired : .unavailable, attempt: attempt) else { return }
+        connected = false
+        home.connection = homeState.connection
+        home.refreshing = false
+        if signIn { home.knowledge = nil; home.planner = nil; home.conversations = nil }
+    }
+
+    private func saveWebSession(_ expected: HubServer) async {
+        let generation = connectionGeneration
+        let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            WKWebsiteDataStore.default().httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        guard !Task.isCancelled, server == expected, generation == connectionGeneration, let state = deviceState else { return }
+        do { try state.rememberVerifiedSession(cookies) }
+        catch { message.text = "Connected. Sign-in could not be saved on this iPhone." }
+        HubNotifications.shared.attach(server: expected, state: state)
+    }
+
+    private func performHomeConnectionAction() {
+        switch home.connection {
+        case .needsSetup: showConnection()
+        case .signInRequired:
+            if let server {
+                signingIn = true
+                loadRemote(server.origin)
+            }
+        case .unavailable, .connected: refreshHome()
+        case .connecting: break
+        }
+    }
+
+    private func openHomeVoice() {
+        if home.connection == .connected || voice?.isActive == true { showVoice() }
+        else { performHomeConnectionAction() }
+    }
+
+    private func openWorkspace() {
+        guard !home.sending else { return }
+        guard connected, let server else { performHomeConnectionAction(); return }
+        loadHub(server)
+    }
+
+    private func openChat(_ id: String) {
+        guard !home.sending, let server, let destination = try? HubNotificationDestination(server: server, sessionID: id) else { return }
+        if home.uncertainChat == id, connected {
+            home.uncertainChat = nil
+            home.sendError = nil
+        }
+        openNotification(destination)
+    }
+
+    private func sendHomeDraft() {
+        guard showingHome, home.connection == .connected, !home.sending, home.uncertainChat == nil,
+              let conversationAPI, !home.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let draft = home.draft
+        let generation = connectionGeneration
+        home.sending = true
+        home.sendError = nil
+        sendTask = Task { [weak self] in
+            do {
+                let id = try await conversationAPI.sendNewChat(draft)
+                guard let self, generation == self.connectionGeneration else { return }
+                self.home.sending = false
+                self.home.draft = ""
+                self.openChat(id)
+            } catch {
+                guard let self, generation == self.connectionGeneration else { return }
+                self.home.sending = false
+                switch error as? HubChatSendError {
+                case .unknownDelivery(let id):
+                    self.home.uncertainChat = id
+                    self.home.sendError = "Delivery could not be confirmed. Open the conversation before sending again."
+                case .signInRequired:
+                    let attempt = self.homeState.begin(hasServer: true)
+                    self.homeConnectionFailed(HubVoiceAPIError.signInRequired, attempt: attempt)
+                case .invalidDraft:
+                    self.home.sendError = "This message is too long."
+                default:
+                    self.home.sendError = "The message could not be sent. Your text is still here."
+                }
+            }
+        }
+    }
+
+    private func returnHome() {
+        signingIn = false
+        showingHome = true
+        activeNavigation = nil
+        cancelPageDeadline()
+        probe?.cancel()
+        webView?.stopLoading()
+        webView?.isHidden = true
+        recovery.isHidden = true
+        workspaceBar.isHidden = true
+        homeController.view.isHidden = false
+        home.hasActiveVoice = voice?.isActive == true
+        refreshHome()
+    }
+
+    private func showWorkspace() {
+        if showingHome {
+            probe?.cancel()
+            _ = homeState.begin(hasServer: server != nil)
+        }
+        showingHome = false
+        homeController.view.isHidden = true
+        workspaceBar.isHidden = false
+        prepareWebView()
     }
 
     private func loadHub(_ value: HubServer) {
+        showWorkspace()
         // Only static, checksum-verified resources from the signed app are used.
         // The selected HTTPS origin and WebKit's own cookie store remain intact;
         // there is no native fetch proxy, JS bridge or restored user snapshot.
@@ -277,12 +571,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         } else { loadRemote(value.origin) }
     }
     private func loadRemote(_ url: URL) {
+        showWorkspace()
         preparePageLoad()
         usingInstalledUI = false
         activeNavigation = webView.load(URLRequest(url: url))
     }
 
     private func reload() {
+        if showingHome { refreshHome(); return }
         if server == nil { showConnection(); return }
         installedProcessRecoveries = 0
         showContent()
@@ -292,6 +588,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     private func confirmSignOut() {
+        guard !home.sending else { return }
         guard voice?.isActive != true else { showEndVoiceFirst(); return }
         let alert = UIAlertController(title: "Sign out on this iPhone?", message: "Your conversations, files and settings on HUB will stay intact.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -305,10 +602,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             catch { self.showNotice("Sign-out could not clear saved access. Unlock this iPhone and try again."); return }
             HubNotifications.shared.forgetConnection()
             self.connected = false
-            self.webView.stopLoading()
+            self.webView?.stopLoading()
             self.server = nil
             UserDefaults.standard.removeObject(forKey: self.savedOriginKey)
-            let store = self.webView.configuration.websiteDataStore.httpCookieStore
+            let store = WKWebsiteDataStore.default().httpCookieStore
             store.getAllCookies { cookies in
                 let group = DispatchGroup()
                 for cookie in cookies { group.enter(); store.delete(cookie) { group.leave() } }
@@ -373,7 +670,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        guard !showingHome, let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         if let server, server.contains(url), URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "hubNative" }) == true {
             decisionHandler(.cancel)
@@ -410,9 +707,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        if navigation !== activeNavigation { preparePageLoad(); activeNavigation = navigation }
+        if !showingHome, navigation !== activeNavigation { preparePageLoad(); activeNavigation = navigation }
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        guard !showingHome else { decisionHandler(.cancel); return }
         if let response = navigationResponse.response as? HTTPURLResponse,
            HubPageRecovery.failedHTTP(status: response.statusCode, mainFrame: navigationResponse.isForMainFrame) {
             decisionHandler(.cancel)
@@ -422,7 +720,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         decisionHandler(.allow)
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard navigation === activeNavigation else { return }
+        guard !showingHome, navigation === activeNavigation else { return }
         inspectVisiblePage()
         guard let server, let url = webView.url, server.contains(url) else {
             message.text = "Complete sign-in to connect to HUB."
@@ -454,13 +752,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 self.connected = true
                 if !self.showingPageLoad { self.showContent() }
                 self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
-                let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
-                    self.webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
-                }
+                await self.saveWebSession(expected)
                 guard !Task.isCancelled, generation == self.connectionGeneration else { return }
-                do { try self.deviceState?.rememberVerifiedSession(cookies) }
-                catch { self.message.text = "Connected. Sign-in could not be saved on this iPhone." }
-                if let state = self.deviceState { HubNotifications.shared.attach(server: expected, state: state) }
+                if self.signingIn {
+                    self.returnHome()
+                    return
+                }
                 self.openPendingNotification()
             } catch {
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration else { return }
@@ -481,9 +778,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
 
     private func openNotification(_ destination: HubNotificationDestination) {
         notificationDestination = destination
-        if connected { openPendingNotification() }
-        else if let server { loadHub(server) }
-        else { message.text = "Connect to the HUB used by this notification first." }
+        guard !firstAppearance else { return }
+        guard !home.sending else { return }
+        if connected {
+            openPendingNotification()
+        } else if showingHome {
+            if home.connection != .connecting { performHomeConnectionAction() }
+        } else if let server, !signingIn {
+            loadHub(server)
+        }
     }
     private func openPendingNotification() {
         guard connected, let server, let destination = notificationDestination else { return }
@@ -501,6 +804,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         if (error as NSError).code != NSURLErrorCancelled { showRecovery("Could not open HUB. Check your connection, then retry or choose another connection.") }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard !showingHome else { return }
         cancelPageDeadline()
         connected = false
         if UIApplication.shared.applicationState != .background, let server, installedUI != nil, !preferRemoteUI, installedProcessRecoveries < 1 {

@@ -6,18 +6,108 @@ private final class CatalogFixture: URLProtocol {
     static var reply = ""
     static var code = 200
     static var request: URLRequest?
+    static var requests: [URLRequest] = []
+    static var responder: ((URLRequest) throws -> (Int, Data))?
+
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.request = request
-        let response = HTTPURLResponse(url: request.url!, statusCode: Self.code, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(Self.reply.utf8)); client?.urlProtocolDidFinishLoading(self)
+        Self.requests.append(request)
+        do {
+            let (code, data) = try Self.responder?(request) ?? (Self.code, Data(Self.reply.utf8))
+            let response = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
     }
     override func stopLoading() {}
 }
 final class HubConversationTests: XCTestCase {
-    override func setUp() { CatalogFixture.code = 200; CatalogFixture.request = nil }
+    override func setUp() {
+        CatalogFixture.code = 200
+        CatalogFixture.request = nil
+        CatalogFixture.requests = []
+        CatalogFixture.responder = nil
+    }
+
+    func testHomeReadsUseExistingAuthenticatedRoutes() async throws {
+        let api = try client()
+        CatalogFixture.reply = #"{"nodes":[{"id":"note","kind":"note"}],"edges":[]}"#
+        let graph = try await api.knowledge()
+        XCTAssertEqual(graph.nodes.first?.id, "note")
+        XCTAssertEqual(CatalogFixture.request?.url?.query, "view=graph")
+        XCTAssertEqual(CatalogFixture.request?.value(forHTTPHeaderField: "x-hub-memory"), "1")
+        CatalogFixture.reply = #"{"items":[{"id":"todo","title":"Fixture","kind":"todo","state":"open","deleted":false}]}"#
+        let planner = try await api.planner()
+        XCTAssertEqual(planner.items.first?.title, "Fixture")
+        XCTAssertEqual(CatalogFixture.request?.url?.path, "/api/hub/planner")
+        XCTAssertTrue(CatalogFixture.requests.allSatisfy { $0.httpMethod == "GET" })
+    }
+
+    func testNewChatPostsOneCorrelatedPromptAndDoesNotReplayAnUncertainDelivery() async throws {
+        let api = try client()
+        var accepted = false
+        var createdID = ""
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+            XCTAssertEqual(request.url?.host, "hub.example.com")
+            let body = try Self.requestBody(request)
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            let method = try XCTUnwrap(envelope["method"] as? String)
+            XCTAssertEqual(request.url?.path, "/api/" + method)
+            let args = try XCTUnwrap((envelope["payload"] as? [String: Any])?["args"] as? [String: Any])
+            let payload = try XCTUnwrap(args["request"] as? [String: Any])
+            let id = try XCTUnwrap(payload["sessionId"] as? String)
+            var value: [String: Any]
+            if method == "session/create" {
+                createdID = id
+                value = ["sessionId": id]
+            } else {
+                XCTAssertEqual(method, "session/prompt")
+                XCTAssertEqual(id, createdID)
+                XCTAssertEqual(payload["mode"] as? String, "queue")
+                XCTAssertEqual(payload["content"] as? [[String: String]], [["type": "text", "text": "Test draft"]])
+                if !accepted { throw URLError(.networkConnectionLost) }
+                value = ["accepted": true]
+            }
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": value],
+            ]))
+        }
+        do {
+            _ = try await api.sendNewChat(" Test draft ")
+            XCTFail("A lost prompt receipt cannot be counted as accepted")
+        } catch {
+            XCTAssertEqual(error as? HubChatSendError, .unknownDelivery(sessionID: createdID))
+        }
+        XCTAssertEqual(CatalogFixture.requests.map { $0.url?.path }, ["/api/session/create", "/api/session/prompt"])
+        accepted = true
+        let sent = try await api.sendNewChat("Test draft")
+        XCTAssertEqual(sent, createdID)
+        XCTAssertEqual(CatalogFixture.requests.count, 4)
+    }
+
+    private static func requestBody(_ request: URLRequest) throws -> Data {
+        if let body = request.httpBody { return body }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read >= 0 else { throw URLError(.cannotDecodeContentData) }
+            if read == 0 { return data }
+            data.append(contentsOf: buffer.prefix(read))
+        }
+    }
+
     func testPendingHandoffChecksHostCapabilityAndExactReceiptBeforeOpening() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("hub-eval-confirm-draft-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

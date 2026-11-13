@@ -7,6 +7,11 @@ public struct HubNotificationDestination {
     public let server: HubServer
     public let sessionID: String
     private struct Payload: Decodable { let version: Int; let kind: String; let origin: String; let sessionId: String }
+    public init(server: HubServer, sessionID: String) throws {
+        guard HubVoiceAPI.validID(sessionID) else { throw DestinationError.invalidPayload }
+        self.server = server
+        self.sessionID = sessionID
+    }
     public init(data: Data) throws {
         guard data.count <= 2048,
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
