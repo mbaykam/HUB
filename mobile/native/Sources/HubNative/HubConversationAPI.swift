@@ -1105,6 +1105,7 @@ struct HubChatStreamFrame: Decodable {
                     let config: HubChatModelSelection?
                 }
                 struct ToolError: Decodable { let name: String?; let code: String? }
+                struct RetryFailure: Decodable { let message: String?; let code: String? }
                 struct Usage: Decodable {
                     let inputTokens: Int?
                     let outputTokens: Int?
@@ -1129,6 +1130,10 @@ struct HubChatStreamFrame: Decodable {
                 let args: String?
                 let kind: String?
                 let text: String?
+                let retry: Int?
+                let maxRetries: Int?
+                let delayMs: Double?
+                let failure: RetryFailure?
             }
             let type: String
             let seq: Int
@@ -1185,6 +1190,16 @@ struct HubChatStreamFrame: Decodable {
                 case "request/context":
                     activityTitle = "Context updated"
                     detail = nil
+                case "llm/retry", "llm/retry-started":
+                    activityTitle = type == "llm/retry" ? "Waiting to retry model request" : "Retrying model request"
+                    let attempt = payload?.retry.map { retry in
+                        payload?.maxRetries.map { "Attempt \(retry) of \($0)" } ?? "Attempt \(retry)"
+                    }
+                    let delay = payload?.delayMs.flatMap { milliseconds -> String? in
+                        guard milliseconds.isFinite, milliseconds >= 0, milliseconds <= 86_400_000 else { return nil }
+                        return "\(Int((milliseconds / 1_000).rounded(.up))) s delay"
+                    }
+                    detail = [attempt, delay, payload?.failure?.message ?? payload?.failure?.code].compactMap { $0 }.joined(separator: " · ")
                 case "command/run":
                     activityTitle = "Command started"
                     detail = (payload?.name).map { "/" + $0 + (payload?.args ?? "") }
@@ -1307,7 +1322,7 @@ struct HubChatTimeline {
             running = true
             failure = nil
             blocks.removeAll()
-        case "step/start", "assistant/message":
+        case "step/start", "assistant/message", "llm/retry":
             blocks.removeAll()
         case "turn/end":
             running = false

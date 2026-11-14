@@ -319,6 +319,25 @@ final class HubConversationTests: XCTestCase {
         XCTAssertTrue(timeline.snapshot.partial.isEmpty)
     }
 
+    func testProviderRetryClearsAbandonedPartialResponseAndPreservesItsActivity() throws {
+        let decoder = JSONDecoder()
+        var timeline = HubChatTimeline()
+        let events = [
+            #"{"type":"turn/start","seq":1,"data":{}}"#,
+            #"{"type":"assistant/chunk","seq":2,"data":{"chunk":{"type":"text-delta","index":0,"text":"Discarded"}}}"#,
+            #"{"type":"llm/retry","seq":3,"data":{"turn":1,"retry":1,"maxRetries":2,"delayMs":2500,"failure":{"code":"server-error"}}}"#,
+            #"{"type":"llm/retry-started","seq":4,"data":{"turn":1,"retry":1}}"#,
+            #"{"type":"assistant/chunk","seq":5,"data":{"chunk":{"type":"text-delta","index":0,"text":"Retried"}}}"#,
+        ]
+        for source in events {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8)))
+        }
+        XCTAssertEqual(timeline.snapshot.partial, "Retried")
+        XCTAssertEqual(timeline.snapshot.activity.map(\.title), ["Waiting to retry model request", "Retrying model request"])
+        XCTAssertTrue(timeline.snapshot.activity.first?.detail?.contains("3 s delay") == true)
+        XCTAssertTrue(timeline.snapshot.running)
+    }
+
     func testScreenshotCatalogUsesBoundedConversationRoute() async throws {
         let api = try client()
         let id = String(repeating: "a", count: 64)
