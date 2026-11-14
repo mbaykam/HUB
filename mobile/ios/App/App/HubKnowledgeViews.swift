@@ -918,7 +918,8 @@ struct HubKnowledgeGraphView: View {
             }
             .buttonStyle(.plain)
             .font(.caption)
-            .background(HubWorkspacePalette.border.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            .foregroundStyle(HubWorkspacePalette.muted)
+            .background(HubWorkspacePalette.border.opacity(overview ? 0 : 0.08), in: RoundedRectangle(cornerRadius: 12))
             .padding(4)
             }
         }
@@ -935,8 +936,8 @@ struct HubKnowledgeGraphView: View {
     private func positions(_ items: [HubKnowledgeLayout.Point], zoom: CGFloat, offset: CGSize, size: CGSize) -> [String: CGPoint] {
         let x = items.map(\.x), y = items.map(\.y)
         guard let minX = x.min(), let maxX = x.max(), let minY = y.min(), let maxY = y.max() else { return [:] }
-        let width = max(1, size.width - 40), height = max(1, size.height - 70)
-        let inset: CGFloat = overview ? 54 : 65
+        let width = max(1, size.width - 40), height = max(1, size.height - (overview ? 40 : 70))
+        let inset: CGFloat = overview ? 34 : 65
         let fit = min(width / (CGFloat(maxX - minX) + inset), height / (CGFloat(maxY - minY) + inset)) * zoom
         let centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2
         return Dictionary(uniqueKeysWithValues: items.map { item in

@@ -38,6 +38,7 @@ enum HubWorkspacePalette {
     static let background = dynamic(light: 0xF4F6FB, dark: 0x0B101B)
     static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x161B2A))
     static let accent = Color(uiColor: dynamic(light: 0x3F51A5, dark: 0xBFCBFF))
+    static let onAccent = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x141B35))
     static let muted = Color(uiColor: dynamic(light: 0x4E5970, dark: 0xA8B3CC))
     static let border = Color(uiColor: dynamic(light: 0x172233, dark: 0xFFFFFF))
 
@@ -355,7 +356,7 @@ struct HubHomeView: View {
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
                             knowledgeSummary(value, notes: notes.count)
-                            HubKnowledgeGraphView(graph: value, height: 230, scope: .notes, overview: true, select: selectKnowledgeNode)
+                            HubKnowledgeGraphView(graph: value, height: 211, scope: .notes, overview: true, select: selectKnowledgeNode)
                         }
 
                     }
@@ -383,7 +384,7 @@ struct HubHomeView: View {
                             .id(ObjectIdentifier(api))
                     }
                 }
-                .padding(.top, 12)
+                .padding(.top, 5)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
@@ -1218,16 +1219,24 @@ struct HubHomeView: View {
     }
 
     private func personalPlanner(_ planner: HubHomePlanner) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let openTodos = planner.items.filter { !$0.deleted && $0.state == "open" && $0.kind == "todo" }
+        let nearCount = openTodos.filter { ($0.horizon ?? "near") == "near" }.count
+        let laterCount = openTodos.filter { $0.horizon == "later" }.count
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 18) {
                 ForEach(PlannerTab.allCases, id: \.self) { tab in
                     Button {
                         hideKeyboard()
                         plannerTab = tab
                     } label: {
-                        Text(tab.title)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(plannerTab == tab ? accent : HubWorkspacePalette.muted)
+                        HStack(spacing: 5) {
+                            Text(tab.title).font(.subheadline.weight(.medium))
+                            if tab == .todos, !openTodos.isEmpty {
+                                Text(openTodos.count.formatted()).font(.caption.monospacedDigit())
+                                    .foregroundStyle(HubWorkspacePalette.muted)
+                            }
+                        }
+                            .foregroundStyle(plannerTab == tab ? Color.primary : HubWorkspacePalette.muted)
                             .frame(minHeight: 44)
                             .padding(.horizontal, 2)
                             .overlay(alignment: .bottom) {
@@ -1288,7 +1297,7 @@ struct HubHomeView: View {
                     .disabled(!canEditPlanner || item.version == nil)
                 }
             } else {
-                todoList(planner)
+                todoList(planner, nearCount: nearCount, laterCount: laterCount)
             }
             if model.plannerSaving { ProgressView().accessibilityLabel("Saving to planner") }
             if let error = model.plannerError { Text(error).font(.footnote).foregroundStyle(.secondary) }
@@ -1320,18 +1329,19 @@ struct HubHomeView: View {
         }
     }
 
-    private func todoList(_ planner: HubHomePlanner) -> some View {
+    private func todoList(_ planner: HubHomePlanner, nearCount: Int, laterCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                let count = todoHorizon == .near ? nearCount : laterCount
                 Text("Your list").font(.footnote).foregroundStyle(HubWorkspacePalette.muted)
                 Spacer()
                 Menu {
                     Picker("Your list", selection: $todoHorizon) {
-                        Text("Soon").tag(HubHomePlanner.Horizon.near)
-                        Text("Later").tag(HubHomePlanner.Horizon.later)
+                        todoHorizonLabel(.near, count: nearCount).tag(HubHomePlanner.Horizon.near)
+                        todoHorizonLabel(.later, count: laterCount).tag(HubHomePlanner.Horizon.later)
                     }
                 } label: {
-                    Label(todoHorizon == .near ? "Soon" : "Later", systemImage: "chevron.up.chevron.down")
+                    Label { todoHorizonLabel(todoHorizon, count: count) } icon: { Image(systemName: "chevron.up.chevron.down") }
                         .font(.footnote.weight(.medium))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
@@ -1350,7 +1360,8 @@ struct HubHomeView: View {
             ForEach(items) { item in
                 HStack {
                     Button { completeTodo(item) } label: {
-                        Image(systemName: "circle").frame(width: 44, height: 44)
+                        Image(systemName: "square").foregroundStyle(HubWorkspacePalette.muted)
+                            .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Complete \(item.title)")
                     Button {
@@ -1385,6 +1396,11 @@ struct HubHomeView: View {
         }
     }
 
+    private func todoHorizonLabel(_ horizon: HubHomePlanner.Horizon, count: Int) -> Text {
+        if count == 0 { return Text(horizon == .near ? "Soon" : "Later") }
+        return horizon == .near ? Text("Soon (\(count))") : Text("Later (\(count))")
+    }
+
     private var quickTodo: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -1395,14 +1411,20 @@ struct HubHomeView: View {
                     .submitLabel(.done)
                     .onSubmit(submitTodo)
                     .onChange(of: todoDraft) { _ in todoDraftID = UUID() }
-                Button("Add") {
+                Button {
                     if todoDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         hideKeyboard()
                         plannerEditor = PlannerEdit(item: nil, kind: .todo)
                     } else { submitTodo() }
+                } label: {
+                    Text("Add")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(HubWorkspacePalette.onAccent)
+                        .padding(.horizontal, 13)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(accent, in: RoundedRectangle(cornerRadius: 10))
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(accent)
+                .buttonStyle(.plain)
             }
             .padding(6)
             .padding(.leading, 6)
@@ -1432,7 +1454,7 @@ struct HubHomeView: View {
                     .accessibilityAddTraits(.isHeader)
                 if let open {
                     Spacer()
-                    Button(action: open) { Text(actionLabel).font(.footnote).frame(minHeight: 40) }
+                    Button(action: open) { Text(actionLabel).font(.footnote).foregroundStyle(accent).frame(minHeight: 40) }
                         .buttonStyle(.plain)
                         .accessibilityLabel(Text(actionLabel))
                 }
