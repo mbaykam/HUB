@@ -1,4 +1,6 @@
 import UIKit
+import SwiftUI
+import HubNative
 
 final class HubVoiceViewController: UIViewController {
     private let voice: HubNativeVoice
@@ -20,6 +22,7 @@ final class HubVoiceViewController: UIViewController {
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Hide", style: .plain, target: self, action: #selector(hide))
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
             UIAction(title: "Open conversation", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.openConversation() },
+            UIAction(title: "Canvas", image: UIImage(systemName: "rectangle.on.rectangle")) { [weak self] _ in self?.openCanvas() },
             UIAction(title: "Share a file", image: UIImage(systemName: "paperclip")) { [weak self] _ in self?.shareFile() },
             UIAction(title: "Reconnect audio", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.voice.reconnect() }
             ,UIAction(title: "Interrupt reply", image: UIImage(systemName: "hand.raised")) { [weak self] _ in self?.voice.interrupt() }
@@ -87,11 +90,117 @@ final class HubVoiceViewController: UIViewController {
         navigationItem.leftBarButtonItem?.title = voice.isActive ? "Hide" : "Close"
     }
     @objc private func hide() { dismiss(animated: true) }
+    private func openCanvas() {
+        guard let context = voice.attachmentContext() else {
+            let alert = UIAlertController(title: "Canvas unavailable", message: "Connect to a voice conversation first.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        present(UIHostingController(rootView: HubVoiceCanvasView(context: context)), animated: true)
+    }
     private func shareFile() {
         guard let context = voice.attachmentContext(), let screen = try? HubAttachmentViewController(context: context) else {
             let alert = UIAlertController(title: "Files unavailable", message: "Wait for voice to connect, then try again. Unlock your iPhone if local storage is unavailable.", preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default)); present(alert, animated: true); return
         }
         present(UINavigationController(rootViewController: screen), animated: true)
+    }
+}
+
+@MainActor
+private struct HubVoiceCanvasView: View {
+    let context: HubVoiceAttachmentContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var latest: HubChatPresentation?
+    @State private var shown: HubChatPresentation?
+    @State private var html: String?
+    @State private var renderID = UUID()
+    @State private var liveUpdates = true
+    @State private var retry = 0
+    @State private var callEnded = false
+    @State private var notice = "Looking for a presentation…"
+    @State private var loadError = false
+
+    private struct Refresh: Equatable {
+        let active: Bool
+        let attempt: Int
+        let live: Bool
+    }
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 12) {
+                if callEnded {
+                    Text("The voice call ended.").foregroundStyle(.secondary)
+                } else if let html {
+                    HubContainedDocumentView(document: html).id(renderID)
+                } else {
+                    Text(notice).font(.footnote).foregroundStyle(.secondary).padding(16)
+                }
+                if loadError {
+                    Button("Retry") { retry += 1 }.padding(.bottom, 8)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(shown?.title ?? "Voice Canvas")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Toggle("Live updates", isOn: $liveUpdates)
+                        Button("Show latest") {
+                            shown = nil
+                            retry += 1
+                        }
+                        .disabled(latest == nil || latest == shown)
+                        Button("Reset visual") { renderID = UUID() }.disabled(html == nil)
+                    } label: {
+                        Image(systemName: "ellipsis.circle").accessibilityLabel("Canvas options")
+                    }
+                    .disabled(callEnded)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .preferredColorScheme(.dark)
+        .task(id: Refresh(active: scenePhase == .active, attempt: retry, live: liveUpdates)) {
+            guard scenePhase == .active else { return }
+            await follow()
+        }
+    }
+
+    private func follow() async {
+        while !Task.isCancelled {
+            guard context.stillOwned() else {
+                callEnded = true
+                html = nil
+                loadError = false
+                return
+            }
+            do {
+                let presentation = try await context.voiceAPI.presentation(callID: context.callID)
+                try Task.checkCancellation()
+                latest = presentation
+                if let presentation, html == nil || ((liveUpdates || shown == nil) && shown != presentation) {
+                    let document = try await context.voiceAPI.presentationDocument(callID: context.callID, id: presentation.id)
+                    try Task.checkCancellation()
+                    guard context.stillOwned() else { continue }
+                    html = document
+                    shown = presentation
+                    renderID = UUID()
+                } else if html == nil {
+                    notice = "No presentation in this voice call yet."
+                }
+                loadError = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                loadError = true
+                notice = "Could not load the voice presentation."
+            }
+            try? await Task.sleep(nanoseconds: loadError ? 6_000_000_000 : 2_000_000_000)
+        }
     }
 }

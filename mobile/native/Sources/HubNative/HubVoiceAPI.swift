@@ -83,7 +83,7 @@ public final class HubVoiceAPI {
         }
     }
 
-    private func request(_ action: String, method: String = "GET", body: [String: Any]? = nil, callId: String? = nil, jpeg: Data? = nil, screenHeaders: [String: String] = [:], capturedAt: Date? = nil) async throws -> Data {
+    private func request(_ action: String, method: String = "GET", body: [String: Any]? = nil, callId: String? = nil, jpeg: Data? = nil, screenHeaders: [String: String] = [:], capturedAt: Date? = nil, presentationID: UUID? = nil, maxBytes: Int = 262_144) async throws -> Data {
         if let callId, !Self.validID(callId) { throw HubVoiceAPIError.invalidResponse }
         // action is private and supplied only by the fixed methods below.
         let url = server.origin.appendingPathComponent("api/hub/voice/\(action)")
@@ -113,6 +113,7 @@ public final class HubVoiceAPI {
         }
         if action == "share" { request.setValue("1", forHTTPHeaderField: "x-hub-voice-share") }
         if let callId { request.setValue(callId, forHTTPHeaderField: "x-hub-voice-call") }
+        if let presentationID { request.setValue(presentationID.uuidString.lowercased(), forHTTPHeaderField: "x-hub-presentation") }
         try Task.checkCancellation()
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw HubVoiceAPIError.invalidResponse }
@@ -127,8 +128,18 @@ public final class HubVoiceAPI {
             throw object?["error"] as? String == "expired-admission" ? HubVoiceAPIError.admissionExpired : HubVoiceAPIError.invalidResponse
         default: throw HubVoiceAPIError.serviceUnavailable
         }
-        guard response.mimeType == "application/json", data.count <= 262_144 else { throw action == "screen" ? HubVoiceAPIError.updateHost : HubVoiceAPIError.invalidResponse }
+        guard response.mimeType == "application/json", data.count <= maxBytes else { throw action == "screen" ? HubVoiceAPIError.updateHost : HubVoiceAPIError.invalidResponse }
         return data
+    }
+
+    public func presentation(callID: String) async throws -> HubChatPresentation? {
+        let data = try await request("presentation", callId: callID, maxBytes: 4_096)
+        return try JSONDecoder().decode(HubChatPresentation.Summary.self, from: data).presentation
+    }
+
+    public func presentationDocument(callID: String, id: UUID) async throws -> String {
+        let data = try await request("presentation-document", callId: callID, presentationID: id, maxBytes: 10_000_000)
+        return try HubChatPresentation.decodeDocument(data)
     }
 
     public func status() async throws -> HubVoiceStatus {

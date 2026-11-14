@@ -444,9 +444,31 @@ public struct HubChatPresentation: Decodable, Equatable, Identifiable {
     public let kind: Kind
     public let createdAt: Int64
 
-    fileprivate var isValid: Bool {
+    var isValid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             title.utf16.count <= 120 && (0...9_007_199_254_740_991).contains(createdAt)
+    }
+
+    struct Summary: Decodable {
+        let presentation: HubChatPresentation?
+
+        init(from decoder: Decoder) throws {
+            let box = try decoder.container(keyedBy: CodingKeys.self)
+            guard box.contains(.presentation) else { throw HubAttachmentError.invalidResponse }
+            presentation = try box.decodeIfPresent(HubChatPresentation.self, forKey: .presentation)
+            guard presentation?.isValid != false else { throw HubAttachmentError.invalidResponse }
+        }
+
+        private enum CodingKeys: String, CodingKey { case presentation }
+    }
+
+    static func decodeDocument(_ data: Data) throws -> String {
+        struct Document: Decodable { let document: String }
+        let html = try JSONDecoder().decode(Document.self, from: data).document
+        guard html.hasPrefix("<!doctype html><html><head>"), html.utf16.count <= 3_000_000 else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return html
     }
 }
 
@@ -2036,35 +2058,17 @@ public final class HubConversationAPI {
     }
 
     public func chatPresentation(sessionID: String) async throws -> HubChatPresentation? {
-        struct Summary: Decodable {
-            let presentation: HubChatPresentation?
-
-            init(from decoder: Decoder) throws {
-                let box = try decoder.container(keyedBy: CodingKeys.self)
-                guard box.contains(.presentation) else { throw HubAttachmentError.invalidResponse }
-                presentation = try box.decodeIfPresent(HubChatPresentation.self, forKey: .presentation)
-            }
-
-            private enum CodingKeys: String, CodingKey { case presentation }
-        }
         guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
         let data = try await requestData("api/hub/presentation", headers: ["x-hub-session": sessionID], maxBytes: 4_096)
-        let result = try JSONDecoder().decode(Summary.self, from: data).presentation
-        guard result?.isValid != false else { throw HubAttachmentError.invalidResponse }
-        return result
+        return try JSONDecoder().decode(HubChatPresentation.Summary.self, from: data).presentation
     }
 
     public func chatPresentationDocument(sessionID: String, id: UUID) async throws -> String {
-        struct Document: Decodable { let document: String }
         guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
         let data = try await requestData("api/hub/presentation-document", headers: [
             "x-hub-session": sessionID, "x-hub-presentation": id.uuidString.lowercased(),
         ], maxBytes: 10_000_000)
-        let document = try JSONDecoder().decode(Document.self, from: data).document
-        guard document.hasPrefix("<!doctype html><html><head>"), document.utf16.count <= 3_000_000 else {
-            throw HubAttachmentError.invalidResponse
-        }
-        return document
+        return try HubChatPresentation.decodeDocument(data)
     }
 
     public func browserTabs() async throws -> [HubBrowserTab] {
