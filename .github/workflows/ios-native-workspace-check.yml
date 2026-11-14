@@ -39,7 +39,7 @@ jobs:
       - run: pnpm check
       - run: swift test --package-path native
       - run: pnpm ios:build:simulator
-      - name: Launch the same unsigned build on an isolated iPhone
+      - name: Launch the simulator build on an isolated iPhone
         working-directory: .
         env:
           HUB_NATIVE_WORKSPACE_SIMULATOR: '1'

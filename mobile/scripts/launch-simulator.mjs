@@ -1,5 +1,5 @@
 import {execFileSync} from 'node:child_process';
-import {copyFile,mkdir,readFile,writeFile,lstat,realpath} from 'node:fs/promises';
+import {copyFile,mkdir,readFile,readdir,writeFile,lstat,realpath} from 'node:fs/promises';
 import {resolve,sep} from 'node:path';
 import {selectSimulatorSeed} from './simulator-source.mjs';
 
@@ -36,6 +36,23 @@ const selected=selectSimulatorSeed(nativeDevelopment && Object.keys(ordinary).le
 const baselineMode=nativeDevelopment?'fresh-isolated-device':'cloned-runner-seed';
 let device,stage='create-device',displayMode='headless';
 try{
+  if(nativeDevelopment){
+    // Sign only the extracted simulator fixture. Embedded extensions are code
+    // in their own right, so sign them before sealing the containing app.
+    stage='ad-hoc-sign';
+    const plugins=await readdir(resolve(app,'PlugIns'),{withFileTypes:true}).catch(error=>{
+      if(error.code==='ENOENT')return [];
+      throw error;
+    });
+    for(const plugin of plugins){
+      if(plugin.isDirectory()&&plugin.name.endsWith('.appex')){
+        run('/usr/bin/codesign',['--force','--sign','-',resolve(app,'PlugIns',plugin.name)]);
+      }
+    }
+    run('/usr/bin/codesign',['--force','--sign','-',app]);
+    run('/usr/bin/codesign',['--verify','--deep','--strict',app]);
+    stage='create-device';
+  }
   const name='HUB isolated launch '+process.env.GITHUB_RUN_ID;
   if(nativeDevelopment){
     // Clones of the hosted seed have repeatedly stalled in Data Migration.
@@ -55,7 +72,7 @@ try{
   const simulatorApp=resolve(run('/usr/bin/xcode-select',['-p']),'Applications/Simulator.app');
   // Some hosted toolchains ship CoreSimulator without Simulator.app. simctl
   // can still install, launch and capture the isolated device headlessly.
-  if((await lstat(simulatorApp).catch(error=>{if(error.code==='ENOENT')return undefined;throw error;}))?.isDirectory()){
+  if(!nativeDevelopment&&(await lstat(simulatorApp).catch(error=>{if(error.code==='ENOENT')return undefined;throw error;}))?.isDirectory()){
     run('/usr/bin/open',['-a',simulatorApp,'--args','-CurrentDeviceUDID',device]);
     displayMode='simulator-app';
   }
