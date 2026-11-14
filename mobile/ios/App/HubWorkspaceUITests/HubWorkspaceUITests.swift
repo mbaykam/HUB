@@ -34,12 +34,14 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
         app.buttons["Close panel"].tap()
 
-        let todo = app.staticTexts["Review the weekly plan"]
-        if !todo.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        let todos = app.buttons["hub.planner.todos"]
+        if !todos.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(todos.waitForExistence(timeout: 7))
+        let todo = app.buttons["hub.planner.todo.11111111-1111-4111-8111-111111111111"]
         XCTAssertTrue(todo.waitForExistence(timeout: 5))
-        app.buttons["Agenda"].tap()
+        app.buttons["hub.planner.agenda"].tap()
         XCTAssertTrue(app.staticTexts["No plans for this day."].waitForExistence(timeout: 5))
-        app.buttons["To-dos"].tap()
+        todos.tap()
         XCTAssertTrue(todo.waitForExistence(timeout: 5))
 
         let composer = app.textFields["hub.home.draft"]

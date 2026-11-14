@@ -1212,6 +1212,7 @@ struct HubHomeView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier(tab == .agenda ? "hub.planner.agenda" : "hub.planner.todos")
                     .accessibilityAddTraits(plannerTab == tab ? .isSelected : [])
                 }
                 Spacer(minLength: 0)
@@ -1333,6 +1334,7 @@ struct HubHomeView: View {
                     } label: {
                         Text(item.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
+                    .accessibilityIdentifier("hub.planner.todo.\(item.id)")
                 }
                 .buttonStyle(.plain)
                 .disabled(!canEditPlanner || item.version == nil)
