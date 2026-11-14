@@ -8,6 +8,7 @@ struct HubUsageView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var usage: HubUsageSnapshot?
     @State private var failed = false
+    @State private var refreshing = false
     @State private var attempt = 0
 
     var body: some View {
@@ -21,6 +22,9 @@ struct HubUsageView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         provider("Codex", usage.codex) {
+                            if (usage.codex.rateLimits ?? []).isEmpty && usage.codex.credits == nil && usage.codex.individualLimit == nil {
+                                Text("Codex did not report usage limits.").foregroundStyle(.secondary)
+                            }
                             ForEach(usage.codex.rateLimits ?? []) { limit in
                                 Text(limit.name ?? limit.id).font(.subheadline.bold())
                                 ForEach(Array(limit.windows.enumerated()), id: \.offset) { item in
@@ -34,13 +38,13 @@ struct HubUsageView: View {
                                 }
                             }
                             if let credits = usage.codex.credits {
-                                row("Credits", credits.unlimited ? "Unlimited" : (credits.balance ?? "Unavailable"))
+                                row("Credits", credits.unlimited ? "Unlimited" : (credits.balance ?? "Available"))
                             }
                             if let limit = usage.codex.individualLimit {
                                 ProgressView(value: max(0, min(100, limit.remainingPercent)), total: 100) {
-                                    Text("Individual limit")
+                                    Text("Monthly spend")
                                 } currentValueLabel: {
-                                    Text("\(limit.remaining) of \(limit.limit) left")
+                                    Text("\(usdString(limit.remaining)) left of \(usdString(limit.limit))")
                                 }
                             }
                         }
@@ -50,11 +54,14 @@ struct HubUsageView: View {
                             money("Monthly", usage.openRouter.usageMonthly)
                             money("API key usage", usage.openRouter.usage)
                             if let limit = usage.openRouter.limit {
-                                money("Limit", limit.amount)
-                                money("Remaining", limit.remaining)
+                                creditProgress("Key spending limit", available: limit.remaining, total: limit.amount)
                                 if let reset = limit.reset { row("Reset", reset.capitalized) }
+                            } else {
+                                Text("No spending cap on this key.").foregroundStyle(.secondary)
                             }
-                            account(usage.openRouter.account)
+                            if let account = usage.openRouter.account {
+                                creditProgress("Account credits", available: max(0, account.totalCredits - account.totalUsage), total: account.totalCredits)
+                            }
                             if usage.openRouter.isFreeTier == true { Text("Free tier").foregroundStyle(.secondary) }
                         }
                         provider("Unlid", usage.unlid) {
@@ -62,17 +69,46 @@ struct HubUsageView: View {
                             money("Held", usage.unlid.held)
                             money("Available", usage.unlid.available)
                             money("Monthly", usage.unlid.usageMonthly)
-                            account(usage.unlid.account)
+                            if let account = usage.unlid.account {
+                                if let available = usage.unlid.available, account.totalCredits > 0 {
+                                    creditProgress("Available credit", available: available, total: account.totalCredits)
+                                }
+                                money("Lifetime spend", account.totalUsage)
+                                money("Total credits", account.totalCredits)
+                            }
+                            Text("Totals include usage outside HUB.").font(.footnote).foregroundStyle(.secondary)
                         }
                         provider("Soniox", usage.soniox) {
                             speech("Today", usage.soniox.today)
                             speech("Last 7 days", usage.soniox.last7Days)
                             speech("Month", usage.soniox.month)
-                            ForEach(usage.soniox.models ?? []) { model in speech(model.id, model.month) }
+                            if let models = usage.soniox.models, !models.isEmpty {
+                                DisclosureGroup("By model · this month") {
+                                    ForEach(models) { model in speech(model.id, model.month) }
+                                }
+                            } else {
+                                Text("No completed Soniox usage is reported for this month.").foregroundStyle(.secondary)
+                            }
+                            Text("Project totals use UTC and include other apps. Active sessions appear when they finish.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            if let billing = URL(string: "https://console.soniox.com/") {
+                                Link("Open Soniox billing", destination: billing)
+                            }
                         }
                     }
                 }
-                Button("Refresh") { attempt += 1 }
+                if failed {
+                    Text("Refresh failed. Showing the last successful reading.").font(.footnote).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Refresh") { attempt += 1 }.disabled(refreshing)
+                    Spacer()
+                    if refreshing { ProgressView().controlSize(.small) }
+                    else if let updated = ISO8601DateFormatter().date(from: usage.updatedAt) {
+                        Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             } else if failed {
                 Button("Retry loading usage") { failed = false; attempt += 1 }
             } else {
@@ -80,11 +116,13 @@ struct HubUsageView: View {
             }
         }
         .task(id: attempt) {
+            refreshing = true
+            defer { if !Task.isCancelled { refreshing = false } }
             do {
                 let value = try await api.usage()
-                if !Task.isCancelled { usage = value }
+                if !Task.isCancelled { usage = value; failed = false }
             } catch {
-                if !Task.isCancelled { usage = nil; failed = true }
+                if !Task.isCancelled { failed = true }
             }
         }
         .padding(18)
@@ -116,14 +154,24 @@ struct HubUsageView: View {
     }
 
     @ViewBuilder private func money(_ label: String, _ value: Double?) -> some View {
-        if let value { row(label, value.formatted(.currency(code: "USD").precision(.fractionLength(2...6)))) }
+        if let value { row(label, usd(value)) }
     }
 
-    @ViewBuilder private func account(_ account: HubUsageSnapshot.Provider.Account?) -> some View {
-        if let account {
-            money("Account credits", account.totalCredits)
-            money("Account usage", account.totalUsage)
+    private func creditProgress(_ label: String, available: Double, total: Double) -> some View {
+        let fraction = total > 0 ? min(1, max(0, available / total)) : 0
+        return ProgressView(value: fraction) {
+            Text(label)
+        } currentValueLabel: {
+            Text("\(usd(available)) left of \(usd(total))")
         }
+    }
+
+    private func usd(_ value: Double) -> String {
+        value.formatted(.currency(code: "USD").precision(.fractionLength(2...6)))
+    }
+
+    private func usdString(_ value: String) -> String {
+        Double(value).map(usd) ?? value
     }
 
     @ViewBuilder private func speech(_ label: String, _ period: HubUsageSnapshot.Provider.SpeechPeriod?) -> some View {
