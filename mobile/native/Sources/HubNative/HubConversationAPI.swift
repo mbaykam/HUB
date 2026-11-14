@@ -337,6 +337,27 @@ public struct HubKnowledgeActivity: Decodable {
     public let historyNotice: String
 }
 
+public struct HubKnowledgeCurationReview: Decodable {
+    public struct Source: Decodable {
+        public let content: String
+        public let channel: String?
+    }
+    public struct Plan: Decodable {
+        public let decision: String
+        public let reason: String
+        public let tags: [String]
+        public let domainOps: [HubTaskArgument]?
+        public let relations: [HubTaskArgument]?
+        public let reflections: [HubTaskArgument]?
+        public let profileSuggestions: [HubTaskArgument]?
+        public let memories: [HubTaskArgument]?
+    }
+    public let source: Source
+    public let plan: Plan
+    public let stale: Bool
+    public let reviewHash: String
+}
+
 public struct HubKnowledgeProfileReview: Decodable {
     public struct Suggestion: Decodable, Identifiable {
         public let id: String
@@ -2091,6 +2112,19 @@ public final class HubConversationAPI {
     public func knowledgeStatus() async throws -> HubKnowledgeStatus {
         let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"])
         return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
+    }
+
+    public func knowledgeCurationReview(_ entry: HubKnowledgeActivity.Entry) async throws -> HubKnowledgeCurationReview {
+        guard entry.status == "review", !entry.id.isEmpty else { throw HubAttachmentError.invalidResponse }
+        let review: HubKnowledgeCurationReview = try await readKnowledge("review", arguments: ["id": entry.id])
+        guard Self.isScreenshotID(review.reviewHash) else { throw HubAttachmentError.invalidResponse }
+        return review
+    }
+
+    public func decideKnowledgeCuration(_ entry: HubKnowledgeActivity.Entry, review: HubKnowledgeCurationReview, approve: Bool) async throws {
+        guard entry.status == "review", !entry.id.isEmpty, entry.id.utf8.count <= 1_024 else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONSerialization.data(withJSONObject: ["action": "review", "id": entry.id, "approve": approve, "reviewHash": review.reviewHash])
+        _ = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, operationTimeout: 60)
     }
 
     public func knowledgeProfileReview() async throws -> HubKnowledgeProfileReview {

@@ -967,6 +967,7 @@ struct HubKnowledgeActivityView: View {
     @State private var acting = false
     @State private var actionMessage: String?
     @State private var confirmation: QueueAction?
+    @State private var reviewEntry: HubKnowledgeActivity.Entry?
 
     private enum QueueAction: String, Identifiable {
         case process = "Process queued records"
@@ -1010,6 +1011,9 @@ struct HubKnowledgeActivityView: View {
                                 ForEach(Array(entry.warnings.enumerated()), id: \.offset) { warning in
                                     Text(warning.element).font(.footnote).foregroundStyle(.secondary)
                                 }
+                                if entry.status == "review" {
+                                    Button("Review proposed changes") { reviewEntry = entry }
+                                }
                                 Divider()
                             }
                         }
@@ -1027,6 +1031,9 @@ struct HubKnowledgeActivityView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .sheet(item: $reviewEntry, onDismiss: { Task { await load(0) } }) { entry in
+            HubKnowledgeCurationReviewView(api: api, entry: entry)
+        }
         .alert(item: $confirmation) { action in
             Alert(title: Text(action.rawValue), message: Text("Knowledge AI uses the configured model and budget."),
                   primaryButton: .default(Text("Continue")) { Task { await run(action) } }, secondaryButton: .cancel())
@@ -1064,6 +1071,85 @@ struct HubKnowledgeActivityView: View {
             page = result
         } catch {
             if !Task.isCancelled { failed = true }
+        }
+    }
+}
+
+@MainActor
+private struct HubKnowledgeCurationReviewView: View {
+    let api: HubConversationAPI
+    let entry: HubKnowledgeActivity.Entry
+    @Environment(\.dismiss) private var dismiss
+    @State private var review: HubKnowledgeCurationReview?
+    @State private var error: String?
+    @State private var saving = false
+    @State private var attempt = 0
+
+    var body: some View {
+        NavigationView {
+            List {
+                if let error {
+                    Text(error).foregroundStyle(.secondary)
+                    Button("Reload review") { attempt += 1 }
+                }
+                if let review {
+                    Section("Proposed changes") {
+                        Text(review.plan.decision.replacingOccurrences(of: "-", with: " ").capitalized).font(.headline)
+                        Text(review.plan.reason)
+                        if review.stale { Text("Preview refreshed against the current Knowledge registry.").font(.footnote) }
+                        if !review.plan.tags.isEmpty { Text(review.plan.tags.joined(separator: ", ")).font(.footnote) }
+                        details("Domain changes", review.plan.domainOps)
+                        details("Relationships", review.plan.relations)
+                        details("Reflections", review.plan.reflections)
+                        details("Profile suggestions", review.plan.profileSuggestions)
+                        details("Memories", review.plan.memories)
+                    }
+                    Section("Original source") {
+                        Text(review.source.content).textSelection(.enabled)
+                    }
+                    Section {
+                        Button("Approve changes") { Task { await decide(review, approve: true) } }
+                        Button("Reject changes", role: .destructive) { Task { await decide(review, approve: false) } }
+                    }
+                } else if error == nil { ProgressView("Loading review…") }
+            }
+            .disabled(saving)
+            .navigationTitle("Review Knowledge changes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(saving) }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(saving)
+        .task(id: attempt) {
+            review = nil
+            error = nil
+            do { review = try await api.knowledgeCurationReview(entry) }
+            catch { if !Task.isCancelled { error = "Could not load this review. It may have changed." } }
+        }
+    }
+
+    @ViewBuilder private func details(_ name: String, _ values: [HubTaskArgument]?) -> some View {
+        if let values, !values.isEmpty {
+            DisclosureGroup(name) {
+                ForEach(values.indices, id: \.self) { index in
+                    Text(values[index].displayText).font(.footnote.monospaced()).textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private func decide(_ review: HubKnowledgeCurationReview, approve: Bool) async {
+        guard !saving else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            try await api.decideKnowledgeCuration(entry, review: review, approve: approve)
+            dismiss()
+        } catch {
+            self.review = nil
+            error = "Could not confirm the decision. Reload the review before trying again."
         }
     }
 }
