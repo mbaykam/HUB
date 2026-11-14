@@ -1005,7 +1005,10 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
         let id = query.first { $0.name == "id" }?.value
         switch (view, id) {
         case ("note", "note-project"):
-            return Data(#"{"id":"note-project","title":"Planning a coding project","kind":"note","content":"## First release\n\nSketch the first release before choosing the tools.\n\n```swift\nlet firstRelease = true\n```"}"#.utf8)
+            return Data(#"""
+            {"id":"note-project","title":"Planning a coding project","kind":"note",
+             "content":"## First release\n\nSketch the first release before choosing the tools.\n\n```swift\nlet firstRelease = true\n```"}
+            """#.utf8)
         case ("activity", nil):
             return Data(#"""
             {"state":"ready","enabled":true,"total":1,"lastStartedAt":1794499999000,"lastFinishedAt":1794500000000,
