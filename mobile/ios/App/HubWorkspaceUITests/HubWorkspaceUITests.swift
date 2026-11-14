@@ -154,7 +154,7 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.images["Fixture screenshot.png"].waitForExistence(timeout: 6))
         XCTAssertTrue(app.buttons["Save screenshot to Files"].exists)
 
-        let more = app.buttons["More actions"], voice = app.buttons["Voice"], stop = app.buttons["Stop"]
+        let more = app.buttons["hub.chat.more"], voice = app.buttons["hub.chat.voice"], stop = app.buttons["hub.chat.stop"]
         XCTAssertTrue(more.exists && voice.exists && stop.exists)
         XCTAssertLessThanOrEqual(more.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, stop.frame.minX)
@@ -170,7 +170,7 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertFalse(dismissKeyboard.exists)
         XCTAssertFalse(app.staticTexts["Collecting fixture references…"].exists)
         XCTAssertEqual(draft.value as? String, "Keep this draft")
-        XCTAssertTrue(app.buttons["Send"].isEnabled)
+        XCTAssertTrue(app.buttons["hub.chat.send"].isEnabled)
         XCTAssertEqual(app.webViews.count, 0)
         capture("Conversation after Stop")
     }

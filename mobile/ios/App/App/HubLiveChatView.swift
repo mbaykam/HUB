@@ -764,17 +764,20 @@ struct HubLiveChatView: View {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("More actions")
+                .accessibilityIdentifier("hub.chat.more")
                 Button {
                     composerFocused = false
                     voice()
                 } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
                 .accessibilityLabel("Voice")
+                .accessibilityIdentifier("hub.chat.voice")
                 if snapshot?.running == true || awaitingAfter != nil {
                     Button(action: stop) {
                         Image(systemName: "stop.fill").frame(width: 44, height: 44)
                             .background(Circle().fill(accent.opacity(0.28)))
                     }
                     .accessibilityLabel("Stop")
+                    .accessibilityIdentifier("hub.chat.stop")
                     .disabled(stopRequest != nil)
                 } else {
                     Button { send() } label: {
@@ -782,6 +785,7 @@ struct HubLiveChatView: View {
                             .background(Circle().fill(accent.opacity(canSend ? 0.28 : 0.10)))
                     }
                         .accessibilityLabel("Send")
+                        .accessibilityIdentifier("hub.chat.send")
                         .disabled(!canSend)
                 }
             }
