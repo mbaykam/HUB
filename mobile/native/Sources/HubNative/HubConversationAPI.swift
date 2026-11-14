@@ -140,6 +140,28 @@ public struct HubKnowledgeDomains: Decodable {
     }
 }
 
+public struct HubKnowledgeBackups: Decodable {
+    public struct Copy: Decodable, Identifiable {
+        public let id: UUID
+        public let at: Double
+        public let records: Int
+        public let bytes: Int64
+        public let path: String
+    }
+    public let items: [Copy]
+    public let total: Int
+    public let nextOffset: Int?
+    public let storage: String
+    public let incompleteCopies: Int?
+}
+
+public struct HubKnowledgeRestoredCopy: Decodable {
+    public let vault: String
+    public let root: String
+    public let backgroundWork: String
+    public let activated: Bool
+}
+
 public struct HubKnowledgeActivity: Decodable {
     public struct Entry: Decodable, Identifiable {
         public struct Change: Decodable {
@@ -1032,7 +1054,8 @@ public final class HubConversationAPI {
     }
     deinit { session.invalidateAndCancel() }
     private func requestData(_ path: String, headers: [String: String], query: [URLQueryItem] = [], body: Data? = nil,
-                             mediaTypes: Set<String> = ["application/json"], maxBytes: Int = 1_048_576) async throws -> Data {
+                             mediaTypes: Set<String> = ["application/json"], maxBytes: Int = 1_048_576,
+                             operationTimeout: TimeInterval? = nil) async throws -> Data {
         var components = URLComponents(url: server.origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw HubAttachmentError.invalidResponse }
@@ -1045,7 +1068,18 @@ public final class HubConversationAPI {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        let (data, response) = try await session.data(for: request)
+        let (data, response): (Data, URLResponse)
+        if let operationTimeout {
+            request.timeoutInterval = operationTimeout
+            let config = session.configuration
+            config.timeoutIntervalForRequest = operationTimeout
+            config.timeoutIntervalForResource = operationTimeout
+            let operation = URLSession(configuration: config, delegate: HubNoRedirects(), delegateQueue: nil)
+            defer { operation.finishTasksAndInvalidate() }
+            (data, response) = try await operation.data(for: request)
+        } else {
+            (data, response) = try await session.data(for: request)
+        }
         guard let response = response as? HTTPURLResponse, response.url == url else { throw HubAttachmentError.invalidResponse }
         switch response.statusCode {
         case 200: break
@@ -1554,6 +1588,49 @@ public final class HubConversationAPI {
     public func knowledgeStatus() async throws -> HubKnowledgeStatus {
         let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"])
         return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
+    }
+
+    public func knowledgeBackups(offset: Int = 0) async throws -> HubKnowledgeBackups {
+        guard offset >= 0 else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
+            URLQueryItem(name: "view", value: "backups"), URLQueryItem(name: "offset", value: String(offset)),
+        ], operationTimeout: 60)
+        let page = try JSONDecoder().decode(HubKnowledgeBackups.self, from: data)
+        guard page.total >= 0, page.items.count <= 30, page.nextOffset.map({ $0 > offset }) ?? true,
+              Set(page.items.map(\.id)).count == page.items.count,
+              page.items.allSatisfy({ $0.at.isFinite && (0...9_007_199_254_740_991).contains($0.at) && $0.records >= 0 && $0.bytes >= 0 }) else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return page
+    }
+
+    public func createKnowledgeBackup() async throws -> HubKnowledgeBackups.Copy {
+        struct Receipt: Decodable { let verified: Bool }
+        let data = try await knowledgeBackupOperation(["action": "backup-create"])
+        let decoder = JSONDecoder()
+        guard try decoder.decode(Receipt.self, from: data).verified else { throw HubAttachmentError.invalidResponse }
+        return try decoder.decode(HubKnowledgeBackups.Copy.self, from: data)
+    }
+
+    public func verifyKnowledgeBackup(_ id: UUID) async throws -> Int {
+        struct Receipt: Decodable { let id: UUID; let verified: Bool; let files: Int }
+        let data = try await knowledgeBackupOperation(["action": "backup-verify", "id": id.uuidString.lowercased()])
+        let receipt = try JSONDecoder().decode(Receipt.self, from: data)
+        guard receipt.id == id, receipt.verified, receipt.files >= 0 else { throw HubAttachmentError.invalidResponse }
+        return receipt.files
+    }
+
+    public func restoreKnowledgeBackupCopy(_ id: UUID) async throws -> HubKnowledgeRestoredCopy {
+        let data = try await knowledgeBackupOperation(["action": "backup-restore-copy", "id": id.uuidString.lowercased()])
+        let restored = try JSONDecoder().decode(HubKnowledgeRestoredCopy.self, from: data)
+        guard !restored.activated, restored.backgroundWork == "paused-for-review",
+              !restored.vault.isEmpty, !restored.root.isEmpty else { throw HubAttachmentError.invalidResponse }
+        return restored
+    }
+
+    private func knowledgeBackupOperation(_ command: [String: String]) async throws -> Data {
+        try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: JSONEncoder().encode(command),
+                              operationTimeout: 180)
     }
 
     public func knowledgeDomains() async throws -> HubKnowledgeDomains {

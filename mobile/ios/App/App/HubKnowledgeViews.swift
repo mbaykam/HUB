@@ -3,6 +3,151 @@ import UIKit
 import HubNative
 
 @MainActor
+struct HubKnowledgeBackupsView: View {
+    let api: HubConversationAPI
+    @Environment(\.dismiss) private var dismiss
+    @State private var copies: [HubKnowledgeBackups.Copy] = []
+    @State private var page: HubKnowledgeBackups?
+    @State private var busy = false
+    @State private var notice: String?
+    @State private var restored: HubKnowledgeRestoredCopy?
+    @State private var restoreCandidate: HubKnowledgeBackups.Copy?
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    Button("Create verified backup") { Task { await createBackup() } }
+                    Button("Refresh backups") { Task { await refresh() } }
+                    if busy { ProgressView("Checking backup data on HUB…") }
+                    if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                } footer: {
+                    Text("Copies are saved on the HUB computer. Keep each backup folder with its snapshot.json.")
+                }
+                if let restored {
+                    Section("Restored copy") {
+                        Text("The restored copy is separate and its background work is paused.").font(.footnote)
+                        path(restored.vault)
+                        if restored.root != restored.vault { path(restored.root) }
+                    }
+                }
+                if page != nil || !copies.isEmpty {
+                    Section("Saved copies · \(page?.total ?? copies.count)") {
+                        if let page { DisclosureGroup("Storage on HUB") { path(page.storage) } }
+                        if let count = page?.incompleteCopies, count > 0 {
+                            Text("\(count) incomplete or unreadable copies are retained on HUB.").font(.footnote)
+                        }
+                        if copies.isEmpty { Text("No verified backups").foregroundStyle(.secondary) }
+                        ForEach(copies) { copy in backupRow(copy) }
+                        if let next = page?.nextOffset {
+                            Button("Older backups") { Task { await refresh(offset: next) } }
+                        }
+                    }
+                }
+            }
+            .disabled(busy)
+            .navigationTitle("Knowledge backups")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(busy) }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(busy)
+        .task { await refresh() }
+        .confirmationDialog("Restore a separate copy?", isPresented: Binding(
+            get: { restoreCandidate != nil }, set: { if !$0 { restoreCandidate = nil } }),
+            presenting: restoreCandidate) { copy in
+                Button("Restore separate copy") { Task { await restore(copy) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("HUB will verify this backup and write a separate folder on the computer. Restored background work starts paused.")
+            }
+    }
+
+    private func path(_ value: String) -> some View {
+        Text(value).font(.caption.monospaced()).textSelection(.enabled)
+    }
+
+    private func backupRow(_ copy: HubKnowledgeBackups.Copy) -> some View {
+        DisclosureGroup {
+            path(copy.path)
+            Button("Verify integrity") { Task { await verify(copy) } }
+            Button("Restore as a separate copy") { restoreCandidate = copy }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Date(timeIntervalSince1970: copy.at / 1_000).formatted(date: .abbreviated, time: .shortened))
+                Text("\(copy.records) records · \(ByteCountFormatter.string(fromByteCount: copy.bytes, countStyle: .file))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func refresh(offset: Int = 0) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await load(offset: offset)
+            notice = nil
+        } catch {
+            if !Task.isCancelled { notice = "Could not load backups from HUB." }
+        }
+    }
+
+    private func load(offset: Int = 0) async throws {
+        let result = try await api.knowledgeBackups(offset: offset)
+        try Task.checkCancellation()
+        let existing: Set<UUID> = offset == 0 ? [] : Set(copies.map(\.id))
+        copies = (offset == 0 ? [] : copies) + result.items.filter { !existing.contains($0.id) }
+        page = result
+    }
+
+    private func createBackup() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let copy = try await api.createKnowledgeBackup()
+            do {
+                try await load()
+            } catch {
+                page = nil
+                copies.removeAll { $0.id == copy.id }
+                copies.insert(copy, at: 0)
+            }
+            notice = "Verified backup saved with \(copy.records) records."
+        } catch {
+            notice = "Could not confirm the backup. Refresh the list before creating another copy."
+        }
+    }
+
+    private func verify(_ copy: HubKnowledgeBackups.Copy) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let files = try await api.verifyKnowledgeBackup(copy.id)
+            notice = "Verified \(files) files against their saved hashes."
+        } catch {
+            notice = "Could not verify the saved copy."
+        }
+    }
+
+    private func restore(_ copy: HubKnowledgeBackups.Copy) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            restored = try await api.restoreKnowledgeBackupCopy(copy.id)
+            notice = "Verified separate copy restored."
+        } catch {
+            notice = "Could not confirm the restore. Check the folders on HUB before trying again."
+        }
+    }
+}
+
+@MainActor
 struct HubKnowledgeGraphView: View {
     let graph: HubHomeKnowledge
     let height: CGFloat
