@@ -827,6 +827,13 @@ public struct HubConversationAppDocument: Decodable {
     public let document: String
 }
 
+public struct HubConversationFile: Decodable, Identifiable {
+    public let id: String
+    public let name: String
+    public let bytes: Int
+    public let sha256: String
+}
+
 public struct HubChatPresentation: Decodable, Equatable, Identifiable {
     public enum Kind: String, Decodable { case html, vega, app }
     public let id: UUID
@@ -2961,6 +2968,44 @@ public final class HubConversationAPI {
             throw HubAttachmentError.invalidResponse
         }
         return document
+    }
+
+    public func conversationFiles(sessionID: String) async throws -> [HubConversationFile]? {
+        struct Catalog: Decodable { let files: [HubConversationFile]? }
+        guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/artifacts", headers: [
+            "x-hub-daily-use": "1", "x-hub-session": sessionID, "x-hub-artifact-format": "file",
+        ], maxBytes: 1_048_576)
+        guard let files = try JSONDecoder().decode(Catalog.self, from: data).files else { return nil }
+        guard files.count <= 250, Set(files.map(\.id)).count == files.count,
+              files.allSatisfy(Self.validConversationFile) else { throw HubAttachmentError.invalidResponse }
+        return files
+    }
+
+    public func conversationFileBytes(sessionID: String, file: HubConversationFile) async throws -> Data {
+        struct Receipt: Decodable {
+            let id: String
+            let name: String
+            let bytes: Int
+            let sha256: String
+            let data: String
+        }
+        guard HubVoiceAPI.validID(sessionID), Self.validConversationFile(file) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/artifacts", headers: [
+            "x-hub-daily-use": "1", "x-hub-session": sessionID, "x-hub-artifact-format": "file", "x-hub-artifact": file.id,
+        ], maxBytes: 4_100_000)
+        let receipt = try JSONDecoder().decode(Receipt.self, from: data)
+        guard receipt.id == file.id, receipt.name == file.name, receipt.bytes == file.bytes, receipt.sha256 == file.sha256,
+              let bytes = Data(base64Encoded: receipt.data), bytes.count == file.bytes,
+              HubAttachmentStore.digest(bytes) == file.sha256 else { throw HubAttachmentError.invalidResponse }
+        return bytes
+    }
+
+    private static func validConversationFile(_ file: HubConversationFile) -> Bool {
+        Self.isScreenshotID(file.id) && Self.isScreenshotID(file.sha256) && (0...3_000_000).contains(file.bytes) &&
+            !file.name.isEmpty && file.name.utf8.count <= 1_024 && file.name != "." && file.name != ".." &&
+            !file.name.contains("/") && !file.name.contains("\\") &&
+            file.name.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
     }
 
     public func chatPresentation(sessionID: String) async throws -> HubChatPresentation? {

@@ -953,7 +953,19 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
            request.value(forHTTPHeaderField: "x-hub-daily-use") == "1",
            ProcessInfo.processInfo.arguments.contains("--hub-native-chat-fixture") {
             let id = String(repeating: "c", count: 64)
-            if request.value(forHTTPHeaderField: "x-hub-screenshot") == id {
+            if request.value(forHTTPHeaderField: "x-hub-artifact-format") == "file" {
+                let fileID = String(repeating: "d", count: 64)
+                let bytes = Data("Fixture meeting notes".utf8)
+                let metadata: [String: Any] = ["id": fileID, "name": "meeting-notes.txt", "bytes": bytes.count,
+                                               "sha256": HubAttachmentStore.digest(bytes)]
+                if request.value(forHTTPHeaderField: "x-hub-artifact") == fileID {
+                    var file = metadata
+                    file["data"] = bytes.base64EncodedString()
+                    respond(with: try? JSONSerialization.data(withJSONObject: file))
+                } else {
+                    respond(with: try? JSONSerialization.data(withJSONObject: ["files": [metadata]]))
+                }
+            } else if request.value(forHTTPHeaderField: "x-hub-screenshot") == id {
                 let image = "iVBORw0KGgoAAAANSUhEUgAAAGAAAAAZCAIAAABB17xmAAAASElEQVR4nO3QMQ0AMAwEseAJj3Iq/DDIVvUHSwfg5OpztVTfD8IDBAgQIEDBAQIECBCg4AABAgQIUHCAAAECBCg4QIAA9UugARgldhmWerIvAAAAAElFTkSuQmCC"
                 respond(with: Data(base64Encoded: image), mediaType: "image/png")
             } else {

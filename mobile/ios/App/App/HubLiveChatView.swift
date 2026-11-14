@@ -759,7 +759,7 @@ struct HubLiveChatView: View {
                     Button {
                         composerFocused = false
                         appsOpen = true
-                    } label: { Label("Conversation apps", systemImage: "doc.richtext") }
+                    } label: { Label("Conversation outputs", systemImage: "doc.richtext") }
                 } label: {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }
@@ -1467,9 +1467,6 @@ private struct HubChatImageView: View {
     @State private var savedFile: SavedFile?
     @State private var exporting = false
     @State private var exportFailed = false
-    @State private var sharing = false
-    @State private var sharedFile: URL?
-    @State private var shareFailed = false
     @State private var failed = false
     @State private var attempt = 0
 
@@ -1484,15 +1481,11 @@ private struct HubChatImageView: View {
             if let image {
                 VStack(alignment: .leading, spacing: 4) {
                     Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(name)
-                    if savedFile != nil {
+                    if let savedFile {
                         HStack {
                             Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             Spacer()
-                            Button { shareScreenshot() } label: {
-                                Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Share screenshot")
+                            HubShareFileButton(bytes: savedFile.bytes, name: savedFile.name, label: "Share screenshot")
                             Button {
                                 exportFailed = false
                                 exporting = true
@@ -1503,7 +1496,6 @@ private struct HubChatImageView: View {
                             .accessibilityLabel("Save screenshot to Files")
                         }
                         if exportFailed { Text("Could not save the screenshot.").font(.footnote).foregroundStyle(.secondary) }
-                        if shareFailed { Text("Could not prepare the screenshot for sharing.").font(.footnote).foregroundStyle(.secondary) }
                     }
                 }
             } else if failed {
@@ -1515,9 +1507,6 @@ private struct HubChatImageView: View {
         .fileExporter(isPresented: $exporting, document: savedFile.map { HubFileDocument(bytes: $0.bytes) },
                       contentType: savedFile?.type ?? .image, defaultFilename: savedFile?.name) { result in
             if case .failure = result { exportFailed = true }
-        }
-        .sheet(isPresented: $sharing, onDismiss: clearSharedFile) {
-            if let sharedFile { HubShareSheet(file: sharedFile) }
         }
         .task(id: attempt) {
             do {
@@ -1540,15 +1529,38 @@ private struct HubChatImageView: View {
         }
     }
 
-    private func shareScreenshot() {
-        guard let savedFile, !sharing else { return }
+}
+
+@MainActor
+struct HubShareFileButton: View {
+    let bytes: Data
+    let name: String
+    let label: LocalizedStringKey
+    @State private var sharing = false
+    @State private var sharedFile: URL?
+    @State private var shareFailed = false
+
+    var body: some View {
+        Button { share() } label: { Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(label))
+            .sheet(isPresented: $sharing, onDismiss: clearSharedFile) {
+                if let sharedFile { HubShareSheet(file: sharedFile) }
+            }
+            .alert("Could not prepare this file for sharing", isPresented: $shareFailed) {
+                Button("OK", role: .cancel) {}
+            }
+    }
+
+    private func share() {
+        guard !sharing else { return }
         clearSharedFile()
         shareFailed = false
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-            let file = directory.appendingPathComponent(savedFile.name)
-            try savedFile.bytes.write(to: file, options: [.atomic, .completeFileProtection])
+            let file = directory.appendingPathComponent(name)
+            try bytes.write(to: file, options: [.atomic, .completeFileProtection])
             sharedFile = file
             sharing = true
         } catch {

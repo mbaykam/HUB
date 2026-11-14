@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import HubNative
+import UniformTypeIdentifiers
 
 @MainActor
 struct HubConversationAppsView: View {
@@ -8,6 +9,13 @@ struct HubConversationAppsView: View {
     let sessionID: String
     @Environment(\.dismiss) private var dismiss
     @State private var artifacts: [HubConversationApp]?
+    @State private var files: [HubConversationFile]?
+    @State private var selectedFile: HubConversationFile?
+    @State private var fileBytes: Data?
+    @State private var fileError = false
+    @State private var loadingFiles = true
+    @State private var exporting = false
+    @State private var exportError = false
     @State private var selected: HubConversationApp?
     @State private var document: HubConversationAppDocument?
     @State private var failed = false
@@ -16,59 +24,140 @@ struct HubConversationAppsView: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                if selected != nil {
-                    Button { selected = nil; document = nil; failed = false } label: {
-                        Label("Apps", systemImage: "chevron.left")
+                if selected != nil || selectedFile != nil {
+                    Button { clearSelection() } label: {
+                        Label("Outputs", systemImage: "chevron.left")
                     }
                 }
-                Text(selected?.name ?? "Conversation apps").font(.headline).lineLimit(1)
+                Text(selected?.name ?? selectedFile?.name ?? "Conversation outputs").font(.headline).lineLimit(1)
                 Spacer()
                 Button("Done") { dismiss() }
             }
             .padding(.horizontal, 16)
-            if let document {
+            if let selectedFile {
+                fileDetail(selectedFile)
+            } else if let document {
                 HubContainedDocumentView(document: document.document)
             } else if failed {
                 Button("Retry") { failed = false; attempt += 1 }
                 Spacer()
             } else if selected != nil || artifacts == nil {
-                ProgressView("Loading apps…").frame(maxHeight: .infinity)
+                ProgressView("Loading outputs…").frame(maxHeight: .infinity)
             } else if let artifacts {
-                if artifacts.isEmpty {
-                    Text("No saved apps in this conversation.").foregroundStyle(.secondary)
-                    Spacer()
-                } else {
-                    List(artifacts) { item in
-                        Button {
-                            selected = item
-                            failed = false
-                        } label: {
-                            Label(item.name, systemImage: "doc.richtext").frame(minHeight: 44)
+                List {
+                    if !artifacts.isEmpty {
+                        Section("Interactive apps") {
+                            ForEach(artifacts) { item in
+                                Button {
+                                    selected = item
+                                    failed = false
+                                } label: {
+                                    Label(item.name, systemImage: "doc.richtext").frame(minHeight: 44)
+                                }
+                            }
                         }
                     }
-                    .listStyle(.plain)
+                    Section("Files") {
+                        if let files {
+                            if files.isEmpty { Text("No saved outputs in this conversation.").foregroundStyle(.secondary) }
+                            ForEach(files) { file in
+                                Button { selectedFile = file } label: {
+                                    Label(file.name, systemImage: "doc").frame(minHeight: 44)
+                                }
+                                .accessibilityIdentifier("hub.chat.output.\(file.id)")
+                            }
+                        } else if fileError {
+                            Button("Retry files") { attempt += 1 }
+                        } else if loadingFiles {
+                            ProgressView("Loading files…")
+                        } else {
+                            Text("File downloads require an updated HUB host.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                 }
+                .listStyle(.plain)
             }
         }
         .padding(.top, 12)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
-        .task(id: LoadRequest(appID: selected?.id, attempt: attempt)) {
+        .task(id: LoadRequest(appID: selected?.id, fileID: selectedFile?.id, attempt: attempt)) {
+            if let selectedFile {
+                fileError = false
+                do {
+                    let value = try await api.conversationFileBytes(sessionID: sessionID, file: selectedFile)
+                    if !Task.isCancelled { fileBytes = value }
+                } catch {
+                    if !Task.isCancelled { fileError = true }
+                }
+                return
+            }
             do {
                 if let selected {
                     let value = try await api.chatAppDocument(sessionID: sessionID, id: selected.id)
                     if !Task.isCancelled { document = value }
-                } else if artifacts == nil {
-                    let value = try await api.chatArtifacts(sessionID: sessionID)
-                    if !Task.isCancelled { artifacts = value.artifacts ?? [] }
+                } else {
+                    if artifacts == nil {
+                        let value = try await api.chatArtifacts(sessionID: sessionID)
+                        if !Task.isCancelled { artifacts = value.artifacts ?? [] }
+                    }
+                    if files == nil && !Task.isCancelled {
+                        loadingFiles = true
+                        defer { loadingFiles = false }
+                        do {
+                            let value = try await api.conversationFiles(sessionID: sessionID)
+                            if !Task.isCancelled { files = value; fileError = false }
+                        } catch {
+                            if !Task.isCancelled { fileError = true }
+                        }
+                    }
                 }
             } catch {
                 if !Task.isCancelled { failed = true }
             }
         }
+        .fileExporter(isPresented: $exporting, document: fileBytes.map { HubFileDocument(bytes: $0) },
+                      contentType: selectedFile.flatMap { UTType(filenameExtension: ($0.name as NSString).pathExtension) } ?? .data,
+                      defaultFilename: selectedFile?.name) { result in
+            if case .failure = result { exportError = true }
+        }
+    }
+
+    private func clearSelection() {
+        selected = nil
+        document = nil
+        selectedFile = nil
+        fileBytes = nil
+        failed = false
+        fileError = false
+        exportError = false
+    }
+
+    @ViewBuilder private func fileDetail(_ file: HubConversationFile) -> some View {
+        if let fileBytes {
+            HStack {
+                Button("Save to Files") { exportError = false; exporting = true }
+                Spacer()
+                HubShareFileButton(bytes: fileBytes, name: file.name, label: "Share output")
+            }.padding(.horizontal, 16)
+            if exportError { Text("Could not save this output.").font(.footnote) }
+            if fileBytes.count <= 400_000, let preview = String(data: fileBytes, encoding: .utf8) {
+                ScrollView { Text(preview).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(16) }
+            } else {
+                Text("Save or share this file to open it in another app.").foregroundStyle(.secondary).padding()
+                Spacer()
+            }
+        } else if fileError {
+            Button("Reload output list") { clearSelection(); artifacts = nil; files = nil; attempt += 1 }
+            Spacer()
+        } else {
+            ProgressView("Loading file…").frame(maxHeight: .infinity)
+        }
     }
 
     private struct LoadRequest: Equatable {
         let appID: String?
+        let fileID: String?
         let attempt: Int
     }
 }

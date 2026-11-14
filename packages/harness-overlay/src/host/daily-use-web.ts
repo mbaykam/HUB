@@ -1,6 +1,7 @@
 import {conversationScreenshots,installScreenshotDelivery} from "./screenshot-delivery.ts";
 import {conversationArtifacts,artifactDocument} from "./conversation-artifacts.ts";
 import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
+import {createHash} from "node:crypto";
 /** Read-only native state, available before any chat has been opened in the
  * new PWA process. No task is resumed, repeated or cancelled by these reads. */
 export function installDailyUseWeb(ctx:any){
@@ -48,6 +49,16 @@ export function installDailyUseWeb(ctx:any){
           res.end(stored.data);return;
         }
         const files=conversationArtifacts(events),apps=files.filter(f=>/\.html?$/i.test(f.name));
+        if(req.headers["x-hub-artifact-format"]==="file"){
+          const transferable=files.filter(file=>file.name&&file.name!=="."&&file.name!==".."&&
+            file.name.length<=255&&!/[\\/\u0000-\u001f\u007f-\u009f]/u.test(file.name));
+          const metadata=(file:typeof files[number])=>({id:file.id,name:file.name,at:file.at,bytes:Buffer.byteLength(file.content),
+            sha256:createHash("sha256").update(file.content).digest("hex")});
+          if(id===undefined){send(200,{files:transferable.slice(-250).reverse().map(metadata)});return;}
+          const file=transferable.find(item=>item.id===id);
+          if(!file){send(404,{error:"artifact-unavailable"});return;}
+          send(200,{...metadata(file),data:Buffer.from(file.content).toString("base64")});return;
+        }
         if(id===undefined){send(200,{artifacts:apps.map(({content,...item})=>item),screenshots:screenshots.map(({attachment,...item})=>item)});return;}
         const app=apps.find(f=>f.id===id);if(!app){send(404,{error:"artifact-unavailable"});return;}
         send(200,{document:artifactDocument(app,files),name:app.name,at:app.at});

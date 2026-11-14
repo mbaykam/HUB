@@ -173,6 +173,17 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["hub.chat.send"].isEnabled)
         XCTAssertEqual(app.webViews.count, 0)
         capture("Conversation after Stop")
+
+        more.tap()
+        app.buttons["Conversation outputs"].tap()
+        let file = app.buttons["hub.chat.output.\(String(repeating: "d", count: 64))"]
+        XCTAssertTrue(file.waitForExistence(timeout: 5))
+        file.tap()
+        XCTAssertTrue(app.staticTexts["Fixture meeting notes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Save to Files"].exists)
+        XCTAssertTrue(app.buttons["Share output"].exists)
+        XCTAssertEqual(app.webViews.count, 0)
+        capture("Conversation file output")
     }
 
     @MainActor

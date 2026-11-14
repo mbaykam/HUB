@@ -86,11 +86,11 @@ try{
     run('xcodebuild',['test-without-building','-project','mobile/ios/App/App.xcodeproj','-scheme','App',
       '-destination','platform=iOS Simulator,id='+device,'-derivedDataPath','mobile/build/DerivedData',
       '-parallel-testing-enabled','NO','-only-testing:HubWorkspaceUITests',
-      '-resultBundlePath',result,'CODE_SIGNING_ALLOWED=NO'],420000);
+      '-resultBundlePath',result,'CODE_SIGNING_ALLOWED=NO'],600000);
     await writeFile(resolve(folder,'workspace-ui-proof.json'),JSON.stringify({...source,runtime:selected.runtime,
       isolatedSimulator:true,nativeHomeFixture:true,physicalAcceptance:false,drawersPlannerComposerKeyboardPassed:true,
       knowledgeNoteAndReviewPassed:true,generalPreferencesPassed:true,chatStopAndDraftPassed:true,
-      knowledgeSkillsPassed:true},null,2));
+      knowledgeSkillsPassed:true,chatFileOutputPassed:true},null,2));
     try{sim('terminate',device,'com.mbaykam.hub');}catch{}
   }else{
     stage='install';console.log('Installing the verified existing bundle');

@@ -514,6 +514,35 @@ final class HubConversationTests: XCTestCase {
         }
     }
 
+    func testConversationFileDownloadChecksSessionAndSnapshotDigest() async throws {
+        let api = try client()
+        let data = Data("Text output\r\n".utf8)
+        let digest = HubAttachmentStore.digest(data)
+        let id = String(repeating: "a", count: 64)
+        let file: [String: Any] = ["name": "notes.txt", "id": id, "bytes": data.count, "sha256": digest]
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/artifacts")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-session"), "fixture-chat")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-artifact-format"), "file")
+            if let artifact = request.value(forHTTPHeaderField: "x-hub-artifact") {
+                XCTAssertEqual(artifact, id)
+                var receipt = file
+                let delivered = CatalogFixture.requests.count == 2 ? data : Data(repeating: 0x20, count: data.count)
+                receipt["data"] = delivered.base64EncodedString()
+                return (200, try JSONSerialization.data(withJSONObject: receipt))
+            }
+            return (200, try JSONSerialization.data(withJSONObject: ["files": [file]]))
+        }
+        let files = try await api.conversationFiles(sessionID: "fixture-chat")
+        let selected = try XCTUnwrap(files?.first)
+        let received = try await api.conversationFileBytes(sessionID: "fixture-chat", file: selected)
+        XCTAssertEqual(received, data)
+        do {
+            _ = try await api.conversationFileBytes(sessionID: "fixture-chat", file: selected)
+            XCTFail("An altered file must not reach the preview or share sheet")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
     func testScreenshotCatalogUsesBoundedConversationRoute() async throws {
         let api = try client()
         let id = String(repeating: "a", count: 64)
