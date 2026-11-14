@@ -102,6 +102,7 @@ struct HubHomeView: View {
     @State private var activityDestination: ActivityDestination?
     @State private var selectedNote: HubKnowledgeNote?
     @State private var selectedKnowledgeSource: HubKnowledgeNote.Source?
+    @State private var knowledgeForgetOpen = false
     @State private var noteLoadFailed = false
     @State private var noteAttempt = 0
     @State private var noteEditing = false
@@ -918,6 +919,7 @@ struct HubHomeView: View {
         selectedNoteID = nil
         selectedNote = nil
         selectedKnowledgeSource = nil
+        knowledgeForgetOpen = false
         noteLoadFailed = false
         noteEditing = false
         noteDraft = ""
@@ -1024,6 +1026,14 @@ struct HubHomeView: View {
         .sheet(item: $selectedKnowledgeSource) { source in
             if let api = chatAPI() { HubKnowledgeOriginalSourceView(api: api, source: source) }
         }
+        .sheet(isPresented: $knowledgeForgetOpen) {
+            if let api = chatAPI(), let note = selectedNote {
+                HubKnowledgeForgetView(api: api, note: note) { updated in
+                    if selectedNoteID == updated.id, chatAPI() === api { selectedNote = updated }
+                    await refreshKnowledgeGraph()
+                }
+            }
+        }
     }
 
     private func refreshKnowledgeGraph() async {
@@ -1051,6 +1061,11 @@ struct HubHomeView: View {
                     Button { knowledgeAssetsOpen = true } label: { Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44) }
                         .accessibilityLabel("Attach file to note")
                         .disabled(model.connection != .connected)
+                    Menu {
+                        Button("Forget a passage", role: .destructive) { knowledgeForgetOpen = true }
+                    } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
+                    .accessibilityLabel("Note actions")
+                    .disabled(model.connection != .connected)
                 }
             }
             if noteEditing {

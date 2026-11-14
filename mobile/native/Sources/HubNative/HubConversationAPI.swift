@@ -2394,6 +2394,18 @@ public final class HubConversationAPI {
         return saved
     }
 
+    public func forgetKnowledgePassage(_ passage: String, from note: HubKnowledgeNote) async throws -> HubKnowledgeNote {
+        guard !note.id.isEmpty, note.id.utf8.count <= 1_024, note.protected != true, note.kind != "conversation",
+              let hash = note.hash, Self.isScreenshotID(hash),
+              !passage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONEncoder().encode(["action": "forget", "id": note.id, "hash": hash, "passage": passage])
+        guard body.count <= 200_000 else { throw HubAttachmentError.tooLarge }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body)
+        let updated = try JSONDecoder().decode(HubKnowledgeNote.self, from: data)
+        guard updated.id == note.id, updated.hash != hash else { throw HubAttachmentError.invalidResponse }
+        return updated
+    }
+
     public func knowledgeActivity(offset: Int = 0) async throws -> HubKnowledgeActivity {
         guard offset >= 0 else { throw HubAttachmentError.invalidResponse }
         let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [

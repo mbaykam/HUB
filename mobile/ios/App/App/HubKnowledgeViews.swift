@@ -5,6 +5,63 @@ import UniformTypeIdentifiers
 import PDFKit
 
 @MainActor
+struct HubKnowledgeForgetView: View {
+    let api: HubConversationAPI
+    let note: HubKnowledgeNote
+    let changed: (HubKnowledgeNote) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var passage = ""
+    @State private var confirm = false
+    @State private var busy = false
+    @State private var failed = false
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Passage to forget") {
+                    TextEditor(text: $passage).frame(minHeight: 85).accessibilityLabel("Passage to forget")
+                    Text("Copy an exact passage from the note below and paste it here.").font(.footnote)
+                }
+                Section(note.title) {
+                    Text(note.content).textSelection(.enabled)
+                }
+                if busy { ProgressView("Forgetting passage…") }
+                if failed { Text("Could not confirm the change. Reopen the note before trying again.").font(.footnote) }
+            }
+            .disabled(busy)
+            .navigationTitle("Forget a passage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Forget", role: .destructive) { confirm = true }
+                        .disabled(busy || failed || passage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .alert("Forget this passage?", isPresented: $confirm) {
+                Button("Forget passage", role: .destructive) { Task { await forget() } }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Knowledge will remove the selected passage and retire its earlier evidence from recall.") }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(busy)
+    }
+
+    private func forget() async {
+        guard !busy, !failed else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await api.forgetKnowledgePassage(passage, from: note)
+            await changed(updated)
+            dismiss()
+        } catch {
+            failed = true
+        }
+    }
+}
+
+@MainActor
 struct HubKnowledgeOriginalSourceView: View {
     let api: HubConversationAPI
     let source: HubKnowledgeNote.Source
