@@ -54,7 +54,7 @@ export function installDailyUseWeb(ctx:any){
             file.name.length<=255&&!/[\\/\u0000-\u001f\u007f-\u009f]/u.test(file.name));
           const metadata=(file:typeof files[number])=>({id:file.id,name:file.name,at:file.at,bytes:Buffer.byteLength(file.content),
             sha256:createHash("sha256").update(file.content).digest("hex")});
-          if(id===undefined){send(200,{files:transferable.slice(-250).reverse().map(metadata)});return;}
+          if(id===undefined){send(200,{files:transferable.sort((first,second)=>second.seq-first.seq).slice(0,250).map(metadata)});return;}
           const file=transferable.find(item=>item.id===id);
           if(!file){send(404,{error:"artifact-unavailable"});return;}
           send(200,{...metadata(file),data:Buffer.from(file.content).toString("base64")});return;
