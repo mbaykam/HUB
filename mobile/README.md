@@ -22,12 +22,12 @@ from the left panel. Settings, Knowledge and Tasks open from the right panel.
 The app records time to native Home and time
 to live Home data separately in the local HomeLaunch log category.
 
-## Installed interface
+## Workspace and web content
 
-The matching development build includes the actual renderer, styles/fonts and
-lazy graph/voice assets from a fixed product profile. The installed web renderer
-remains available to the connection recovery code. The ordinary workspace
-opens in SwiftUI. It starts without a previous screen, chat or draft snapshot.
+The workspace and connection recovery open in SwiftUI. WebKit opens the
+configured HTTPS authentication page when sign-in is required. The workspace
+starts without a previous screen, chat or draft snapshot. Installed-renderer
+verification remains available for comparison with the earlier workspace.
 Data still comes from HUB; opening the interface alone does not run an assistant.
 Network requests and stream creation wait for the authenticated compatibility
 check. Expired sign-in opens the existing HTTPS authentication flow. Canvas and
