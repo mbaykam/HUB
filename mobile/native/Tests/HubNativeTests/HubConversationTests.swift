@@ -259,6 +259,29 @@ final class HubConversationTests: XCTestCase {
         XCTAssertFalse(receipt.automatic)
     }
 
+    func testWorkspaceGoalOutputVerifiesArtifactDigestAndSafeName() async throws {
+        let api = try client()
+        let bytes = Data("Verified fixture".utf8)
+        let hash = HubAttachmentStore.digest(bytes)
+        let evidence = try JSONDecoder().decode(HubWorkspaceTask.Evidence.self, from: JSONSerialization.data(withJSONObject: [
+            "id": "file-evidence", "kind": "file", "label": "Fixture", "detail": "Verified", "at": 1, "sha256": hash,
+        ]))
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.query, "view=artifact&id=fixture-goal&evidenceId=file-evidence")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-goals"), "1")
+            let name = CatalogFixture.requests.count == 2 ? "../fixture.txt" : "fixture.txt"
+            let value = ["name": name, "data": bytes.base64EncodedString(), "sha256": hash]
+            return (200, try JSONSerialization.data(withJSONObject: value))
+        }
+        let file = try await api.workspaceTaskOutput(goalID: "fixture-goal", evidence: evidence)
+        XCTAssertEqual(file.name, "fixture.txt")
+        XCTAssertEqual(file.data, bytes)
+        do {
+            _ = try await api.workspaceTaskOutput(goalID: "fixture-goal", evidence: evidence)
+            XCTFail("A file path cannot be used as the exported file name")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
     func testFollowTimelineCombinesPackedAndLiveTextAndSettlesOnEnd() throws {
         let decoder = JSONDecoder()
         var timeline = HubChatTimeline()

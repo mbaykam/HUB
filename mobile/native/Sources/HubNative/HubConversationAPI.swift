@@ -769,6 +769,20 @@ public struct HubWorkspaceTask: Decodable, Identifiable {
     public struct Checkpoint: Decodable {
         public let summary: String
         public let nextAction: String
+        public let result: String?
+    }
+    public struct Evidence: Decodable, Identifiable {
+        public let id: String
+        public let kind: String
+        public let label: String
+        public let detail: String
+        public let sha256: String?
+        public let at: Double
+    }
+    public struct OutputFile: Decodable {
+        public let name: String
+        public let data: Data
+        fileprivate let sha256: String
     }
     public let id: String
     public let title: String
@@ -786,6 +800,7 @@ public struct HubWorkspaceTask: Decodable, Identifiable {
     public let plan: [Milestone]?
     public let approvals: [Approval]?
     public let checkpoint: Checkpoint?
+    public let evidence: [Evidence]?
 }
 
 public enum HubTaskArgument: Decodable {
@@ -1878,6 +1893,22 @@ public final class HubConversationAPI {
                                              body: body, maxBytes: 8_388_608)
         let receipt = try JSONDecoder().decode(Receipt.self, from: response)
         guard receipt.revision > loaded.revision else { throw HubAttachmentError.invalidResponse }
+    }
+
+    public func workspaceTaskOutput(goalID: String, evidence: HubWorkspaceTask.Evidence) async throws -> HubWorkspaceTask.OutputFile {
+        guard HubVoiceAPI.validID(goalID), HubVoiceAPI.validID(evidence.id), evidence.kind == "file",
+              let hash = evidence.sha256, Self.isScreenshotID(hash) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/goals", headers: ["x-hub-goals": "1"], query: [
+            URLQueryItem(name: "view", value: "artifact"), URLQueryItem(name: "id", value: goalID),
+            URLQueryItem(name: "evidenceId", value: evidence.id),
+        ], maxBytes: 34_000_000, operationTimeout: 60)
+        let file = try JSONDecoder().decode(HubWorkspaceTask.OutputFile.self, from: data)
+        guard !file.name.isEmpty, file.name.utf8.count <= 255, file.name != ".", file.name != "..",
+              file.name.rangeOfCharacter(from: CharacterSet(charactersIn: "/\\:").union(.controlCharacters)) == nil,
+              file.data.count <= 25_000_000, file.sha256 == hash, HubAttachmentStore.digest(file.data) == hash else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return file
     }
 
     public func changeWorkspaceTask(_ action: HubWorkspaceTaskAction, id: String, revision: Int,

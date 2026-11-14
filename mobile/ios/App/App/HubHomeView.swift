@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import HubNative
+import UniformTypeIdentifiers
 
 @MainActor
 final class HubHomeModel: ObservableObject {
@@ -1510,6 +1511,10 @@ private struct HubTasksView: View {
     @State private var changeError = false
     @State private var pending: PendingAction?
     @State private var taskEditor: TaskEdit?
+    @State private var exportingOutput = false
+    @State private var output: HubWorkspaceTask.OutputFile?
+    @State private var outputError: String?
+    @State private var loadingOutput: String?
     var load: () async throws -> HubWorkspaceTasks
     let api: HubConversationAPI
     let openChat: (HubConversationChoice) -> Void
@@ -1544,6 +1549,7 @@ private struct HubTasksView: View {
                     }
                 }
                 Button("Refresh") { attempt += 1 }
+                if let outputError { Text(outputError).font(.footnote).foregroundStyle(.secondary) }
                 if changeError { Text("Could not confirm the change. Refresh the task before trying again.").font(.footnote) }
             } else if failed {
                 Button("Retry loading tasks") { failed = false; attempt += 1 }
@@ -1570,6 +1576,12 @@ private struct HubTasksView: View {
                 HubGoalEditorView(api: api, id: edit.taskID) { attempt += 1 }
             }
         }
+        .fileExporter(isPresented: $exportingOutput, document: output.map { GoalOutputDocument(bytes: $0.data) },
+                      contentType: output.flatMap { UTType(filenameExtension: ($0.name as NSString).pathExtension) } ?? .data,
+                      defaultFilename: output?.name, onCompletion: { result in
+            output = nil
+            if case .failure = result { outputError = "Could not save the file to the chosen location." }
+        })
         .confirmationDialog(pending?.label ?? "Confirm task action",
                             isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
                             titleVisibility: .visible, presenting: pending) { command in
@@ -1624,12 +1636,31 @@ private struct HubTasksView: View {
             DisclosureGroup("Checkpoint") {
                 Text(checkpoint.summary).textSelection(.enabled)
                 Text(checkpoint.nextAction).font(.footnote)
+                if let result = checkpoint.result { Text(result).textSelection(.enabled) }
             }
         }
         if let plan = task.plan, !plan.isEmpty {
             DisclosureGroup("Milestones") {
                 ForEach(plan) { step in
                     Label(step.title, systemImage: step.status == "done" ? "checkmark.circle" : "circle")
+                }
+            }
+        }
+        if let evidence = task.evidence, !evidence.isEmpty {
+            DisclosureGroup("Evidence & output") {
+                ForEach(evidence.reversed()) { entry in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(entry.label).font(.subheadline.weight(.semibold))
+                        Text(Date(timeIntervalSince1970: entry.at / 1_000).formatted()).font(.caption).foregroundStyle(.secondary)
+                        Text(entry.detail).textSelection(.enabled)
+                        if entry.kind == "file", entry.sha256 != nil {
+                            Button(loadingOutput == entry.id ? "Preparing file…" : "Save to Files") {
+                                Task { await saveOutput(task, evidence: entry) }
+                            }
+                            .disabled(loadingOutput != nil || exportingOutput)
+                        }
+                    }
+                    .padding(.vertical, 5)
                 }
             }
         }
@@ -1663,6 +1694,20 @@ private struct HubTasksView: View {
                     taskAction("Deny request", action: .deny, task: task, routine: false, approval: approval)
                 }
             }
+        }
+    }
+
+    private func saveOutput(_ task: HubWorkspaceTask, evidence: HubWorkspaceTask.Evidence) async {
+        guard loadingOutput == nil, !exportingOutput else { return }
+        output = nil
+        loadingOutput = evidence.id
+        outputError = nil
+        defer { loadingOutput = nil }
+        do {
+            output = try await api.workspaceTaskOutput(goalID: task.id, evidence: evidence)
+            exportingOutput = true
+        } catch {
+            outputError = "Could not retrieve the verified file. Refresh the goal and try again."
         }
     }
 
@@ -1718,4 +1763,16 @@ private struct HubTasksView: View {
         catch { changeError = true }
         attempt += 1
     }
+}
+
+private struct GoalOutputDocument: FileDocument {
+    static let readableContentTypes: [UTType] = [.data]
+    let bytes: Data
+
+    init(bytes: Data) { self.bytes = bytes }
+    init(configuration: ReadConfiguration) throws {
+        guard let bytes = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
+        self.bytes = bytes
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: bytes) }
 }
