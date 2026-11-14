@@ -343,14 +343,53 @@ public struct HubKnowledgeCurationReview: Decodable {
         public let channel: String?
     }
     public struct Plan: Decodable {
+        public final class DomainChange: Decodable {
+            public struct SplitGroup: Decodable {
+                public let title: String
+                public let nodeIds: [String]
+            }
+            public let type: String
+            public let title: String?
+            public let id: String?
+            public let domainId: String?
+            public let targetId: String?
+            public let nodeId: String?
+            public let parentId: String?
+            public let status: String?
+            public let aliases: [String]?
+            public let groups: [SplitGroup]?
+            public let deactivateSource: Bool?
+            public let operation: DomainChange?
+            public let evidence: String?
+        }
+        public struct Relation: Decodable {
+            public let targetId: String
+            public let label: String
+            public let evidence: String
+        }
+        public struct Reflection: Decodable {
+            public let scope: String
+            public let observation: String
+            public let evidence: String
+        }
+        public struct ProfileSuggestion: Decodable {
+            public let target: String
+            public let text: String
+            public let evidence: String
+        }
+        public struct Memory: Decodable {
+            public let title: String
+            public let category: String
+            public let evidence: String
+        }
         public let decision: String
         public let reason: String
         public let tags: [String]
-        public let domainOps: [HubTaskArgument]?
-        public let relations: [HubTaskArgument]?
-        public let reflections: [HubTaskArgument]?
-        public let profileSuggestions: [HubTaskArgument]?
-        public let memories: [HubTaskArgument]?
+        public let domainOps: [DomainChange]?
+        public let relations: [Relation]?
+        public let reflections: [Reflection]?
+        public let profileSuggestions: [ProfileSuggestion]?
+        public let memories: [Memory]?
     }
     public let source: Source
     public let plan: Plan

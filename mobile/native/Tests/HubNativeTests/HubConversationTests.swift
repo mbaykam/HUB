@@ -53,6 +53,43 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(CatalogFixture.requests.count, 1)
     }
 
+    func testKnowledgePassReviewKeepsEvidenceAndApprovesOnlyThePreviewedHash() async throws {
+        let api = try client()
+        let hash = String(repeating: "d", count: 64)
+        let entry = try JSONDecoder().decode(HubKnowledgeActivity.Entry.self, from: Data(
+            #"{"id":"pass-1","status":"review","updatedAt":1,"changes":[],"warnings":[]}"#.utf8
+        ))
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            if request.httpMethod == "GET" {
+                let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+                let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value) })
+                XCTAssertEqual(query["view"] ?? nil, "review")
+                XCTAssertEqual(query["id"] ?? nil, entry.id)
+                let response = #"""
+                {"source":{"content":"Private fixture text"},"stale":true,"reviewHash":"\#(hash)",
+                 "plan":{"decision":"organize","reason":"Keep a sourced record","tags":[],
+                         "domainOps":[{"type":"propose","operation":{"type":"merge","id":"a","targetId":"b"},"evidence":"Fixture excerpt"}],
+                         "memories":[{"title":"Fixture memory","category":"learning","evidence":"Private fixture text"}]}}
+                """#
+                return (200, Data(response.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "review")
+            XCTAssertEqual(command["id"] as? String, entry.id)
+            XCTAssertEqual(command["approve"] as? Bool, true)
+            XCTAssertEqual(command["reviewHash"] as? String, hash)
+            XCTAssertNil(command["source"])
+            return (200, Data("{}".utf8))
+        }
+        let preview = try await api.knowledgeCurationReview(entry)
+        XCTAssertEqual(preview.source.content, "Private fixture text")
+        XCTAssertEqual(preview.plan.domainOps?.first?.operation?.targetId, "b")
+        XCTAssertEqual(preview.plan.memories?.first?.evidence, "Private fixture text")
+        try await api.decideKnowledgeCuration(entry, review: preview, approve: true)
+    }
+
     func testQueueOnlyDisplaysSelectedSessionAndNeverEditsAttachmentsAsText() async throws {
         let baseline = Data(#"""
         {"type":"item","value":{"type":"baseline","value":{"queues":{

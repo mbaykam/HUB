@@ -1098,11 +1098,7 @@ private struct HubKnowledgeCurationReviewView: View {
                         Text(review.plan.reason)
                         if review.stale { Text("Preview refreshed against the current Knowledge registry.").font(.footnote) }
                         if !review.plan.tags.isEmpty { Text(review.plan.tags.joined(separator: ", ")).font(.footnote) }
-                        details("Domain changes", review.plan.domainOps)
-                        details("Relationships", review.plan.relations)
-                        details("Reflections", review.plan.reflections)
-                        details("Profile suggestions", review.plan.profileSuggestions)
-                        details("Memories", review.plan.memories)
+                        planDetails(review.plan)
                     }
                     Section("Original source") {
                         Text(review.source.content).textSelection(.enabled)
@@ -1130,14 +1126,64 @@ private struct HubKnowledgeCurationReviewView: View {
         }
     }
 
-    @ViewBuilder private func details(_ name: String, _ values: [HubTaskArgument]?) -> some View {
+    private func planDetails(_ plan: HubKnowledgeCurationReview.Plan) -> some View {
+        Group {
+            details("Domain changes", plan.domainOps) { change in
+                let operation = change.operation ?? change
+                domainRow(operation, evidence: change.evidence ?? operation.evidence)
+            }
+            details("Relationships", plan.relations) { relation in
+                reviewRow(relation.label, detail: relation.targetId, evidence: relation.evidence)
+            }
+            details("Reflections", plan.reflections) { reflection in
+                reviewRow(reflection.observation, detail: reflection.scope.capitalized, evidence: reflection.evidence)
+            }
+            details("Profile suggestions", plan.profileSuggestions) { suggestion in
+                reviewRow(suggestion.text, detail: suggestion.target == "USER.md" ? "Shared user profile" : "Character profile",
+                          evidence: suggestion.evidence)
+            }
+            details("Memories", plan.memories) { memory in
+                reviewRow(memory.title, detail: memory.category.capitalized, evidence: memory.evidence)
+            }
+        }
+    }
+
+    private func domainRow(_ change: HubKnowledgeCurationReview.Plan.DomainChange, evidence: String?) -> some View {
+        let identity = [change.id, change.nodeId, change.domainId, change.parentId, change.targetId, change.status]
+            .compactMap { $0 }.joined(separator: " → ")
+        return VStack(alignment: .leading, spacing: 5) {
+            reviewRow(change.type.capitalized, detail: change.title, evidence: evidence)
+            if !identity.isEmpty { Text(identity).font(.caption).foregroundStyle(.secondary) }
+            if let aliases = change.aliases, !aliases.isEmpty {
+                Text("Aliases: \(aliases.joined(separator: ", "))").font(.caption)
+            }
+            if let groups = change.groups {
+                ForEach(groups.indices, id: \.self) { index in
+                    Text("\(groups[index].title) · \(groups[index].nodeIds.count) records").font(.caption)
+                }
+            }
+            if change.deactivateSource == true { Text("Deactivate the original domain").font(.caption) }
+        }
+    }
+
+    @ViewBuilder private func details<Row, Content: View>(_ name: LocalizedStringKey, _ values: [Row]?,
+                                                          @ViewBuilder content: (Row) -> Content) -> some View {
         if let values, !values.isEmpty {
             DisclosureGroup(name) {
                 ForEach(values.indices, id: \.self) { index in
-                    Text(values[index].displayText).font(.footnote.monospaced()).textSelection(.enabled)
+                    content(values[index])
                 }
             }
         }
+    }
+
+    private func reviewRow(_ title: String, detail: String?, evidence: String?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.subheadline.weight(.semibold))
+            if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            if let evidence { Text(evidence).italic().font(.footnote).textSelection(.enabled) }
+        }
+        .padding(.vertical, 4)
     }
 
     private func decide(_ review: HubKnowledgeCurationReview, approve: Bool) async {
