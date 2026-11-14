@@ -71,6 +71,8 @@ struct HubLiveChatView: View {
     @State private var renameDraft = ""
     @State private var renaming = false
     @State private var branching = false
+    @State private var commandsOpen = false
+    @State private var focusAfterCommandPick = false
     @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
 
     private struct LoadedVisual {
@@ -156,6 +158,22 @@ struct HubLiveChatView: View {
             .navigationViewStyle(.stack)
         }
         .sheet(isPresented: $appsOpen) { HubConversationAppsView(api: api, sessionID: chat.sessionId) }
+        .sheet(isPresented: $commandsOpen, onDismiss: {
+            if focusAfterCommandPick {
+                focusAfterCommandPick = false
+                composerFocused = true
+            }
+        }) {
+            HubChatCommandsView(api: api, sessionID: chat.sessionId) { name in
+                focusAfterCommandPick = true
+                let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty || (text.hasPrefix("/") && !text.contains(where: \.isWhitespace)) {
+                    draft = "/\(name) "
+                } else {
+                    draft = "/\(name) " + draft
+                }
+            }
+        }
         .sheet(isPresented: $modelPickerOpen) {
             HubChatModelPicker(api: api, sessionID: chat.sessionId, current: selectedModel ?? snapshot?.model) {
                 selectedModel = snapshot?.model == $0 ? nil : $0
@@ -424,6 +442,14 @@ struct HubLiveChatView: View {
                                         .padding(14)
                                         .background(panel, in: RoundedRectangle(cornerRadius: 18))
                                     }
+                                } else if message.role == "command" || message.role == "command-error" {
+                                    Label {
+                                        Text(message.text).textSelection(.enabled)
+                                    } icon: {
+                                        Image(systemName: message.role == "command-error" ? "exclamationmark.circle" : "terminal")
+                                    }
+                                    .font(.footnote)
+                                    .foregroundStyle(message.role == "command-error" ? Color.red : Color.secondary)
                                 } else {
                                     let formatted = try? AttributedString(markdown: message.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
                                     if !message.text.isEmpty {
@@ -614,6 +640,11 @@ struct HubLiveChatView: View {
                     .onSubmit { send(fromKeyboard: true) }
                     .padding(.leading, 12)
                 Menu {
+                    Button {
+                        composerFocused = false
+                        commandsOpen = true
+                    } label: { Label("Commands & skills", systemImage: "terminal") }
+                    .disabled(connectionLost)
                     Button {
                         composerFocused = false
                         filePickerOpen = true
@@ -840,11 +871,48 @@ struct HubLiveChatView: View {
             do {
                 var prepared: ([String], [HubChatPhoto]) = ([], [])
                 let context = attachments()
+                let command: HubChatCommand?
+                if let name = HubChatCommand.leadingName(in: text) {
+                    do {
+                        command = try await api.chatCommands(sessionID: chat.sessionId).first { $0.name == name }
+                    } catch {
+                        self.error = "Could not check available commands. Your draft is still here."
+                        return
+                    }
+                } else {
+                    command = nil
+                }
                 if !files.isEmpty {
                     guard let context else { throw HubAttachmentError.signInRequired }
+                    if let command, command.input?.images != true {
+                        self.error = "/\(command.name) does not accept attachments."
+                        return
+                    }
+                    if command != nil, files.contains(where: { file in
+                        let type = UTType(filenameExtension: (file.name as NSString).pathExtension)?.preferredMIMEType
+                        return !["image/png", "image/jpeg", "image/webp", "image/gif"].contains(type ?? "")
+                    }) {
+                        self.error = "This command only accepts image attachments."
+                        return
+                    }
                     prepared = try await prepareFiles(files, context: context)
                 }
-                try await api.sendChat(text, sessionID: chat.sessionId, files: prepared.0, photos: prepared.1, delivery: delivery)
+                if let command {
+                    guard prepared.0.isEmpty else {
+                        self.error = "This command only accepts image attachments."
+                        return
+                    }
+                    guard let receipt = try await api.runChatCommand(text, sessionID: chat.sessionId, photos: prepared.1) else {
+                        self.error = "/\(command.name) is no longer available. Your draft is still here."
+                        return
+                    }
+                    if receipt.result.kind == .error {
+                        self.error = receipt.result.text ?? "The command failed. Your draft is still here."
+                        return
+                    }
+                } else {
+                    try await api.sendChat(text, sessionID: chat.sessionId, files: prepared.0, photos: prepared.1, delivery: delivery)
+                }
                 if draft == text { draft = "" }
                 for file in files {
                     do {
@@ -855,7 +923,7 @@ struct HubLiveChatView: View {
                         fileDrafts.removeAll { $0.id == file.id }
                     }
                 }
-                if !connectionLost, snapshot?.running != true, (snapshot?.messages.last?.id ?? "") == previous {
+                if command == nil, !connectionLost, snapshot?.running != true, (snapshot?.messages.last?.id ?? "") == previous {
                     awaitingAfter = previous
                     try? await Task.sleep(nanoseconds: 12_000_000_000)
                     if awaitingAfter == previous {
@@ -886,6 +954,87 @@ struct HubLiveChatView: View {
                 try await api.cancelChat(sessionID: chat.sessionId)
             } catch {
                 self.error = "Could not confirm that HUB received Stop."
+            }
+        }
+    }
+}
+
+@MainActor
+private struct HubChatCommandsView: View {
+    let api: HubConversationAPI
+    let sessionID: String
+    let select: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var commands: [HubChatCommand]?
+    @State private var skills: [HubChatSkill]?
+    @State private var query = ""
+    @State private var loading = true
+    @State private var attempt = 0
+
+    var body: some View {
+        NavigationView {
+            List {
+                if loading { ProgressView("Loading commands and skills…") }
+                if let commands {
+                    Section("Commands") {
+                        let matching = commands.filter { matches($0.name, description: $0.description) }
+                        if matching.isEmpty { Text("No matching commands").foregroundStyle(.secondary) }
+                        ForEach(matching) { command in
+                            option(command.name, description: command.description, hint: command.input?.hint)
+                        }
+                    }
+                } else if !loading {
+                    Text("Commands could not be loaded.").foregroundStyle(.secondary)
+                }
+                if let skills {
+                    let names = Set(commands?.map(\.name) ?? [])
+                    Section("Skills") {
+                        let matching = skills.filter { !names.contains($0.name) && matches($0.name, description: $0.description) }
+                        if matching.isEmpty { Text("No matching skills").foregroundStyle(.secondary) }
+                        ForEach(matching) { skill in option(skill.name, description: skill.description, hint: nil) }
+                    }
+                } else if !loading {
+                    Text("Skills could not be loaded.").foregroundStyle(.secondary)
+                }
+                if !loading && (commands == nil || skills == nil) {
+                    Button("Retry") { attempt += 1 }
+                }
+            }
+            .searchable(text: $query, prompt: "Find a command or skill")
+            .navigationTitle("Commands & skills")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .task(id: attempt) {
+            loading = true
+            async let commandCatalog = try? api.chatCommands(sessionID: sessionID)
+            async let skillCatalog = try? api.chatSkills(sessionID: sessionID)
+            let (commands, skills) = await (commandCatalog, skillCatalog)
+            guard !Task.isCancelled else { return }
+            self.commands = commands
+            self.skills = skills
+            loading = false
+        }
+    }
+
+    private func matches(_ name: String, description: String) -> Bool {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return term.isEmpty || ("/" + name).localizedCaseInsensitiveContains(term) ||
+            description.localizedCaseInsensitiveContains(term)
+    }
+
+    private func option(_ name: String, description: String, hint: String?) -> some View {
+        Button {
+            select(name)
+            dismiss()
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("/" + name).font(.body.monospaced())
+                Text(description).font(.caption).foregroundStyle(.secondary)
+                if let hint, !hint.isEmpty { Text(hint).font(.caption).foregroundStyle(.secondary) }
             }
         }
     }

@@ -34,6 +34,42 @@ final class HubConversationTests: XCTestCase {
         CatalogFixture.responder = nil
     }
 
+    func testSlashCommandUsesSessionCatalogAndCommandEndpointWithoutPrompting() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            XCTAssertEqual(arguments["agentId"] as? String, "owned-chat")
+            var result: [String: Any] = ["ok": true]
+            switch request.url?.path {
+            case "/api/commands/list":
+                result["value"] = [["name": "echo", "description": "Display text", "input": ["hint": "Text"]]]
+            case "/api/commands/execute":
+                XCTAssertEqual(arguments["line"] as? String, "/echo  keep spacing")
+                XCTAssertEqual((arguments["images"] as? [Any])?.count, 0)
+                if CatalogFixture.requests.count == 2 {
+                    result["value"] = ["commandId": "fixture-command", "result": ["kind": "success", "text": "keep spacing"]]
+                }
+            default:
+                XCTFail("A command must not enter the model prompt route")
+            }
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": result,
+            ]))
+        }
+        let list = try await api.chatCommands(sessionID: "owned-chat")
+        XCTAssertEqual(list.map(\.name), ["echo"])
+        let receipt = try await api.runChatCommand("/echo  keep spacing", sessionID: "owned-chat", photos: [])
+        XCTAssertEqual(receipt?.commandId, "fixture-command")
+        let removed = try await api.runChatCommand("/echo  keep spacing", sessionID: "owned-chat", photos: [])
+        XCTAssertNil(removed)
+        XCTAssertNil(HubChatCommand.leadingName(in: "Read /echo"))
+        XCTAssertNil(HubChatCommand.leadingName(in: "/echo.txt"))
+        XCTAssertEqual(HubChatCommand.leadingName(in: "/echo\r\narguments"), "echo")
+    }
+
     func testHomeReadsUseExistingAuthenticatedRoutes() async throws {
         let api = try client()
         CatalogFixture.reply = #"{"nodes":[{"id":"note","kind":"note"}],"edges":[]}"#

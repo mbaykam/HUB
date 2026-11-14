@@ -190,6 +190,40 @@ public struct HubChatMessage: Identifiable {
     public let photos: [Photo]
 }
 
+public struct HubChatCommand: Decodable, Identifiable {
+    public struct Input: Decodable {
+        public let hint: String
+        public let images: Bool?
+    }
+    public let name: String
+    public let description: String
+    public let input: Input?
+    public var id: String { name }
+
+    public static func leadingName(in text: String) -> String? {
+        guard let token = text.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" || $0 == "\r\n" }).first,
+              text.hasPrefix("/"), token.hasPrefix("/") else { return nil }
+        let name = String(token.dropFirst())
+        return name.range(of: #"^[a-z][a-z0-9_-]*\z"#, options: .regularExpression) == nil ? nil : name
+    }
+}
+
+public struct HubChatSkill: Decodable, Identifiable {
+    public let name: String
+    public let description: String
+    public var id: String { name }
+}
+
+public struct HubChatCommandReceipt: Decodable {
+    public struct Outcome: Decodable {
+        public enum Kind: String, Decodable { case success, error }
+        public let kind: Kind
+        public let text: String?
+    }
+    public let commandId: String
+    public let result: Outcome
+}
+
 public struct HubChatSnapshot {
     public let messages: [HubChatMessage]
     public let hasMore: Bool
@@ -701,6 +735,9 @@ struct HubChatStreamFrame: Decodable {
                 let error: ToolError?
                 let title: String?
                 let usage: Usage?
+                let args: String?
+                let kind: String?
+                let text: String?
             }
             let type: String
             let seq: Int
@@ -757,6 +794,12 @@ struct HubChatStreamFrame: Decodable {
                 case "request/context":
                     activityTitle = "Context updated"
                     detail = nil
+                case "command/run":
+                    activityTitle = "Command started"
+                    detail = (payload?.name).map { "/" + $0 + (payload?.args ?? "") }
+                case "command/done":
+                    activityTitle = payload?.kind == "error" ? "Command failed" : "Command finished"
+                    detail = payload?.text
                 case "turn/end":
                     activityTitle = failure == nil ? nil : "This turn failed"
                     detail = failure
@@ -766,9 +809,16 @@ struct HubChatStreamFrame: Decodable {
                 }
                 if let activityTitle {
                     activity = HubChatActivity(sequence: seq, title: activityTitle, detail: detail,
-                                               turn: payload?.turn, failed: failure != nil || payload?.error != nil)
+                                               turn: payload?.turn, failed: failure != nil || payload?.error != nil ||
+                                                (type == "command/done" && payload?.kind == "error"))
                 } else {
                     activity = nil
+                }
+                if type == "command/run" || type == "command/done" {
+                    let role = payload?.kind == "error" ? "command-error" : "command"
+                    message = HubChatMessage(id: String(seq), role: role,
+                                             text: detail ?? (activityTitle ?? ""), turn: nil, photos: [])
+                    return
                 }
                 guard type == "user/message" || type == "assistant/message",
                       let payload,
@@ -1628,16 +1678,51 @@ public final class HubConversationAPI {
         return text
     }
 
+    public func chatCommands(sessionID: String) async throws -> [HubChatCommand] {
+        guard HubVoiceAPI.validID(sessionID),
+              let value = try await rpcValue("commands/list", arguments: ["agentId": sessionID], maxBytes: 524_288) as? [Any] else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return try JSONDecoder().decode([HubChatCommand].self, from: JSONSerialization.data(withJSONObject: value))
+    }
+
+    public func chatSkills(sessionID: String) async throws -> [HubChatSkill] {
+        struct Catalog: Decodable { let skills: [HubChatSkill] }
+        guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
+        let value = try await rpc("skills/list", request: ["sessionId": sessionID], maxBytes: 524_288)
+        return try JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: value)).skills
+    }
+
+    public func runChatCommand(_ line: String, sessionID: String, photos: [HubChatPhoto]) async throws -> HubChatCommandReceipt? {
+        guard HubVoiceAPI.validID(sessionID), HubChatCommand.leadingName(in: line) != nil,
+              line.utf8.count <= 32_768, photos.count <= 8,
+              photos.allSatisfy(Self.validChatPhoto) else { throw HubChatSendError.invalidDraft }
+        let images = photos.map { ["mediaType": $0.mediaType, "name": $0.name, "data": $0.data.base64EncodedString()] }
+        do {
+            let value = try await rpcValue("commands/execute", arguments: ["agentId": sessionID, "line": line, "images": images],
+                                           maxBytes: 524_288)
+            if value == nil || value is NSNull { return nil }
+            guard let receipt = value as? [String: Any] else { throw HubAttachmentError.invalidResponse }
+            return try JSONDecoder().decode(HubChatCommandReceipt.self, from: JSONSerialization.data(withJSONObject: receipt))
+        } catch HubChatSendError.signInRequired {
+            throw HubChatSendError.signInRequired
+        } catch {
+            throw HubChatSendError.unknownDelivery(sessionID: sessionID)
+        }
+    }
+
+    private static func validChatPhoto(_ photo: HubChatPhoto) -> Bool {
+        ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(photo.mediaType) &&
+            !photo.data.isEmpty && photo.data.count <= 20 * 1_024 * 1_024 && photo.name.utf8.count <= 240
+    }
+
     public func sendChat(_ draft: String, sessionID: String, files: [String] = [], photos: [HubChatPhoto] = [],
                          delivery: HubChatPreferences.Delivery = .queue) async throws {
         guard HubVoiceAPI.validID(sessionID) else { throw HubChatSendError.rejected }
         let input = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard input.utf8.count <= 32_768, !input.isEmpty || !files.isEmpty || !photos.isEmpty,
               files.count + photos.count <= 8, files.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 262_144 }),
-              photos.allSatisfy({ photo in
-                  ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(photo.mediaType) &&
-                      !photo.data.isEmpty && photo.data.count <= 20 * 1_024 * 1_024 && photo.name.utf8.count <= 240
-              }) else { throw HubChatSendError.invalidDraft }
+              photos.allSatisfy(Self.validChatPhoto) else { throw HubChatSendError.invalidDraft }
         let text = ([input].filter { !$0.isEmpty } + files).joined(separator: "\n\n")
         var content = text.isEmpty ? [] : [["type": "text", "text": text]]
         content.append(contentsOf: photos.map {
@@ -2016,6 +2101,13 @@ public final class HubConversationAPI {
     }
 
     private func rpc(_ method: String, arguments: [String: Any], maxBytes: Int = 65_536) async throws -> [String: Any] {
+        guard let value = try await rpcValue(method, arguments: arguments, maxBytes: maxBytes) as? [String: Any] else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return value
+    }
+
+    private func rpcValue(_ method: String, arguments: [String: Any], maxBytes: Int = 65_536) async throws -> Any? {
         let url = server.origin.appendingPathComponent("api/" + method)
         let rpcID = UUID().uuidString.lowercased()
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
@@ -2050,8 +2142,7 @@ public final class HubConversationAPI {
             }
             throw HubAttachmentError.invalidResponse
         }
-        guard let value = result["value"] as? [String: Any] else { throw HubAttachmentError.invalidResponse }
-        return value
+        return result["value"]
     }
 
     /// Only a draft already bound to this server and text conversation may
