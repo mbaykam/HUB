@@ -959,6 +959,8 @@ struct HubKnowledgeGraphView: View {
 @MainActor
 struct HubKnowledgeActivityView: View {
     let api: HubConversationAPI
+    var openRecord: ((String) -> Void)? = nil
+    var openConversation: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var entries: [HubKnowledgeActivity.Entry] = []
     @State private var page: HubKnowledgeActivity?
@@ -994,28 +996,12 @@ struct HubKnowledgeActivityView: View {
             if acting { ProgressView() }
             if let actionMessage { Text(actionMessage).font(.footnote).foregroundStyle(.secondary) }
             if let page {
-                Text(page.enabled ? page.state.capitalized : "Disabled").foregroundStyle(.secondary)
+                activitySummary(page)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         if entries.isEmpty { Text(page.historyNotice).foregroundStyle(.secondary) }
                         ForEach(entries) { entry in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text((entry.outcome ?? entry.status).replacingOccurrences(of: "-", with: " ").capitalized).font(.headline)
-                                Text(Date(timeIntervalSince1970: entry.updatedAt / 1000).formatted()).font(.caption).foregroundStyle(.secondary)
-                                if let reason = entry.reason { Text(reason) }
-                                if let error = entry.error { Text(error.message).foregroundStyle(.red) }
-                                if let retryAt = entry.retryAt { Text("Retry: \(Date(timeIntervalSince1970: retryAt / 1000).formatted())") }
-                                ForEach(Array(entry.changes.enumerated()), id: \.offset) { change in
-                                    Text("\(change.element.action.capitalized) · \(change.element.title)")
-                                }
-                                ForEach(Array(entry.warnings.enumerated()), id: \.offset) { warning in
-                                    Text(warning.element).font(.footnote).foregroundStyle(.secondary)
-                                }
-                                if entry.status == "review" {
-                                    Button("Review proposed changes") { reviewEntry = entry }
-                                }
-                                Divider()
-                            }
+                            activityEntry(entry)
                         }
                         if let next = page.nextOffset {
                             Button("Load more") { Task { await load(next) } }.disabled(loading)
@@ -1037,6 +1023,108 @@ struct HubKnowledgeActivityView: View {
         .alert(item: $confirmation) { action in
             Alert(title: Text(action.rawValue), message: Text("Knowledge AI uses the configured model and budget."),
                   primaryButton: .default(Text("Continue")) { Task { await run(action) } }, secondaryButton: .cancel())
+        }
+    }
+
+    private func activitySummary(_ page: HubKnowledgeActivity) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(page.enabled ? stateLabel(page.state) : "Paused")
+            if let total = page.total { Text("\(total) saved jobs") }
+            Text("Last start: \(activityDate(page.lastStartedAt))")
+            Text("Last end: \(activityDate(page.lastFinishedAt))")
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+
+    private func activityEntry(_ entry: HubKnowledgeActivity.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(stateLabel(entry.status)).font(.headline)
+            Text([entry.outcome, entry.source?.channel, activityDate(entry.updatedAt)]
+                .compactMap { $0 }.joined(separator: " · "))
+                .font(.caption).foregroundStyle(.secondary)
+            if let reason = entry.reason { Text(reason) }
+            if let error = entry.error { failure(error) }
+            if let retryAt = entry.retryAt { Text("Last retry: \(activityDate(retryAt))").font(.footnote) }
+            ForEach(entry.changes.indices, id: \.self) { index in
+                changeRow(entry.changes[index])
+            }
+            if let source = entry.source { sourceRow(source) }
+            DisclosureGroup("Timing and attempts") {
+                Text("Started: \(activityDate(entry.startedAt))")
+                Text("Finished: \(activityDate(entry.finishedAt))")
+                if let count = entry.attempts { Text("\(count) model attempts") }
+                if let attempts = entry.previousAttempts {
+                    ForEach(attempts.indices, id: \.self) { index in
+                        attemptRow(attempts[index])
+                    }
+                }
+            }
+            .font(.footnote)
+            ForEach(entry.warnings.indices, id: \.self) { index in
+                Text(entry.warnings[index]).font(.footnote).foregroundStyle(.secondary)
+            }
+            if entry.status == "review" {
+                Button("Review proposed changes") { reviewEntry = entry }
+            }
+            Divider()
+        }
+    }
+
+    @ViewBuilder private func sourceRow(_ source: HubKnowledgeActivity.Entry.Source) -> some View {
+        if let id = source.sessionId, let openConversation {
+            Button("Open source conversation") { openConversation(id) }
+        } else if let id = source.recordId, let openRecord {
+            Button("Read source record") { openRecord(id) }
+        }
+    }
+
+    private func changeRow(_ change: HubKnowledgeActivity.Entry.Change) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(change.action.capitalized) · \(change.title)")
+            if let openRecord {
+                if change.kind == "note", let id = change.id {
+                    Button("Open note") { openRecord(id) }
+                } else if change.kind == "link", let id = change.targetId {
+                    Button("Open linked record") { openRecord(id) }
+                }
+            }
+        }
+        .font(.footnote)
+    }
+
+    private func attemptRow(_ attempt: HubKnowledgeActivity.Entry.Attempt) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Attempt \(attempt.attempt) · \(stateLabel(attempt.status))")
+            Text("\(activityDate(attempt.startedAt)) → \(activityDate(attempt.finishedAt))")
+            if let reason = attempt.reason { Text(reason) }
+            if let error = attempt.error { failure(error) }
+        }
+        .padding(.top, 4)
+    }
+
+    private func failure(_ error: HubKnowledgeActivity.Entry.Failure) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if error.phase != nil || error.code != nil {
+                Text([error.phase, error.code].compactMap { $0 }.joined(separator: " · ")).font(.caption)
+            }
+            Text(error.message)
+        }
+        .foregroundStyle(.red)
+    }
+
+    private func activityDate(_ value: Double?) -> String {
+        guard let value, value.isFinite, value > 0 else { return String(localized: "Not recorded") }
+        return Date(timeIntervalSince1970: value / 1000).formatted()
+    }
+
+    private func stateLabel(_ value: String) -> String {
+        switch value {
+        case "ready", "idle": return String(localized: "Idle")
+        case "review": return String(localized: "Awaiting review")
+        case "done": return String(localized: "Completed")
+        case "waiting-credit": return String(localized: "Waiting for credit or provider limit")
+        default: return value.replacingOccurrences(of: "-", with: " ").capitalized
         }
     }
 

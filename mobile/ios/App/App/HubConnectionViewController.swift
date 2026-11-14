@@ -248,6 +248,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         home.work = try? decoder.decode(HubHomeWork.self, from: Data(work.utf8))
         home.conversations = [HubConversationChoice(sessionId: "fixture-work", title: "Collect reading notes", updatedAt: 0)]
         home.connection = .connected
+        if ProcessInfo.processInfo.arguments.contains("--hub-native-read-fixture"),
+           let fixtureServer = try? HubServer(address: "https://hub-workspace-fixture.invalid") {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [HubWorkspaceFixtureProtocol.self]
+            conversationAPI = HubConversationAPI(server: fixtureServer, configuration: configuration) { [] }
+            connected = true
+        }
     }
     #endif
 
@@ -925,3 +932,83 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         } else { decisionHandler(trusted && frame.isMainFrame ? .prompt : .deny) }
     }
 }
+
+#if DEBUG && targetEnvironment(simulator)
+private final class HubWorkspaceFixtureProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        guard let url = request.url, url.host == "hub-workspace-fixture.invalid",
+              request.value(forHTTPHeaderField: "Cookie") == nil, let data = responseData(url),
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                                             headerFields: ["Content-Type": "application/json"]) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private func responseData(_ url: URL) -> Data? {
+        if url.path == "/api/settings/describe", request.httpMethod == "POST" {
+            return settingsDescription()
+        }
+        guard url.path == "/api/hub/memory", request.httpMethod == "GET",
+              request.value(forHTTPHeaderField: "x-hub-memory") == "1" else { return nil }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let view = query.first { $0.name == "view" }?.value
+        let id = query.first { $0.name == "id" }?.value
+        switch (view, id) {
+        case ("note", "note-project"):
+            return Data(#"{"id":"note-project","title":"Planning a coding project","kind":"note","content":"Sketch the first release before choosing the tools."}"#.utf8)
+        case ("activity", nil):
+            return Data(#"""
+            {"state":"ready","enabled":true,"total":1,"lastStartedAt":1794499999000,"lastFinishedAt":1794500000000,
+             "entries":[{"id":"fixture-pass","status":"review","updatedAt":1794500000000,"startedAt":1794499999000,
+                         "finishedAt":1794500000000,"attempts":1,"changes":[],"warnings":[],
+                         "source":{"channel":"pwa","recordId":"note-project"}}],"historyNotice":"No recent activity"}
+            """#.utf8)
+        case ("review", "fixture-pass"):
+            return Data(#"""
+            {"source":{"content":"Sketch the first release before choosing the tools."},"stale":false,
+             "reviewHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+             "plan":{"decision":"organize","reason":"Keep a sourced record","tags":["planning"],
+                     "memories":[{"title":"First release planning","category":"projects","evidence":"Sketch the first release"}]}}
+            """#.utf8)
+        default:
+            return nil
+        }
+    }
+
+    private func settingsDescription() -> Data? {
+        let body: Data
+        if let bytes = request.httpBody {
+            body = bytes
+        } else if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4_096)
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0, count < buffer.count else { return nil }
+            body = Data(buffer.prefix(count))
+        } else {
+            return nil
+        }
+        guard let envelope = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+              envelope["method"] as? String == "settings/describe", let rpcID = envelope["rpcId"] as? String else { return nil }
+        let namespaces: [[String: Any]] = [
+            ["ns": "ui-theme", "revision": 1, "value": ["fontSize": 16, "preference": "dark"]],
+            ["ns": "ui-conversation", "revision": 1, "value": ["busyEnter": "steer"]],
+            ["ns": "ui-chat", "revision": 1, "value": ["transcriptView": "compact"]],
+            ["ns": "locale", "revision": 1, "value": ["preference": "en"]],
+        ]
+        return try? JSONSerialization.data(withJSONObject: [
+            "type": "server-response", "rpcId": rpcID,
+            "result": ["ok": true, "value": ["writable": true, "namespaces": namespaces]],
+        ])
+    }
+}
+#endif

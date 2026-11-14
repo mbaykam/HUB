@@ -96,6 +96,7 @@ struct HubHomeView: View {
     @State private var knowledgeConnectionsOpen = false
     @State private var knowledgeRefreshError = false
     @State private var selectedNoteID: String?
+    @State private var activityDestination: ActivityDestination?
     @State private var selectedNote: HubKnowledgeNote?
     @State private var noteLoadFailed = false
     @State private var noteAttempt = 0
@@ -223,8 +224,16 @@ struct HubHomeView: View {
                 settingsOpen = false
             }
         }
-        .sheet(isPresented: $knowledgeActivityOpen) {
-            if let api = chatAPI() { HubKnowledgeActivityView(api: api) }
+        .sheet(isPresented: $knowledgeActivityOpen, onDismiss: openActivityDestination) {
+            if let api = chatAPI() {
+                HubKnowledgeActivityView(api: api, openRecord: { id in
+                    activityDestination = .record(id)
+                    knowledgeActivityOpen = false
+                }, openConversation: { id in
+                    activityDestination = .conversation(id)
+                    knowledgeActivityOpen = false
+                })
+            }
         }
         .sheet(isPresented: $voiceHistoryOpen) {
             if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
@@ -848,6 +857,21 @@ struct HubHomeView: View {
         dismissKeyboard {
             closePanel()
             knowledgeOpen = true
+        }
+    }
+
+    private enum ActivityDestination {
+        case record(String)
+        case conversation(String)
+    }
+
+    private func openActivityDestination() {
+        let destination = activityDestination
+        activityDestination = nil
+        switch destination {
+        case .record(let id): selectKnowledgeNode(id)
+        case .conversation(let id): openChat(id)
+        case nil: break
         }
     }
 

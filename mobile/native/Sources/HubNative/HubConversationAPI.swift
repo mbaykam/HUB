@@ -316,22 +316,50 @@ public struct HubKnowledgeArchiveWithdrawal: Decodable {
 public struct HubKnowledgeActivity: Decodable {
     public struct Entry: Decodable, Identifiable {
         public struct Change: Decodable {
+            public let kind: String?
             public let action: String
             public let title: String
+            public let id: String?
+            public let targetId: String?
         }
-        public struct Failure: Decodable { public let message: String }
+        public struct Failure: Decodable {
+            public let message: String
+            public let phase: String?
+            public let code: String?
+        }
+        public struct Attempt: Decodable {
+            public let attempt: Int
+            public let status: String
+            public let startedAt: Double?
+            public let finishedAt: Double?
+            public let reason: String?
+            public let error: Failure?
+        }
+        public struct Source: Decodable {
+            public let channel: String
+            public let recordId: String?
+            public let sessionId: String?
+        }
         public let id: String
         public let status: String
         public let outcome: String?
         public let updatedAt: Double
+        public let startedAt: Double?
+        public let finishedAt: Double?
         public let retryAt: Double?
+        public let attempts: Int?
+        public let previousAttempts: [Attempt]?
         public let reason: String?
         public let error: Failure?
         public let changes: [Change]
         public let warnings: [String]
+        public let source: Source?
     }
     public let state: String
     public let enabled: Bool
+    public let total: Int?
+    public let lastStartedAt: Double?
+    public let lastFinishedAt: Double?
     public let entries: [Entry]
     public let nextOffset: Int?
     public let historyNotice: String
