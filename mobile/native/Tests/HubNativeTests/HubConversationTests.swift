@@ -34,6 +34,50 @@ final class HubConversationTests: XCTestCase {
         CatalogFixture.responder = nil
     }
 
+    func testQueueOnlyDisplaysSelectedSessionAndNeverEditsAttachmentsAsText() async throws {
+        let baseline = Data(#"""
+        {"type":"item","value":{"type":"baseline","value":{"queues":{
+          "owned-chat":[
+            {"id":"text-1","placement":"queued","message":{"content":[{"type":"text","text":"Original"}]}},
+            {"id":"image-1","placement":"queued","message":{"content":[{"type":"image"}]}},
+            {"id":"context-1","placement":"context","message":{"content":[{"type":"text","text":"Hidden"}]}}
+          ],
+          "other-chat":[{"id":"private-1","placement":"queued","message":{"content":[{"type":"text","text":"Other chat"}]}}]
+        }}}}
+        """#.utf8)
+        let update = try XCTUnwrap(HubConversationAPI.chatQueueUpdate(baseline, sessionID: "owned-chat"))
+        let items = try XCTUnwrap(update.items)
+        XCTAssertEqual(items.map(\.id), ["text-1", "image-1"])
+        XCTAssertTrue(items[0].canEdit)
+        XCTAssertFalse(items[1].canEdit)
+        let unrelated = Data(#"{"type":"item","value":{"type":"queue","sessionId":"other-chat","items":[]}}"#.utf8)
+        XCTAssertNil(try HubConversationAPI.chatQueueUpdate(unrelated, sessionID: "owned-chat"))
+
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/updateQueue")
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let command = try XCTUnwrap(arguments["request"] as? [String: Any])
+            XCTAssertEqual(command["sessionId"] as? String, "owned-chat")
+            XCTAssertEqual(command["itemId"] as? String, "text-1")
+            let action = try XCTUnwrap(command["action"] as? [String: Any])
+            XCTAssertEqual(action["kind"] as? String, "edit")
+            XCTAssertEqual(action["content"] as? [[String: String]], [["type": "text", "text": "Revised"]])
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": ["accepted": true]],
+            ]))
+        }
+        try await api.updateChatQueue(sessionID: "owned-chat", item: items[0], action: .edit("Revised"))
+        do {
+            try await api.updateChatQueue(sessionID: "owned-chat", item: items[1], action: .edit("Would lose attachment"))
+            XCTFail("Editing a queued image as text must be refused locally")
+        } catch HubChatSendError.invalidDraft {}
+        XCTAssertEqual(CatalogFixture.requests.count, 1)
+    }
+
     func testSlashCommandUsesSessionCatalogAndCommandEndpointWithoutPrompting() async throws {
         let api = try client()
         CatalogFixture.responder = { request in

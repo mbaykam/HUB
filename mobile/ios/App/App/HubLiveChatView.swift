@@ -73,6 +73,11 @@ struct HubLiveChatView: View {
     @State private var branching = false
     @State private var commandsOpen = false
     @State private var focusAfterCommandPick = false
+    @State private var queuedMessages: [HubQueuedChatMessage]?
+    @State private var queueAvailable = true
+    @State private var queueEdit: HubQueuedChatMessage?
+    @State private var queueDraft = ""
+    @State private var queueBusy = false
     @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
 
     private struct LoadedVisual {
@@ -187,6 +192,32 @@ struct HubLiveChatView: View {
             }
             .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(item: $queueEdit) { item in
+            NavigationView {
+                Form {
+                    TextEditor(text: $queueDraft).frame(minHeight: 140)
+                        .accessibilityLabel("Queued message")
+                    if queuedMessages?.contains(item) != true {
+                        Text("This message has changed or is no longer waiting.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                }
+                .navigationTitle("Edit queued message")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { queueEdit = nil }.disabled(queueBusy) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { changeQueue(item, action: .edit(queueDraft)) }
+                            .disabled(queueBusy || queuedMessages?.contains(item) != true ||
+                                      queueDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                      queueDraft.utf8.count > 32_768)
+                    }
+                }
+            }
+            .navigationViewStyle(.stack)
+            .interactiveDismissDisabled(queueBusy)
         }
         .sheet(item: $researchMode) { mode in
             HubResearchView(sessionID: chat.sessionId, api: api, question: draft, showJobs: mode == .jobs,
@@ -612,6 +643,11 @@ struct HubLiveChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if let items = queuedMessages, !items.isEmpty {
+                queuedMessagesView(items)
+            } else if !queueAvailable && !connectionLost {
+                Button("Refresh message queue") { attempt += 1 }.font(.footnote)
+            }
             if !fileDrafts.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -711,6 +747,62 @@ struct HubLiveChatView: View {
         .padding(.vertical, 8)
     }
 
+    private func queuedMessagesView(_ items: [HubQueuedChatMessage]) -> some View {
+        DisclosureGroup("Queued messages · \(items.count)") {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(items) { item in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.text.isEmpty ? "Attachment" : item.text).lineLimit(2)
+                                if item.placement == .steering {
+                                    Text("Steering the current turn").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Menu {
+                                if item.canEdit {
+                                    Button("Edit") {
+                                        composerFocused = false
+                                        error = nil
+                                        queueDraft = item.text
+                                        queueEdit = item
+                                    }
+                                }
+                                if item.placement == .queued && snapshot?.running == true {
+                                    Button("Send to current turn") { changeQueue(item, action: .steer) }
+                                }
+                                Button("Remove from queue", role: .destructive) { changeQueue(item, action: .remove) }
+                            } label: {
+                                Image(systemName: "ellipsis").frame(width: 44, height: 40)
+                                    .accessibilityLabel("Queued message options")
+                            }
+                            .disabled(queueBusy || connectionLost)
+                        }
+                    }
+                }
+            }
+            .frame(height: CGFloat(min(items.count, 3)) * 44)
+        }
+        .font(.footnote)
+        .padding(.horizontal, 8)
+    }
+
+    private func changeQueue(_ item: HubQueuedChatMessage, action: HubChatQueueAction) {
+        guard !queueBusy, !connectionLost, queuedMessages?.contains(item) == true else { return }
+        queueBusy = true
+        error = nil
+        Task {
+            defer { queueBusy = false }
+            do {
+                try await api.updateChatQueue(sessionID: chat.sessionId, item: item, action: action)
+                queueEdit = nil
+            } catch {
+                self.error = "Could not confirm the queue change. Check whether the message is still waiting."
+            }
+        }
+    }
+
     private var canSend: Bool {
         canSubmit && snapshot?.running == false
     }
@@ -798,8 +890,14 @@ struct HubLiveChatView: View {
 
     private func follow() async {
         let conversation = chat.sessionId
+        queuedMessages = nil
+        queueAvailable = true
         do {
-            try await api.followChat(sessionID: conversation) { value in
+            try await api.followChat(sessionID: conversation, queue: { items in
+                guard !Task.isCancelled else { return }
+                queuedMessages = items
+                queueAvailable = items != nil
+            }) { value in
                 guard !Task.isCancelled else { return }
                 let completed = snapshot?.running == true && !value.running
                 if snapshot?.historyCursor != value.historyCursor {
@@ -820,6 +918,7 @@ struct HubLiveChatView: View {
             if !Task.isCancelled {
                 connectionLost = true
                 awaitingAfter = nil
+                queuedMessages = nil
             }
         }
     }

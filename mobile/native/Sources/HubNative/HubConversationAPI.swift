@@ -224,6 +224,33 @@ public struct HubChatCommandReceipt: Decodable {
     public let result: Outcome
 }
 
+public struct HubQueuedChatMessage: Decodable, Equatable, Identifiable {
+    public enum Placement: String, Decodable { case queued, steering, context }
+    private struct Message: Decodable, Equatable {
+        struct Block: Decodable, Equatable {
+            let type: String
+            let text: String?
+        }
+        let content: [Block]
+    }
+    public let id: String
+    public let placement: Placement
+    private let message: Message
+
+    public var text: String {
+        message.content.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n")
+    }
+    public var canEdit: Bool {
+        !message.content.isEmpty && message.content.allSatisfy { $0.type == "text" && $0.text != nil }
+    }
+}
+
+public enum HubChatQueueAction {
+    case edit(String)
+    case remove
+    case steer
+}
+
 public struct HubChatSnapshot {
     public let messages: [HubChatMessage]
     public let hasMore: Bool
@@ -1754,6 +1781,25 @@ public final class HubConversationAPI {
         guard receipt["accepted"] as? Bool == true else { throw HubChatSendError.rejected }
     }
 
+    public func updateChatQueue(sessionID: String, item: HubQueuedChatMessage, action: HubChatQueueAction) async throws {
+        guard HubVoiceAPI.validID(sessionID), !item.id.isEmpty, item.id.utf8.count <= 512,
+              item.placement != .context else { throw HubChatSendError.invalidDraft }
+        let operation: [String: Any]
+        switch action {
+        case .edit(let text):
+            guard item.canEdit, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  text.utf8.count <= 32_768 else { throw HubChatSendError.invalidDraft }
+            operation = ["kind": "edit", "content": [["type": "text", "text": text]]]
+        case .remove:
+            operation = ["kind": "remove"]
+        case .steer:
+            guard item.placement == .queued else { throw HubChatSendError.invalidDraft }
+            operation = ["kind": "steer"]
+        }
+        let receipt = try await rpc("session/updateQueue", request: ["sessionId": sessionID, "itemId": item.id, "action": operation])
+        guard receipt["accepted"] as? Bool == true else { throw HubAttachmentError.invalidResponse }
+    }
+
     public func chatScreenshots(sessionID: String) async throws -> [HubChatScreenshot] {
         try await chatArtifacts(sessionID: sessionID).screenshots
     }
@@ -2032,11 +2078,13 @@ public final class HubConversationAPI {
         return String(decoding: try JSONSerialization.data(withJSONObject: envelope), as: UTF8.self)
     }
 
-    public func followChat(sessionID: String, update: @MainActor (HubChatSnapshot) async -> Void) async throws {
+    public func followChat(sessionID: String, queue: (@MainActor ([HubQueuedChatMessage]?) -> Void)? = nil,
+                           update: @MainActor (HubChatSnapshot) async -> Void) async throws {
         guard HubVoiceAPI.validID(sessionID) else { throw HubChatSendError.rejected }
         let (socket, streamSession) = try await remoteSocket()
         defer { streamSession.invalidateAndCancel() }
         let streamID = UUID().uuidString.lowercased()
+        let controlID = UUID().uuidString.lowercased()
         let message = try Self.remoteOpen(streamID: streamID, endpoint: "session/follow", arguments: [
             "request": ["address": ["kind": "session", "sessionId": sessionID], "maxMessages": 40],
         ])
@@ -2049,11 +2097,26 @@ public final class HubConversationAPI {
             try Task.checkCancellation()
             socket.resume()
             try await socket.send(.string(message))
+            if queue != nil {
+                let control = try Self.remoteOpen(streamID: controlID, endpoint: "session/control", arguments: [:])
+                try await socket.send(.string(control))
+            }
             var timeline = HubChatTimeline()
             var opened = false
+            struct Envelope: Decodable { let streamId: String? }
+            let decoder = JSONDecoder()
             while !Task.isCancelled {
                 guard case .string(let text) = try await socket.receive() else { throw HubAttachmentError.invalidResponse }
-                let frame = try JSONDecoder().decode(HubChatStreamFrame.self, from: Data(text.utf8))
+                let data = Data(text.utf8)
+                if queue != nil, try decoder.decode(Envelope.self, from: data).streamId == controlID {
+                    do {
+                        if let change = try Self.chatQueueUpdate(data, sessionID: sessionID) { await queue?(change.items) }
+                    } catch {
+                        await queue?(nil)
+                    }
+                    continue
+                }
+                let frame = try decoder.decode(HubChatStreamFrame.self, from: data)
                 guard frame.streamId == streamID else { continue }
                 if frame.type == "error" || frame.type == "end" { throw HubAttachmentError.unavailable }
                 guard frame.type == "item", let value = frame.value else { continue }
@@ -2070,6 +2133,42 @@ public final class HubConversationAPI {
             }
             throw CancellationError()
         }, onCancel: { socket.cancel(with: .goingAway, reason: nil) })
+    }
+
+    struct ChatQueueUpdate {
+        let items: [HubQueuedChatMessage]?
+    }
+
+    static func chatQueueUpdate(_ data: Data, sessionID: String) throws -> ChatQueueUpdate? {
+        guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw HubAttachmentError.invalidResponse
+        }
+        if let type = envelope["type"] as? String, type == "error" || type == "end" {
+            return ChatQueueUpdate(items: nil)
+        }
+        guard let frame = envelope["value"] as? [String: Any] else { return nil }
+        let records: [Any]
+        switch frame["type"] as? String {
+        case "baseline":
+            guard let value = frame["value"] as? [String: Any], let queues = value["queues"] as? [String: Any] else {
+                throw HubAttachmentError.invalidResponse
+            }
+            if let entry = queues[sessionID] {
+                guard let items = entry as? [Any] else { throw HubAttachmentError.invalidResponse }
+                records = items
+            } else {
+                records = []
+            }
+        case "queue":
+            guard frame["sessionId"] as? String == sessionID else { return nil }
+            guard let items = frame["items"] as? [Any] else { throw HubAttachmentError.invalidResponse }
+            records = items
+        default: return nil
+        }
+        let items = try JSONDecoder().decode([HubQueuedChatMessage].self, from: JSONSerialization.data(withJSONObject: records))
+        let visible = items.filter { $0.placement != .context }
+        guard Set(visible.map(\.id)).count == visible.count else { throw HubAttachmentError.invalidResponse }
+        return ChatQueueUpdate(items: visible)
     }
 
     public func chatHistory(sessionID: String, through cursor: Int, before sequence: Int) async throws -> HubChatHistoryPage {
