@@ -5,6 +5,7 @@ import HubNative
 struct HubKnowledgeDomainsView: View {
     let api: HubConversationAPI
     let changed: () async -> Void
+    let openNote: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var registry: HubKnowledgeDomains?
     @State private var draft: Draft?
@@ -21,6 +22,8 @@ struct HubKnowledgeDomainsView: View {
     @State private var confirmation: Confirmation?
     @State private var domainLimit: Int?
     @State private var organizingRecords = false
+    @State private var suggestedGroups = false
+    @State private var suggestedLabel: String?
 
     private enum Confirmation: Identifiable {
         case merge(String, String, String)
@@ -129,6 +132,20 @@ struct HubKnowledgeDomainsView: View {
         .sheet(isPresented: $organizingRecords) {
             if let registry { HubKnowledgeOrganizeView(api: api, records: registry.nodes) }
         }
+        .sheet(isPresented: $suggestedGroups, onDismiss: {
+            if let suggestedLabel {
+                draft = Draft(title: suggestedLabel)
+                self.suggestedLabel = nil
+            }
+        }) {
+            HubKnowledgeSuggestedGroupsView(api: api, openNote: {
+                suggestedGroups = false
+                openNote($0)
+            }, chooseLabel: {
+                suggestedLabel = $0
+                suggestedGroups = false
+            })
+        }
         .task(id: attempt) { await load() }
     }
 
@@ -141,6 +158,7 @@ struct HubKnowledgeDomainsView: View {
             Button { draft = Draft() } label: { Label("New domain", systemImage: "plus") }
                 .disabled(stale)
             Button("Organize selected records") { organizingRecords = true }.disabled(stale || registry.nodes.isEmpty)
+            Button("Suggested groups") { suggestedGroups = true }.disabled(stale)
             if available.isEmpty { Text("No domains yet").foregroundStyle(.secondary) }
             ForEach(available) { domain in
                 let notes = registry.memberships.filter { $0.domainId == domain.id }.count
@@ -420,6 +438,119 @@ struct HubKnowledgeDomainsView: View {
             stale = true
             notice = "Could not confirm the domain change. Reload to check what HUB saved."
         }
+    }
+}
+
+@MainActor
+private struct HubKnowledgeSuggestedGroupsView: View {
+    let api: HubConversationAPI
+    let openNote: (String) -> Void
+    let chooseLabel: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var page: HubKnowledgeDomains.SuggestedGroups?
+    @State private var groups: [HubKnowledgeDomains.SuggestedGroups.Group] = []
+    @State private var selected: HubKnowledgeDomains.SuggestedGroups.Group?
+    @State private var sources: [HubKnowledgeDomains.Note] = []
+    @State private var nextSourceOffset: Int?
+    @State private var busy = false
+    @State private var failure: String?
+
+    var body: some View {
+        NavigationView {
+            List {
+                if let failure { Text(failure).foregroundStyle(.secondary) }
+                if busy { ProgressView() }
+                if let selected {
+                    Section(selected.label) {
+                        Button("Use this label for a domain") { chooseLabel(selected.label) }
+                        ForEach(sources) { source in Button(source.title) { openNote(source.id) } }
+                        if let nextSourceOffset {
+                            Button("More sources") { Task { await loadSources(selected.id, offset: nextSourceOffset) } }
+                        }
+                        if failure != nil {
+                            Button("Reload suggestions") { returnToGroups(); Task { await loadGroups(0) } }
+                        }
+                    }
+                } else {
+                    Section {
+                        if let page {
+                            Text("\(page.total) suggestions · \(page.coverage.consideredRecords) of \(page.coverage.totalRecords) sources considered")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            if !page.coverage.complete { Text("Some sources were outside the search coverage.").font(.footnote) }
+                            if groups.isEmpty { Text("No linked groups yet.").foregroundStyle(.secondary) }
+                        }
+                        ForEach(groups) { group in
+                            Button {
+                                selected = group
+                                Task { await loadSources(group.id, offset: 0) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(group.label)
+                                    Text("\(group.count) related records").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        if failure != nil {
+                            Button("Reload suggestions") { Task { await loadGroups(0) } }
+                        } else if let offset = page?.nextOffset {
+                            Button("More groups") { Task { await loadGroups(offset) } }
+                        }
+                    }
+                }
+            }
+            .disabled(busy)
+            .navigationTitle("Suggested groups")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(selected == nil ? "Done" : "Back") {
+                        if selected == nil { dismiss() } else { returnToGroups() }
+                    }
+                    .disabled(busy)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .task { await loadGroups(0) }
+    }
+
+    private func returnToGroups() {
+        selected = nil
+        sources = []
+        nextSourceOffset = nil
+        failure = nil
+    }
+
+    private func loadGroups(_ offset: Int) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await api.knowledgeSuggestedGroups(offset: offset)
+            guard !Task.isCancelled else { return }
+            if offset > 0, result.inputHash != page?.inputHash {
+                failure = "The source graph changed. Reload suggestions."
+                return
+            }
+            if offset == 0 { groups = [] }
+            var seen = Set(groups.map(\.id))
+            groups += result.groups.filter { seen.insert($0.id).inserted }
+            page = result
+            failure = nil
+        } catch { if !Task.isCancelled { failure = "Could not load suggested groups." } }
+    }
+
+    private func loadSources(_ id: String, offset: Int) async {
+        guard !busy, let version = page?.inputHash else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await api.knowledgeSuggestedSources(id: id, version: version, offset: offset)
+            guard !Task.isCancelled, selected?.id == id else { return }
+            var seen = Set(sources.map(\.id))
+            sources += result.nodes.filter { seen.insert($0.id).inserted }
+            nextSourceOffset = result.nextOffset
+        } catch { if !Task.isCancelled { failure = "Could not load group sources. The source graph may have changed." } }
     }
 }
 

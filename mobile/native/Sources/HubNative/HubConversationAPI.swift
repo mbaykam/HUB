@@ -148,6 +148,30 @@ public struct HubKnowledgeDomains: Decodable {
         public let queued: Int
         public let automatic: Bool
     }
+    public struct SuggestedGroups: Decodable {
+        public struct Coverage: Decodable {
+            public let complete: Bool
+            public let consideredRecords: Int
+            public let totalRecords: Int
+        }
+        public struct Group: Decodable, Identifiable {
+            public let id: String
+            public let label: String
+            public let count: Int
+        }
+        public let inputHash: String
+        public let coverage: Coverage
+        public let total: Int
+        public let groups: [Group]
+        public let nextOffset: Int?
+    }
+    public struct SuggestedSources: Decodable {
+        public let id: String
+        public let total: Int
+        public let nodes: [Note]
+        public let nextOffset: Int?
+        public let inputHash: String
+    }
     public let revision: Int
     public let maxActiveDomains: Int
     public let domains: [Domain]
@@ -2197,6 +2221,24 @@ public final class HubConversationAPI {
             throw HubAttachmentError.invalidResponse
         }
         return excerpt
+    }
+
+    public func knowledgeSuggestedGroups(offset: Int = 0) async throws -> HubKnowledgeDomains.SuggestedGroups {
+        guard offset >= 0 else { throw HubAttachmentError.invalidResponse }
+        let page: HubKnowledgeDomains.SuggestedGroups = try await readKnowledge("communities", arguments: ["offset": String(offset)])
+        guard Self.isScreenshotID(page.inputHash), page.nextOffset.map({ $0 > offset }) ?? true else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return page
+    }
+
+    public func knowledgeSuggestedSources(id: String, version: String, offset: Int = 0) async throws -> HubKnowledgeDomains.SuggestedSources {
+        guard !id.isEmpty, Self.isScreenshotID(version), offset >= 0 else { throw HubAttachmentError.invalidResponse }
+        let page: HubKnowledgeDomains.SuggestedSources = try await readKnowledge("community", arguments: ["id": id, "version": version, "offset": String(offset)])
+        guard page.id == id, page.inputHash == version, page.nextOffset.map({ $0 > offset }) ?? true else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return page
     }
 
     public func queueKnowledgeOrganization(notes: Set<String>, excerpts: [HubKnowledgeDomains.SourceExcerpt]) async throws -> HubKnowledgeDomains.OrganizationReceipt {

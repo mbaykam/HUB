@@ -943,7 +943,10 @@ struct HubHomeView: View {
         .interactiveDismissDisabled(noteSaving || noteEditing)
         .sheet(isPresented: $knowledgeDomainsOpen) {
             if let api = chatAPI() {
-                HubKnowledgeDomainsView(api: api, changed: refreshKnowledgeGraph)
+                HubKnowledgeDomainsView(api: api, changed: refreshKnowledgeGraph, openNote: { id in
+                    knowledgeDomainsOpen = false
+                    selectKnowledgeNode(id)
+                })
             }
         }
         .sheet(isPresented: $knowledgeBackupsOpen) {
