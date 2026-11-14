@@ -49,6 +49,31 @@ final class HubVoiceAPITests: XCTestCase {
              HTTPCookie(properties: [.name: "foreign", .value: "do-not-send", .domain: "elsewhere.test", .path: "/"])!]
         }
     }
+    func testPhotoShareKeepsItsOwnerInstructionAndRetryReceipt() async throws {
+        let api = try client()
+        defer { api.invalidate() }
+        let uploadID = UUID()
+        let requestID = UUID()
+        let question = "Fotoğraftaki etiketi okur musun?"
+        VoiceFixture.respond = { request, _ in
+            XCTAssertEqual(request.url?.path, "/api/hub/voice/share")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-voice-share"), "1")
+            return (200, "application/json", #"{"accepted":true}"#)
+        }
+        for _ in 0..<2 {
+            try await api.share(callId: "owned-call", uploadID: uploadID, requestID: requestID, instruction: question)
+        }
+        XCTAssertEqual(VoiceFixture.bodies.count, 2)
+        for body in VoiceFixture.bodies {
+            let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(decoded["callId"] as? String, "owned-call")
+            XCTAssertEqual(decoded["requestId"] as? String, requestID.uuidString.lowercased())
+            XCTAssertEqual(decoded["uploads"] as? [String], [uploadID.uuidString.lowercased()])
+            XCTAssertEqual(decoded["instruction"] as? String, question)
+        }
+    }
+
     func testVoiceCanvasPinsTheActiveCallAndPresentation() async throws {
         let api = try client(); defer { api.invalidate() }
         let id = try XCTUnwrap(UUID(uuidString: "12345678-1234-1234-1234-123456789abc"))

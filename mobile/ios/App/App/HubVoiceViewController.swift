@@ -1,5 +1,6 @@
 import UIKit
 import SwiftUI
+import AVFoundation
 import HubNative
 
 final class HubVoiceViewController: UIViewController {
@@ -29,6 +30,7 @@ final class HubVoiceViewController: UIViewController {
             UIAction(title: "Open conversation", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.openConversation() },
             UIAction(title: "Canvas", image: UIImage(systemName: "rectangle.on.rectangle")) { [weak self] _ in self?.openCanvas() },
             UIAction(title: "Share a file", image: UIImage(systemName: "paperclip")) { [weak self] _ in self?.shareFile() },
+            UIAction(title: "Camera", image: UIImage(systemName: "camera")) { [weak self] _ in self?.openCamera() },
             UIAction(title: "Reconnect audio", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.voice.reconnect() }
             ,UIAction(title: "Interrupt reply", image: UIImage(systemName: "hand.raised")) { [weak self] _ in self?.voice.interrupt() }
         ]))
@@ -160,6 +162,177 @@ final class HubVoiceViewController: UIViewController {
             alert.addAction(UIAlertAction(title: "OK", style: .default)); present(alert, animated: true); return
         }
         present(UINavigationController(rootViewController: screen), animated: true)
+    }
+
+    private func openCamera() {
+        guard presentedViewController == nil else { return }
+        guard let context = voice.attachmentContext(), context.stillOwned() else {
+            let alert = UIAlertController(title: "Camera unavailable", message: "Connect to a voice conversation first.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        present(UIHostingController(rootView: HubVoicePhotoView(context: context)), animated: true)
+    }
+}
+
+@MainActor
+private struct HubVoicePhotoView: View {
+    let context: HubVoiceAttachmentContext
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingCamera = false
+    @State private var askingPermission = false
+    @State private var photo: Data?
+    @State private var instruction = ""
+    @State private var receiptID = UUID()
+    @State private var attempted = false
+    @State private var uploaded = false
+    @State private var sending = false
+    @State private var sent = false
+    @State private var notice = "Take a photo, review it, and send it to the current voice conversation."
+
+    var body: some View {
+        NavigationView {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let photo, let image = UIImage(data: photo) {
+                        Image(uiImage: image).resizable().scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: 340)
+                            .accessibilityLabel("Photo preview")
+                        if !sent {
+                            TextField("What should HUB look at?", text: $instruction)
+                                .textFieldStyle(.roundedBorder).disabled(attempted)
+                            Button(attempted ? "Retry photo" : "Send to HUB") { send(photo) }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(sending || instruction.utf16.count > 4_000)
+                        }
+                    }
+                    Button(photo == nil ? "Take photo" : sent ? "Take another" : "Retake") {
+                        Task { await openCamera() }
+                    }
+                    .disabled(askingPermission || sending)
+                    Text(notice).font(.footnote).foregroundStyle(.secondary)
+                    if instruction.utf16.count > 4_000 {
+                        Text("Use 4,000 characters or fewer.").font(.footnote)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Camera")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(sending) }
+            }
+            .fullScreenCover(isPresented: $showingCamera) {
+                HubStillCamera { image in
+                    showingCamera = false
+                    if let image { prepare(image) }
+                }
+                .ignoresSafeArea()
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(sending)
+    }
+
+    private func openCamera() async {
+        guard !askingPermission, context.stillOwned() else { notice = "The voice conversation has ended."; return }
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            notice = "The iPhone camera is unavailable."
+            return
+        }
+        askingPermission = true
+        defer { askingPermission = false }
+        let granted = await AVCaptureDevice.requestAccess(for: .video)
+        guard granted else { notice = "Allow camera access in iPhone Settings to take a photo."; return }
+        guard context.stillOwned() else { notice = "The voice conversation has ended."; return }
+        showingCamera = true
+    }
+
+    private func prepare(_ image: UIImage) {
+        let longestSide = max(image.size.width, image.size.height)
+        guard longestSide.isFinite, image.size.width > 0, image.size.height > 0 else {
+            notice = "The photo could not be prepared. Try taking it again."
+            return
+        }
+        let scale = min(1, 1920 / longestSide)
+        let size = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: 0.92) { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        photo = rendered
+        if sent { instruction = "" }
+        receiptID = UUID()
+        attempted = false
+        uploaded = false
+        sent = false
+        notice = "Review the photo before you send it."
+    }
+
+    private func send(_ jpeg: Data) {
+        guard !sending, !sent, instruction.utf16.count <= 4_000 else { return }
+        guard context.stillOwned() else { notice = "The voice conversation has ended."; return }
+        let id = receiptID
+        let question = instruction
+        attempted = true
+        sending = true
+        Task {
+            defer { sending = false }
+            do {
+                if !uploaded {
+                    notice = "Uploading photo…"
+                    try await context.uploadAPI.uploadVoicePhoto(jpeg, sessionID: context.sessionID, callID: context.callID, uploadID: id)
+                    uploaded = true
+                }
+                guard context.stillOwned() else { throw HubAttachmentError.callEnded }
+                notice = "Sharing with the voice assistant…"
+                try await context.voiceAPI.share(callId: context.callID, uploadID: id, requestID: id, instruction: question)
+                sent = true
+                notice = "Photo shared. You can keep talking while HUB looks at it."
+            } catch HubAttachmentError.callEnded {
+                notice = "The voice conversation ended before sharing was confirmed."
+            } catch HubVoiceAPIError.callUnavailable {
+                notice = "The voice conversation ended before sharing was confirmed."
+            } catch {
+                notice = "Sharing could not be confirmed. Retry to use the same request."
+            }
+        }
+    }
+}
+
+@MainActor
+private struct HubStillCamera: UIViewControllerRepresentable {
+    let finish: (UIImage?) -> Void
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            return UIHostingController(rootView: VStack(spacing: 16) {
+                Text("The iPhone camera is unavailable.")
+                Button("Close") { finish(nil) }
+            }.padding())
+        }
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(finish: finish) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let finish: (UIImage?) -> Void
+        init(finish: @escaping (UIImage?) -> Void) { self.finish = finish }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { finish(nil) }
+        func imagePickerController(_ picker: UIImagePickerController,
+                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            finish(info[.originalImage] as? UIImage)
+        }
     }
 }
 

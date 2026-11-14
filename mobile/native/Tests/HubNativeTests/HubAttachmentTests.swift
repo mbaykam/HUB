@@ -120,6 +120,27 @@ final class HubAttachmentTests: XCTestCase {
         let handle = try FileHandle(forWritingTo: large); try handle.truncate(atOffset: UInt64(HubAttachmentStore.maximumBytes + 1)); try handle.close()
         do { _ = try await store.stage(source: large, server: server, sessionID: "chat", callID: "call"); XCTFail("Oversize file") } catch {}
     }
+    func testCameraUploadRequiresImageReceiptInTheOwnedSession() async throws {
+        let server = try HubServer(address: "https://hub.example.com")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AttachmentFixture.self]
+        let uploader = HubAttachmentAPI(server: server, configuration: config) { [] }
+        let id = UUID()
+        let jpeg = Data([0xff, 0xd8, 0xff, 0xd9])
+        AttachmentFixture.requests = []
+        AttachmentFixture.code = 200
+        AttachmentFixture.reply = "{\"id\":\"\(id.uuidString)\",\"name\":\"Camera.jpg\",\"bytes\":4,\"image\":true}"
+        try await uploader.uploadVoicePhoto(jpeg, sessionID: "chat", callID: "call", uploadID: id)
+        let request = try XCTUnwrap(AttachmentFixture.requests.first)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-session"), "chat")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-upload-id"), id.uuidString.lowercased())
+        AttachmentFixture.reply = AttachmentFixture.reply.replacingOccurrences(of: "true", with: "false")
+        do {
+            try await uploader.uploadVoicePhoto(jpeg, sessionID: "chat", callID: "call", uploadID: id)
+            XCTFail("A file without a visual receipt must not be shared as a photo")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
     func testNativeUploadAndLostVoiceReceiptRetryKeepStableIdentifiers() async throws {
         let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
         let source = root.appendingPathComponent("Türkçe file.txt"), data = Data("fixture".utf8); try data.write(to: source)

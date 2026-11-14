@@ -6,7 +6,7 @@ public final class HubAttachmentAPI {
     private let server: HubServer
     private let cookies: () async -> [HTTPCookie]
     private let session: URLSession
-    private struct Receipt: Decodable { let id: UUID; let name: String; let bytes: Int; let text: String? }
+    private struct Receipt: Decodable { let id: UUID; let name: String; let bytes: Int; let text: String?; let image: Bool? }
     public init(server: HubServer, configuration: URLSessionConfiguration = .ephemeral, cookies: @escaping () async -> [HTTPCookie]) {
         self.server = server; self.cookies = cookies
         let config = configuration.copy() as! URLSessionConfiguration
@@ -17,6 +17,14 @@ public final class HubAttachmentAPI {
     deinit { session.invalidateAndCancel() }
     public func upload(_ draft: HubAttachmentDraft, bytes: Data) async throws {
         _ = try await receipt(draft, bytes: bytes)
+    }
+
+    public func uploadVoicePhoto(_ jpeg: Data, sessionID: String, callID: String, uploadID: UUID) async throws {
+        guard HubVoiceAPI.validID(callID), jpeg.starts(with: [0xff, 0xd8, 0xff]) else { throw HubAttachmentError.invalidFile }
+        let draft = HubAttachmentDraft(id: uploadID, requestID: uploadID, origin: server.origin.absoluteString,
+            sessionID: sessionID, callID: callID, name: "Camera.jpg", bytes: jpeg.count, sha256: HubAttachmentStore.digest(jpeg))
+        let uploaded = try await receipt(draft, bytes: jpeg)
+        guard uploaded.image == true else { throw HubAttachmentError.invalidResponse }
     }
 
     public func prepareChatFile(_ draft: HubAttachmentDraft, bytes: Data) async throws -> String {

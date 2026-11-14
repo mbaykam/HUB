@@ -184,9 +184,10 @@ public final class HubVoiceAPI {
     }
 
     public func close(callId: String) async throws { _ = try await request("close", method: "POST", body: ["callId": callId]) }
-    public func share(callId: String, uploadID: UUID, requestID: UUID) async throws {
-        guard Self.validID(callId) else { throw HubVoiceAPIError.invalidResponse }
-        let data = try await request("share", method: "POST", body: ["callId": callId, "requestId": requestID.uuidString.lowercased(), "uploads": [uploadID.uuidString.lowercased()], "instruction": "The user explicitly shared this file with the current conversation. Inspect it if supported; say clearly if its contents cannot be read."])
+    public func share(callId: String, uploadID: UUID, requestID: UUID,
+                      instruction: String = "The user explicitly shared this file with the current conversation. Inspect it if supported; say clearly if its contents cannot be read.") async throws {
+        guard Self.validID(callId), instruction.utf16.count <= 4000 else { throw HubVoiceAPIError.invalidResponse }
+        let data = try await request("share", method: "POST", body: ["callId": callId, "requestId": requestID.uuidString.lowercased(), "uploads": [uploadID.uuidString.lowercased()], "instruction": instruction])
         struct Acceptance: Decodable { let accepted: Bool }
         guard try JSONDecoder().decode(Acceptance.self, from: data).accepted else { throw HubVoiceAPIError.invalidResponse }
     }
