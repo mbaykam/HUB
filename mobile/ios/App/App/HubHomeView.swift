@@ -112,7 +112,7 @@ struct HubHomeView: View {
     private let card = Color(red: 0.085, green: 0.105, blue: 0.165)
     private let accent = Color(red: 0.75, green: 0.80, blue: 1.0)
 
-    private enum PlannerTab: String {
+    private enum PlannerTab: String, CaseIterable {
         case agenda = "Agenda"
         case todos = "To-dos"
     }
@@ -302,9 +302,7 @@ struct HubHomeView: View {
                     section("Knowledge", actionLabel: "Explore knowledge", open: showKnowledge) {
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
-                            Text("\(notes.count) Brain notes  ·  \(value.domains?.filter { $0.status == "active" && $0.parentId == nil }.count ?? 0) Domains  ·  \(value.edges.count) Connections  ·  \(value.nodes.count - notes.count) Chat archive")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                            knowledgeSummary(value, notes: notes.count)
                             HubKnowledgeGraphView(graph: value, height: 230, scope: .notes, overview: true, select: selectKnowledgeNode)
                         }
 
@@ -339,6 +337,33 @@ struct HubHomeView: View {
             }
             composer
         }
+    }
+
+    private func knowledgeSummary(_ graph: HubHomeKnowledge, notes: Int) -> some View {
+        let domains = graph.domains?.filter { $0.status == "active" && $0.parentId == nil }.count ?? 0
+        let stats = [(notes, "Brain notes"), (domains, "Domains"), (graph.edges.count, "Connections"),
+                     (graph.nodes.count - notes, "Chat archive")]
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 7) {
+                ForEach(stats.indices, id: \.self) { index in
+                    knowledgeStat(stats[index].0, label: stats[index].1).fixedSize()
+                }
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach([0, 2], id: \.self) { index in
+                    HStack(spacing: 12) {
+                        knowledgeStat(stats[index].0, label: stats[index].1)
+                        knowledgeStat(stats[index + 1].0, label: stats[index + 1].1)
+                    }
+                }
+            }
+        }
+        .font(.caption2)
+    }
+
+    private func knowledgeStat(_ value: Int, label: String) -> some View {
+        (Text(value, format: .number).fontWeight(.semibold) + Text(" \(label)").foregroundColor(Color(red: 0.66, green: 0.70, blue: 0.80)))
+            .accessibilityElement(children: .combine)
     }
 
     private func workSummary(_ work: HubHomeWork) -> some View {
@@ -1089,11 +1114,28 @@ struct HubHomeView: View {
 
     private func personalPlanner(_ planner: HubHomePlanner) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("Planner view", selection: $plannerTab) {
-                Text("Agenda").tag(PlannerTab.agenda)
-                Text("To-dos").tag(PlannerTab.todos)
+            HStack(spacing: 18) {
+                ForEach(PlannerTab.allCases, id: \.self) { tab in
+                    Button {
+                        hideKeyboard()
+                        plannerTab = tab
+                    } label: {
+                        Text(tab.rawValue)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(plannerTab == tab ? accent : Color(red: 0.66, green: 0.70, blue: 0.80))
+                            .frame(minHeight: 44)
+                            .padding(.horizontal, 2)
+                            .overlay(alignment: .bottom) {
+                                if plannerTab == tab { Capsule().fill(accent).frame(height: 2) }
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(plannerTab == tab ? .isSelected : [])
+                }
+                Spacer(minLength: 0)
             }
-            .pickerStyle(.segmented)
+            .background(alignment: .bottom) { Rectangle().fill(.white.opacity(0.12)).frame(height: 1) }
             if plannerTab == .agenda {
                 HStack {
                     Button {
@@ -1174,12 +1216,26 @@ struct HubHomeView: View {
 
     private func todoList(_ planner: HubHomePlanner) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Your list", selection: $todoHorizon) {
-                Text("Soon").tag(HubHomePlanner.Horizon.near)
-                Text("Later").tag(HubHomePlanner.Horizon.later)
-            }
-            .pickerStyle(.segmented)
+            HStack {
+                Text("Your list").font(.footnote).foregroundStyle(Color(red: 0.66, green: 0.70, blue: 0.80))
+                Spacer()
+                Menu {
+                    Picker("Your list", selection: $todoHorizon) {
+                        Text("Soon").tag(HubHomePlanner.Horizon.near)
+                        Text("Later").tag(HubHomePlanner.Horizon.later)
+                    }
+                } label: {
+                    Label(todoHorizon == .near ? "Soon" : "Later", systemImage: "chevron.up.chevron.down")
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                        .frame(minHeight: 44)
+                }
                 .disabled(model.plannerSaving)
+                .accessibilityLabel("To-do list")
+                .accessibilityValue(todoHorizon == .near ? "Soon" : "Later")
+            }
             .onChange(of: todoHorizon) { _ in todoDraftID = UUID() }
             quickTodo
             let items = planner.items.filter {
@@ -1225,8 +1281,10 @@ struct HubHomeView: View {
     private var quickTodo: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                TextField("Add a to-do", text: $todoDraft)
+                TextField("What needs doing?", text: $todoDraft,
+                          prompt: Text("What needs doing?").foregroundStyle(Color(red: 0.66, green: 0.70, blue: 0.80)))
                     .focused($todoFocused)
+                    .frame(minHeight: 44)
                     .submitLabel(.done)
                     .onSubmit(submitTodo)
                     .onChange(of: todoDraft) { _ in todoDraftID = UUID() }
@@ -1236,8 +1294,13 @@ struct HubHomeView: View {
                         plannerEditor = PlannerEdit(item: nil, kind: .todo)
                     } else { submitTodo() }
                 }
-                    .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
             }
+            .padding(6)
+            .padding(.leading, 6)
+            .background(Color(uiColor: Self.backgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.10)))
             .disabled(!canEditPlanner)
         }
     }
