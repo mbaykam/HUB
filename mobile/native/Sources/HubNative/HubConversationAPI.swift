@@ -580,6 +580,8 @@ public struct HubChatSnapshot {
     public let running: Bool
     public let partial: String
     public let failure: String?
+    public let lastTurnEndSequence: Int?
+    public let lastTurnWasStopped: Bool
     public let latestScreenshotSequence: Int?
     public let historyCursor: Int?
     public let firstSequence: Int?
@@ -1228,6 +1230,7 @@ struct HubChatStreamFrame: Decodable {
             let message: HubChatMessage?
             let delta: (index: Int, text: String)?
             let failure: String?
+            let wasStopped: Bool
             let announcesScreenshot: Bool
             let activity: HubChatActivity?
             let replacement: Replacement?
@@ -1260,6 +1263,7 @@ struct HubChatStreamFrame: Decodable {
                 } else {
                     delta = nil
                 }
+                wasStopped = type == "turn/end" && payload?.reason?.kind == "aborted"
                 failure = type == "turn/end" && payload?.reason?.kind == "error"
                     ? (payload?.reason?.message ?? "This turn failed.") : nil
                 announcesScreenshot = type == "tool/result" && payload?.meta?.kind == "hub-screenshot"
@@ -1361,6 +1365,8 @@ struct HubChatTimeline {
     private var blocks: [Int: String] = [:]
     private var running = false
     private var failure: String?
+    private var lastTurnEndSequence: Int?
+    private var lastTurnWasStopped = false
     private var hasMore = false
     private var lastSequence = -1
     private var latestScreenshotSequence: Int?
@@ -1409,12 +1415,15 @@ struct HubChatTimeline {
         case "turn/start":
             running = true
             failure = nil
+            lastTurnWasStopped = false
             blocks.removeAll()
         case "step/start", "assistant/message", "llm/retry":
             blocks.removeAll()
         case "turn/end":
             running = false
             failure = event.failure
+            lastTurnEndSequence = event.seq
+            lastTurnWasStopped = event.wasStopped
             blocks.removeAll()
         default: break
         }
@@ -1434,6 +1443,7 @@ struct HubChatTimeline {
         }
         return HubChatSnapshot(messages: messages, hasMore: hasMore, running: running,
                         partial: blocks.keys.sorted().compactMap { blocks[$0] }.joined(), failure: failure,
+                        lastTurnEndSequence: lastTurnEndSequence, lastTurnWasStopped: lastTurnWasStopped,
                         latestScreenshotSequence: latestScreenshotSequence, historyCursor: historyCursor,
                         firstSequence: firstSequence, activity: activity, title: title, model: model, usageByTurn: totals)
     }
@@ -1489,6 +1499,9 @@ public final class HubConversationAPI {
     private let server: HubServer
     private let cookies: () async -> [HTTPCookie]
     private let session: URLSession
+    #if DEBUG && targetEnvironment(simulator)
+    public var simulatorChatFrames: ((String) -> AsyncThrowingStream<Data, Error>)?
+    #endif
     public init(server: HubServer, configuration: URLSessionConfiguration = .ephemeral, cookies: @escaping () async -> [HTTPCookie]) {
         self.server = server; self.cookies = cookies
         let config = configuration.copy() as! URLSessionConfiguration
@@ -2941,6 +2954,20 @@ public final class HubConversationAPI {
     public func followChat(sessionID: String, queue: (@MainActor ([HubQueuedChatMessage]?) -> Void)? = nil,
                            update: @MainActor (HubChatSnapshot) async -> Void) async throws {
         guard HubVoiceAPI.validID(sessionID) else { throw HubChatSendError.rejected }
+        #if DEBUG && targetEnvironment(simulator)
+        if let simulatorChatFrames {
+            var timeline = HubChatTimeline()
+            await queue?([])
+            for try await data in simulatorChatFrames(sessionID) {
+                try Task.checkCancellation()
+                let value = try JSONDecoder().decode(HubChatStreamFrame.Value.self, from: data)
+                if value.type == "snapshot" { timeline.start(value) }
+                else if value.type == "event", let event = value.event { timeline.apply(event) }
+                await update(timeline.snapshot)
+            }
+            return
+        }
+        #endif
         let (socket, streamSession) = try await remoteSocket()
         defer { streamSession.invalidateAndCancel() }
         let streamID = UUID().uuidString.lowercased()

@@ -35,7 +35,7 @@ struct HubLiveChatView: View {
     @State private var sending = false
     @State private var awaitingAfter: String?
     @State private var deliveryUncertain = false
-    @State private var stopping = false
+    @State private var stopRequest: StopRequest?
     @State private var error: String?
     @State private var olderMessages: [HubChatMessage] = []
     @State private var olderActivity: [HubChatActivity] = []
@@ -91,6 +91,11 @@ struct HubLiveChatView: View {
     private struct VisualLoad: Equatable {
         let id: UUID?
         let retry: Int
+    }
+
+    private struct StopRequest: Equatable {
+        let id = UUID()
+        let priorEnd: Int?
     }
 
     private enum ChatTab: String { case chat = "Chat", trajectory = "Trajectory" }
@@ -530,7 +535,7 @@ struct HubLiveChatView: View {
                             }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
-                            if snapshot.running && snapshot.partial.isEmpty { ProgressView("Working…") }
+                            if snapshot.running && snapshot.partial.isEmpty && !connectionLost { ProgressView("Working…") }
                         } else if !connectionLost {
                             ProgressView("Loading chat…")
                         }
@@ -636,7 +641,7 @@ struct HubLiveChatView: View {
     }
 
     private func screenshotImage(_ screenshot: HubChatScreenshot) -> some View {
-        HubChatImageView(name: screenshot.name) {
+        HubChatImageView(name: screenshot.name, canSave: true) {
             try await api.chatScreenshot(sessionID: chat.sessionId, id: screenshot.id)
         }
     }
@@ -664,6 +669,11 @@ struct HubLiveChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if stopRequest != nil {
+                ProgressView("Stopping…").font(.footnote)
+            } else if !connectionLost && snapshot?.lastTurnWasStopped == true {
+                Label("Turn stopped", systemImage: "stop.circle").font(.footnote).foregroundStyle(.secondary)
+            }
             if let items = queuedMessages, !items.isEmpty {
                 queuedMessagesView(items)
             } else if !queueAvailable && !connectionLost {
@@ -693,6 +703,7 @@ struct HubLiveChatView: View {
             HStack(spacing: 6) {
                 TextField("Chat…", text: $draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
                     .focused($composerFocused)
+                    .accessibilityIdentifier("hub.chat.draft")
                     .submitLabel(.send)
                     .onSubmit { send(fromKeyboard: true) }
                     .padding(.leading, 12)
@@ -743,11 +754,17 @@ struct HubLiveChatView: View {
                 } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
                 .accessibilityLabel("Voice")
                 if snapshot?.running == true || awaitingAfter != nil {
-                    Button(action: stop) { Image(systemName: "stop.fill").frame(width: 44, height: 44) }
-                        .accessibilityLabel("Stop")
-                        .disabled(stopping || connectionLost)
+                    Button(action: stop) {
+                        Image(systemName: "stop.fill").frame(width: 44, height: 44)
+                            .background(Circle().fill(accent.opacity(0.28)))
+                    }
+                    .accessibilityLabel("Stop")
+                    .disabled(stopRequest != nil)
                 } else {
-                    Button { send() } label: { Image(systemName: "arrow.up").frame(width: 44, height: 44) }
+                    Button { send() } label: {
+                        Image(systemName: "arrow.up").frame(width: 44, height: 44)
+                            .background(Circle().fill(accent.opacity(canSend ? 0.28 : 0.10)))
+                    }
                         .accessibilityLabel("Send")
                         .disabled(!canSend)
                 }
@@ -829,7 +846,7 @@ struct HubLiveChatView: View {
     }
 
     private var canSubmit: Bool {
-        snapshot != nil && !sending && !attachmentBusy && awaitingAfter == nil && !deliveryUncertain && !connectionLost &&
+        snapshot != nil && !sending && !attachmentBusy && awaitingAfter == nil && stopRequest == nil && !deliveryUncertain && !connectionLost &&
             (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !fileDrafts.isEmpty)
     }
 
@@ -929,6 +946,13 @@ struct HubLiveChatView: View {
                     historyError = false
                 }
                 snapshot = value
+                connectionLost = false
+                if let request = stopRequest, let end = value.lastTurnEndSequence,
+                   end > (request.priorEnd ?? -1) {
+                    stopRequest = nil
+                    awaitingAfter = nil
+                    error = nil
+                }
                 if selectedModel == value.model { selectedModel = nil }
                 if renamedTitle == value.title { renamedTitle = nil }
                 if value.running || completed || (awaitingAfter != nil && (value.latestUserMessageID ?? "") != awaitingAfter) {
@@ -1064,15 +1088,25 @@ struct HubLiveChatView: View {
     }
 
     private func stop() {
-        guard !stopping, !connectionLost else { return }
+        guard stopRequest == nil, snapshot?.running == true || awaitingAfter != nil else { return }
         composerFocused = false
-        stopping = true
+        let request = StopRequest(priorEnd: snapshot?.lastTurnEndSequence)
+        stopRequest = request
         error = nil
         Task {
-            defer { stopping = false }
             do {
                 try await api.cancelChat(sessionID: chat.sessionId)
+                guard stopRequest == request else { return }
+                if connectionLost { attempt += 1 }
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                guard stopRequest == request else { return }
+                stopRequest = nil
+                awaitingAfter = nil
+                error = "HUB received Stop. Checking whether the turn ended."
+                attempt += 1
             } catch {
+                guard stopRequest == request else { return }
+                stopRequest = nil
                 self.error = "Could not confirm that HUB received Stop."
             }
         }
@@ -1393,26 +1427,67 @@ private struct HubChatCharacterView: View {
 @MainActor
 private struct HubChatImageView: View {
     let name: String
+    var canSave = false
     let load: () async throws -> Data
     @State private var image: UIImage?
+    @State private var savedFile: SavedFile?
+    @State private var exporting = false
+    @State private var exportFailed = false
     @State private var failed = false
     @State private var attempt = 0
+
+    private struct SavedFile {
+        let bytes: Data
+        let type: UTType
+        let name: String
+    }
 
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(name)
+                VStack(alignment: .leading, spacing: 4) {
+                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(name)
+                    if savedFile != nil {
+                        HStack {
+                            Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Spacer()
+                            Button {
+                                exportFailed = false
+                                exporting = true
+                            } label: {
+                                Image(systemName: "square.and.arrow.down").frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Save screenshot to Files")
+                        }
+                        if exportFailed { Text("Could not save the screenshot.").font(.footnote).foregroundStyle(.secondary) }
+                    }
+                }
             } else if failed {
                 Button("Retry loading image") { failed = false; attempt += 1 }
             } else {
                 ProgressView("Loading image…")
             }
         }
+        .fileExporter(isPresented: $exporting, document: savedFile.map { HubFileDocument(bytes: $0.bytes) },
+                      contentType: savedFile?.type ?? .image, defaultFilename: savedFile?.name) { result in
+            if case .failure = result { exportFailed = true }
+        }
         .task(id: attempt) {
             do {
                 let bytes = try await load()
                 guard let decoded = UIImage(data: bytes) else { throw HubAttachmentError.invalidResponse }
-                if !Task.isCancelled { image = decoded }
+                if !Task.isCancelled {
+                    image = decoded
+                    if canSave, let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+                       let identifier = CGImageSourceGetType(source), let type = UTType(identifier as String) {
+                        let leaf = (name as NSString).lastPathComponent
+                        let safeName = leaf.isEmpty || leaf == "." || leaf == ".." ? "Screenshot" : leaf
+                        let base = (safeName as NSString).deletingPathExtension
+                        let filename = type.preferredFilenameExtension.map { "\(base).\($0)" } ?? safeName
+                        savedFile = SavedFile(bytes: bytes, type: type, name: filename)
+                    }
+                }
             } catch {
                 if !Task.isCancelled { failed = true }
             }

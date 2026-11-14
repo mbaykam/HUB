@@ -392,6 +392,25 @@ final class HubConversationTests: XCTestCase {
         XCTAssertTrue(timeline.snapshot.running)
     }
 
+    func testTurnEndKeepsCancellationSeparateFromFailureAndContinuesQueuedWork() throws {
+        let decoder = JSONDecoder()
+        var timeline = HubChatTimeline()
+        let events = [
+            #"{"type":"turn/start","seq":1,"data":{}}"#,
+            #"{"type":"turn/end","seq":2,"data":{"reason":{"kind":"aborted","reason":{"kind":"user"}}}}"#,
+            #"{"type":"turn/start","seq":3,"data":{}}"#,
+            #"{"type":"turn/end","seq":4,"data":{"reason":{"kind":"error","message":"Fixture provider error"}}}"#,
+        ]
+        for (index, json) in events.enumerated() {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(json.utf8)))
+            let snapshot = timeline.snapshot
+            XCTAssertEqual(snapshot.running, index == 0 || index == 2)
+            XCTAssertEqual(snapshot.lastTurnWasStopped, index == 1)
+            XCTAssertEqual(snapshot.lastTurnEndSequence, [nil, 2, 2, 4][index])
+            XCTAssertEqual(snapshot.failure, index == 3 ? "Fixture provider error" : nil)
+        }
+    }
+
     func testScreenshotCatalogUsesBoundedConversationRoute() async throws {
         let api = try client()
         let id = String(repeating: "a", count: 64)

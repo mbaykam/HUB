@@ -128,6 +128,40 @@ final class HubWorkspaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testNativeChatStopWaitsForTheTurnToEndAndKeepsTheDraft() {
+        let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture"])
+        let history = app.buttons["Chat history"]
+        XCTAssertTrue(history.waitForExistence(timeout: 20))
+        history.tap()
+        let conversation = app.buttons["hub.history.fixture-work"]
+        XCTAssertTrue(conversation.waitForExistence(timeout: 5))
+        conversation.tap()
+        XCTAssertTrue(app.staticTexts["Collecting fixture references…"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.images["Fixture screenshot.png"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.buttons["Save screenshot to Files"].exists)
+
+        let more = app.buttons["More actions"], voice = app.buttons["Voice"], stop = app.buttons["Stop"]
+        XCTAssertTrue(more.exists && voice.exists && stop.exists)
+        XCTAssertLessThanOrEqual(more.frame.maxX, voice.frame.minX)
+        XCTAssertLessThanOrEqual(voice.frame.maxX, stop.frame.minX)
+        capture("Conversation before Stop")
+        let draft = app.textFields["hub.chat.draft"]
+        draft.tap()
+        draft.typeText("Keep this draft")
+        let dismissKeyboard = app.buttons["Hide keyboard"]
+        XCTAssertTrue(dismissKeyboard.exists)
+        stop.tap()
+        XCTAssertTrue(app.staticTexts["Turn stopped"].waitForExistence(timeout: 8))
+        XCTAssertFalse(stop.exists)
+        XCTAssertFalse(dismissKeyboard.exists)
+        XCTAssertFalse(app.staticTexts["Collecting fixture references…"].exists)
+        XCTAssertEqual(draft.value as? String, "Keep this draft")
+        XCTAssertTrue(app.buttons["Send"].isEnabled)
+        XCTAssertEqual(app.webViews.count, 0)
+        capture("Conversation after Stop")
+    }
+
+    @MainActor
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
@@ -136,10 +170,10 @@ final class HubWorkspaceUITests: XCTestCase {
     }
 
     @MainActor
-    private func readFixtureApp() -> XCUIApplication {
+    private func readFixtureApp(extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--hub-native-home-fixture", "--hub-native-read-fixture",
-                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extraArguments
         app.launch()
         return app
     }

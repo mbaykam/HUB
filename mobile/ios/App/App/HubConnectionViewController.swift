@@ -252,7 +252,11 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
            let fixtureServer = try? HubServer(address: "https://hub-workspace-fixture.invalid") {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [HubWorkspaceFixtureProtocol.self]
-            conversationAPI = HubConversationAPI(server: fixtureServer, configuration: configuration) { [] }
+            let api = HubConversationAPI(server: fixtureServer, configuration: configuration) { [] }
+            if ProcessInfo.processInfo.arguments.contains("--hub-native-chat-fixture") {
+                api.simulatorChatFrames = HubWorkspaceChatFixture.shared.frames
+            }
+            conversationAPI = api
             connected = true
         }
     }
@@ -940,16 +944,54 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
     override func stopLoading() {}
 
     override func startLoading() {
+        if request.url?.path == "/api/session/cancel", request.httpMethod == "POST" {
+            respondToCancellation()
+            return
+        }
+        if request.url?.path == "/api/hub/artifacts", request.httpMethod == "GET",
+           request.value(forHTTPHeaderField: "x-hub-session") == "fixture-work",
+           request.value(forHTTPHeaderField: "x-hub-daily-use") == "1",
+           ProcessInfo.processInfo.arguments.contains("--hub-native-chat-fixture") {
+            let id = String(repeating: "c", count: 64)
+            if request.value(forHTTPHeaderField: "x-hub-screenshot") == id {
+                let image = "iVBORw0KGgoAAAANSUhEUgAAAGAAAAAZCAIAAABB17xmAAAASElEQVR4nO3QMQ0AMAwEseAJj3Iq/DDIVvUHSwfg5OpztVTfD8IDBAgQIEDBAQIECBCg4AABAgQIUHCAAAECBCg4QIAA9UugARgldhmWerIvAAAAAElFTkSuQmCC"
+                respond(with: Data(base64Encoded: image), mediaType: "image/png")
+            } else {
+                respond(with: Data("{\"screenshots\":[{\"id\":\"\(id)\",\"name\":\"Fixture screenshot.png\",\"turn\":1}]}".utf8))
+            }
+            return
+        }
+        respond(with: request.url.flatMap(responseData))
+    }
+
+    private func respond(with data: Data?, mediaType: String = "application/json") {
         guard let url = request.url, url.host == "hub-workspace-fixture.invalid",
-              request.value(forHTTPHeaderField: "Cookie") == nil, let data = responseData(url),
+              request.value(forHTTPHeaderField: "Cookie") == nil, let data,
               let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-                                             headerFields: ["Content-Type": "application/json"]) else {
+                                             headerFields: ["Content-Type": mediaType]) else {
             client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
             return
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private func respondToCancellation() {
+        guard request.url?.host == "hub-workspace-fixture.invalid",
+              request.value(forHTTPHeaderField: "Cookie") == nil,
+              ProcessInfo.processInfo.arguments.contains("--hub-native-chat-fixture"),
+              let envelope = rpcEnvelope("session/cancel"), let id = envelope["rpcId"] as? String,
+              let payload = envelope["payload"] as? [String: Any], let args = payload["args"] as? [String: Any],
+              let command = args["request"] as? [String: String], command == ["sessionId": "fixture-work"] else {
+            respond(with: nil)
+            return
+        }
+        respond(with: rpcResult(id, value: ["accepted": true]))
+        Task {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            await HubWorkspaceChatFixture.shared.stop()
+        }
     }
 
     private func responseData(_ url: URL) -> Data? {
@@ -984,6 +1026,17 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
     }
 
     private func settingsDescription() -> Data? {
+        guard let envelope = rpcEnvelope("settings/describe"), let rpcID = envelope["rpcId"] as? String else { return nil }
+        let namespaces: [[String: Any]] = [
+            ["ns": "ui-theme", "revision": 1, "value": ["fontSize": 16, "preference": "dark"]],
+            ["ns": "ui-conversation", "revision": 1, "value": ["busyEnter": "steer"]],
+            ["ns": "ui-chat", "revision": 1, "value": ["transcriptView": "compact"]],
+            ["ns": "locale", "revision": 1, "value": ["preference": "en"]],
+        ]
+        return rpcResult(rpcID, value: ["writable": true, "namespaces": namespaces])
+    }
+
+    private func rpcEnvelope(_ method: String) -> [String: Any]? {
         let body: Data
         if let bytes = request.httpBody {
             body = bytes
@@ -998,17 +1051,61 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
             return nil
         }
         guard let envelope = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
-              envelope["method"] as? String == "settings/describe", let rpcID = envelope["rpcId"] as? String else { return nil }
-        let namespaces: [[String: Any]] = [
-            ["ns": "ui-theme", "revision": 1, "value": ["fontSize": 16, "preference": "dark"]],
-            ["ns": "ui-conversation", "revision": 1, "value": ["busyEnter": "steer"]],
-            ["ns": "ui-chat", "revision": 1, "value": ["transcriptView": "compact"]],
-            ["ns": "locale", "revision": 1, "value": ["preference": "en"]],
-        ]
+              envelope["type"] as? String == "client-request", envelope["method"] as? String == method else { return nil }
+        return envelope
+    }
+
+    private func rpcResult(_ id: String, value: [String: Any]) -> Data? {
         return try? JSONSerialization.data(withJSONObject: [
-            "type": "server-response", "rpcId": rpcID,
-            "result": ["ok": true, "value": ["writable": true, "namespaces": namespaces]],
+            "type": "server-response", "rpcId": id,
+            "result": ["ok": true, "value": value],
         ])
+    }
+}
+
+private actor HubWorkspaceChatFixture {
+    static let shared = HubWorkspaceChatFixture()
+    private typealias Stream = AsyncThrowingStream<Data, Error>
+    private var observers: [UUID: Stream.Continuation] = [:]
+    private var stopped = false
+    private let end = #"{"type":"turn/end","seq":4,"data":{"reason":{"kind":"aborted","reason":{"kind":"user"}}}}"#
+
+    nonisolated func frames(_ session: String) -> AsyncThrowingStream<Data, Error> {
+        AsyncThrowingStream { continuation in
+            guard session == "fixture-work" else {
+                continuation.finish(throwing: URLError(.resourceUnavailable))
+                return
+            }
+            let id = UUID()
+            let registration = Task { await self.register(id, continuation: continuation) }
+            continuation.onTermination = { _ in
+                registration.cancel()
+                Task { await self.remove(id) }
+            }
+        }
+    }
+
+    private func register(_ id: UUID, continuation: Stream.Continuation) {
+        guard !Task.isCancelled else { return }
+        let initial = #"""
+        {"type":"snapshot","records":[
+         {"event":{"type":"user/message","seq":1,"data":{"source":{"kind":"user"},"content":[{"type":"text","text":"Fixture request"}]}}},
+         {"event":{"type":"turn/start","seq":2,"data":{}}},
+         {"event":{"type":"assistant/chunk","seq":3,"data":{"chunk":{"type":"text-delta","index":0,"text":"Collecting fixture references…"}}}}
+        ]}
+        """#
+        if case .terminated = continuation.yield(Data(initial.utf8)) { return }
+        if stopped { continuation.yield(Data("{\"type\":\"event\",\"event\":\(end)}".utf8)) }
+        observers[id] = continuation
+    }
+
+    private func remove(_ id: UUID) { observers.removeValue(forKey: id) }
+
+    func stop() {
+        guard !stopped else { return }
+        stopped = true
+        let update = Data("{\"type\":\"event\",\"event\":\(end)}".utf8)
+        for observer in observers.values { observer.yield(update) }
     }
 }
 #endif

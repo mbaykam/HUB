@@ -89,7 +89,7 @@ try{
       '-resultBundlePath',result,'CODE_SIGNING_ALLOWED=NO'],420000);
     await writeFile(resolve(folder,'workspace-ui-proof.json'),JSON.stringify({...source,runtime:selected.runtime,
       isolatedSimulator:true,nativeHomeFixture:true,physicalAcceptance:false,drawersPlannerComposerKeyboardPassed:true,
-      knowledgeNoteAndReviewPassed:true,generalPreferencesPassed:true},null,2));
+      knowledgeNoteAndReviewPassed:true,generalPreferencesPassed:true,chatStopAndDraftPassed:true},null,2));
     try{sim('terminate',device,'com.mbaykam.hub');}catch{}
   }else{
     stage='install';console.log('Installing the verified existing bundle');

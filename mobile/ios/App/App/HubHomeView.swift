@@ -781,6 +781,7 @@ struct HubHomeView: View {
                 Text(chat.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
+            .accessibilityIdentifier("hub.history.\(chat.sessionId)")
             if let bookmarks {
                 let pinned = bookmarks.sessionIds.contains(chat.sessionId)
                 Button { Task { await setPinned(chat.sessionId, pinned: !pinned) } } label: {
@@ -1628,7 +1629,7 @@ private struct HubTasksView: View {
                 HubGoalEditorView(api: api, id: edit.taskID) { attempt += 1 }
             }
         }
-        .fileExporter(isPresented: $exportingOutput, document: output.map { GoalOutputDocument(bytes: $0.data) },
+        .fileExporter(isPresented: $exportingOutput, document: output.map { HubFileDocument(bytes: $0.data) },
                       contentType: output.flatMap { UTType(filenameExtension: ($0.name as NSString).pathExtension) } ?? .data,
                       defaultFilename: output?.name, onCompletion: { result in
             output = nil
@@ -1817,7 +1818,7 @@ private struct HubTasksView: View {
     }
 }
 
-private struct GoalOutputDocument: FileDocument {
+struct HubFileDocument: FileDocument {
     static let readableContentTypes: [UTType] = [.data]
     let bytes: Data
 
