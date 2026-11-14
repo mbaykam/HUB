@@ -37,7 +37,7 @@ struct HubKnowledgeConnectionsView: View {
     private var search: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section(note.title) {
                     if let total {
@@ -77,6 +77,7 @@ struct HubKnowledgeConnectionsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
         }
+        .navigationViewStyle(.stack)
         .preferredColorScheme(.dark)
         .task { await loadPage("") }
         .task(id: search) { await findTargets(search) }
@@ -84,7 +85,7 @@ struct HubKnowledgeConnectionsView: View {
             if let target { await findPath(target.id) }
         }
         .sheet(item: $selectedEvidence) { selection in
-            NavigationStack {
+            NavigationView {
                 List {
                     if let evidence {
                         Section(evidence.sourceTitle) {
@@ -105,6 +106,7 @@ struct HubKnowledgeConnectionsView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { selectedEvidence = nil } } }
             }
+            .navigationViewStyle(.stack)
             .task(id: evidenceAttempt) { await loadEvidence(selection) }
         }
     }
@@ -179,7 +181,7 @@ struct HubKnowledgeConnectionsView: View {
         guard searchBusy else { return }
         defer { if search == input, !Task.isCancelled { searchBusy = false } }
         do {
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(nanoseconds: 250_000_000)
             let results = try await api.searchKnowledgeRecords(input)
             guard search == input, !Task.isCancelled else { return }
             matches = results.filter { $0.id != note.id }

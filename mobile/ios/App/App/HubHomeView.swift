@@ -343,22 +343,36 @@ struct HubHomeView: View {
         let domains = graph.domains?.filter { $0.status == "active" && $0.parentId == nil }.count ?? 0
         let stats = [(notes, "Brain notes"), (domains, "Domains"), (graph.edges.count, "Connections"),
                      (graph.nodes.count - notes, "Chat archive")]
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 7) {
-                ForEach(stats.indices, id: \.self) { index in
-                    knowledgeStat(stats[index].0, label: stats[index].1).fixedSize()
+        return Group {
+            if #available(iOS 16.0, *) {
+                ViewThatFits(in: .horizontal) {
+                    knowledgeStatsLine(stats)
+                    knowledgeStatsRows(stats)
                 }
-            }
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach([0, 2], id: \.self) { index in
-                    HStack(spacing: 12) {
-                        knowledgeStat(stats[index].0, label: stats[index].1)
-                        knowledgeStat(stats[index + 1].0, label: stats[index + 1].1)
-                    }
-                }
+            } else {
+                knowledgeStatsRows(stats)
             }
         }
         .font(.caption2)
+    }
+
+    private func knowledgeStatsLine(_ stats: [(Int, String)]) -> some View {
+        HStack(spacing: 7) {
+            ForEach(stats.indices, id: \.self) { index in
+                knowledgeStat(stats[index].0, label: stats[index].1).fixedSize()
+            }
+        }
+    }
+
+    private func knowledgeStatsRows(_ stats: [(Int, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach([0, 2], id: \.self) { index in
+                HStack(spacing: 12) {
+                    knowledgeStat(stats[index].0, label: stats[index].1)
+                    knowledgeStat(stats[index + 1].0, label: stats[index + 1].1)
+                }
+            }
+        }
     }
 
     private func knowledgeStat(_ value: Int, label: String) -> some View {
@@ -939,8 +953,10 @@ struct HubHomeView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         let text = try? AttributedString(markdown: note.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
                         Text(text ?? AttributedString(note.content)).textSelection(.enabled)
-                        Button("Connections and sources", systemImage: "point.3.connected.trianglepath.dotted") {
+                        Button {
                             knowledgeConnectionsOpen = true
+                        } label: {
+                            Label("Connections and sources", systemImage: "point.3.connected.trianglepath.dotted")
                         }
                         .frame(minHeight: 44)
                         knowledgeLinks("Links", nodes: note.links ?? [])

@@ -68,6 +68,7 @@ struct HubGoalEditorView: View {
             TextEditor(text: field(\.instructions, current)).frame(minHeight: 80)
                 .accessibilityLabel("Goal-specific instructions")
         }
+        if let milestones = current.milestones { plan(milestones) }
         if !data.isResearch {
             Section("Resources") {
                 Toggle("Read relevant Knowledge", isOn: field(\.knowledge, current))
@@ -107,6 +108,75 @@ struct HubGoalEditorView: View {
                 .disabled(!canSave(current))
             if id == nil { Text("Start the saved draft from Tasks when you’re ready.").font(.footnote).foregroundStyle(.secondary) }
         }
+    }
+
+    private func plan(_ milestones: [HubGoalEditorData.Milestone]) -> some View {
+        Section("Milestones") {
+            if milestones.isEmpty { Text("No milestones yet.").foregroundStyle(.secondary) }
+            ForEach(milestones) { milestone in
+                DisclosureGroup(milestone.title.isEmpty ? "New milestone" : milestone.title) {
+                    TextField("Milestone title", text: milestoneField(\.title, for: milestone))
+                    Picker("Progress", selection: milestoneField(\.status, for: milestone)) {
+                        ForEach(HubGoalEditorData.Milestone.Status.allCases, id: \.self) { status in
+                            Text(status.rawValue.capitalized).tag(status)
+                        }
+                    }
+                    let others = milestones.filter { $0.id != milestone.id }
+                    if !others.isEmpty {
+                        DisclosureGroup("Depends on") {
+                            ForEach(others) { other in
+                                let dependencies = milestoneField(\.dependsOn, for: milestone)
+                                Toggle(other.title.isEmpty ? "Untitled milestone" : other.title, isOn: Binding(
+                                    get: { dependencies.wrappedValue.contains(other.id) },
+                                    set: { selected in
+                                        var ids = dependencies.wrappedValue.filter { $0 != other.id }
+                                        if selected { ids.append(other.id) }
+                                        dependencies.wrappedValue = ids
+                                    }))
+                                    .disabled(!milestone.dependsOn.contains(other.id) &&
+                                              dependencyReaches(milestone.id, from: other.id, in: milestones))
+                            }
+                        }
+                    }
+                    if !milestone.evidence.isEmpty {
+                        Text("\(milestone.evidence.count) evidence references").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Button("Remove milestone", role: .destructive) {
+                        var next = milestones.filter { $0.id != milestone.id }
+                        for index in next.indices { next[index].dependsOn.removeAll { $0 == milestone.id } }
+                        draft?.milestones = next
+                    }
+                }
+            }
+            Button {
+                draft?.milestones?.append(HubGoalEditorData.Milestone())
+            } label: {
+                Label("Add milestone", systemImage: "plus")
+            }
+            .disabled(milestones.count >= 80)
+        }
+    }
+
+    private func dependencyReaches(_ target: String, from start: String, in milestones: [HubGoalEditorData.Milestone]) -> Bool {
+        var targets = [start]
+        var visited: Set<String> = []
+        while let next = targets.popLast() {
+            if next == target { return true }
+            if visited.insert(next).inserted, let milestone = milestones.first(where: { $0.id == next }) {
+                targets.append(contentsOf: milestone.dependsOn)
+            }
+        }
+        return false
+    }
+
+    private func milestoneField<Value>(_ key: WritableKeyPath<HubGoalEditorData.Milestone, Value>,
+                                       for original: HubGoalEditorData.Milestone) -> Binding<Value> {
+        Binding(get: {
+            draft?.milestones?.first(where: { $0.id == original.id })?[keyPath: key] ?? original[keyPath: key]
+        }, set: { value in
+            guard let index = draft?.milestones?.firstIndex(where: { $0.id == original.id }) else { return }
+            draft?.milestones?[index][keyPath: key] = value
+        })
     }
 
     private func collaborators(_ data: HubGoalEditorData, current: HubGoalEditorData.Draft) -> some View {
@@ -171,7 +241,8 @@ struct HubGoalEditorView: View {
         !current.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !current.objective.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !current.characterID.isEmpty && (1...20).contains(criteriaLines.count) &&
-            (1...10_080).contains(current.activeMinutes)
+            (1...10_080).contains(current.activeMinutes) &&
+            (current.milestones?.allSatisfy { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
     }
 
     private func load() async {

@@ -774,6 +774,22 @@ public struct HubGoalEditorData {
         public let name: String
         public let route: HubChatModelSelection?
     }
+    public struct Milestone: Codable, Equatable, Identifiable {
+        public enum Status: String, Codable, CaseIterable { case pending, working, done }
+        public let id: String
+        public var title: String
+        public var status: Status
+        public var dependsOn: [String]
+        public let evidence: [String]
+
+        public init(title: String = "") {
+            id = "milestone-\(UUID().uuidString.lowercased())"
+            self.title = title
+            status = .pending
+            dependsOn = []
+            evidence = []
+        }
+    }
     public struct Draft {
         public var title: String
         public var objective: String
@@ -803,6 +819,7 @@ public struct HubGoalEditorData {
         public var writeFolders: [String]?
         public var tools: [String]?
         public var knowledgeOutput: Bool?
+        public var milestones: [Milestone]?
     }
     public let draft: Draft
     public let characters: [Character]
@@ -1591,6 +1608,12 @@ public final class HubConversationAPI {
         draft.writeFolders = resources["writeFolders"] as? [String]
         draft.tools = resources["tools"] as? [String]
         draft.knowledgeOutput = resources["knowledgeOutput"] as? Bool
+        if let plan = definition["plan"] {
+            let data = try JSONSerialization.data(withJSONObject: plan, options: [.fragmentsAllowed])
+            draft.milestones = try? JSONDecoder().decode([HubGoalEditorData.Milestone].self, from: data)
+        } else if id == nil {
+            draft.milestones = []
+        }
         let fields: Set<String> = ["research", "title", "objective", "criteria", "characterId", "approach",
             "instructions", "helpers", "verifierId", "fallbacks", "resources", "limits", "schedule", "recovery",
             "humanApproval", "notification", "sourceSessionId"]
@@ -1645,6 +1668,16 @@ public final class HubConversationAPI {
         value["limits"] = limits
         var command: [String: Any] = ["action": "save", "revision": loaded.revision, "goal": value]
         if let id = loaded.id { command["id"] = id }
+        if let milestones = draft.milestones, milestones != loaded.draft.milestones {
+            let ids = Set(milestones.map(\.id))
+            guard loaded.draft.milestones != nil, milestones.count <= 80, ids.count == milestones.count,
+                  milestones.allSatisfy({ milestone in
+                      !milestone.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && milestone.title.utf16.count <= 1_000 &&
+                      !milestone.id.isEmpty && milestone.id.utf16.count <= 80 &&
+                      milestone.dependsOn.allSatisfy { $0 != milestone.id && ids.contains($0) }
+                  }) else { throw HubAttachmentError.invalidResponse }
+            command["plan"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(milestones))
+        }
         let body = try JSONSerialization.data(withJSONObject: command)
         guard body.count <= 100_000 else { throw HubAttachmentError.tooLarge }
         let data = try await requestData("api/hub/goals", headers: ["x-hub-goals": "1"], body: body, maxBytes: 8_388_608)

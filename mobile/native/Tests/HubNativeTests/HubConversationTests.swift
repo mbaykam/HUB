@@ -439,7 +439,8 @@ final class HubConversationTests: XCTestCase {
                        "tools":["read"],"files":[],"knowledgeOutput":false},
           "limits":{"activeMinutes":30,"dailyBudget":0.2,"totalBudget":1},
           "schedule":{"trigger":{"kind":"interval","seconds":1800},"repeat":"continue","missed":"skip"},
-          "recovery":"ask","humanApproval":true,"notification":"pwa","plan":[{"id":"milestone"}]
+          "recovery":"ask","humanApproval":true,"notification":"pwa",
+          "plan":[{"id":"milestone","title":"Original step","dependsOn":[],"status":"pending","evidence":["ref-1"]}]
         }]}
         """#
         CatalogFixture.responder = { request in
@@ -449,7 +450,15 @@ final class HubConversationTests: XCTestCase {
             XCTAssertEqual(command["action"] as? String, "save")
             XCTAssertEqual(command["id"] as? String, "saved-goal")
             XCTAssertEqual(command["revision"] as? Int, 7)
-            XCTAssertNil(command["plan"])
+            if CatalogFixture.requests.count == 2 {
+                XCTAssertNil(command["plan"])
+            } else {
+                let milestones = try XCTUnwrap(command["plan"] as? [[String: Any]])
+                XCTAssertEqual(milestones.first?["id"] as? String, "milestone")
+                XCTAssertEqual(milestones.first?["status"] as? String, "working")
+                XCTAssertEqual(milestones.first?["evidence"] as? [String], ["ref-1"])
+                XCTAssertEqual(milestones.last?["dependsOn"] as? [String], ["milestone"])
+            }
             let goal = try XCTUnwrap(command["goal"] as? [String: Any])
             XCTAssertEqual(goal["title"] as? String, "Renamed")
             XCTAssertEqual((goal["resources"] as? [String: Any])?["folders"] as? [String], ["C:/Fixture"])
@@ -465,6 +474,14 @@ final class HubConversationTests: XCTestCase {
         draft.dailyBudget = 0.25
         let id = try await api.saveGoal(draft, from: editor)
         XCTAssertEqual(id, "saved-goal")
+        var milestones = try XCTUnwrap(draft.milestones)
+        milestones[0].status = .working
+        var followUp = HubGoalEditorData.Milestone(title: "Follow up")
+        followUp.dependsOn = [milestones[0].id]
+        milestones.append(followUp)
+        draft.milestones = milestones
+        let editedID = try await api.saveGoal(draft, from: editor)
+        XCTAssertEqual(editedID, id)
     }
 
     func testRoutineEditorUsesTheRegistryRevisionAndPreservesEventCondition() async throws {
