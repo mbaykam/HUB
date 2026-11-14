@@ -31,6 +31,7 @@ struct HubLiveChatView: View {
     @State private var draft = ""
     @State private var openedInitialAction = false
     @State private var connectionLost = false
+    @State private var reconnecting = false
     @State private var attempt = 0
     @State private var sending = false
     @State private var awaitingAfter: String?
@@ -137,6 +138,9 @@ struct HubLiveChatView: View {
             }
         }
         .task(id: attempt) { await follow() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active && connectionLost { reconnect() }
+        }
         .task(id: historyRequest) {
             if historyRequest != 0 { await loadEarlierMessages() }
         }
@@ -312,9 +316,9 @@ struct HubLiveChatView: View {
             Divider()
             if connectionLost {
                 HStack {
-                    Text("Connection interrupted").font(.footnote)
+                    Text(reconnecting ? "Checking conversation connection…" : "Connection interrupted").font(.footnote)
                     Spacer()
-                    Button("Retry") { connectionLost = false; attempt += 1 }
+                    Button("Retry", action: reconnect).disabled(reconnecting)
                 }
                 .padding(12)
             }
@@ -947,6 +951,7 @@ struct HubLiveChatView: View {
                 }
                 snapshot = value
                 connectionLost = false
+                reconnecting = false
                 if let request = stopRequest, let end = value.lastTurnEndSequence,
                    end > (request.priorEnd ?? -1) {
                     stopRequest = nil
@@ -962,10 +967,17 @@ struct HubLiveChatView: View {
         } catch {
             if !Task.isCancelled {
                 connectionLost = true
+                reconnecting = false
                 awaitingAfter = nil
                 queuedMessages = nil
             }
         }
+    }
+
+    private func reconnect() {
+        guard !reconnecting else { return }
+        reconnecting = true
+        attempt += 1
     }
 
     private func loadScreenshots() async {
@@ -1097,13 +1109,14 @@ struct HubLiveChatView: View {
             do {
                 try await api.cancelChat(sessionID: chat.sessionId)
                 guard stopRequest == request else { return }
-                if connectionLost { attempt += 1 }
+                if connectionLost { reconnect() }
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 guard stopRequest == request else { return }
                 stopRequest = nil
                 awaitingAfter = nil
                 error = "HUB received Stop. Checking whether the turn ended."
-                attempt += 1
+                connectionLost = true
+                reconnect()
             } catch {
                 guard stopRequest == request else { return }
                 stopRequest = nil
