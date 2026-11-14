@@ -109,7 +109,11 @@ struct HubHomeView: View {
     @State private var noteSaveFailed = false
     @State private var knowledgeScope = HubKnowledgeGraphView.Scope.all
     @State private var knowledgeSpatial = false
+    @State private var knowledgeTab = KnowledgeTab.graph
     @State private var knowledgeQuery = ""
+    @State private var knowledgeSearchResult: [HubHomeKnowledge.Node]?
+    @State private var knowledgeSearchFailure = false
+    @State private var knowledgeSearchRetry = 0
     @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
     @State private var tasksOpen = false
     @State private var usageOpen = false
@@ -1088,34 +1092,49 @@ struct HubHomeView: View {
 
     private func knowledgeOverview(_ graph: HubHomeKnowledge) -> some View {
         let query = knowledgeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let records = graph.nodes.filter {
-            knowledgeScope.includes($0) && (query.isEmpty || ($0.title?.localizedCaseInsensitiveContains(query) ?? false))
-        }
+        let api = chatAPI()
+        let search = KnowledgeSearch(query: query, scope: knowledgeScope, retry: knowledgeSearchRetry, apiID: api.map { ObjectIdentifier($0) })
+        let records = (query.isEmpty ? graph.nodes : knowledgeSearchResult ?? []).filter { knowledgeScope.includes($0) }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if knowledgeRefreshError {
                     Button("Retry refreshing Knowledge") { Task { await refreshKnowledgeGraph() } }
                         .font(.footnote).frame(minHeight: 44)
                 }
+                Picker("Knowledge view", selection: $knowledgeTab) {
+                    Text("Graph").tag(KnowledgeTab.graph)
+                    Text("Records").tag(KnowledgeTab.records)
+                }
+                .pickerStyle(.segmented)
                 Picker("Knowledge scope", selection: $knowledgeScope) {
                     ForEach(HubKnowledgeGraphView.Scope.allCases) { scope in Text(scope.rawValue).tag(scope) }
                 }
                 .pickerStyle(.segmented)
-                HubKnowledgeGraphView(graph: graph, height: 330, scope: knowledgeScope, spatial: knowledgeSpatial, select: selectKnowledgeNode)
-                    .id("\(knowledgeScope.rawValue)/\(knowledgeSpatial)")
-                    .overlay(alignment: .topTrailing) {
-                        Menu {
-                            Button("2D") { knowledgeSpatial = false }
-                            Button("3D") { knowledgeSpatial = true }
-                        } label: {
-                            Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
-                                .frame(minWidth: 44, minHeight: 44)
+                if knowledgeTab == .graph {
+                    HubKnowledgeGraphView(graph: graph, height: 330, scope: knowledgeScope, spatial: knowledgeSpatial, select: selectKnowledgeNode)
+                        .id("\(knowledgeScope.rawValue)/\(knowledgeSpatial)")
+                        .overlay(alignment: .topTrailing) {
+                            Menu {
+                                Button("2D") { knowledgeSpatial = false }
+                                Button("3D") { knowledgeSpatial = true }
+                            } label: {
+                                Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }
+                            .accessibilityLabel("Graph view")
+                            .accessibilityValue(knowledgeSpatial ? "3D" : "2D")
                         }
-                        .accessibilityLabel("Graph view")
-                        .accessibilityValue(knowledgeSpatial ? "3D" : "2D")
-                    }
-                TextField("Find records", text: $knowledgeQuery).textFieldStyle(.roundedBorder)
-                if records.isEmpty { Text("No matching records").foregroundStyle(.secondary) }
+                }
+                TextField("Find records", text: $knowledgeQuery).textFieldStyle(.roundedBorder).submitLabel(.search)
+                if query.utf16.count > 200 {
+                    Text("Use 200 characters or fewer.").foregroundStyle(.secondary)
+                } else if knowledgeSearchFailure && !query.isEmpty {
+                    Button("Retry searching Knowledge") { knowledgeSearchRetry += 1 }
+                } else if knowledgeSearchResult == nil && !query.isEmpty {
+                    ProgressView("Searching Knowledge…")
+                } else if records.isEmpty {
+                    Text("No matching records").foregroundStyle(.secondary)
+                }
                 ForEach(records, id: \.id) { node in
                     Button { selectKnowledgeNode(node.id) } label: {
                         HStack {
@@ -1131,6 +1150,34 @@ struct HubHomeView: View {
                     Divider()
                 }
             }
+        }
+        .task(id: search) { await searchKnowledge(search, api: api) }
+    }
+
+    private enum KnowledgeTab { case graph, records }
+
+    private struct KnowledgeSearch: Equatable {
+        let query: String
+        let scope: HubKnowledgeGraphView.Scope
+        let retry: Int
+        let apiID: ObjectIdentifier?
+    }
+
+    private func searchKnowledge(_ search: KnowledgeSearch, api: HubConversationAPI?) async {
+        knowledgeSearchResult = nil
+        knowledgeSearchFailure = false
+        guard !search.query.isEmpty else { return }
+        guard let api, search.query.utf16.count <= 200 else {
+            knowledgeSearchFailure = true
+            return
+        }
+        let scope: HubHomeKnowledge.SearchScope = search.scope == .all ? .all : search.scope == .notes ? .brain : .archive
+        do {
+            try await Task.sleep(nanoseconds: 250_000_000)
+            let records = try await api.searchKnowledge(search.query, scope: scope)
+            if !Task.isCancelled, chatAPI() === api { knowledgeSearchResult = records }
+        } catch {
+            if !Task.isCancelled, chatAPI() === api { knowledgeSearchFailure = true }
         }
     }
 

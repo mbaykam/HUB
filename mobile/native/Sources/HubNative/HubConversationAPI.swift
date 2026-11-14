@@ -56,6 +56,7 @@ public struct HubHomeWork: Decodable {
 }
 
 public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
+    public enum SearchScope: String { case all, brain, archive }
     public struct Node: Decodable, Equatable, Sendable {
         public let id: String
         public let kind: String?
@@ -2196,6 +2197,18 @@ public final class HubConversationAPI {
         let note = try JSONDecoder().decode(HubKnowledgeNote.self, from: data)
         guard note.id == id else { throw HubAttachmentError.invalidResponse }
         return note
+    }
+
+    public func searchKnowledge(_ query: String, scope: HubHomeKnowledge.SearchScope) async throws -> [HubHomeKnowledge.Node] {
+        struct SearchPage: Decodable { let nodes: [HubHomeKnowledge.Node] }
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.utf16.count <= 200 else { throw HubAttachmentError.invalidResponse }
+        let page: SearchPage = try await readKnowledge("search", arguments: ["q": text, "scope": scope.rawValue])
+        guard page.nodes.count <= 100, Set(page.nodes.map(\.id)).count == page.nodes.count,
+              page.nodes.allSatisfy({ !$0.id.isEmpty && $0.id.utf8.count <= 1_024 }) else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return page.nodes
     }
 
     public static let knowledgeAssetLimit = 25_000_000

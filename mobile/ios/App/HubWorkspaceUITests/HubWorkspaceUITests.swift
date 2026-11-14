@@ -74,7 +74,7 @@ final class HubWorkspaceUITests: XCTestCase {
         let search = app.textFields["Find records"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
-        search.typeText("Planning")
+        search.typeText("choosing the tools")
         let record = app.buttons["hub.knowledge.record.note-project"]
         if !record.isHittable { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(record.waitForExistence(timeout: 5))

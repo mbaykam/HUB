@@ -1015,6 +1015,12 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
         let view = query.first { $0.name == "view" }?.value
         let id = query.first { $0.name == "id" }?.value
         switch (view, id) {
+        case ("search", nil):
+            let term = query.first { $0.name == "q" }?.value
+            if term?.localizedCaseInsensitiveContains("choosing the tools") == true {
+                return Data(#"{"nodes":[{"id":"note-project","title":"Planning a coding project","kind":"note"}]}"#.utf8)
+            }
+            return Data(#"{"nodes":[]}"#.utf8)
         case ("note", "note-project"):
             return Data(#"""
             {"id":"note-project","title":"Planning a coding project","kind":"note",
