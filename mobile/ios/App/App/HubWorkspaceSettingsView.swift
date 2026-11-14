@@ -54,7 +54,6 @@ struct HubWorkspaceSettingsView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .preferredColorScheme(.dark)
     }
 }
 
@@ -70,6 +69,14 @@ private struct HubGeneralSettingsView: View {
         Form {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
             if let settings {
+                Section("Appearance") {
+                    Picker("Theme", selection: Binding(get: { settings.appearance }, set: { update(.appearance($0)) })) {
+                        Text("System").tag(HubChatPreferences.Appearance.system)
+                        Text("Light").tag(HubChatPreferences.Appearance.light)
+                        Text("Dark").tag(HubChatPreferences.Appearance.dark)
+                    }
+                }
+                .disabled(busy || !settings.writable)
                 Section("Chat") {
                     Stepper("Conversation text size · \(settings.fontSize)", value: Binding(
                         get: { settings.fontSize }, set: { update(.fontSize($0)) }), in: 12...17)

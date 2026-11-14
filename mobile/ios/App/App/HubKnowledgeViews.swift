@@ -78,7 +78,6 @@ struct HubKnowledgeConnectionsView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
         }
         .navigationViewStyle(.stack)
-        .preferredColorScheme(.dark)
         .task { await loadPage("") }
         .task(id: search) { await findTargets(search) }
         .task(id: target.map { "\($0.id)/\(traceAttempt)" }) {
@@ -754,8 +753,8 @@ struct HubKnowledgeGraphView: View {
                     label.shading = .color(tone)
                     context.draw(label, at: CGPoint(x: center.point.x, y: center.point.y - r - 11))
                 }
-                context.stroke(lines, with: .color(Color.white.opacity(0.16)), lineWidth: 1)
-                context.stroke(highlighted, with: .color(Color.white.opacity(0.52)), lineWidth: 1.5)
+                context.stroke(lines, with: .color(HubWorkspacePalette.border.opacity(0.16)), lineWidth: 1)
+                context.stroke(highlighted, with: .color(HubWorkspacePalette.border.opacity(0.52)), lineWidth: 1.5)
                 for node in projected {
                     let point = node.projection.point
                     let r: CGFloat = (node.item.id == selectedID ? 7 : 4) * sqrt(zoom) * node.projection.perspective
@@ -794,7 +793,7 @@ struct HubKnowledgeGraphView: View {
                     .accessibilityLabel("Zoom in")
             }
             .font(.caption).buttonStyle(.plain).padding(.horizontal, 6)
-            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+            .background(HubWorkspacePalette.border.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             .padding(4)
         }
         .clipped()
@@ -839,7 +838,7 @@ struct HubKnowledgeGraphView: View {
                     lines.move(to: a)
                     lines.addLine(to: b)
                 }
-                context.stroke(lines, with: .color(Color(red: 0.64, green: 0.71, blue: 0.81).opacity(0.28)), lineWidth: 1)
+                context.stroke(lines, with: .color(HubWorkspacePalette.muted.opacity(0.38)), lineWidth: 1)
                 for item in layout.points {
                     guard let point = points[item.id] else { continue }
                     let radius: CGFloat = item.groupID == HubKnowledgeLayout.archiveID ? 2.5 : 4.7
@@ -889,7 +888,7 @@ struct HubKnowledgeGraphView: View {
             }
             .buttonStyle(.plain)
             .font(.caption)
-            .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+            .background(HubWorkspacePalette.border.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             .padding(4)
             }
         }
@@ -996,9 +995,8 @@ struct HubKnowledgeActivityView: View {
         .task { await load(0) }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .alert(item: $confirmation) { action in
             Alert(title: Text(action.rawValue), message: Text("Knowledge AI uses the configured model and budget."),
                   primaryButton: .default(Text("Continue")) { Task { await run(action) } }, secondaryButton: .cancel())

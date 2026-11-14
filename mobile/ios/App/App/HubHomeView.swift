@@ -33,9 +33,35 @@ struct HubNativeChatRequest: Equatable {
     var composerAction: ComposerAction?
 }
 
+enum HubWorkspacePalette {
+    static let background = dynamic(light: 0xF4F6FB, dark: 0x0B101B)
+    static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x161B2A))
+    static let accent = Color(uiColor: dynamic(light: 0x3F51A5, dark: 0xBFCBFF))
+    static let muted = Color(uiColor: dynamic(light: 0x4E5970, dark: 0xA8B3CC))
+    static let border = Color(uiColor: dynamic(light: 0x172233, dark: 0xFFFFFF))
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
+        UIColor { traits in
+            let rgb = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((rgb >> 16) & 255) / 255,
+                           green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+        }
+    }
+}
+
+extension HubChatPreferences.Appearance {
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light: .light
+        case .dark: .dark
+        case .system: nil
+        }
+    }
+}
+
 @MainActor
 struct HubHomeView: View {
-    static let backgroundColor = UIColor(red: 0.045, green: 0.064, blue: 0.105, alpha: 1)
+    static let backgroundColor = HubWorkspacePalette.background
 
     @ObservedObject var model: HubHomeModel
     var connect: () -> Void
@@ -52,6 +78,7 @@ struct HubHomeView: View {
     var attachments: () -> HubChatAttachmentContext?
     var chatAPI: () -> HubConversationAPI?
     var readTasks: () async throws -> HubWorkspaceTasks
+    var appearanceChanged: (HubChatPreferences.Appearance) -> Void
 
     private enum Panel {
         case history
@@ -115,8 +142,8 @@ struct HubHomeView: View {
     @State private var plannerEditor: PlannerEdit?
     @FocusState private var composerFocused: Bool
     @FocusState private var todoFocused: Bool
-    private let card = Color(red: 0.085, green: 0.105, blue: 0.165)
-    private let accent = Color(red: 0.75, green: 0.80, blue: 1.0)
+    private let card = HubWorkspacePalette.panel
+    private let accent = HubWorkspacePalette.accent
 
     private enum PlannerTab: String, CaseIterable {
         case agenda = "Agenda"
@@ -148,10 +175,10 @@ struct HubHomeView: View {
                     .id(selectedChat.request.choice.sessionId)
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .tint(accent)
         .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(chatPreferences.appearance.colorScheme)
         .sheet(isPresented: $knowledgeOpen, onDismiss: clearKnowledgeSelection) { knowledgeScreen }
         .sheet(isPresented: $tasksOpen) {
             if let api = chatAPI() { HubTasksView(load: readTasks, api: api, openChat: showChat) }
@@ -169,7 +196,7 @@ struct HubHomeView: View {
                 }
             }
             .padding(18)
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
             .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
             .sheet(item: $plannerEditor, content: plannerEditorView)
         }
@@ -185,7 +212,10 @@ struct HubHomeView: View {
         }) {
             let api = chatAPI()
             HubWorkspaceSettingsView(api: api, preferencesChanged: {
-                if let api, api === chatAPI() { chatPreferences = $0 }
+                if let api, api === chatAPI() {
+                    chatPreferences = $0
+                    appearanceChanged($0.appearance)
+                }
             }) {
                 openPhoneOptions = true
                 settingsOpen = false
@@ -223,6 +253,7 @@ struct HubHomeView: View {
             guard model.connection == .connected, let api = chatAPI(),
                   let value = try? await api.chatPreferences(), !Task.isCancelled else { return }
             chatPreferences = value
+            appearanceChanged(value.appearance)
         }
         .onChange(of: model.openNativeChat) { request in
             if let request { showChat(request); model.openNativeChat = nil }
@@ -386,7 +417,7 @@ struct HubHomeView: View {
     }
 
     private func knowledgeStat(_ value: Int, label: String) -> some View {
-        (Text(value, format: .number).fontWeight(.semibold) + Text(" \(label)").foregroundColor(Color(red: 0.66, green: 0.70, blue: 0.80)))
+        (Text(value, format: .number).fontWeight(.semibold) + Text(" \(label)").foregroundColor(HubWorkspacePalette.muted))
             .accessibilityElement(children: .combine)
     }
 
@@ -532,7 +563,7 @@ struct HubHomeView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 72)
             .background(card, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
         }
         .buttonStyle(.plain)
     }
@@ -905,10 +936,9 @@ struct HubHomeView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .tint(accent)
         .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .interactiveDismissDisabled(noteSaving || noteEditing)
         .sheet(isPresented: $knowledgeDomainsOpen) {
             if let api = chatAPI() {
@@ -1127,7 +1157,7 @@ struct HubHomeView: View {
             .buttonStyle(.plain)
             .padding(5)
             .background(card, in: RoundedRectangle(cornerRadius: 25))
-            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(.white.opacity(0.09)))
+            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(HubWorkspacePalette.border.opacity(0.09)))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -1168,7 +1198,7 @@ struct HubHomeView: View {
                     } label: {
                         Text(tab.rawValue)
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(plannerTab == tab ? accent : Color(red: 0.66, green: 0.70, blue: 0.80))
+                            .foregroundStyle(plannerTab == tab ? accent : HubWorkspacePalette.muted)
                             .frame(minHeight: 44)
                             .padding(.horizontal, 2)
                             .overlay(alignment: .bottom) {
@@ -1181,7 +1211,7 @@ struct HubHomeView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .background(alignment: .bottom) { Rectangle().fill(.white.opacity(0.12)).frame(height: 1) }
+            .background(alignment: .bottom) { Rectangle().fill(HubWorkspacePalette.border.opacity(0.12)).frame(height: 1) }
             if plannerTab == .agenda {
                 HStack {
                     Button {
@@ -1263,7 +1293,7 @@ struct HubHomeView: View {
     private func todoList(_ planner: HubHomePlanner) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Your list").font(.footnote).foregroundStyle(Color(red: 0.66, green: 0.70, blue: 0.80))
+                Text("Your list").font(.footnote).foregroundStyle(HubWorkspacePalette.muted)
                 Spacer()
                 Menu {
                     Picker("Your list", selection: $todoHorizon) {
@@ -1275,7 +1305,7 @@ struct HubHomeView: View {
                         .font(.footnote.weight(.medium))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
-                        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                        .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                         .frame(minHeight: 44)
                 }
                 .disabled(model.plannerSaving)
@@ -1328,7 +1358,7 @@ struct HubHomeView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 TextField("What needs doing?", text: $todoDraft,
-                          prompt: Text("What needs doing?").foregroundColor(Color(red: 0.66, green: 0.70, blue: 0.80)))
+                          prompt: Text("What needs doing?").foregroundColor(HubWorkspacePalette.muted))
                     .focused($todoFocused)
                     .frame(minHeight: 44)
                     .submitLabel(.done)
@@ -1346,7 +1376,7 @@ struct HubHomeView: View {
             .padding(6)
             .padding(.leading, 6)
             .background(Color(uiColor: Self.backgroundColor), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(HubWorkspacePalette.border.opacity(0.10)))
             .disabled(!canEditPlanner)
         }
     }
@@ -1381,7 +1411,7 @@ struct HubHomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(card, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
     }
 
 }
@@ -1425,7 +1455,6 @@ private struct HubVoiceHistoryView: View {
         .padding(.top, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .task { await load() }
     }
 
@@ -1532,9 +1561,8 @@ private struct HubTasksView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .sheet(item: $taskEditor) { edit in
             if edit.routine {
                 HubRoutineEditorView(api: api, id: edit.taskID, goals: tasks?.goals ?? []) { attempt += 1 }

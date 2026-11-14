@@ -19,6 +19,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var conversationAPI: HubConversationAPI?
     private var sendTask: Task<Void, Never>?
     private var showingHome = true
+    private var workspaceAppearance = HubChatPreferences.Appearance.dark
     private var signingIn = false
     private var firstAppearance = true
     #if DEBUG && targetEnvironment(simulator)
@@ -59,10 +60,32 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var showingPageLoad = false
     deinit { networkMonitor?.cancel(); sendTask?.cancel(); probe?.cancel(); pageDeadline?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) } }
 
-    override var preferredStatusBarStyle: UIStatusBarStyle { showingHome ? .lightContent : .default }
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        guard showingHome else { return .default }
+        switch workspaceAppearance {
+        case .dark: return .lightContent
+        case .light: return .darkContent
+        case .system: return traitCollection.userInterfaceStyle == .dark ? .lightContent : .darkContent
+        }
+    }
+
+    private func applyWorkspaceAppearance(_ appearance: HubChatPreferences.Appearance) {
+        workspaceAppearance = appearance
+        guard showingHome else { return }
+        let style: UIUserInterfaceStyle
+        switch appearance {
+        case .dark: style = .dark
+        case .light: style = .light
+        case .system: style = .unspecified
+        }
+        overrideUserInterfaceStyle = style
+        setNeedsStatusBarAppearanceUpdate()
+        navigationController?.setNeedsStatusBarAppearanceUpdate()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        applyWorkspaceAppearance(workspaceAppearance)
         view.backgroundColor = HubHomeView.backgroundColor
         navigationController?.setNavigationBarHidden(true, animated: false)
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -157,7 +180,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 let tasks = try await api.workspaceTasks()
                 guard generation == self.connectionGeneration else { throw CancellationError() }
                 return tasks
-            })
+            }, appearanceChanged: { [weak self] in self?.applyWorkspaceAppearance($0) })
         let controller = UIHostingController(rootView: screen)
         homeController = controller
         addChild(controller)
@@ -660,6 +683,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func returnHome(refresh: Bool = true) {
         signingIn = false
         showingHome = true
+        applyWorkspaceAppearance(workspaceAppearance)
         view.backgroundColor = HubHomeView.backgroundColor
         navigationController?.setNeedsStatusBarAppearanceUpdate()
         activeNavigation = nil
@@ -681,6 +705,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             _ = homeState.begin(hasServer: server != nil)
         }
         showingHome = false
+        overrideUserInterfaceStyle = .unspecified
         view.backgroundColor = .systemBackground
         navigationController?.setNeedsStatusBarAppearanceUpdate()
         homeController.view.isHidden = true
@@ -773,7 +798,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             }
             self.dismiss(animated: true) { [weak self] in self?.openNotification(destination) }
         }
-        present(UINavigationController(rootViewController: sheet), animated: true) { [weak self, weak sheet] in
+        let voiceNavigation = UINavigationController(rootViewController: sheet)
+        voiceNavigation.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        present(voiceNavigation, animated: true) { [weak self, weak sheet] in
             model.changed = { [weak sheet] in
                 sheet?.refresh()
             }

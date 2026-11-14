@@ -602,26 +602,30 @@ public struct HubBrowserFrame {
 public struct HubChatPreferences {
     public enum Delivery: String, CaseIterable { case queue, steer }
     public enum Transcript: String, CaseIterable { case normal, compact }
+    public enum Appearance: String, CaseIterable { case light, dark, system }
 
     public let fontSize: Int
     public let busyEnter: Delivery
     public let transcript: Transcript
+    public let appearance: Appearance
     public let writable: Bool
     fileprivate let revisions: [String: Int]
 
     public static let defaults = HubChatPreferences(fontSize: 14, busyEnter: .queue, transcript: .compact,
-                                                     writable: false, revisions: [:])
+                                                     appearance: .dark, writable: false, revisions: [:])
 
     public enum Change {
         case fontSize(Int)
         case busyEnter(Delivery)
         case transcript(Transcript)
+        case appearance(Appearance)
 
         fileprivate var field: (namespace: String, key: String, value: Any) {
             switch self {
             case .fontSize(let size): return ("ui-theme", "fontSize", size)
             case .busyEnter(let mode): return ("ui-conversation", "busyEnter", mode.rawValue)
             case .transcript(let mode): return ("ui-chat", "transcriptView", mode.rawValue)
+            case .appearance(let mode): return ("ui-theme", "preference", mode.rawValue)
             }
         }
     }
@@ -2506,7 +2510,8 @@ public final class HubConversationAPI {
               let view = fields["ui-chat"]?["transcriptView"] as? String, let transcript = HubChatPreferences.Transcript(rawValue: view) else {
             throw HubAttachmentError.invalidResponse
         }
-        return HubChatPreferences(fontSize: size, busyEnter: delivery, transcript: transcript,
+        let appearance = (fields["ui-theme"]?["preference"] as? String).flatMap(HubChatPreferences.Appearance.init(rawValue:)) ?? .system
+        return HubChatPreferences(fontSize: size, busyEnter: delivery, transcript: transcript, appearance: appearance,
                                   writable: writable, revisions: revisions)
     }
 

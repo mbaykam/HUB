@@ -55,7 +55,6 @@ struct HubResearchView: View {
         }
         .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy)
-        .preferredColorScheme(.dark)
         .task { await loadCatalog() }
         .onChange(of: draft) { _ in requestID = UUID() }
         .confirmationDialog("Stop research?", isPresented: $confirmStop, titleVisibility: .visible) {

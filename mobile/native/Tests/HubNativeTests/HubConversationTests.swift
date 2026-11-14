@@ -386,14 +386,15 @@ final class HubConversationTests: XCTestCase {
             if request.url?.path == "/api/settings/describe" {
                 XCTAssertTrue(arguments.isEmpty)
                 value = ["writable": true, "namespaces": [
-                    ["ns": "ui-theme", "revision": 7, "value": ["fontSize": 16, "preference": "dark"]],
+                    ["ns": "ui-theme", "revision": 7, "value": ["fontSize": 16, "preference": CatalogFixture.requests.count >= 5 ? "light" : "dark"]],
                     ["ns": "ui-conversation", "revision": 3, "value": ["busyEnter": "steer"]],
                     ["ns": "ui-chat", "revision": 2, "value": ["transcriptView": "normal"]],
                 ]]
             } else {
                 XCTAssertEqual(request.url?.path, "/api/settings/update")
                 XCTAssertEqual(arguments["ns"] as? String, "ui-theme")
-                XCTAssertEqual(arguments["patch"] as? [String: Int], ["fontSize": 16])
+                if CatalogFixture.requests.count == 2 { XCTAssertEqual(arguments["patch"] as? [String: Int], ["fontSize": 16]) }
+                else { XCTAssertEqual(arguments["patch"] as? [String: String], ["preference": "light"]) }
                 XCTAssertEqual(arguments["expectedRevision"] as? Int, 7)
                 value = ["ns": "ui-theme"]
             }
@@ -404,10 +405,14 @@ final class HubConversationTests: XCTestCase {
         let preferences = try await api.chatPreferences()
         XCTAssertEqual(preferences.busyEnter, .steer)
         XCTAssertEqual(preferences.transcript, .normal)
+        XCTAssertEqual(preferences.appearance, .dark)
         let updated = try await api.updateChatPreferences(.fontSize(16), from: preferences)
         XCTAssertEqual(updated.fontSize, 16)
         XCTAssertEqual(CatalogFixture.requests.map { $0.url?.path },
                        ["/api/settings/describe", "/api/settings/update", "/api/settings/describe"])
+        let themed = try await api.updateChatPreferences(.appearance(.light), from: updated)
+        XCTAssertEqual(themed.appearance, .light)
+        XCTAssertEqual(themed.fontSize, updated.fontSize)
     }
 
     func testCreatingAChatUsesTheSelectedWorkspaceAndDoesNotUseItsPath() async throws {

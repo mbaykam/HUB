@@ -52,7 +52,6 @@ struct HubConversationAppsView: View {
         }
         .padding(.top, 12)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .task(id: LoadRequest(appID: selected?.id, attempt: attempt)) {
             do {
                 if let selected {

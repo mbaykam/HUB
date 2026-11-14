@@ -89,9 +89,8 @@ struct HubUsageView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
     }
 
     private func provider<Content: View>(_ title: String, _ provider: HubUsageSnapshot.Provider, @ViewBuilder content: () -> Content) -> some View {

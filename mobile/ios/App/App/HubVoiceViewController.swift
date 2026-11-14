@@ -18,7 +18,7 @@ final class HubVoiceViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Voice conversation"
-        view.backgroundColor = UIColor(red: 0.04, green: 0.055, blue: 0.09, alpha: 1)
+        view.backgroundColor = HubWorkspacePalette.background
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Hide", style: .plain, target: self, action: #selector(hide))
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
             UIAction(title: "Open conversation", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.openConversation() },
@@ -41,7 +41,7 @@ final class HubVoiceViewController: UIViewController {
         status.adjustsFontForContentSizeCategory = true
         status.numberOfLines = 0
         status.textAlignment = .center
-        status.textColor = .white
+        status.textColor = .label
         status.accessibilityTraits = .updatesFrequently
         transcript.isEditable = false
         transcript.backgroundColor = .clear
@@ -61,7 +61,7 @@ final class HubVoiceViewController: UIViewController {
         let actions = UIStackView(arrangedSubviews: [mute, attention])
         actions.distribution = .fillEqually; actions.spacing = 12
         let symbol = UIImageView(image: UIImage(systemName: "waveform.circle.fill"))
-        symbol.contentMode = .scaleAspectFit; symbol.tintColor = UIColor(red: 0.7, green: 0.75, blue: 1, alpha: 1)
+        symbol.contentMode = .scaleAspectFit; symbol.tintColor = .label
         symbol.heightAnchor.constraint(equalToConstant: 96).isActive = true
         symbol.isAccessibilityElement = false
         let stack = UIStackView(arrangedSubviews: [symbol, status, transcript, actions, end])
@@ -165,7 +165,6 @@ private struct HubVoiceCanvasView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .preferredColorScheme(.dark)
         .task(id: Refresh(active: scenePhase == .active, attempt: retry, live: liveUpdates)) {
             guard scenePhase == .active else { return }
             await follow()

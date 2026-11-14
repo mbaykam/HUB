@@ -100,8 +100,8 @@ struct HubLiveChatView: View {
         var id: Self { self }
     }
 
-    private let panel = Color(red: 0.085, green: 0.105, blue: 0.165)
-    private let accent = Color(red: 0.75, green: 0.80, blue: 1)
+    private let panel = HubWorkspacePalette.panel
+    private let accent = HubWorkspacePalette.accent
 
     var body: some View {
         VStack(spacing: 0) {
@@ -236,10 +236,9 @@ struct HubLiveChatView: View {
                                     question.trimmingCharacters(in: .whitespacesAndNewlines) { draft = "" }
                             }, openChat: openChat)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .tint(accent)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
     }
 
     private func openComposerAction(_ action: HubNativeChatRequest.ComposerAction?) {
@@ -1361,7 +1360,7 @@ private struct HubChatCharacterView: View {
         .interactiveDismissDisabled(changing)
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
     }
 
