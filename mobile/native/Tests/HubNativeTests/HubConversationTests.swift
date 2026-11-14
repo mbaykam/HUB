@@ -695,6 +695,28 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(archived, ["chat-one"])
     }
 
+    func testNewWorkspaceFolderUsesTheHostPickerAndRejectsTraversal() async throws {
+        let api = try client()
+        do {
+            _ = try await api.createWorkspaceDirectory(parent: "C:\\Workspace", name: "..\\other")
+            XCTFail("A folder name must be a single path segment")
+        } catch HubAttachmentError.invalidFile {}
+        XCTAssertTrue(CatalogFixture.requests.isEmpty)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/directoryPicker/createDirectory")
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            XCTAssertEqual(payload["args"] as? [String: String], ["path": "C:\\Workspace", "name": "Fixtures"])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID,
+                "result": ["ok": true, "value": "C:\\Workspace\\Fixtures"],
+            ]))
+        }
+        let folder = try await api.createWorkspaceDirectory(parent: "C:\\Workspace", name: " Fixtures ")
+        XCTAssertEqual(folder, "C:\\Workspace\\Fixtures")
+    }
+
     func testChatKeepsAPendingModelThroughThePreviousModelsRequest() throws {
         let decoder = JSONDecoder()
         let start = try decoder.decode(HubChatStreamFrame.Value.self, from: Data(#"""
