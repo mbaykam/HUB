@@ -49,6 +49,22 @@ final class HubConversationTests: XCTestCase {
         XCTAssertNil(graph.neighborhood(of: "missing"))
     }
 
+    func testKnowledgeDomainFocusIncludesSubdomainsButKeepsTheChatArchiveSeparate() throws {
+        let graph = try JSONDecoder().decode(HubHomeKnowledge.self, from: Data(#"""
+        {"nodes":[{"id":"parent-note"},{"id":"child-note"},{"id":"outside"},{"id":"archived","kind":"conversation"}],
+         "domains":[{"id":"parent","title":"Parent","status":"active"},
+                    {"id":"child","title":"Child","status":"active","parentId":"parent"}],
+         "memberships":[{"nodeId":"parent-note","domainId":"parent"},{"nodeId":"child-note","domainId":"child"},
+                        {"nodeId":"archived","domainId":"child"}],
+         "edges":[{"source":"parent-note","target":"child-note"},{"source":"child-note","target":"outside"}]}
+        """#.utf8))
+        let domain = try XCTUnwrap(graph.graphForDomain("parent"))
+        XCTAssertEqual(domain.nodes.map(\.id), ["parent-note", "child-note"])
+        XCTAssertEqual(domain.edges.count, 1)
+        XCTAssertEqual(graph.graphForDomain(HubKnowledgeLayout.archiveID)?.nodes.map(\.id), ["archived"])
+        XCTAssertNil(graph.graphForDomain("missing"))
+    }
+
     func testKnowledgeSkillEditorSendsExplicitCreateNullAndObservedUpdateHash() async throws {
         let api = try client()
         let observedHash = String(repeating: "a", count: 64)

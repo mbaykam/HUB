@@ -1179,6 +1179,7 @@ struct HubKnowledgeGraphView: View {
     var showsControls = true
     var spatial = false
     var focusID: String? = nil
+    var selectDomain: ((String) -> Void)? = nil
     let select: (String) -> Void
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -1362,6 +1363,7 @@ struct HubKnowledgeGraphView: View {
         let zoom = min(4, max(0.5, scale * pinch))
         let translation = CGSize(width: offset.width + drag.width, height: offset.height + drag.height)
         let points = positions(layout.points, zoom: zoom, offset: translation, size: size)
+        let visibleGroups = layout.groups.filter { $0.parentID == nil || zoom >= 1.6 }
         return ZStack(alignment: .bottomTrailing) {
             Canvas { context, _ in
                 var lines = Path()
@@ -1377,14 +1379,13 @@ struct HubKnowledgeGraphView: View {
                     let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
                     context.fill(Path(ellipseIn: dot), with: .color(color(item.hue, id: item.groupID)))
                 }
-                for group in layout.groups where group.parentID == nil || zoom >= 1.6 {
+                for group in visibleGroups {
                     if overview, group.id == HubKnowledgeLayout.unassignedID { continue }
-                    let members = group.members.compactMap { points[$0] }
-                    guard let top = members.map(\.y).min() else { continue }
-                    let x = members.reduce(0) { $0 + $1.x } / CGFloat(members.count)
+                    if selectDomain != nil && canSelectDomain(group.id) { continue }
+                    guard let location = groupLabelPosition(group, points: points) else { continue }
                     var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
                     label.shading = .color(color(group.hue, id: group.id))
-                    context.draw(label, at: CGPoint(x: x, y: top - 19))
+                    context.draw(label, at: location)
                 }
                 if !overview, zoom >= 2.2 {
                     for item in layout.points {
@@ -1401,7 +1402,7 @@ struct HubKnowledgeGraphView: View {
                 })
             .simultaneousGesture(MagnificationGesture().updating($pinch) { value, state, _ in state = value }
                 .onEnded { scale = min(4, max(0.5, scale * $0)) })
-            ForEach(layout.points.filter { focusID != nil || $0.groupID != HubKnowledgeLayout.archiveID || zoom > 1.8 }, id: \.id) { item in
+            ForEach(layout.points.filter { focusID != nil || scope == .archive || $0.groupID != HubKnowledgeLayout.archiveID || zoom > 1.8 }, id: \.id) { item in
                 if let point = points[item.id], CGRect(origin: .zero, size: size).contains(point) {
                     Button { select(item.id) } label: {
                         Color.clear.frame(width: 20, height: 20).contentShape(Rectangle())
@@ -1409,6 +1410,22 @@ struct HubKnowledgeGraphView: View {
                     .buttonStyle(.plain)
                     .position(point)
                     .accessibilityLabel(byID[item.id]?.title ?? "Knowledge record")
+                }
+            }
+            if let selectDomain {
+                ForEach(visibleGroups.filter { canSelectDomain($0.id) }, id: \.id) { group in
+                    if let location = groupLabelPosition(group, points: points), CGRect(origin: .zero, size: size).contains(location) {
+                        Button { selectDomain(group.id) } label: {
+                            Text(group.title).font(.caption.weight(.medium)).lineLimit(1)
+                                .foregroundStyle(color(group.hue, id: group.id))
+                                .padding(.horizontal, 6)
+                                .frame(minHeight: 28)
+                                .background(HubWorkspacePalette.panel, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("hub.knowledge.domain.\(group.id)")
+                        .position(location)
+                    }
                 }
             }
             if showsControls { HStack(spacing: 2) {
@@ -1427,6 +1444,16 @@ struct HubKnowledgeGraphView: View {
         }
         .clipped()
         .accessibilityLabel("Knowledge graph")
+    }
+
+    private func canSelectDomain(_ id: String) -> Bool {
+        id == HubKnowledgeLayout.archiveID || graph.domains?.contains(where: { $0.id == id && $0.status != "merged" }) == true
+    }
+
+    private func groupLabelPosition(_ group: HubKnowledgeLayout.Group, points: [String: CGPoint]) -> CGPoint? {
+        let members = group.members.compactMap { points[$0] }
+        guard let top = members.map(\.y).min() else { return nil }
+        return CGPoint(x: members.reduce(0) { $0 + $1.x } / CGFloat(members.count), y: top - 19)
     }
 
     private struct LayoutRequest: Equatable {

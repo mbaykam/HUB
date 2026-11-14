@@ -112,6 +112,7 @@ struct HubHomeView: View {
     @State private var knowledgeScope = HubKnowledgeGraphView.Scope.all
     @State private var knowledgeSpatial = false
     @State private var knowledgeLocalCenter: String?
+    @State private var knowledgeFocusedDomain: String?
     @State private var knowledgeGraphReset = 0
     @State private var knowledgeTab = KnowledgeTab.graph
     @State private var knowledgeQuery = ""
@@ -197,6 +198,7 @@ struct HubHomeView: View {
         .sheet(isPresented: $knowledgeOpen, onDismiss: {
             clearKnowledgeSelection()
             knowledgeLocalCenter = nil
+            knowledgeFocusedDomain = nil
         }) { knowledgeScreen }
         .sheet(isPresented: $tasksOpen) {
             if let api = chatAPI() { HubTasksView(load: readTasks, api: api, openChat: showChat) }
@@ -302,6 +304,7 @@ struct HubHomeView: View {
                 knowledgeAssetsOpen = false
                 knowledgeConnectionsOpen = false
                 knowledgeLocalCenter = nil
+                knowledgeFocusedDomain = nil
                 knowledgeQuery = ""
                 knowledgeSearchResponse = nil
                 knowledgeRefreshError = false
@@ -1173,6 +1176,7 @@ struct HubHomeView: View {
                         if model.knowledge?.nodes.contains(where: { $0.id == note.id }) == true {
                             Button {
                                 knowledgeLocalCenter = note.id
+                                knowledgeFocusedDomain = nil
                                 knowledgeTab = .graph
                                 clearKnowledgeSelection()
                             } label: { Label("Local graph", systemImage: "point.3.connected.trianglepath.dotted") }
@@ -1242,8 +1246,10 @@ struct HubHomeView: View {
         let query = knowledgeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let api = chatAPI()
         let neighborhood = knowledgeLocalCenter.flatMap { graph.neighborhood(of: $0) }
-        let graphToShow = neighborhood ?? graph
-        let graphScope: HubKnowledgeGraphView.Scope = neighborhood == nil ? knowledgeScope : .all
+        let domainGraph = knowledgeFocusedDomain.flatMap { graph.graphForDomain($0) }
+        let graphToShow = neighborhood ?? domainGraph ?? graph
+        let graphScope: HubKnowledgeGraphView.Scope = knowledgeFocusedDomain == HubKnowledgeLayout.archiveID && domainGraph != nil
+            ? .archive : neighborhood != nil || domainGraph != nil ? .all : knowledgeScope
         let search = KnowledgeSearch(query: query, scope: knowledgeScope, retry: knowledgeSearchRetry, apiID: api.map { ObjectIdentifier($0) })
         let response = knowledgeSearchResponse.flatMap { $0.request == search ? $0 : nil }
         let records = (query.isEmpty ? (knowledgeTab == .graph ? graphToShow.nodes : graph.nodes) : response?.nodes ?? [])
@@ -1274,15 +1280,35 @@ struct HubHomeView: View {
                         }
                         if neighborhood.edges.isEmpty { Text("This record has no connections yet.").font(.footnote).foregroundStyle(.secondary) }
                     }
+                    if let domain = knowledgeFocusedDomain, let domainGraph {
+                        HStack {
+                            Button { knowledgeFocusedDomain = nil } label: { Label("All knowledge", systemImage: "chevron.left") }
+                                .accessibilityIdentifier("hub.knowledge.leave-domain")
+                            Spacer()
+                            Text(domain == HubKnowledgeLayout.archiveID ? "Chat archive" : graph.domains?.first { $0.id == domain }?.title ?? "Domain")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        if domainGraph.nodes.isEmpty { Text("No records in this domain.").font(.footnote).foregroundStyle(.secondary) }
+                    }
                     HubKnowledgeGraphView(graph: graphToShow, height: 330, scope: graphScope, spatial: knowledgeSpatial,
-                                          focusID: neighborhood == nil ? nil : knowledgeLocalCenter, select: selectKnowledgeNode)
-                        .id("\(graphScope.rawValue)/\(knowledgeSpatial)/\(knowledgeLocalCenter ?? "")/\(knowledgeGraphReset)")
+                                          focusID: neighborhood == nil ? nil : knowledgeLocalCenter,
+                                          selectDomain: neighborhood == nil && domainGraph == nil ? focusKnowledgeDomain : nil,
+                                          select: selectKnowledgeNode)
+                        .id("\(graphScope.rawValue)/\(knowledgeSpatial)/\(knowledgeLocalCenter ?? "")/\(knowledgeFocusedDomain ?? "")/\(knowledgeGraphReset)")
                         .overlay(alignment: .topTrailing) {
                             Menu {
                                 Button("2D") { knowledgeSpatial = false }
                                 Button("3D") { knowledgeSpatial = true }
                                 Button("Reset view") { knowledgeGraphReset += 1 }
                                 Button("Refresh graph") { Task { await refreshKnowledgeGraph() } }
+                                if neighborhood == nil, domainGraph == nil {
+                                    Menu("Focus domain") {
+                                        ForEach((graph.domains ?? []).filter { $0.status != "merged" }) { domain in
+                                            Button(domain.title) { focusKnowledgeDomain(domain.id) }
+                                        }
+                                        Button("Chat archive") { focusKnowledgeDomain(HubKnowledgeLayout.archiveID) }
+                                    }
+                                }
                             } label: {
                                 Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
                                     .frame(minWidth: 44, minHeight: 44)
@@ -1318,6 +1344,11 @@ struct HubHomeView: View {
             }
         }
         .task(id: search) { await searchKnowledge(search, api: api) }
+    }
+
+    private func focusKnowledgeDomain(_ id: String) {
+        knowledgeLocalCenter = nil
+        knowledgeFocusedDomain = id
     }
 
     private enum KnowledgeTab { case graph, records }

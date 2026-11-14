@@ -104,6 +104,26 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
             if edge.source == id { members.insert(edge.target) }
             if edge.target == id { members.insert(edge.source) }
         }
+        return subgraph(members: members)
+    }
+
+    public func graphForDomain(_ id: String) -> HubHomeKnowledge? {
+        if id == HubKnowledgeLayout.archiveID {
+            return subgraph(members: Set(nodes.filter { $0.kind == "conversation" }.map(\.id)))
+        }
+        guard let domains, domains.contains(where: { $0.id == id && $0.status != "merged" }) else { return nil }
+        let children = Dictionary(grouping: domains.filter { $0.status != "merged" }, by: \.parentId)
+        var included: Set<String> = [id]
+        var frontier = [id]
+        while let parent = frontier.popLast() {
+            for child in children[parent] ?? [] where included.insert(child.id).inserted { frontier.append(child.id) }
+        }
+        let notes = Set(nodes.filter { $0.kind != "conversation" }.map(\.id))
+        let members = Set((memberships ?? []).filter { included.contains($0.domainId) }.map(\.nodeId)).intersection(notes)
+        return subgraph(members: members)
+    }
+
+    private func subgraph(members: Set<String>) -> HubHomeKnowledge {
         let localNodes = nodes.filter { members.contains($0.id) }
         let known = Set(localNodes.map(\.id))
         return HubHomeKnowledge(
