@@ -617,7 +617,7 @@ private struct HubKnowledgeProfileReviewView: View {
             error = nil
             needsRefresh = false
         } catch {
-            error = "Could not load reflections and profile suggestions."
+            self.error = "Could not load reflections and profile suggestions."
             needsRefresh = true
         }
     }
@@ -630,7 +630,7 @@ private struct HubKnowledgeProfileReviewView: View {
         } catch {
             busy = false
             needsRefresh = true
-            error = "Could not confirm the profile change. Refresh to check what HUB saved."
+            self.error = "Could not confirm the profile change. Refresh to check what HUB saved."
             return
         }
         busy = false

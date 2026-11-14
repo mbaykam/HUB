@@ -1126,7 +1126,7 @@ private struct HubKnowledgeCurationReviewView: View {
             review = nil
             error = nil
             do { review = try await api.knowledgeCurationReview(entry) }
-            catch { if !Task.isCancelled { error = "Could not load this review. It may have changed." } }
+            catch { if !Task.isCancelled { self.error = "Could not load this review. It may have changed." } }
         }
     }
 
@@ -1149,7 +1149,7 @@ private struct HubKnowledgeCurationReviewView: View {
             dismiss()
         } catch {
             self.review = nil
-            error = "Could not confirm the decision. Reload the review before trying again."
+            self.error = "Could not confirm the decision. Reload the review before trying again."
         }
     }
 }
