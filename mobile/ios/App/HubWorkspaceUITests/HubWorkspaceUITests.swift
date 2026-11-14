@@ -112,8 +112,8 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(tools.waitForExistence(timeout: 20))
         tools.tap()
         app.buttons["Settings"].tap()
-        let general = app.buttons["General"]
-        XCTAssertTrue(general.waitForExistence(timeout: 5))
+        let general = app.descendants(matching: .any)["hub.settings.general"].firstMatch
+        XCTAssertTrue(general.waitForExistence(timeout: 8))
         general.tap()
 
         XCTAssertTrue(app.staticTexts["Appearance"].waitForExistence(timeout: 5))

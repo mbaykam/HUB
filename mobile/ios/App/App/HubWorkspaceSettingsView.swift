@@ -15,6 +15,7 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubGeneralSettingsView(api: api, changed: preferencesChanged)) {
                         Label("General", systemImage: "slider.horizontal.3")
                     }
+                    .accessibilityIdentifier("hub.settings.general")
                     NavigationLink(destination: HubCharactersSettingsView(api: api)) {
                         Label("Characters", systemImage: "person.2")
                     }
