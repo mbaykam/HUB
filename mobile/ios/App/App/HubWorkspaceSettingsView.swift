@@ -44,6 +44,7 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubUsageView(api: api)) {
                         Label("Usage limits", systemImage: "chart.bar.xaxis")
                     }
+                    .accessibilityIdentifier("hub.settings.usage")
                 } else {
                     Text("Connect to HUB to view its settings.").foregroundStyle(.secondary)
                 }

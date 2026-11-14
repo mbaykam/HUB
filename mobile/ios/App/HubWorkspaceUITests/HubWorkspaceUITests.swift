@@ -157,6 +157,21 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(model.waitForExistence(timeout: 5))
         XCTAssertEqual(app.webViews.count, 0)
         capture("Voice personality")
+
+        app.navigationBars["Edit personality"].buttons["Cancel"].tap()
+        app.navigationBars["Voice personalities"].buttons["Settings"].tap()
+        let usage = app.descendants(matching: .any)["hub.settings.usage"].firstMatch
+        if !usage.isHittable { app.swipeUp() }
+        XCTAssertTrue(usage.waitForExistence(timeout: 5))
+        usage.tap()
+        let remaining = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "42%", "42%")).firstMatch
+        XCTAssertTrue(remaining.waitForExistence(timeout: 5))
+        let credit = app.staticTexts["Account credits"].firstMatch
+        if !credit.isHittable { app.swipeUp() }
+        XCTAssertTrue(credit.exists)
+        XCTAssertEqual(app.webViews.count, 0)
+        capture("Usage limits")
     }
 
     @MainActor

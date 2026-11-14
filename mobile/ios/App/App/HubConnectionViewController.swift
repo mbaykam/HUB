@@ -1007,6 +1007,16 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
     }
 
     private func responseData(_ url: URL) -> Data? {
+        if request.httpMethod == "GET", url.path == "/minke/api/usage" {
+            return Data(#"""
+            {"updatedAt":"2026-11-14T17:45:00.000Z",
+             "codex":{"state":"ready","rateLimits":[{"id":"codex","windows":[{"remainingPercent":42,"windowSeconds":18000}]}]},
+             "openRouter":{"state":"ready","usageDaily":1.25,"limit":{"amount":9,"remaining":6,"reset":"weekly"},
+                           "account":{"totalCredits":20,"totalUsage":4}},
+             "unlid":{"state":"not-configured"},
+             "soniox":{"state":"not-configured"}}
+            """#.utf8)
+        }
         if request.httpMethod == "GET", url.path == "/api/hub/voice/profiles" {
             return Data(#"""
             {"revision":3,"selectedId":"216cb7b2-8e8f-48d5-86f9-cf92a29aca14","profiles":[
