@@ -23,8 +23,14 @@ final class HubHomeModel: ObservableObject {
 }
 
 struct HubNativeChatRequest: Equatable {
+    enum ComposerAction: Equatable {
+        case commands, files, photos, characters, research, researchTasks, instructions
+    }
+
     let id = UUID()
     let choice: HubConversationChoice
+    var initialDraft = ""
+    var composerAction: ComposerAction?
 }
 
 @MainActor
@@ -131,8 +137,12 @@ struct HubHomeView: View {
                 .accessibilityHidden(selectedChat != nil)
             if let selectedChat {
                 HubLiveChatView(chat: selectedChat.request.choice, api: selectedChat.api,
-                                back: { self.selectedChat = nil }, voice: voice, openChat: showChat, attachments: attachments,
-                                requestID: selectedChat.request.id, preferences: chatPreferences) { name in
+                                back: { unsent in
+                                    if selectedChat.request.composerAction != nil, model.draft.isEmpty { model.draft = unsent }
+                                    self.selectedChat = nil
+                                }, voice: voice, openChat: showChat, attachments: attachments,
+                                requestID: selectedChat.request.id, initialDraft: selectedChat.request.initialDraft,
+                                composerAction: selectedChat.request.composerAction, preferences: chatPreferences) { name in
                     if chatAPI() === selectedChat.api { updateChatTitle(selectedChat.request.choice.sessionId, name: name) }
                 }
                     .id(selectedChat.request.choice.sessionId)
@@ -767,14 +777,18 @@ struct HubHomeView: View {
         }
     }
 
-    private func newChat(workspaceID: String? = nil) async {
-        guard !creatingChat, let api = chatAPI() else { return }
+    private func newChat(workspaceID: String? = nil, action: HubNativeChatRequest.ComposerAction? = nil) async {
+        guard selectedChat == nil, !model.sending, !creatingChat, let api = chatAPI() else { return }
         creatingChat = true
+        let initialDraft = action == nil ? "" : model.draft
         defer { creatingChat = false }
         do {
             let id = try await api.createChat(workspaceID: workspaceID)
             guard chatAPI() === api else { return }
-            showChat(HubConversationChoice(sessionId: id, title: "New chat", updatedAt: 0))
+            guard selectedChat == nil else { return }
+            if action != nil, model.draft == initialDraft { model.draft = "" }
+            showChat(HubNativeChatRequest(choice: HubConversationChoice(sessionId: id, title: "New chat", updatedAt: 0),
+                                          initialDraft: initialDraft, composerAction: action))
         } catch {
             if chatAPI() === api {
                 if workspaceID != nil { workspaceError = "Could not open a chat in this workspace." }
@@ -1081,12 +1095,21 @@ struct HubHomeView: View {
                     .accessibilityIdentifier("hub.home.draft")
                     .submitLabel(.send)
                     .onSubmit { if canSend { dismissKeyboard(then: send) } }
-                    .disabled(model.sending)
+                    .disabled(model.sending || creatingChat)
                     .padding(.leading, 12)
-                Button { dismissKeyboard(then: options) } label: {
+                Menu {
+                    startChatAction("Commands & skills", icon: "terminal", action: .commands)
+                    startChatAction("Files", icon: "paperclip", action: .files)
+                    startChatAction("Photos", icon: "photo", action: .photos)
+                    startChatAction("Choose character", icon: "person.crop.circle", action: .characters)
+                    startChatAction("Research…", icon: "magnifyingglass", action: .research)
+                    startChatAction("Research tasks", icon: "list.bullet.rectangle", action: .researchTasks)
+                    startChatAction("Instructions", icon: "doc.text", action: .instructions)
+                } label: {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("More actions")
+                .disabled(model.connection != .connected || model.sending || creatingChat || model.uncertainChat != nil)
                 Button { dismissKeyboard(then: voice) } label: {
                     Image(systemName: "waveform").frame(width: 44, height: 44)
                 }
@@ -1110,8 +1133,15 @@ struct HubHomeView: View {
         .padding(.vertical, 8)
     }
 
+    private func startChatAction(_ title: String, icon: String, action: HubNativeChatRequest.ComposerAction) -> some View {
+        Button {
+            hideKeyboard()
+            Task { await newChat(action: action) }
+        } label: { Label(title, systemImage: icon) }
+    }
+
     private var canSend: Bool {
-        model.connection == .connected && !model.sending && model.uncertainChat == nil
+        model.connection == .connected && !model.sending && !creatingChat && model.uncertainChat == nil
             && !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 

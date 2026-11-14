@@ -15,11 +15,13 @@ struct HubChatAttachmentContext {
 struct HubLiveChatView: View {
     let chat: HubConversationChoice
     let api: HubConversationAPI
-    let back: () -> Void
+    let back: (String) -> Void
     let voice: () -> Void
     let openChat: (HubConversationChoice) -> Void
     let attachments: () -> HubChatAttachmentContext?
     let requestID: UUID
+    let initialDraft: String
+    let composerAction: HubNativeChatRequest.ComposerAction?
     let preferences: HubChatPreferences
     let renamed: (String) -> Void
     @Environment(\.scenePhase) private var scenePhase
@@ -27,6 +29,7 @@ struct HubLiveChatView: View {
     @State private var snapshot: HubChatSnapshot?
     @State private var screenshots: [HubChatScreenshot] = []
     @State private var draft = ""
+    @State private var openedInitialAction = false
     @State private var connectionLost = false
     @State private var attempt = 0
     @State private var sending = false
@@ -133,7 +136,14 @@ struct HubLiveChatView: View {
             if historyRequest != 0 { await loadEarlierMessages() }
         }
         .task(id: snapshot?.latestScreenshotSequence) { await loadScreenshots() }
-        .task(id: requestID) { await loadFileDrafts() }
+        .task(id: requestID) {
+            if !openedInitialAction {
+                openedInitialAction = true
+                draft = initialDraft
+                openComposerAction(composerAction)
+            }
+            await loadFileDrafts()
+        }
         .fileImporter(isPresented: $filePickerOpen, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls): Task { await stageFiles(urls) }
@@ -232,10 +242,23 @@ struct HubLiveChatView: View {
         .preferredColorScheme(.dark)
     }
 
+    private func openComposerAction(_ action: HubNativeChatRequest.ComposerAction?) {
+        switch action {
+        case .commands: commandsOpen = true
+        case .files: filePickerOpen = true
+        case .photos: photoPickerOpen = true
+        case .characters: characterPickerOpen = true
+        case .research: researchMode = .new
+        case .researchTasks: researchMode = .jobs
+        case .instructions: instructionsOpen = true
+        case nil: break
+        }
+    }
+
     private var chatHeader: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Button { composerFocused = false; back() } label: {
+                Button { composerFocused = false; back(deliveryUncertain || sending ? "" : draft) } label: {
                     Label("Home", systemImage: "chevron.left").frame(minHeight: 44)
                 }
                 VStack(alignment: .leading, spacing: 3) {
