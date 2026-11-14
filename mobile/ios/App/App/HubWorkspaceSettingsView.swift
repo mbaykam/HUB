@@ -335,11 +335,14 @@ private struct HubKnowledgeSettingsView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var showModels = false
+    @State private var confirmModelCheck = false
+    @State private var modelCheckPassed = false
 
     var body: some View {
         Form {
             if let error { Text(error).foregroundStyle(.secondary) }
             if busy { ProgressView("Updating Knowledge AI…") }
+            if modelCheckPassed { Label("Model connection verified", systemImage: "checkmark.circle") }
             if let status, let draft {
                 form(status, draft: draft)
             } else if !busy {
@@ -357,6 +360,12 @@ private struct HubKnowledgeSettingsView: View {
         }
         .task { await load() }
         .sheet(isPresented: $showModels) { modelPicker }
+        .alert("Test Knowledge AI model?", isPresented: $confirmModelCheck) {
+            Button("Test model") { Task { await checkModel() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("HUB may send a short request to your saved model using the Knowledge AI budget.")
+        }
     }
 
     private func form(_ status: HubKnowledgeStatus, draft: HubKnowledgeSettings) -> some View {
@@ -381,6 +390,9 @@ private struct HubKnowledgeSettingsView: View {
                         ForEach(efforts) { Text($0.name).tag($0.id) }
                     }
                 }
+                Button("Test model connection") { confirmModelCheck = true }
+                    .disabled(draft.provider != status.settings.provider || draft.model != status.settings.model ||
+                              draft.reasoningEffort != status.settings.reasoningEffort)
                 Picker("When to run", selection: setting(\.mode, fallback: draft.mode)) {
                     Text("Automatically").tag("automatic")
                     Text("Review proposals first").tag("review")
@@ -440,6 +452,17 @@ private struct HubKnowledgeSettingsView: View {
                 number("Input price per 1M tokens", key: \.inputPrice, fallback: draft.inputPrice)
                 number("Output price per 1M tokens", key: \.outputPrice, fallback: draft.outputPrice)
                 NavigationLink("Knowledge AI Activity", destination: HubKnowledgeActivityView(api: api))
+                if let recalls = status.recalls {
+                    NavigationLink("Notes recalled in chats", destination: HubKnowledgeRecallsView(api: api, records: recalls))
+                }
+                DisclosureGroup("Storage and search") {
+                    Text("\(status.notes) saved notes")
+                    Text("Search index: \(status.embedding)")
+                    if let ready = status.historyArchivesReady { Text(ready ? "Conversation archive ready" : "Conversation archive is preparing") }
+                    if let outcomes = status.outcomes {
+                        Text("\(outcomes["organized"] ?? 0) organized · \(outcomes["written"] ?? 0) updated · \(outcomes["skipped"] ?? 0) skipped · \(outcomes["archive-only"] ?? 0) archived")
+                    }
+                }
             }
         }
     }
@@ -522,6 +545,7 @@ private struct HubKnowledgeSettingsView: View {
             return
         }
         busy = true
+        modelCheckPassed = false
         defer { busy = false }
         do {
             let saved = try await api.saveKnowledgeSettings(value)
@@ -531,6 +555,60 @@ private struct HubKnowledgeSettingsView: View {
         } catch {
             self.error = "Could not confirm the save. Your settings draft is retained."
         }
+    }
+
+    private func checkModel() async {
+        guard !busy, let saved = status?.settings else { return }
+        busy = true
+        modelCheckPassed = false
+        defer { busy = false }
+        do {
+            try await api.checkKnowledgeModel(provider: saved.provider, model: saved.model, effort: saved.reasoningEffort)
+            status = (try? await api.knowledgeStatus()) ?? status
+            error = nil
+            modelCheckPassed = true
+        } catch {
+            self.error = "Could not verify the saved model connection. Check Knowledge AI activity and budget."
+        }
+    }
+}
+
+@MainActor
+private struct HubKnowledgeRecallsView: View {
+    let api: HubConversationAPI
+    let records: [HubKnowledgeStatus.Recall]
+
+    var body: some View {
+        List {
+            if records.isEmpty { Text("No recall activity has been recorded.").foregroundStyle(.secondary) }
+            ForEach(records.indices, id: \.self) { index in
+                let record = records[index]
+                Section {
+                    if record.status == "used" { Text("\(record.notes.count) notes recalled") }
+                    else if record.status == "empty" { Text("No related records found") }
+                    else { Text("Recall was unavailable for this reply") }
+                    if let context = record.context {
+                        Text("Estimated context · \(context.estimatedTokens) tokens · \(context.bytes) bytes").font(.footnote)
+                    }
+                    if let coverage = record.coverage, !coverage.complete {
+                        Text("\(coverage.omitted) sources were omitted from the search index.").font(.footnote)
+                    }
+                    ForEach(record.notes.indices, id: \.self) { noteIndex in
+                        let note = record.notes[noteIndex]
+                        NavigationLink(destination: HubKnowledgeProfileSourceView(api: api, id: note.id)) {
+                            VStack(alignment: .leading) {
+                                Text(note.title)
+                                Text(note.reason.replacingOccurrences(of: "-", with: " ").capitalized)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text(record.query).textCase(nil)
+                }
+            }
+        }
+        .navigationTitle("Recalled notes")
     }
 }
 

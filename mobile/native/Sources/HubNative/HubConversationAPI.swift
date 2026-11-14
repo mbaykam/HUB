@@ -2181,6 +2181,21 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
     }
 
+    public func checkKnowledgeModel(provider: String, model: String, effort: String) async throws {
+        struct Receipt: Decodable {
+            let ok: Bool
+            let provider: String
+            let model: String
+            let reasoningEffort: String
+        }
+        let body = try JSONEncoder().encode(["action": "model-check"])
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, operationTimeout: 60)
+        let receipt = try JSONDecoder().decode(Receipt.self, from: data)
+        guard receipt.ok, receipt.provider == provider, receipt.model == model, receipt.reasoningEffort == effort else {
+            throw HubAttachmentError.invalidResponse
+        }
+    }
+
     public func knowledgeCurationReview(_ entry: HubKnowledgeActivity.Entry) async throws -> HubKnowledgeCurationReview {
         guard entry.status == "review", !entry.id.isEmpty else { throw HubAttachmentError.invalidResponse }
         let review: HubKnowledgeCurationReview = try await readKnowledge("review", arguments: ["id": entry.id])

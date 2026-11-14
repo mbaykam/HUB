@@ -271,6 +271,27 @@ public struct HubKnowledgeSettings: Codable, Equatable {
 }
 
 public struct HubKnowledgeStatus: Decodable {
+    public struct Recall: Decodable {
+        public struct Note: Decodable {
+            public let id: String
+            public let title: String
+            public let reason: String
+        }
+        public struct Context: Decodable {
+            public let bytes: Int
+            public let estimatedTokens: Int
+        }
+        public struct Coverage: Decodable {
+            public let omitted: Int
+            public let complete: Bool
+        }
+        public let at: Double
+        public let query: String
+        public let status: String
+        public let notes: [Note]
+        public let context: Context?
+        public let coverage: Coverage?
+    }
     public let enabled: Bool
     public let status: String
     public let settings: HubKnowledgeSettings
@@ -279,6 +300,9 @@ public struct HubKnowledgeStatus: Decodable {
     public let counts: [String: Int]
     public let notes: Int
     public let embedding: String
+    public let historyArchivesReady: Bool?
+    public let recalls: [Recall]?
+    public let outcomes: [String: Int]?
 }
 
 public struct HubTelegramStatus: Decodable {

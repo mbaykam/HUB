@@ -90,6 +90,23 @@ final class HubConversationTests: XCTestCase {
         try await api.decideKnowledgeCuration(entry, review: preview, approve: true)
     }
 
+    func testKnowledgeModelCheckUsesTheSavedRouteAndRejectsAnUnexpectedReceipt() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: String])
+            XCTAssertEqual(command, ["action": "model-check"])
+            return (200, Data(#"{"ok":true,"provider":"fixture","model":"saved","reasoningEffort":"low"}"#.utf8))
+        }
+        try await api.checkKnowledgeModel(provider: "fixture", model: "saved", effort: "low")
+        do {
+            try await api.checkKnowledgeModel(provider: "fixture", model: "different", effort: "low")
+            XCTFail("A receipt for a different route cannot verify the saved model")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
     func testQueueOnlyDisplaysSelectedSessionAndNeverEditsAttachmentsAsText() async throws {
         let baseline = Data(#"""
         {"type":"item","value":{"type":"baseline","value":{"queues":{
