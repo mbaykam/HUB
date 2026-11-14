@@ -1181,6 +1181,7 @@ struct HubHomeView: View {
                     if let center = knowledgeLocalCenter, let neighborhood {
                         HStack {
                             Button { knowledgeLocalCenter = nil } label: { Label("All knowledge", systemImage: "chevron.left") }
+                                .accessibilityIdentifier("hub.knowledge.leave-local-graph")
                             Spacer()
                             Text(neighborhood.nodes.first { $0.id == center }?.title ?? "Local graph")
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)

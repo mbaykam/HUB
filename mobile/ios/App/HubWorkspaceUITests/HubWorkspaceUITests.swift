@@ -95,7 +95,7 @@ final class HubWorkspaceUITests: XCTestCase {
         app.navigationBars["Original source"].buttons["Done"].tap()
         if !app.buttons["Local graph"].isHittable { app.scrollViews.firstMatch.swipeDown() }
         app.buttons["Local graph"].tap()
-        let allKnowledge = app.buttons["All knowledge"]
+        let allKnowledge = app.buttons["hub.knowledge.leave-local-graph"]
         XCTAssertTrue(allKnowledge.waitForExistence(timeout: 5))
         capture("Knowledge local graph")
         allKnowledge.tap()
