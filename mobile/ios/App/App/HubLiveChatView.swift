@@ -28,6 +28,8 @@ struct HubLiveChatView: View {
     @FocusState private var composerFocused: Bool
     @State private var snapshot: HubChatSnapshot?
     @State private var screenshots: [HubChatScreenshot] = []
+    @State private var screenshotListFailed = false
+    @State private var screenshotRetry = 0
     @State private var draft = ""
     @State private var openedInitialAction = false
     @State private var connectionLost = false
@@ -99,6 +101,11 @@ struct HubLiveChatView: View {
         let priorEnd: Int?
     }
 
+    private struct ScreenshotLoad: Equatable {
+        let sequence: Int?
+        let retry: Int
+    }
+
     private enum ChatTab: String { case chat = "Chat", trajectory = "Trajectory" }
 
     private enum ResearchMode: String, Identifiable {
@@ -144,7 +151,9 @@ struct HubLiveChatView: View {
         .task(id: historyRequest) {
             if historyRequest != 0 { await loadEarlierMessages() }
         }
-        .task(id: snapshot?.latestScreenshotSequence) { await loadScreenshots() }
+        .task(id: ScreenshotLoad(sequence: snapshot?.latestScreenshotSequence, retry: screenshotRetry)) {
+            await loadScreenshots()
+        }
         .task(id: requestID) {
             if !openedInitialAction {
                 openedInitialAction = true
@@ -536,6 +545,9 @@ struct HubLiveChatView: View {
                                 !messages.contains { $0.role == "assistant" && $0.turn == screenshot.turn }
                             }) { screenshot in
                                 screenshotImage(screenshot)
+                            }
+                            if screenshotListFailed && snapshot.latestScreenshotSequence != nil {
+                                Button("Retry loading screenshots") { screenshotRetry += 1 }.font(.footnote)
                             }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
@@ -981,8 +993,12 @@ struct HubLiveChatView: View {
     }
 
     private func loadScreenshots() async {
-        if let result = try? await api.chatScreenshots(sessionID: chat.sessionId), !Task.isCancelled {
-            screenshots = result
+        screenshotListFailed = false
+        do {
+            let result = try await api.chatScreenshots(sessionID: chat.sessionId)
+            if !Task.isCancelled { screenshots = result }
+        } catch {
+            if !Task.isCancelled { screenshotListFailed = true }
         }
     }
 
