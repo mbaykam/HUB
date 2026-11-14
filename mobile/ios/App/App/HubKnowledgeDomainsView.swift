@@ -20,6 +20,7 @@ struct HubKnowledgeDomainsView: View {
     @State private var preview: HubKnowledgeDomains.Preview?
     @State private var confirmation: Confirmation?
     @State private var domainLimit: Int?
+    @State private var organizingRecords = false
 
     private enum Confirmation: Identifiable {
         case merge(String, String, String)
@@ -125,6 +126,9 @@ struct HubKnowledgeDomainsView: View {
             Alert(title: Text(action.title), message: Text(action.detail),
                   primaryButton: .default(Text("Confirm")) { Task { await apply(action) } }, secondaryButton: .cancel())
         }
+        .sheet(isPresented: $organizingRecords) {
+            if let registry { HubKnowledgeOrganizeView(api: api, records: registry.nodes) }
+        }
         .task(id: attempt) { await load() }
     }
 
@@ -136,6 +140,7 @@ struct HubKnowledgeDomainsView: View {
         Section {
             Button { draft = Draft() } label: { Label("New domain", systemImage: "plus") }
                 .disabled(stale)
+            Button("Organize selected records") { organizingRecords = true }.disabled(stale || registry.nodes.isEmpty)
             if available.isEmpty { Text("No domains yet").foregroundStyle(.secondary) }
             ForEach(available) { domain in
                 let notes = registry.memberships.filter { $0.domainId == domain.id }.count
@@ -414,6 +419,149 @@ struct HubKnowledgeDomainsView: View {
         } catch {
             stale = true
             notice = "Could not confirm the domain change. Reload to check what HUB saved."
+        }
+    }
+}
+
+@MainActor
+private struct HubKnowledgeOrganizeView: View {
+    let api: HubConversationAPI
+    let records: [HubKnowledgeDomains.Note]
+    @Environment(\.dismiss) private var dismiss
+    @State private var filter = ""
+    @State private var selected: Set<String> = []
+    @State private var windows: [String: HubKnowledgeDomains.SourceExcerpt] = [:]
+    @State private var source: HubKnowledgeDomains.Note?
+    @State private var excerpt: HubKnowledgeDomains.SourceExcerpt?
+    @State private var offsets = [0]
+    @State private var busy = false
+    @State private var notice: String?
+    @State private var confirmation = false
+
+    private var matches: [HubKnowledgeDomains.Note] {
+        let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? records : records.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationView {
+            List {
+                if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                if busy { ProgressView() }
+                if let source { sourceSection(source) }
+                else { recordList }
+            }
+            .navigationTitle(source == nil ? "Organize records" : "Choose an excerpt")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(source == nil ? "Done" : "Back") {
+                        if source != nil { closeSource() } else { dismiss() }
+                    }
+                    .disabled(busy)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(busy)
+        .alert("Queue selected records?", isPresented: $confirmation) {
+            Button("Queue \(selected.count) records") { Task { await queue() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Knowledge AI will process these sources using its configured model and budget.")
+        }
+    }
+
+    private var recordList: some View {
+        Section {
+            TextField("Find a brain note", text: $filter)
+            Text("\(selected.count) of 10 records selected").font(.footnote).foregroundStyle(.secondary)
+            if matches.isEmpty { Text("No matching records.").foregroundStyle(.secondary) }
+            ForEach(matches) { record in
+                VStack(alignment: .leading, spacing: 4) {
+                    let requiresExcerpt = (record.chars ?? 0) > 23_500 && windows[record.id] == nil
+                    Toggle(record.title, isOn: Binding(get: { selected.contains(record.id) }, set: { included in
+                        if included { selected.insert(record.id) }
+                        else { selected.remove(record.id) }
+                    }))
+                    .disabled(busy || requiresExcerpt || (selected.count >= 10 && !selected.contains(record.id)))
+                    Button(requiresExcerpt ? "Choose an excerpt" : "Preview source") {
+                        source = record
+                        excerpt = nil
+                        offsets = [0]
+                        Task { await load(record.id, offset: 0) }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(busy)
+                    if windows[record.id] != nil { Text("Excerpt selected").font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+            Button("Queue organization") { confirmation = true }.disabled(busy || selected.isEmpty)
+        }
+    }
+
+    private func sourceSection(_ record: HubKnowledgeDomains.Note) -> some View {
+        Section(record.title) {
+            if let excerpt {
+                Text("\(excerpt.start + 1)–\(excerpt.end) of \(excerpt.totalChars) characters")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text(excerpt.content).textSelection(.enabled)
+                Button("Use this excerpt") {
+                    windows[record.id] = excerpt
+                    selected.insert(record.id)
+                    closeSource()
+                }
+                .disabled(busy || (selected.count >= 10 && !selected.contains(record.id)))
+                if offsets.count > 1 {
+                    Button("Previous excerpt") {
+                        let previous = offsets[offsets.count - 2]
+                        Task { if await load(record.id, offset: previous) { offsets.removeLast() } }
+                    }
+                    .disabled(busy)
+                }
+                if let next = excerpt.nextOffset {
+                    Button("Next excerpt") { Task { if await load(record.id, offset: next) { offsets.append(next) } } }
+                        .disabled(busy)
+                }
+            } else if !busy {
+                Button("Retry") { Task { await load(record.id, offset: 0) } }
+            }
+        }
+    }
+
+    private func closeSource() {
+        source = nil
+        excerpt = nil
+        notice = nil
+    }
+
+    @discardableResult
+    private func load(_ id: String, offset: Int) async -> Bool {
+        guard !busy else { return false }
+        busy = true
+        defer { busy = false }
+        do {
+            excerpt = try await api.knowledgeOrganizationExcerpt(id, offset: offset)
+            notice = nil
+            return true
+        } catch {
+            notice = "Could not load this excerpt. The source may have changed."
+            return false
+        }
+    }
+
+    private func queue() async {
+        guard !busy, !selected.isEmpty else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let receipt = try await api.queueKnowledgeOrganization(notes: selected, excerpts: selected.compactMap { windows[$0] })
+            notice = receipt.automatic ? "\(receipt.queued) records queued. See Knowledge AI Activity for progress."
+                : "\(receipt.queued) records queued. Start the pass in Knowledge AI Activity."
+            selected = []
+            windows = [:]
+        } catch {
+            notice = "Could not confirm the queue request. Check Knowledge AI Activity before retrying."
         }
     }
 }

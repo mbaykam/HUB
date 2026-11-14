@@ -935,14 +935,34 @@ struct HubKnowledgeActivityView: View {
     @State private var page: HubKnowledgeActivity?
     @State private var failed = false
     @State private var loading = false
+    @State private var acting = false
+    @State private var actionMessage: String?
+    @State private var confirmation: QueueAction?
+
+    private enum QueueAction: String, Identifiable {
+        case process = "Process queued records"
+        case retry = "Retry failed records"
+        var id: String { rawValue }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Knowledge AI Activity").font(.headline)
                 Spacer()
+                Menu {
+                    Button("Refresh activity") { Task { await load(0) } }
+                    Button(QueueAction.process.rawValue) { confirmation = .process }.disabled(page?.enabled != true)
+                    Button(QueueAction.retry.rawValue) { confirmation = .retry }.disabled(page?.enabled != true)
+                } label: {
+                    Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Knowledge AI actions")
+                .disabled(acting || loading)
                 Button("Done") { dismiss() }
             }
+            if acting { ProgressView() }
+            if let actionMessage { Text(actionMessage).font(.footnote).foregroundStyle(.secondary) }
             if let page {
                 Text(page.enabled ? page.state.capitalized : "Disabled").foregroundStyle(.secondary)
                 ScrollView {
@@ -979,6 +999,27 @@ struct HubKnowledgeActivityView: View {
         .foregroundStyle(.white)
         .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .alert(item: $confirmation) { action in
+            Alert(title: Text(action.rawValue), message: Text("Knowledge AI uses the configured model and budget."),
+                  primaryButton: .default(Text("Continue")) { Task { await run(action) } }, secondaryButton: .cancel())
+        }
+    }
+
+    private func run(_ action: QueueAction) async {
+        guard !acting else { return }
+        acting = true
+        defer { acting = false }
+        do {
+            switch action {
+            case .process:
+                _ = try await api.processKnowledgeQueue()
+                actionMessage = "Processing requested. Refresh to check progress."
+            case .retry:
+                let count = try await api.retryFailedKnowledge()
+                actionMessage = count == 0 ? "No failed records to retry." : "\(count) records queued again."
+            }
+        } catch { actionMessage = "Could not confirm the request. Refresh activity before retrying." }
+        await load(0)
     }
 
     private func load(_ offset: Int) async {

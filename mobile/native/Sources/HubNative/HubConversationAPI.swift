@@ -108,6 +108,7 @@ public struct HubKnowledgeDomains: Decodable {
     public struct Note: Decodable, Identifiable {
         public let id: String
         public let title: String
+        public let chars: Int?
     }
     public struct Operation: Decodable { public let type: String }
     public struct Proposal: Decodable, Identifiable {
@@ -132,6 +133,20 @@ public struct HubKnowledgeDomains: Decodable {
         public let before: [Domain]
         public let after: [Domain]
         public var id: String { proposal.id }
+    }
+    public struct SourceExcerpt: Decodable {
+        public let nodeId: String
+        public let title: String
+        public let hash: String
+        public let start: Int
+        public let end: Int
+        public let totalChars: Int
+        public let content: String
+        public let nextOffset: Int?
+    }
+    public struct OrganizationReceipt: Decodable {
+        public let queued: Int
+        public let automatic: Bool
     }
     public let revision: Int
     public let maxActiveDomains: Int
@@ -1961,6 +1976,19 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
     }
 
+    public func processKnowledgeQueue() async throws -> HubKnowledgeStatus {
+        let body = try JSONSerialization.data(withJSONObject: ["action": "process"])
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body)
+        return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
+    }
+
+    public func retryFailedKnowledge() async throws -> Int {
+        struct Receipt: Decodable { let queued: Int }
+        let body = try JSONSerialization.data(withJSONObject: ["action": "retry-failed"])
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body)
+        return try JSONDecoder().decode(Receipt.self, from: data).queued
+    }
+
     public func knowledgeBackups(offset: Int = 0) async throws -> HubKnowledgeBackups {
         guard offset >= 0 else { throw HubAttachmentError.invalidResponse }
         let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
@@ -2122,6 +2150,33 @@ public final class HubConversationAPI {
     public func undoKnowledgeDomain(_ change: HubKnowledgeDomains.Audit, revision: Int) async throws {
         guard revision >= 0, change.undone != true, !change.id.isEmpty else { throw HubAttachmentError.invalidResponse }
         try await writeKnowledgeDomainChange(["action": "domain-undo", "revision": revision, "id": change.id])
+    }
+
+    public func knowledgeOrganizationExcerpt(_ id: String, offset: Int = 0) async throws -> HubKnowledgeDomains.SourceExcerpt {
+        guard !id.isEmpty, offset >= 0 else { throw HubAttachmentError.invalidResponse }
+        let excerpt: HubKnowledgeDomains.SourceExcerpt = try await readKnowledge("organization-source", arguments: ["id": id, "offset": String(offset)])
+        guard excerpt.nodeId == id, Self.isScreenshotID(excerpt.hash), excerpt.start >= 0,
+              excerpt.start <= offset, offset - excerpt.start <= 1, excerpt.end > excerpt.start,
+              excerpt.end <= excerpt.totalChars, excerpt.end - excerpt.start == excerpt.content.utf16.count,
+              excerpt.nextOffset.map({ $0 == excerpt.end && $0 < excerpt.totalChars }) ?? true else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return excerpt
+    }
+
+    public func queueKnowledgeOrganization(notes: Set<String>, excerpts: [HubKnowledgeDomains.SourceExcerpt]) async throws -> HubKnowledgeDomains.OrganizationReceipt {
+        let excerptIDs = Set(excerpts.map(\.nodeId))
+        guard (1...10).contains(notes.count), excerptIDs.count == excerpts.count, excerptIDs.isSubset(of: notes),
+              notes.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 1_024 }) else { throw HubAttachmentError.invalidResponse }
+        let windows = excerpts.sorted { $0.nodeId < $1.nodeId }.map { excerpt -> [String: Any] in
+            ["nodeId": excerpt.nodeId, "hash": excerpt.hash, "start": excerpt.start, "end": excerpt.end]
+        }
+        let command: [String: Any] = ["action": "reorganize", "nodeIds": notes.sorted(), "windows": windows]
+        let body = try JSONSerialization.data(withJSONObject: command)
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body)
+        let receipt = try JSONDecoder().decode(HubKnowledgeDomains.OrganizationReceipt.self, from: data)
+        guard receipt.queued == notes.count else { throw HubAttachmentError.invalidResponse }
+        return receipt
     }
 
     private func writeKnowledgeDomainChange(_ command: [String: Any]) async throws {

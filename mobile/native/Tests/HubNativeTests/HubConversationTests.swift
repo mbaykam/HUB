@@ -233,6 +233,32 @@ final class HubConversationTests: XCTestCase {
         ], deactivateSource: true)], revision: 8)
     }
 
+    func testKnowledgeOrganizationSendsOnlyReviewedWindowCoordinates() async throws {
+        let api = try client()
+        let hash = String(repeating: "b", count: 64)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            if request.httpMethod == "GET" {
+                let query = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
+                XCTAssertEqual(query?.first(where: { $0.name == "offset" })?.value, "100")
+                let response = #"{"nodeId":"note","title":"Fixture","hash":"\#(hash)","start":100,"end":104,"totalChars":110,"content":"A🌿B","nextOffset":104}"#
+                return (200, Data(response.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "reorganize")
+            XCTAssertEqual(command["nodeIds"] as? [String], ["note"])
+            let window = try XCTUnwrap((command["windows"] as? [[String: Any]])?.first)
+            XCTAssertEqual(window["hash"] as? String, hash)
+            XCTAssertEqual(window["start"] as? Int, 100)
+            XCTAssertEqual(window["end"] as? Int, 104)
+            XCTAssertNil(window["content"])
+            return (200, Data(#"{"queued":1,"automatic":false}"#.utf8))
+        }
+        let excerpt = try await api.knowledgeOrganizationExcerpt("note", offset: 100)
+        let receipt = try await api.queueKnowledgeOrganization(notes: ["note"], excerpts: [excerpt])
+        XCTAssertFalse(receipt.automatic)
+    }
+
     func testFollowTimelineCombinesPackedAndLiveTextAndSettlesOnEnd() throws {
         let decoder = JSONDecoder()
         var timeline = HubChatTimeline()
