@@ -74,6 +74,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         case .system: style = .unspecified
         }
         overrideUserInterfaceStyle = style
+        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
         setNeedsStatusBarAppearanceUpdate()
         navigationController?.setNeedsStatusBarAppearanceUpdate()
     }
@@ -203,6 +204,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if showingHome { applyWorkspaceAppearance(workspaceAppearance) }
         home.hasActiveVoice = voice?.isActive == true
         if firstAppearance {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - bootstrapStarted) * 1000)
@@ -699,6 +701,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
         showingHome = false
         overrideUserInterfaceStyle = .unspecified
+        view.window?.overrideUserInterfaceStyle = .unspecified
         view.backgroundColor = .systemBackground
         navigationController?.setNeedsStatusBarAppearanceUpdate()
         homeController.view.isHidden = true

@@ -167,6 +167,8 @@ final class HubWorkspaceUITests: XCTestCase {
         let remaining = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "42%", "42%")).firstMatch
         XCTAssertTrue(remaining.waitForExistence(timeout: 5))
+        let updated = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Updated ")).firstMatch
+        XCTAssertTrue(updated.exists)
         let credit = app.staticTexts["Account credits"].firstMatch
         if !credit.isHittable { app.swipeUp() }
         XCTAssertTrue(credit.exists)

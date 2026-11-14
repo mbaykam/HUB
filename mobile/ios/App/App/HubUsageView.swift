@@ -104,7 +104,7 @@ struct HubUsageView: View {
                     Button("Refresh") { attempt += 1 }.disabled(refreshing)
                     Spacer()
                     if refreshing { ProgressView().controlSize(.small) }
-                    else if let updated = ISO8601DateFormatter().date(from: usage.updatedAt) {
+                    else if let updated = readingDate(usage.updatedAt) {
                         Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -151,6 +151,14 @@ struct HubUsageView: View {
         let days = seconds / 86_400
         if days.rounded() == days { return String(format: "%g-day limit", days) }
         return "Usage window"
+    }
+
+    private func readingDate(_ timestamp: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions.insert(.withFractionalSeconds)
+        if let date = formatter.date(from: timestamp) { return date }
+        formatter.formatOptions.remove(.withFractionalSeconds)
+        return formatter.date(from: timestamp)
     }
 
     @ViewBuilder private func money(_ label: String, _ value: Double?) -> some View {
