@@ -1298,7 +1298,7 @@ struct HubHomeView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 TextField("What needs doing?", text: $todoDraft,
-                          prompt: Text("What needs doing?").foregroundStyle(Color(red: 0.66, green: 0.70, blue: 0.80)))
+                          prompt: Text("What needs doing?").foregroundColor(Color(red: 0.66, green: 0.70, blue: 0.80)))
                     .focused($todoFocused)
                     .frame(minHeight: 44)
                     .submitLabel(.done)
