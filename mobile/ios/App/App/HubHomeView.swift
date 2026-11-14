@@ -58,6 +58,7 @@ struct HubHomeView: View {
     @State private var knowledgeOpen = false
     @State private var knowledgeDomainsOpen = false
     @State private var knowledgeBackupsOpen = false
+    @State private var knowledgeArchivesOpen = false
     @State private var knowledgeRefreshError = false
     @State private var selectedNoteID: String?
     @State private var selectedNote: HubKnowledgeNote?
@@ -221,6 +222,7 @@ struct HubHomeView: View {
                 knowledgeOpen = false
                 knowledgeDomainsOpen = false
                 knowledgeBackupsOpen = false
+                knowledgeArchivesOpen = false
                 knowledgeRefreshError = false
                 clearKnowledgeSelection()
                 tasksOpen = false
@@ -809,6 +811,7 @@ struct HubHomeView: View {
                     Menu {
                         Button("Domains") { knowledgeDomainsOpen = true }
                         Button("Backups") { knowledgeBackupsOpen = true }
+                        Button("Conversation archives") { knowledgeArchivesOpen = true }
                     } label: {
                         Image(systemName: "ellipsis").frame(width: 44, height: 36)
                     }
@@ -859,6 +862,9 @@ struct HubHomeView: View {
         }
         .sheet(isPresented: $knowledgeBackupsOpen) {
             if let api = chatAPI() { HubKnowledgeBackupsView(api: api) }
+        }
+        .sheet(isPresented: $knowledgeArchivesOpen) {
+            if let api = chatAPI() { HubKnowledgeArchivesView(api: api, changed: refreshKnowledgeGraph) }
         }
     }
 

@@ -34,6 +34,25 @@ final class HubConversationTests: XCTestCase {
         CatalogFixture.responder = nil
     }
 
+    func testKnowledgeArchiveStagingPreservesBytesAndDoesNotAdmit() async throws {
+        let api = try client()
+        let source = Data(#"{"fixture":true}"#.utf8)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.url?.query, "action=preview-import")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/octet-stream")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-filename"), "Turkish%20archive%2Ejson")
+            XCTAssertEqual(try Self.requestBody(request), source)
+            return (200, Data(#"""
+            {"id":"12345678-1234-1234-1234-123456789abc","filename":"Turkish archive.json","state":"previewed",
+             "conversations":0,"admitted":0,"records":[],"previewHash":"fixture","warnings":[],"nextOffset":null}
+            """#.utf8))
+        }
+        let preview = try await api.stageKnowledgeArchive(source, filename: "Turkish archive.json")
+        XCTAssertEqual(preview.admitted, 0)
+        XCTAssertEqual(CatalogFixture.requests.count, 1)
+    }
+
     func testQueueOnlyDisplaysSelectedSessionAndNeverEditsAttachmentsAsText() async throws {
         let baseline = Data(#"""
         {"type":"item","value":{"type":"baseline","value":{"queues":{

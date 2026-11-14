@@ -1,6 +1,277 @@
 import SwiftUI
 import UIKit
 import HubNative
+import UniformTypeIdentifiers
+
+@MainActor
+struct HubKnowledgeArchivesView: View {
+    let api: HubConversationAPI
+    let changed: () async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var batches: [HubKnowledgeArchive] = []
+    @State private var moreBatches: Int?
+    @State private var preview: HubKnowledgeArchivePreview?
+    @State private var offset = 0
+    @State private var selected: Set<String> = []
+    @State private var record: HubKnowledgeArchivePreview.Record?
+    @State private var original: HubKnowledgeArchiveMessages?
+    @State private var originalOffset = 0
+    @State private var busy = false
+    @State private var notice: String?
+    @State private var pickerOpen = false
+    @State private var confirmation: Mutation?
+    @State private var stale = false
+
+    private enum Mutation: String, Identifiable {
+        case admit, withdraw
+        var id: Self { self }
+        var title: String { self == .admit ? "Admit selected conversations?" : "Withdraw admitted conversations?" }
+    }
+
+    var body: some View {
+        NavigationView {
+            List {
+                if busy { ProgressView("Working with the archive on HUB…") }
+                if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                if let record { originalMessages(record) }
+                else if let preview { previewRows(preview) }
+                else { archiveList }
+            }
+            .disabled(busy)
+            .navigationTitle("Conversation archives")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(record != nil ? "Archive" : preview != nil ? "All archives" : "Done") { goBack() }
+                        .disabled(busy)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .task { await loadBatches() }
+        .interactiveDismissDisabled(busy || !selected.isEmpty)
+        .fileImporter(isPresented: $pickerOpen, allowedContentTypes: [.zip, .json, .html]) { result in
+            switch result {
+            case .success(let url): Task { await stage(url) }
+            case .failure: notice = "Could not open the selected archive."
+            }
+        }
+        .confirmationDialog(confirmation?.title ?? "", isPresented: Binding(
+            get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }),
+            titleVisibility: .visible, presenting: confirmation) { action in
+                Button(action == .admit ? "Admit \(selected.count) conversations" : "Withdraw admitted batch",
+                       role: action == .withdraw ? .destructive : nil) {
+                    Task { await mutate(action) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { action in
+                Text(action == .admit
+                    ? "Selected conversations become available in Knowledge search, graph and assistant memory. Organization may use your current Knowledge AI budget."
+                    : "The conversations leave Knowledge search, graph and assistant memory. Their original messages and private upload are retained.")
+            }
+    }
+
+    private var archiveList: some View {
+        Section {
+            Button("Add a private archive") { pickerOpen = true }
+            Button("Refresh archives") { Task { await loadBatches() } }
+            if batches.isEmpty && !busy { Text("No private archives").foregroundStyle(.secondary) }
+            ForEach(batches) { batch in
+                Button {
+                    Task { await loadPreview(batch.id, offset: 0) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(batch.filename)
+                        Text("\(batch.conversations) conversations · \(batch.state)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let moreBatches { Button("Older archives") { Task { await loadBatches(offset: moreBatches) } } }
+        } footer: {
+            Text("ZIP, JSON or HTML up to 80 MB. The upload stays private until you explicitly admit conversations.")
+        }
+    }
+
+    private func previewRows(_ preview: HubKnowledgeArchivePreview) -> some View {
+        Group {
+            Section {
+                Text(preview.filename).font(.headline)
+                Text("\(preview.conversations) conversations · \(preview.admitted) admitted").font(.footnote)
+                if let error = preview.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                ForEach(Array(preview.warnings.enumerated()), id: \.offset) { _, warning in
+                    Text(warning).font(.footnote).foregroundStyle(.secondary)
+                }
+                Button("Refresh preview") { Task { await loadPreview(preview.id, offset: offset) } }
+                if preview.state != "failed" {
+                    if preview.state != "archived" {
+                        Button("Keep archive private") { Task { await keepPrivate(preview) } }
+                    }
+                    if selected.count > 0 {
+                        Button("Review selected admission · \(selected.count)") { confirmation = .admit }.disabled(stale)
+                        Button("Clear selection") { selected.removeAll() }
+                    }
+                    if preview.admitted > 0 {
+                        Button("Review batch withdrawal", role: .destructive) { confirmation = .withdraw }.disabled(stale)
+                    }
+                }
+            }
+            if preview.state != "failed" {
+                Section("Original conversations") {
+                    ForEach(preview.records) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle(item.title, isOn: Binding(get: { selected.contains(item.id) }, set: { on in
+                                if on {
+                                    if selected.count < 50 { selected.insert(item.id) }
+                                    else { notice = "Select up to 50 conversations at a time." }
+                                } else { selected.remove(item.id) }
+                            }))
+                            .disabled(!item.canAdmit || stale)
+                            Text("\(item.channel) · \(item.messages) messages · \(item.status)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Button("Preview original messages") { Task { await loadOriginal(preview.id, item: item, offset: 0) } }
+                        }
+                    }
+                    if offset > 0 {
+                        Button("Previous page") { Task { await loadPreview(preview.id, offset: max(0, offset - 50)) } }
+                    }
+                    if let next = preview.nextOffset {
+                        Button("Next page") { Task { await loadPreview(preview.id, offset: next) } }
+                    }
+                }
+            }
+        }
+    }
+
+    private func originalMessages(_ item: HubKnowledgeArchivePreview.Record) -> some View {
+        Section(item.title) {
+            if let original {
+                Text("\(original.total) messages").font(.footnote).foregroundStyle(.secondary)
+                ForEach(Array(original.messages.enumerated()), id: \.offset) { _, message in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(message.role.capitalized).font(.caption.weight(.semibold))
+                        Text(message.text).textSelection(.enabled)
+                        if message.truncated { Text("Excerpt. HUB retained the full original.").font(.caption2).foregroundStyle(.secondary) }
+                    }
+                }
+                if let preview, originalOffset > 0 {
+                    Button("Previous messages") { Task { await loadOriginal(preview.id, item: item, offset: max(0, originalOffset - 8)) } }
+                }
+                if let preview, let next = original.nextOffset {
+                    Button("Next messages") { Task { await loadOriginal(preview.id, item: item, offset: next) } }
+                }
+            }
+        }
+    }
+
+    private func goBack() {
+        notice = nil
+        if record != nil {
+            record = nil
+            original = nil
+        } else if preview != nil {
+            if !selected.isEmpty {
+                notice = "Clear the selection before returning to the archive list."
+                return
+            }
+            preview = nil
+            Task { await loadBatches() }
+        } else { dismiss() }
+    }
+
+    private func perform(_ failure: String, _ operation: () async throws -> Void) async {
+        guard !busy else { return }
+        busy = true
+        notice = nil
+        defer { busy = false }
+        do { try await operation() }
+        catch { if !Task.isCancelled { notice = failure } }
+    }
+
+    private func loadBatches(offset: Int = 0) async {
+        await perform("Could not load the private archives.") {
+            let result = try await api.knowledgeArchives(offset: offset)
+            try Task.checkCancellation()
+            let existing = offset == 0 ? Set<UUID>() : Set(batches.map(\.id))
+            batches = (offset == 0 ? [] : batches) + result.batches.filter { !existing.contains($0.id) }
+            moreBatches = result.nextOffset
+        }
+    }
+
+    private func show(_ value: HubKnowledgeArchivePreview, offset: Int) {
+        if preview?.id != value.id || preview?.previewHash != value.previewHash { selected.removeAll() }
+        preview = value
+        self.offset = offset
+        stale = false
+    }
+
+    private func loadPreview(_ id: UUID, offset: Int) async {
+        await perform("Could not load the archive preview.") {
+            let value = try await api.knowledgeArchive(id, offset: offset)
+            try Task.checkCancellation()
+            show(value, offset: offset)
+        }
+    }
+
+    private func loadOriginal(_ id: UUID, item: HubKnowledgeArchivePreview.Record, offset: Int) async {
+        await perform("Could not read those original messages.") {
+            let result = try await api.knowledgeArchiveMessages(id, recordID: item.id, offset: offset)
+            try Task.checkCancellation()
+            original = result
+            originalOffset = offset
+            record = item
+        }
+    }
+
+    private func stage(_ url: URL) async {
+        await perform("Could not confirm the upload. Check the archive list before uploading again.") {
+            let file = try await Task.detached(priority: .userInitiated) {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                guard values.isRegularFile == true, let bytes = values.fileSize,
+                      (1...HubConversationAPI.knowledgeArchiveUploadLimit).contains(bytes) else { return nil as Data? }
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                return try handle.read(upToCount: HubConversationAPI.knowledgeArchiveUploadLimit + 1)
+            }.value
+            try Task.checkCancellation()
+            guard let file else {
+                notice = "Choose a ZIP, JSON or HTML file up to 80 MB."
+                return
+            }
+            let value = try await api.stageKnowledgeArchive(file, filename: url.lastPathComponent)
+            show(value, offset: 0)
+            notice = value.state == "failed" ? "HUB retained the original upload. Review the parsing error." : "Archive saved privately."
+        }
+    }
+
+    private func keepPrivate(_ preview: HubKnowledgeArchivePreview) async {
+        await perform("Could not confirm that HUB saved the archive status. Refresh the preview.") {
+            try await api.keepKnowledgeArchivePrivate(preview.id)
+            notice = "Archive kept private."
+            if let current = try? await api.knowledgeArchive(preview.id, offset: offset) { show(current, offset: offset) }
+        }
+    }
+
+    private func mutate(_ action: Mutation) async {
+        guard let preview, !stale else { return }
+        await perform("Could not confirm the change. Refresh the preview before trying again.") {
+            stale = true
+            switch action {
+            case .admit:
+                let receipt = try await api.admitKnowledgeArchive(preview, recordIDs: selected.sorted())
+                notice = "\(receipt.admitted) admitted · \(receipt.duplicates) duplicates · \(receipt.queued) organization jobs queued."
+            case .withdraw:
+                let count = try await api.withdrawKnowledgeArchive(preview.id)
+                notice = "\(count) conversations withdrawn."
+            }
+            selected.removeAll()
+            if let current = try? await api.knowledgeArchive(preview.id) { show(current, offset: 0) }
+            await changed()
+        }
+    }
+}
 
 @MainActor
 struct HubKnowledgeBackupsView: View {

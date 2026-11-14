@@ -162,6 +162,58 @@ public struct HubKnowledgeRestoredCopy: Decodable {
     public let activated: Bool
 }
 
+public struct HubKnowledgeArchive: Decodable, Identifiable {
+    public let id: UUID
+    public let filename: String
+    public let state: String
+    public let conversations: Int
+}
+
+public struct HubKnowledgeArchivePage: Decodable {
+    public let batches: [HubKnowledgeArchive]
+    public let nextOffset: Int?
+}
+
+public struct HubKnowledgeArchivePreview: Decodable {
+    public struct Record: Decodable, Identifiable {
+        public let id: String
+        public let title: String
+        public let messages: Int
+        public let channel: String
+        public let status: String
+        public var canAdmit: Bool { ["new", "withdrawn", "interrupted"].contains(status) }
+    }
+    public let id: UUID
+    public let filename: String
+    public let state: String
+    public let error: String?
+    public let conversations: Int
+    public let admitted: Int
+    public let records: [Record]
+    public let previewHash: String
+    public let nextOffset: Int?
+    public let warnings: [String]
+}
+
+public struct HubKnowledgeArchiveMessages: Decodable {
+    public struct Message: Decodable {
+        public let role: String
+        public let text: String
+        public let truncated: Bool
+    }
+    public let id: String
+    public let title: String
+    public let messages: [Message]
+    public let total: Int
+    public let nextOffset: Int?
+}
+
+public struct HubKnowledgeArchiveAdmission: Decodable {
+    public let admitted: Int
+    public let duplicates: Int
+    public let queued: Int
+}
+
 public struct HubKnowledgeActivity: Decodable {
     public struct Entry: Decodable, Identifiable {
         public struct Change: Decodable {
@@ -1055,7 +1107,7 @@ public final class HubConversationAPI {
     deinit { session.invalidateAndCancel() }
     private func requestData(_ path: String, headers: [String: String], query: [URLQueryItem] = [], body: Data? = nil,
                              mediaTypes: Set<String> = ["application/json"], maxBytes: Int = 1_048_576,
-                             operationTimeout: TimeInterval? = nil) async throws -> Data {
+                             operationTimeout: TimeInterval? = nil, contentType: String = "application/json") async throws -> Data {
         var components = URLComponents(url: server.origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw HubAttachmentError.invalidResponse }
@@ -1066,7 +1118,7 @@ public final class HubConversationAPI {
         if let body {
             request.httpMethod = "POST"
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         let (data, response): (Data, URLResponse)
         if let operationTimeout {
@@ -1631,6 +1683,84 @@ public final class HubConversationAPI {
     private func knowledgeBackupOperation(_ command: [String: String]) async throws -> Data {
         try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: JSONEncoder().encode(command),
                               operationTimeout: 180)
+    }
+
+    public static let knowledgeArchiveUploadLimit = 80_000_000
+
+    private func archiveRead(_ view: String, arguments: [URLQueryItem], offset: Int) async throws -> Data {
+        guard offset >= 0 else { throw HubAttachmentError.invalidResponse }
+        return try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
+            URLQueryItem(name: "view", value: view), URLQueryItem(name: "offset", value: String(offset)),
+        ] + arguments, operationTimeout: 60)
+    }
+
+    public func knowledgeArchives(offset: Int = 0) async throws -> HubKnowledgeArchivePage {
+        let data = try await archiveRead("import-batches", arguments: [], offset: offset)
+        let page = try JSONDecoder().decode(HubKnowledgeArchivePage.self, from: data)
+        guard page.nextOffset.map({ $0 > offset }) ?? true else { throw HubAttachmentError.invalidResponse }
+        return page
+    }
+
+    public func knowledgeArchive(_ id: UUID, offset: Int = 0) async throws -> HubKnowledgeArchivePreview {
+        let data = try await archiveRead("import-batch", arguments: [
+            URLQueryItem(name: "id", value: id.uuidString.lowercased()),
+        ], offset: offset)
+        let preview = try decodeArchivePreview(data, offset: offset)
+        guard preview.id == id else { throw HubAttachmentError.invalidResponse }
+        return preview
+    }
+
+    public func knowledgeArchiveMessages(_ id: UUID, recordID: String, offset: Int = 0) async throws -> HubKnowledgeArchiveMessages {
+        guard !recordID.isEmpty, recordID.utf8.count <= 512 else { throw HubAttachmentError.invalidResponse }
+        let data = try await archiveRead("import-record", arguments: [
+            URLQueryItem(name: "id", value: id.uuidString.lowercased()), URLQueryItem(name: "record", value: recordID),
+        ], offset: offset)
+        let page = try JSONDecoder().decode(HubKnowledgeArchiveMessages.self, from: data)
+        guard page.id == recordID, page.messages.count <= 8, page.nextOffset.map({ $0 > offset }) ?? true else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return page
+    }
+
+    public func stageKnowledgeArchive(_ bytes: Data, filename: String) async throws -> HubKnowledgeArchivePreview {
+        guard !bytes.isEmpty, bytes.count <= Self.knowledgeArchiveUploadLimit, filename.utf8.count <= 512,
+              ["zip", "json", "html"].contains((filename as NSString).pathExtension.lowercased()),
+              let encoded = filename.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { throw HubAttachmentError.invalidFile }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1", "x-hub-filename": encoded],
+            query: [URLQueryItem(name: "action", value: "preview-import")], body: bytes,
+            operationTimeout: 180, contentType: "application/octet-stream")
+        return try decodeArchivePreview(data, offset: 0)
+    }
+
+    public func keepKnowledgeArchivePrivate(_ id: UUID) async throws {
+        _ = try await archiveCommand(["action": "archive-import", "id": id.uuidString.lowercased()])
+    }
+
+    public func admitKnowledgeArchive(_ preview: HubKnowledgeArchivePreview, recordIDs: [String]) async throws -> HubKnowledgeArchiveAdmission {
+        guard preview.state != "failed", Self.isScreenshotID(preview.previewHash), (1...50).contains(recordIDs.count),
+              Set(recordIDs).count == recordIDs.count,
+              recordIDs.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 512 }) else { throw HubAttachmentError.invalidResponse }
+        let data = try await archiveCommand(["action": "start-import", "id": preview.id.uuidString.lowercased(),
+                                             "previewHash": preview.previewHash, "recordIds": recordIDs])
+        return try JSONDecoder().decode(HubKnowledgeArchiveAdmission.self, from: data)
+    }
+
+    public func withdrawKnowledgeArchive(_ id: UUID) async throws -> Int {
+        struct Receipt: Decodable { let withdrawn: Int }
+        let data = try await archiveCommand(["action": "withdraw-import", "id": id.uuidString.lowercased()])
+        return try JSONDecoder().decode(Receipt.self, from: data).withdrawn
+    }
+
+    private func archiveCommand(_ command: [String: Any]) async throws -> Data {
+        try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"],
+                              body: JSONSerialization.data(withJSONObject: command), operationTimeout: 180)
+    }
+
+    private func decodeArchivePreview(_ data: Data, offset: Int) throws -> HubKnowledgeArchivePreview {
+        let preview = try JSONDecoder().decode(HubKnowledgeArchivePreview.self, from: data)
+        guard preview.records.count <= 50, Set(preview.records.map(\.id)).count == preview.records.count,
+              preview.nextOffset.map({ $0 > offset }) ?? true else { throw HubAttachmentError.invalidResponse }
+        return preview
     }
 
     public func knowledgeDomains() async throws -> HubKnowledgeDomains {
