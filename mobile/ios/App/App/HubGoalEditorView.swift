@@ -69,18 +69,94 @@ struct HubGoalEditorView: View {
                 .accessibilityLabel("Goal-specific instructions")
         }
         if !data.isResearch {
-            Section("Resources & allowance") {
+            Section("Resources") {
                 Toggle("Read relevant Knowledge", isOn: field(\.knowledge, current))
                 Toggle("Search public websites", isOn: field(\.browser, current))
+                Toggle("Allow approved Knowledge outputs", isOn: optional(\.knowledgeOutput, default: false))
+                listField("Read folders", key: \.folders)
+                listField("Input files", key: \.files)
+                listField("Write folders", key: \.writeFolders)
+                listField("Additional tools", key: \.tools)
+            }
+            Section("Work allowance") {
                 TextField("Active work allowance in minutes", value: field(\.activeMinutes, current), format: .number.grouping(.never))
                     .keyboardType(.numberPad)
+                integerField("Total rounds", key: \.maxRounds, fallback: 40)
+                integerField("Daily rounds", key: \.dailyRounds, fallback: 40)
+                integerField("Steps per round", key: \.maxSteps, fallback: 8)
+                integerField("Output tokens per step", key: \.maxOutputTokens, fallback: 4_096)
+                amountField("Daily API budget ($)", key: \.dailyBudget, fallback: 1)
+                amountField("Total API budget ($)", key: \.totalBudget, fallback: 5)
+                amountField("Input cost per million tokens ($)", key: \.inputPrice, fallback: 0.1)
+                amountField("Output cost per million tokens ($)", key: \.outputPrice, fallback: 0.5)
+                Toggle("Set a deadline", isOn: Binding(
+                    get: { draft?.deadline != nil },
+                    set: { draft?.deadline = $0 ? Date().addingTimeInterval(86_400) : nil }))
+                if let deadline = current.deadline {
+                    DatePicker("Deadline", selection: optional(\.deadline, default: deadline))
+                }
+                Picker("After HUB restarts", selection: optional(\.recovery, default: "read-only")) {
+                    Text("Recover read-only work").tag("read-only")
+                    Text("Wait for me").tag("ask")
+                }
             }
+            collaborators(data, current: current)
         }
         Section {
             Button(id == nil ? "Save draft" : "Save changes") { Task { await save() } }
                 .disabled(!canSave(current))
             if id == nil { Text("Start the saved draft from Tasks when you’re ready.").font(.footnote).foregroundStyle(.secondary) }
         }
+    }
+
+    private func collaborators(_ data: HubGoalEditorData, current: HubGoalEditorData.Draft) -> some View {
+        let characters = data.characters.filter { $0.route != nil }
+        return Section("Collaboration") {
+            Picker("Independent verifier", selection: optional(\.verifierID, default: "")) {
+                Text("None").tag("")
+                if let verifier = current.verifierID, !verifier.isEmpty, !characters.contains(where: { $0.id == verifier }) {
+                    Text("Unavailable character").tag(verifier)
+                }
+                ForEach(characters) { Text($0.name).tag($0.id) }
+            }
+            DisclosureGroup("Helpers") {
+                ForEach(characters) { character in
+                    Toggle(character.name, isOn: characterRole(character.id, key: \.helpers))
+                }
+            }
+            DisclosureGroup("Model fallbacks") {
+                ForEach(characters) { character in
+                    Toggle(character.name, isOn: characterRole(character.id, key: \.fallbacks))
+                }
+            }
+        }
+    }
+
+    private func characterRole(_ id: String, key: WritableKeyPath<HubGoalEditorData.Draft, [String]?>) -> Binding<Bool> {
+        Binding(get: { draft?[keyPath: key]?.contains(id) ?? false }, set: { on in
+            var list = draft?[keyPath: key] ?? []
+            if on && !list.contains(id) && list.count < 5 { list.append(id) }
+            if !on { list.removeAll { $0 == id } }
+            draft?[keyPath: key] = list
+        })
+    }
+
+    private func listField(_ title: String, key: WritableKeyPath<HubGoalEditorData.Draft, [String]?>) -> some View {
+        GoalPathListField(title: title, entries: optional(key, default: []))
+    }
+
+    private func integerField(_ title: String, key: WritableKeyPath<HubGoalEditorData.Draft, Int?>, fallback: Int) -> some View {
+        TextField(title, value: optional(key, default: fallback), format: .number.grouping(.never))
+            .keyboardType(.numberPad)
+    }
+
+    private func amountField(_ title: String, key: WritableKeyPath<HubGoalEditorData.Draft, Double?>, fallback: Double) -> some View {
+        TextField(title, value: optional(key, default: fallback), format: .number)
+            .keyboardType(.decimalPad)
+    }
+
+    private func optional<Value>(_ key: WritableKeyPath<HubGoalEditorData.Draft, Value?>, default value: Value) -> Binding<Value> {
+        Binding(get: { draft?[keyPath: key] ?? value }, set: { draft?[keyPath: key] = $0 })
     }
 
     private func field<Value>(_ key: WritableKeyPath<HubGoalEditorData.Draft, Value>, _ value: HubGoalEditorData.Draft) -> Binding<Value> {
@@ -124,6 +200,28 @@ struct HubGoalEditorView: View {
             dismiss()
         } catch {
             self.error = "Could not confirm the save. Your edits are still here. Check Tasks before trying again."
+        }
+    }
+}
+
+private struct GoalPathListField: View {
+    let title: String
+    @Binding var entries: [String]
+    @State private var text = ""
+
+    var body: some View {
+        DisclosureGroup(title) {
+            Text("One entry per line").font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $text)
+                .accessibilityLabel(title)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .frame(minHeight: 76)
+                .onAppear { text = entries.joined(separator: "\n") }
+                .onChange(of: text) { value in
+                    entries = value.components(separatedBy: .newlines)
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+                }
         }
     }
 }

@@ -741,6 +741,24 @@ public struct HubGoalEditorData {
         public var activeMinutes: Int
         public var knowledge: Bool
         public var browser: Bool
+        public var maxRounds: Int?
+        public var dailyRounds: Int?
+        public var maxSteps: Int?
+        public var maxOutputTokens: Int?
+        public var dailyBudget: Double?
+        public var totalBudget: Double?
+        public var inputPrice: Double?
+        public var outputPrice: Double?
+        public var deadline: Date?
+        public var recovery: String?
+        public var helpers: [String]?
+        public var fallbacks: [String]?
+        public var verifierID: String?
+        public var folders: [String]?
+        public var files: [String]?
+        public var writeFolders: [String]?
+        public var tools: [String]?
+        public var knowledgeOutput: Bool?
     }
     public let draft: Draft
     public let characters: [Character]
@@ -1504,10 +1522,28 @@ public final class HubConversationAPI {
               let browser = resources["browser"] as? Bool, let approach = definition["approach"] as? String,
               let approval = definition["humanApproval"] as? Bool else { throw HubAttachmentError.invalidResponse }
         let defaultCharacter = characters.first { $0.name == "HUB" && $0.route != nil } ?? characters.first { $0.route != nil }
-        let draft = HubGoalEditorData.Draft(title: definition["title"] as? String ?? "", objective: definition["objective"] as? String ?? "",
+        var draft = HubGoalEditorData.Draft(title: definition["title"] as? String ?? "", objective: definition["objective"] as? String ?? "",
             criteria: definition["criteria"] as? [String] ?? [], characterID: definition["characterId"] as? String ?? defaultCharacter?.id ?? "",
             approach: approach, instructions: definition["instructions"] as? String ?? "", humanApproval: approval,
             activeMinutes: active, knowledge: knowledge, browser: browser)
+        draft.maxRounds = limits["maxRounds"] as? Int
+        draft.dailyRounds = limits["dailyRounds"] as? Int
+        draft.maxSteps = limits["maxSteps"] as? Int
+        draft.maxOutputTokens = limits["maxOutputTokens"] as? Int
+        draft.dailyBudget = limits["dailyBudget"] as? Double
+        draft.totalBudget = limits["totalBudget"] as? Double
+        draft.inputPrice = limits["inputPrice"] as? Double
+        draft.outputPrice = limits["outputPrice"] as? Double
+        if let deadline = limits["deadline"] as? Double { draft.deadline = Date(timeIntervalSince1970: deadline / 1_000) }
+        draft.recovery = definition["recovery"] as? String
+        draft.helpers = definition["helpers"] as? [String]
+        draft.fallbacks = definition["fallbacks"] as? [String]
+        draft.verifierID = definition["verifierId"] as? String
+        draft.folders = resources["folders"] as? [String]
+        draft.files = resources["files"] as? [String]
+        draft.writeFolders = resources["writeFolders"] as? [String]
+        draft.tools = resources["tools"] as? [String]
+        draft.knowledgeOutput = resources["knowledgeOutput"] as? Bool
         let fields: Set<String> = ["research", "title", "objective", "criteria", "characterId", "approach",
             "instructions", "helpers", "verifierId", "fallbacks", "resources", "limits", "schedule", "recovery",
             "humanApproval", "notification", "sourceSessionId"]
@@ -1536,6 +1572,27 @@ public final class HubConversationAPI {
             resources["knowledge"] = draft.knowledge
             resources["browser"] = draft.browser
             limits["activeMinutes"] = draft.activeMinutes
+            for (key, amount) in [
+                ("maxRounds", draft.maxRounds), ("dailyRounds", draft.dailyRounds), ("maxSteps", draft.maxSteps),
+                ("maxOutputTokens", draft.maxOutputTokens),
+            ] { if let amount { limits[key] = amount } }
+            for (key, amount) in [
+                ("dailyBudget", draft.dailyBudget), ("totalBudget", draft.totalBudget),
+                ("inputPrice", draft.inputPrice), ("outputPrice", draft.outputPrice),
+            ] { if let amount { limits[key] = amount } }
+            if let stamp = draft.deadline?.timeIntervalSince1970 {
+                guard stamp.isFinite, stamp > 0, stamp <= 9_007_199_254_740 else { throw HubAttachmentError.invalidResponse }
+                limits["deadline"] = Int64((stamp * 1_000).rounded())
+            } else { limits.removeValue(forKey: "deadline") }
+            for (key, entries) in [
+                ("folders", draft.folders), ("files", draft.files), ("writeFolders", draft.writeFolders), ("tools", draft.tools),
+            ] { if let entries { resources[key] = entries } }
+            if let flag = draft.knowledgeOutput { resources["knowledgeOutput"] = flag }
+            if let recovery = draft.recovery { value["recovery"] = recovery }
+            if let helpers = draft.helpers { value["helpers"] = helpers }
+            if let fallbacks = draft.fallbacks { value["fallbacks"] = fallbacks }
+            if let verifierID = draft.verifierID, !verifierID.isEmpty { value["verifierId"] = verifierID }
+            else { value.removeValue(forKey: "verifierId") }
         }
         value["resources"] = resources
         value["limits"] = limits

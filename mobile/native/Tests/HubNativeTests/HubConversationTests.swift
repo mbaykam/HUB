@@ -402,7 +402,8 @@ final class HubConversationTests: XCTestCase {
             let goal = try XCTUnwrap(command["goal"] as? [String: Any])
             XCTAssertEqual(goal["title"] as? String, "Renamed")
             XCTAssertEqual((goal["resources"] as? [String: Any])?["folders"] as? [String], ["C:/Fixture"])
-            XCTAssertEqual((goal["limits"] as? [String: Any])?["dailyBudget"] as? Double, 0.2)
+            XCTAssertEqual((goal["limits"] as? [String: Any])?["dailyBudget"] as? Double, 0.25)
+            XCTAssertEqual((goal["limits"] as? [String: Any])?["totalBudget"] as? Double, 1)
             XCTAssertEqual((goal["schedule"] as? [String: Any])?["missed"] as? String, "skip")
             XCTAssertNil(goal["state"])
             return (200, Data(#"{"changedId":"saved-goal"}"#.utf8))
@@ -410,6 +411,7 @@ final class HubConversationTests: XCTestCase {
         let editor = try await api.goalEditor(id: "saved-goal")
         var draft = editor.draft
         draft.title = "Renamed"
+        draft.dailyBudget = 0.25
         let id = try await api.saveGoal(draft, from: editor)
         XCTAssertEqual(id, "saved-goal")
     }
