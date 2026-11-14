@@ -5,6 +5,83 @@ import UniformTypeIdentifiers
 import PDFKit
 
 @MainActor
+struct HubKnowledgeOriginalSourceView: View {
+    let api: HubConversationAPI
+    let source: HubKnowledgeNote.Source
+    @Environment(\.dismiss) private var dismiss
+    @State private var original: HubKnowledgeOriginalSource?
+    @State private var failed = false
+    @State private var attempt = 0
+    @State private var selected: HubKnowledgeAsset?
+    @State private var originalFile: Data?
+    @State private var export = false
+    @State private var fileFailed = false
+    @State private var downloading = false
+
+    var body: some View {
+        NavigationView {
+            List {
+                if let original {
+                    Text(original.content).textSelection(.enabled)
+                    if let files = original.assets, !files.isEmpty {
+                        Section("Source attachments") {
+                            ForEach(files) { file in
+                                Button(file.name) { Task { await fetch(file) } }.disabled(downloading || export)
+                            }
+                            if downloading, let selected { ProgressView(selected.name) }
+                            if fileFailed { Text("Could not verify or save the attachment.").font(.footnote) }
+                        }
+                    }
+                    if let links = original.urls {
+                        ForEach(links.indices, id: \.self) { index in
+                            if let url = URL(string: links[index]), let scheme = url.scheme?.lowercased(),
+                               ["https", "http"].contains(scheme), url.host != nil, url.user == nil, url.password == nil {
+                                Link(links[index], destination: url)
+                            }
+                        }
+                    }
+                } else if failed {
+                    Button("Retry loading source") { attempt += 1 }
+                } else {
+                    ProgressView("Loading source…")
+                }
+            }
+            .navigationTitle("Original source")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+        }
+        .navigationViewStyle(.stack)
+        .task(id: attempt) {
+            failed = false
+            do { original = try await api.knowledgeOriginalSource(id: source.id) }
+            catch { if !Task.isCancelled { failed = true } }
+        }
+        .fileExporter(isPresented: $export, document: originalFile.map { HubFileDocument(bytes: $0) },
+                      contentType: selected.flatMap { UTType(mimeType: $0.mediaType) } ?? .data, defaultFilename: selected?.name) { result in
+            if case .failure = result { fileFailed = true }
+            selected = nil
+            originalFile = nil
+        }
+    }
+
+    private func fetch(_ asset: HubKnowledgeAsset) async {
+        guard !downloading, !export else { return }
+        downloading = true
+        defer { downloading = false }
+        selected = asset
+        originalFile = nil
+        fileFailed = false
+        do {
+            originalFile = try await api.knowledgeAssetBytes(asset)
+            export = true
+        } catch {
+            selected = nil
+            fileFailed = true
+        }
+    }
+}
+
+@MainActor
 struct HubKnowledgeAssetsView: View {
     let api: HubConversationAPI
     @State private var note: HubKnowledgeNote?

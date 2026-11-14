@@ -101,6 +101,7 @@ struct HubHomeView: View {
     @State private var selectedNoteID: String?
     @State private var activityDestination: ActivityDestination?
     @State private var selectedNote: HubKnowledgeNote?
+    @State private var selectedKnowledgeSource: HubKnowledgeNote.Source?
     @State private var noteLoadFailed = false
     @State private var noteAttempt = 0
     @State private var noteEditing = false
@@ -288,7 +289,12 @@ struct HubHomeView: View {
                 knowledgeDomainsOpen = false
                 knowledgeBackupsOpen = false
                 knowledgeArchivesOpen = false
+                knowledgeSkillsOpen = false
+                knowledgeAssetsOpen = false
                 knowledgeConnectionsOpen = false
+                knowledgeLocalCenter = nil
+                knowledgeQuery = ""
+                knowledgeSearchResult = nil
                 knowledgeRefreshError = false
                 clearKnowledgeSelection()
                 tasksOpen = false
@@ -911,6 +917,7 @@ struct HubHomeView: View {
     private func clearKnowledgeSelection() {
         selectedNoteID = nil
         selectedNote = nil
+        selectedKnowledgeSource = nil
         noteLoadFailed = false
         noteEditing = false
         noteDraft = ""
@@ -1014,6 +1021,9 @@ struct HubHomeView: View {
                 }
             }
         }
+        .sheet(item: $selectedKnowledgeSource) { source in
+            if let api = chatAPI() { HubKnowledgeOriginalSourceView(api: api, source: source) }
+        }
     }
 
     private func refreshKnowledgeGraph() async {
@@ -1070,6 +1080,7 @@ struct HubHomeView: View {
                         }
                         knowledgeLinks("Links", nodes: note.links ?? [])
                         knowledgeLinks("Backlinks", nodes: note.backlinks ?? [])
+                        knowledgeSources(note.sources ?? [])
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -1083,6 +1094,30 @@ struct HubHomeView: View {
                 ForEach(nodes, id: \.id) { node in
                     Button(node.title ?? "Knowledge record") { selectKnowledgeNode(node.id) }
                         .frame(minHeight: 44)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func knowledgeSources(_ sources: [HubKnowledgeNote.Source]) -> some View {
+        if !sources.isEmpty {
+            DisclosureGroup("Sources") {
+                ForEach(sources.indices, id: \.self) { index in
+                    let source = sources[index]
+                    VStack(alignment: .leading, spacing: 5) {
+                        Button {
+                            if let id = source.conversationId { selectKnowledgeNode(id) }
+                            else { selectedKnowledgeSource = source }
+                        } label: {
+                            Label(source.channel.capitalized, systemImage: "doc.text.magnifyingglass").frame(minHeight: 44)
+                        }
+                        let time = source.evidence?.occurredAt ?? source.completedAt
+                        if time.isFinite, time > 0 {
+                            Text(Date(timeIntervalSince1970: time / 1000).formatted()).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let reason = source.reason { Text(reason).font(.footnote) }
+                        if let quote = source.evidence?.quote { Text(quote).italic().font(.footnote).textSelection(.enabled) }
+                    }
                 }
             }
         }

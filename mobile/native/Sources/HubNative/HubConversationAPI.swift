@@ -469,6 +469,18 @@ public struct HubKnowledgeProfileReview: Decodable {
 }
 
 public struct HubKnowledgeNote: Decodable {
+    public struct Source: Decodable, Identifiable {
+        public struct Evidence: Decodable {
+            public let quote: String
+            public let occurredAt: Double?
+        }
+        public let id: String
+        public let completedAt: Double
+        public let channel: String
+        public let conversationId: String?
+        public let reason: String?
+        public let evidence: Evidence?
+    }
     public let id: String
     public let title: String
     public let content: String
@@ -477,6 +489,14 @@ public struct HubKnowledgeNote: Decodable {
     public let protected: Bool?
     public let backlinks: [HubHomeKnowledge.Node]?
     public let links: [HubHomeKnowledge.Node]?
+    public let sources: [Source]?
+}
+
+public struct HubKnowledgeOriginalSource: Decodable {
+    public let id: String
+    public let content: String
+    public let assets: [HubKnowledgeAsset]?
+    public let urls: [String]?
 }
 
 public struct HubKnowledgeAsset: Decodable, Identifiable {
@@ -2216,6 +2236,13 @@ public final class HubConversationAPI {
         let note = try JSONDecoder().decode(HubKnowledgeNote.self, from: data)
         guard note.id == id else { throw HubAttachmentError.invalidResponse }
         return note
+    }
+
+    public func knowledgeOriginalSource(id: String) async throws -> HubKnowledgeOriginalSource {
+        guard !id.isEmpty else { throw HubAttachmentError.invalidResponse }
+        let source: HubKnowledgeOriginalSource = try await readKnowledge("source", arguments: ["id": id])
+        guard source.id == id else { throw HubAttachmentError.invalidResponse }
+        return source
     }
 
     public func searchKnowledge(_ query: String, scope: HubHomeKnowledge.SearchScope) async throws -> [HubHomeKnowledge.Node] {
