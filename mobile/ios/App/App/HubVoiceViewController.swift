@@ -14,6 +14,7 @@ final class HubVoiceViewController: UIViewController {
     private let end = UIButton(type: .system)
     private let attention = UIButton(type: .system)
     private let canvas = UIButton(type: .system)
+    private let character = UIButton(type: .system)
     private var canvasWatch: Task<Void, Never>?
     private var lastCanvasCall: String?
     private var lastSurfacedCanvas: UUID?
@@ -67,6 +68,10 @@ final class HubVoiceViewController: UIViewController {
         canvas.isHidden = true
         canvas.setTitle("Open Canvas", for: .normal)
         canvas.addAction(UIAction { [weak self] _ in self?.openCanvas() }, for: .touchUpInside)
+        character.configuration = .tinted()
+        character.setTitle("Choose character", for: .normal)
+        character.isHidden = true
+        character.addAction(UIAction { [weak self] _ in self?.openCharacters() }, for: .touchUpInside)
         end.configuration = .filled(); end.configuration?.baseBackgroundColor = .systemRed
         end.setTitle("End conversation", for: .normal)
         end.addAction(UIAction { [weak self] _ in guard let self else { return }; if self.voice.isActive { self.voice.end() } else { self.restart() } }, for: .touchUpInside)
@@ -76,7 +81,7 @@ final class HubVoiceViewController: UIViewController {
         symbol.contentMode = .scaleAspectFit; symbol.tintColor = .label
         symbol.heightAnchor.constraint(equalToConstant: 96).isActive = true
         symbol.isAccessibilityElement = false
-        let stack = UIStackView(arrangedSubviews: [symbol, status, canvas, transcript, attention, actions, end])
+        let stack = UIStackView(arrangedSubviews: [symbol, status, character, canvas, transcript, attention, actions, end])
         stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -143,6 +148,12 @@ final class HubVoiceViewController: UIViewController {
         end.setTitle(voice.isActive ? "End conversation" : "Resume conversation", for: .normal)
         end.configuration?.baseBackgroundColor = voice.isActive ? .systemRed : .systemIndigo
         navigationItem.leftBarButtonItem?.title = voice.isActive ? "Hide" : "Close"
+        let canChooseCharacter = voice.hasOwnedActiveCall
+        character.isHidden = !canChooseCharacter
+        if !canChooseCharacter {
+            character.setTitle("Choose character", for: .normal)
+            character.accessibilityValue = nil
+        }
         if !voice.isActive { canvas.isHidden = true }
     }
     @objc private func hide() { dismiss(animated: true) }
@@ -187,6 +198,16 @@ final class HubVoiceViewController: UIViewController {
                     }
                 }
         }.navigationViewStyle(.stack)), animated: true)
+    }
+
+    private func openCharacters() {
+        guard presentedViewController == nil, let context = voice.attachmentContext(), context.stillOwned() else { return }
+        let picker = HubChatCharacterView(sessionID: context.sessionID, api: voice.conversationAPI(), stillAvailable: context.stillOwned) { [weak self] name in
+            self?.character.setTitle(name, for: .normal)
+            self?.character.accessibilityLabel = "Choose character"
+            self?.character.accessibilityValue = name
+        }
+        present(UIHostingController(rootView: picker), animated: true)
     }
 }
 

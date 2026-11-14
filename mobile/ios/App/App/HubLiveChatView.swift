@@ -1371,9 +1371,10 @@ private struct HubChatModelPicker: View {
 }
 
 @MainActor
-private struct HubChatCharacterView: View {
+struct HubChatCharacterView: View {
     let sessionID: String
     let api: HubConversationAPI
+    var stillAvailable: () -> Bool = { true }
     let selected: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var picker: HubChatCharacterPicker?
@@ -1433,6 +1434,7 @@ private struct HubChatCharacterView: View {
 
     private func load() async {
         error = nil
+        guard stillAvailable() else { error = "The voice conversation has ended."; return }
         do {
             let value = try await api.chatCharacters(sessionID: sessionID)
             guard !Task.isCancelled else { return }
@@ -1445,6 +1447,7 @@ private struct HubChatCharacterView: View {
 
     private func select(_ option: HubChatCharacterPicker.Character, revision: Int) async {
         guard !changing else { return }
+        guard stillAvailable() else { error = "The voice conversation has ended."; return }
         changing = true
         defer { changing = false }
         do {
