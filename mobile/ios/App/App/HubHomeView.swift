@@ -134,6 +134,8 @@ struct HubHomeView: View {
     @State private var pinnedExpanded = false
     @State private var creatingChat = false
     @State private var workspaces: [HubWorkspaceItem]?
+    @State private var archivedSessions: Set<String> = []
+    @State private var sessionToArchive: HubConversationChoice?
     @State private var workspaceChats: [String: HubConversationChoice] = [:]
     @State private var expandedWorkspaces: Set<String> = []
     @State private var workspaceAttempt = 0
@@ -273,6 +275,13 @@ struct HubHomeView: View {
         } message: { item in
             Text("\(item.title) will be removed from the workspace list. Its files and conversations stay on HUB.")
         }
+        .alert("Archive conversation?", isPresented: Binding(
+            get: { sessionToArchive != nil }, set: { if !$0 { sessionToArchive = nil } }), presenting: sessionToArchive) { chat in
+            Button("Archive", role: .destructive) { Task { await archiveSession(chat.sessionId) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { chat in
+            Text("\(chat.title) will be hidden from the conversation lists. Its messages are kept on HUB.")
+        }
         .task(id: model.connection == .connected ? chatAPI().map { ObjectIdentifier($0) } : nil) {
             guard model.connection == .connected, let api = chatAPI(),
                   let value = try? await api.chatPreferences(), !Task.isCancelled else { return }
@@ -307,6 +316,8 @@ struct HubHomeView: View {
                 plannerOpen = false
                 plannerEditor = nil
                 workspaces = nil
+                archivedSessions = []
+                sessionToArchive = nil
                 workspaceChats = [:]
                 expandedWorkspaces = []
                 workspaceDirectoryOpen = false
@@ -610,7 +621,8 @@ struct HubHomeView: View {
                         pinnedHistory
                         Text("Recents").font(.subheadline.bold()).foregroundStyle(.secondary).padding(.vertical, 10)
                     }
-                    if let conversations = query.isEmpty ? model.conversations : historyResults?.conversations {
+                    if let results = query.isEmpty ? model.conversations : historyResults?.conversations {
+                        let conversations = results.filter { !archivedSessions.contains($0.sessionId) }
                         if conversations.isEmpty {
                             Text(query.isEmpty ? "No conversations yet" : "No matching conversations")
                                 .foregroundStyle(.secondary)
@@ -687,9 +699,9 @@ struct HubHomeView: View {
                         get: { expandedWorkspaces.contains(item.id) },
                         set: { if $0 { expandedWorkspaces.insert(item.id) } else { expandedWorkspaces.remove(item.id) } }
                     )) {
-                        ForEach(item.sessionIds, id: \.self) { id in
+                        ForEach(item.sessionIds.filter { !archivedSessions.contains($0) }, id: \.self) { id in
                             historyRow(workspaceChats[id] ?? HubConversationChoice(sessionId: id,
-                                title: "Untitled conversation", updatedAt: 0))
+                                title: "Untitled conversation", updatedAt: 0), workspace: item)
                         }
                         Button {
                             Task { await newChat(workspaceID: item.id) }
@@ -702,6 +714,7 @@ struct HubHomeView: View {
                             Label(item.title, systemImage: "folder").lineLimit(1)
                             Spacer()
                             Menu {
+                                workspacePlacement(item, in: workspaces)
                                 Button("Rename") { workspaceTitle = item.title; workspaceToRename = item }
                                 Button("Remove workspace", role: .destructive) { workspaceToRemove = item }
                             } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
@@ -727,9 +740,11 @@ struct HubHomeView: View {
         guard let api = chatAPI() else { return }
         workspaceError = nil
         do {
-            let items = try await api.workspaces()
-            guard !Task.isCancelled, chatAPI() === api else { return }
+            let snapshot = try await api.workspaces()
+            let items = snapshot.items
+            guard !Task.isCancelled, chatAPI() === api, !workspaceBusy else { return }
             workspaces = items
+            archivedSessions = Set(snapshot.archivedSessionIds)
             if items.contains(where: { !$0.sessionIds.isEmpty }) {
                 let titles = try await api.workspaceChatTitles()
                 guard !Task.isCancelled, chatAPI() === api else { return }
@@ -737,6 +752,59 @@ struct HubHomeView: View {
             }
         } catch {
             if !Task.isCancelled && chatAPI() === api { workspaceError = "Could not refresh workspaces." }
+        }
+    }
+
+    @ViewBuilder private func workspacePlacement(_ item: HubWorkspaceItem, in items: [HubWorkspaceItem]) -> some View {
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            if index > 0 {
+                Button("Move workspace up") { Task { await moveWorkspace(item.id, before: items[index - 1].id) } }
+            }
+            if index + 1 < items.count {
+                let next = items.dropFirst(index + 2).first?.id
+                Button("Move workspace down") { Task { await moveWorkspace(item.id, before: next) } }
+            }
+        }
+    }
+
+    private func moveWorkspace(_ id: String, before anchor: String?) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false; workspaceAttempt += 1 }
+        do {
+            let order = try await api.moveWorkspace(id, before: anchor)
+            guard chatAPI() === api, let workspaces else { return }
+            let byID = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0) })
+            if Set(order) == Set(byID.keys) { self.workspaces = order.compactMap { byID[$0] } }
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the workspace order." }
+        }
+    }
+
+    private func moveSession(_ id: String, in workspace: HubWorkspaceItem, before anchor: String?) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false; workspaceAttempt += 1 }
+        do {
+            let updated = try await api.moveWorkspaceSession(id, in: workspace.id, before: anchor)
+            guard chatAPI() === api else { return }
+            workspaces = workspaces?.map { $0.id == updated.id ? updated : $0 }
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the conversation order." }
+        }
+    }
+
+    private func archiveSession(_ id: String) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false }
+        do {
+            let archived = try await api.archiveWorkspaceSession(id)
+            guard chatAPI() === api else { return }
+            archivedSessions = archived
+            workspaceAttempt += 1
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the archive. Refresh workspaces to check." }
         }
     }
 
@@ -773,10 +841,11 @@ struct HubHomeView: View {
         DisclosureGroup(isExpanded: $pinnedExpanded) {
             if let bookmarks {
                 let byID = Dictionary(uniqueKeysWithValues: (model.conversations ?? []).map { ($0.sessionId, $0) })
-                if bookmarks.sessionIds.isEmpty {
+                let visible = bookmarks.sessionIds.filter { !archivedSessions.contains($0) }
+                if visible.isEmpty {
                     Text("No pinned conversations").font(.footnote).foregroundStyle(.secondary).padding(.vertical, 8)
                 }
-                ForEach(bookmarks.sessionIds, id: \.self) { id in
+                ForEach(visible, id: \.self) { id in
                     historyRow(byID[id] ?? HubConversationChoice(sessionId: id, title: "Pinned conversation", updatedAt: 0))
                 }
             }
@@ -785,20 +854,37 @@ struct HubHomeView: View {
             HStack {
                 Text("Pinned").font(.headline)
                 Spacer()
-                if let bookmarks { Text("\(bookmarks.sessionIds.count)").foregroundStyle(.secondary) }
+                if let bookmarks { Text("\(bookmarks.sessionIds.filter { !archivedSessions.contains($0) }.count)").foregroundStyle(.secondary) }
                 Image(systemName: "star")
             }
             .frame(minHeight: 44)
         }
     }
 
-    private func historyRow(_ chat: HubConversationChoice) -> some View {
+    private func historyRow(_ chat: HubConversationChoice, workspace: HubWorkspaceItem? = nil) -> some View {
         HStack(spacing: 6) {
             Button { showChat(chat) } label: {
                 Text(chat.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .accessibilityIdentifier("hub.history.\(chat.sessionId)")
+            .contextMenu {
+                if let workspace {
+                    let ids = workspace.sessionIds.filter { !archivedSessions.contains($0) }
+                    if let index = ids.firstIndex(of: chat.sessionId) {
+                        if index > 0 {
+                            Button("Move conversation up") { Task { await moveSession(chat.sessionId, in: workspace, before: ids[index - 1]) } }
+                                .disabled(workspaceBusy)
+                        }
+                        if index + 1 < ids.count {
+                            let next = ids.dropFirst(index + 2).first
+                            Button("Move conversation down") { Task { await moveSession(chat.sessionId, in: workspace, before: next) } }
+                                .disabled(workspaceBusy)
+                        }
+                    }
+                }
+                Button("Archive conversation", role: .destructive) { sessionToArchive = chat }.disabled(workspaceBusy)
+            }
             if let bookmarks {
                 let pinned = bookmarks.sessionIds.contains(chat.sessionId)
                 Button { Task { await setPinned(chat.sessionId, pinned: !pinned) } } label: {

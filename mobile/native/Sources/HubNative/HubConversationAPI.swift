@@ -3029,11 +3029,15 @@ public final class HubConversationAPI {
         return try await chatPreferences()
     }
 
-    public func workspaces() async throws -> [HubWorkspaceItem] {
+    public struct WorkspaceSnapshot: Decodable {
+        public let items: [HubWorkspaceItem]
+        public let archivedSessionIds: [String]
+    }
+
+    public func workspaces() async throws -> WorkspaceSnapshot {
         struct Baseline: Decodable {
             let type: String
-            let value: Value
-            struct Value: Decodable { let items: [HubWorkspaceItem] }
+            let value: WorkspaceSnapshot
         }
         let (socket, streamSession) = try await remoteSocket()
         defer { streamSession.invalidateAndCancel() }
@@ -3060,11 +3064,43 @@ public final class HubConversationAPI {
                 let baseline = try JSONDecoder().decode(Baseline.self, from: JSONSerialization.data(withJSONObject: item))
                 let workspaces = baseline.value.items
                 guard baseline.type == "baseline", workspaces.allSatisfy(\.isValid),
-                      Set(workspaces.map(\.id)).count == workspaces.count else { throw HubAttachmentError.invalidResponse }
-                return workspaces
+                      Set(workspaces.map(\.id)).count == workspaces.count,
+                      baseline.value.archivedSessionIds.allSatisfy(HubVoiceAPI.validID) else { throw HubAttachmentError.invalidResponse }
+                return baseline.value
             }
             throw CancellationError()
         }, onCancel: { socket.cancel(with: .goingAway, reason: nil) })
+    }
+
+    public func moveWorkspace(_ id: String, before anchor: String?) async throws -> [String] {
+        guard HubVoiceAPI.validID(id), anchor != id, anchor.map(HubVoiceAPI.validID) ?? true else {
+            throw HubAttachmentError.invalidFile
+        }
+        var request = ["workspaceId": id]
+        if let anchor { request["beforeWorkspaceId"] = anchor }
+        let value = try await rpc("workspace/insertBefore", request: request, maxBytes: 4_194_304)
+        guard let order = value["workspaceIds"] as? [String], order.contains(id), order.allSatisfy(HubVoiceAPI.validID),
+              Set(order).count == order.count else { throw HubAttachmentError.invalidResponse }
+        return order
+    }
+
+    public func moveWorkspaceSession(_ id: String, in workspaceID: String, before anchor: String?) async throws -> HubWorkspaceItem {
+        guard HubVoiceAPI.validID(id), HubVoiceAPI.validID(workspaceID), anchor != id, anchor.map(HubVoiceAPI.validID) ?? true else {
+            throw HubAttachmentError.invalidFile
+        }
+        var request = ["workspaceId": workspaceID, "sessionId": id]
+        if let anchor { request["beforeSessionId"] = anchor }
+        let workspace = try Self.workspaceMutation(await rpc("workspace/insertSessionBefore", request: request, maxBytes: 4_194_304))
+        guard workspace.id == workspaceID, workspace.sessionIds.contains(id) else { throw HubAttachmentError.invalidResponse }
+        return workspace
+    }
+
+    public func archiveWorkspaceSession(_ id: String) async throws -> Set<String> {
+        guard HubVoiceAPI.validID(id) else { throw HubAttachmentError.invalidFile }
+        let value = try await rpc("workspace/archiveSession", request: ["sessionId": id], maxBytes: 4_194_304)
+        guard let archived = value["archivedSessionIds"] as? [String], archived.contains(id),
+              archived.allSatisfy(HubVoiceAPI.validID) else { throw HubAttachmentError.invalidResponse }
+        return Set(archived)
     }
 
     public func createWorkspaceDirectory(parent: String, name: String) async throws -> String {

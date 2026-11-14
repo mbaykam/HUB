@@ -644,6 +644,41 @@ final class HubConversationTests: XCTestCase {
         XCTAssertTrue(id.hasPrefix("session-"))
     }
 
+    func testWorkspaceOrderingAndArchivingUseTheExistingRegistryRPCs() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let command = try XCTUnwrap(arguments["request"] as? [String: String])
+            let value: [String: Any]
+            switch request.url?.path {
+            case "/api/workspace/insertBefore":
+                XCTAssertEqual(command, ["workspaceId": "fixture-workspace", "beforeWorkspaceId": "other-workspace"])
+                value = ["workspaceIds": ["fixture-workspace", "other-workspace"]]
+            case "/api/workspace/insertSessionBefore":
+                XCTAssertEqual(command, ["workspaceId": "fixture-workspace", "sessionId": "chat-one"])
+                value = ["workspace": ["workspaceId": "fixture-workspace", "path": "/fixture", "title": "Fixture",
+                                        "sessionIds": ["chat-two", "chat-one"]]]
+            case "/api/workspace/archiveSession":
+                XCTAssertEqual(command, ["sessionId": "chat-one"])
+                value = ["archivedSessionIds": ["chat-one"]]
+            default:
+                throw URLError(.unsupportedURL)
+            }
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": value],
+            ]))
+        }
+        let order = try await api.moveWorkspace("fixture-workspace", before: "other-workspace")
+        XCTAssertEqual(order, ["fixture-workspace", "other-workspace"])
+        let workspace = try await api.moveWorkspaceSession("chat-one", in: "fixture-workspace", before: nil)
+        XCTAssertEqual(workspace.sessionIds, ["chat-two", "chat-one"])
+        let archived = try await api.archiveWorkspaceSession("chat-one")
+        XCTAssertEqual(archived, ["chat-one"])
+    }
+
     func testChatKeepsAPendingModelThroughThePreviousModelsRequest() throws {
         let decoder = JSONDecoder()
         let start = try decoder.decode(HubChatStreamFrame.Value.self, from: Data(#"""
