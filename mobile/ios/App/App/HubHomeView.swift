@@ -1302,57 +1302,70 @@ struct HubHomeView: View {
         .task(id: search) { await searchKnowledge(search, api: api) }
     }
 
-    @ViewBuilder private func knowledgeGraphSection(
+    private func knowledgeGraphSection(
         _ graph: HubHomeKnowledge, displayed: HubHomeKnowledge, neighborhood: HubHomeKnowledge?,
         domainGraph: HubHomeKnowledge?, scope: HubKnowledgeGraphView.Scope
     ) -> some View {
-        let selectDomain: ((String) -> Void)? = neighborhood == nil && domainGraph == nil ? focusKnowledgeDomain : nil
-        if let center = knowledgeLocalCenter, let neighborhood {
-            HStack {
-                Button { knowledgeLocalCenter = nil } label: { Label("All knowledge", systemImage: "chevron.left") }
-                    .accessibilityIdentifier("hub.knowledge.leave-local-graph")
-                Spacer()
-                Text(neighborhood.nodes.first { $0.id == center }?.title ?? "Local graph")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        let canFocus = neighborhood == nil && domainGraph == nil
+        let domains = canFocus ? (graph.domains ?? []).filter { $0.status != "merged" } : []
+        let onDomain: ((String) -> Void)? = canFocus ? { id in self.focusKnowledgeDomain(id) } : nil
+        let canvas = HubKnowledgeGraphView(graph: displayed, height: 330, scope: scope, spatial: knowledgeSpatial,
+                                           focusID: neighborhood == nil ? nil : knowledgeLocalCenter,
+                                           selectDomain: onDomain, select: selectKnowledgeNode)
+        let identity = [scope.rawValue, String(knowledgeSpatial), knowledgeLocalCenter ?? "",
+                        knowledgeFocusedDomain ?? "", String(knowledgeGraphReset)].joined(separator: "/")
+        return VStack(alignment: .leading, spacing: 8) {
+            knowledgeGraphHeader(graph, neighborhood: neighborhood, domainGraph: domainGraph)
+            canvas.id(identity).overlay(alignment: .topTrailing) {
+                knowledgeGraphMenu(domains: domains, canFocus: canFocus)
             }
-            if neighborhood.edges.isEmpty { Text("This record has no connections yet.").font(.footnote).foregroundStyle(.secondary) }
+        }
+    }
+
+    @ViewBuilder private func knowledgeGraphHeader(_ graph: HubHomeKnowledge, neighborhood: HubHomeKnowledge?,
+                                                  domainGraph: HubHomeKnowledge?) -> some View {
+        if let center = knowledgeLocalCenter, let neighborhood {
+            let title = neighborhood.nodes.first { $0.id == center }?.title ?? "Local graph"
+            knowledgeScopeHeader(title: title, identifier: "hub.knowledge.leave-local-graph") { knowledgeLocalCenter = nil }
+            if neighborhood.edges.isEmpty {
+                Text("This record has no connections yet.").font(.footnote).foregroundStyle(.secondary)
+            }
         }
         if let domain = knowledgeFocusedDomain, let domainGraph {
-            HStack {
-                Button { knowledgeFocusedDomain = nil } label: { Label("All knowledge", systemImage: "chevron.left") }
-                    .accessibilityIdentifier("hub.knowledge.leave-domain")
-                Spacer()
-                Text(domainTitle(domain, in: graph))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            knowledgeScopeHeader(title: domainTitle(domain, in: graph), identifier: "hub.knowledge.leave-domain") { knowledgeFocusedDomain = nil }
+            if domainGraph.nodes.isEmpty {
+                Text("No records in this domain.").font(.footnote).foregroundStyle(.secondary)
             }
-            if domainGraph.nodes.isEmpty { Text("No records in this domain.").font(.footnote).foregroundStyle(.secondary) }
         }
-        HubKnowledgeGraphView(graph: displayed, height: 330, scope: scope, spatial: knowledgeSpatial,
-                              focusID: neighborhood == nil ? nil : knowledgeLocalCenter,
-                              selectDomain: selectDomain,
-                              select: selectKnowledgeNode)
-            .id("\(scope.rawValue)/\(knowledgeSpatial)/\(knowledgeLocalCenter ?? "")/\(knowledgeFocusedDomain ?? "")/\(knowledgeGraphReset)")
-            .overlay(alignment: .topTrailing) {
-                Menu {
-                    Button("2D") { knowledgeSpatial = false }
-                    Button("3D") { knowledgeSpatial = true }
-                    Button("Reset view") { knowledgeGraphReset += 1 }
-                    Button("Refresh graph") { Task { await refreshKnowledgeGraph() } }
-                    if neighborhood == nil, domainGraph == nil {
-                        Menu("Focus domain") {
-                            ForEach((graph.domains ?? []).filter { $0.status != "merged" }) { domain in
-                                Button(domain.title) { focusKnowledgeDomain(domain.id) }
-                            }
-                            Button("Chat archive") { focusKnowledgeDomain(HubKnowledgeLayout.archiveID) }
-                        }
-                    }
-                } label: {
-                    Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
-                        .frame(minWidth: 44, minHeight: 44)
+    }
+
+    private func knowledgeScopeHeader(title: String, identifier: String, close: @escaping () -> Void) -> some View {
+        HStack {
+            Button(action: close) { Label("All knowledge", systemImage: "chevron.left") }
+                .accessibilityIdentifier(identifier)
+            Spacer()
+            Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+
+    private func knowledgeGraphMenu(domains: [HubHomeKnowledge.Domain], canFocus: Bool) -> some View {
+        Menu {
+            Button("2D") { knowledgeSpatial = false }
+            Button("3D") { knowledgeSpatial = true }
+            Button("Reset view") { knowledgeGraphReset += 1 }
+            Button("Refresh graph") { Task { await refreshKnowledgeGraph() } }
+            if canFocus {
+                Section("Focus domain") {
+                    ForEach(domains) { domain in Button(domain.title) { focusKnowledgeDomain(domain.id) } }
+                    Button("Chat archive") { focusKnowledgeDomain(HubKnowledgeLayout.archiveID) }
                 }
-                .accessibilityLabel("Graph view")
-                .accessibilityValue(knowledgeSpatial ? "3D" : "2D")
             }
+        } label: {
+            Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("Graph view")
+        .accessibilityValue(knowledgeSpatial ? "3D" : "2D")
     }
 
     private func domainTitle(_ id: String, in graph: HubHomeKnowledge) -> String {
