@@ -16,9 +16,6 @@ struct HubRoutineEditorView: View {
     @State private var error: String?
     @State private var attempt = 0
 
-    private let weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    private let events = ["host.started", "task.completed", "task.failed", "knowledge.archived"]
-
     var body: some View {
         NavigationView {
             Form {
@@ -74,75 +71,9 @@ struct HubRoutineEditorView: View {
 
     private func schedule(_ current: HubRoutineEditorData.Trigger) -> some View {
         Section("Schedule") {
-            Picker("Trigger", selection: Binding(get: { current.kind }, set: selectTrigger)) {
-                Text("Once").tag(HubRoutineEditorData.Trigger.Kind.once)
-                Text("At an interval").tag(HubRoutineEditorData.Trigger.Kind.interval)
-                Text("On selected weekdays").tag(HubRoutineEditorData.Trigger.Kind.calendar)
-                Text("Watch a public source").tag(HubRoutineEditorData.Trigger.Kind.watch)
-                Text("When a HUB event occurs").tag(HubRoutineEditorData.Trigger.Kind.event)
-            }
-            switch current.kind {
-            case .once:
-                DatePicker("Run at", selection: Binding(
-                    get: { Date(timeIntervalSince1970: Double(draft?.trigger.at ?? 0) / 1_000) },
-                    set: { draft?.trigger.at = Int64($0.timeIntervalSince1970 * 1_000) }))
-            case .interval:
-                intervalField
-            case .calendar:
-                Stepper("Hour · \(current.hour ?? 9)", value: trigger(\.hour, default: 9), in: 0...23)
-                Stepper("Minute · \(current.minute ?? 0)", value: trigger(\.minute, default: 0), in: 0...59)
-                TextField("Time zone", text: trigger(\.timezone, default: TimeZone.current.identifier))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                ForEach(weekdays.indices, id: \.self) { day in
-                    Toggle(weekdays[day], isOn: Binding(get: { draft?.trigger.days?.contains(day) == true }, set: { on in
-                        var values = Set(draft?.trigger.days ?? [])
-                        if on { values.insert(day) } else { values.remove(day) }
-                        draft?.trigger.days = values.sorted()
-                    }))
-                }
-            case .watch:
-                TextField("Public HTTPS URL", text: trigger(\.url, default: ""))
-                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                intervalField
-                Picker("Condition", selection: trigger(\.rule, default: "changed")) {
-                    Text("Content changes").tag("changed")
-                    Text("Contains text").tag("contains")
-                    Text("No longer contains text").tag("not-contains")
-                    Text("Value above").tag("above")
-                    Text("Value below").tag("below")
-                }
-                if (current.rule ?? "changed") != "changed" { TextField("Comparison value", text: trigger(\.value, default: "")) }
-                TextField("Optional JSON field", text: trigger(\.jsonPath, default: ""))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Toggle("Run if the first check meets the condition", isOn: trigger(\.fireOnFirst, default: false))
-            case .event:
-                Picker("Event", selection: trigger(\.event, default: "task.completed")) {
-                    if let event = current.event, !events.contains(event) { Text(event).tag(event) }
-                    ForEach(events, id: \.self) { Text($0).tag($0) }
-                }
-                Picker("Condition", selection: trigger(\.operatorName, default: "")) {
-                    Text("Every occurrence").tag("")
-                    Text("Field equals").tag("equals")
-                    Text("Field contains").tag("contains")
-                    Text("Value above").tag("above")
-                    Text("Value below").tag("below")
-                }
-                if let operation = current.operatorName, !operation.isEmpty {
-                    TextField("Event field", text: trigger(\.path, default: ""))
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("Comparison value", text: trigger(\.value, default: ""))
-                }
-            }
+            HubScheduleTriggerFields(trigger: Binding(get: { draft?.trigger ?? current },
+                                                      set: { draft?.trigger = $0 }), allowsManual: false)
         }
-    }
-
-    private var intervalField: some View {
-        TextField("Interval in minutes", value: Binding(
-            get: { Double(draft?.trigger.seconds ?? 3_600) / 60 },
-            set: { minutes in
-                guard minutes.isFinite, (0...525_600).contains(minutes) else { return }
-                draft?.trigger.seconds = Int((minutes * 60).rounded())
-            }), format: .number.grouping(.never)).keyboardType(.decimalPad)
     }
 
     private func limits(_ current: HubRoutineEditorData.Draft) -> some View {
@@ -175,28 +106,6 @@ struct HubRoutineEditorView: View {
         Binding(get: { draft?[keyPath: key] ?? value ?? "" }, set: { draft?[keyPath: key] = $0.isEmpty ? nil : $0 })
     }
 
-    private func trigger<Value>(_ key: WritableKeyPath<HubRoutineEditorData.Trigger, Value?>, default value: Value) -> Binding<Value> {
-        Binding(get: { draft?.trigger[keyPath: key] ?? value }, set: { draft?.trigger[keyPath: key] = $0 })
-    }
-
-    private func selectTrigger(_ kind: HubRoutineEditorData.Trigger.Kind) {
-        var next = HubRoutineEditorData.Trigger(kind: kind)
-        switch kind {
-        case .once: next.at = Int64(Date().addingTimeInterval(3_600).timeIntervalSince1970 * 1_000)
-        case .interval: next.seconds = 3_600
-        case .calendar:
-            next.hour = 9
-            next.minute = 0
-            next.days = [1, 2, 3, 4, 5]
-            next.timezone = TimeZone.current.identifier
-        case .watch:
-            next.seconds = 3_600
-            next.rule = "changed"
-        case .event: next.event = "task.completed"
-        }
-        draft?.trigger = next
-    }
-
     private func canSave(_ value: HubRoutineEditorData.Draft, data: HubRoutineEditorData) -> Bool {
         !value.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !value.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -221,9 +130,7 @@ struct HubRoutineEditorView: View {
     private func save() async {
         guard !saving, let data, var draft, canSave(draft, data: data) else { return }
         draft.tools = tools.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        if draft.trigger.operatorName == "" { draft.trigger.operatorName = nil }
-        if draft.trigger.jsonPath == "" { draft.trigger.jsonPath = nil }
-        if draft.trigger.path == "" { draft.trigger.path = nil }
+        draft.trigger = draft.trigger.normalized()
         saving = true
         defer { saving = false }
         do {
@@ -233,5 +140,112 @@ struct HubRoutineEditorView: View {
         } catch {
             self.error = "Could not confirm the save. Your edits are still here. Check the schedule, limits and current routine before trying again."
         }
+    }
+}
+
+@MainActor
+struct HubScheduleTriggerFields: View {
+    @Binding var trigger: HubRoutineEditorData.Trigger
+    let allowsManual: Bool
+
+    private let events = ["host.started", "task.completed", "task.failed", "knowledge.archived"]
+
+    var body: some View {
+        let current = trigger
+        Picker("Trigger", selection: Binding(get: { current.kind }, set: selectTrigger)) {
+            if allowsManual { Text("When I press Start").tag(HubRoutineEditorData.Trigger.Kind.manual) }
+            Text("Once").tag(HubRoutineEditorData.Trigger.Kind.once)
+            Text("At an interval").tag(HubRoutineEditorData.Trigger.Kind.interval)
+            Text("On selected weekdays").tag(HubRoutineEditorData.Trigger.Kind.calendar)
+            Text("Watch a public source").tag(HubRoutineEditorData.Trigger.Kind.watch)
+            Text("When a HUB event occurs").tag(HubRoutineEditorData.Trigger.Kind.event)
+        }
+        switch current.kind {
+        case .manual:
+            EmptyView()
+        case .once:
+            DatePicker("Run at", selection: Binding(
+                get: { Date(timeIntervalSince1970: Double(trigger.at ?? 0) / 1_000) },
+                set: { trigger.at = Int64($0.timeIntervalSince1970 * 1_000) }))
+        case .interval:
+            intervalField
+        case .calendar:
+            Stepper("Hour · \(current.hour ?? 9)", value: field(\.hour, default: 9), in: 0...23)
+            Stepper("Minute · \(current.minute ?? 0)", value: field(\.minute, default: 0), in: 0...59)
+            TextField("Time zone", text: field(\.timezone, default: TimeZone.current.identifier))
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            let weekdays = Calendar.current.weekdaySymbols
+            ForEach(weekdays.indices, id: \.self) { day in
+                Toggle(weekdays[day], isOn: Binding(get: { trigger.days?.contains(day) == true }, set: { on in
+                    var values = Set(trigger.days ?? [])
+                    if on { values.insert(day) } else { values.remove(day) }
+                    trigger.days = values.sorted()
+                }))
+            }
+        case .watch:
+            TextField("Public HTTPS URL", text: field(\.url, default: ""))
+                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+            intervalField
+            Picker("Condition", selection: field(\.rule, default: "changed")) {
+                Text("Content changes").tag("changed")
+                Text("Contains text").tag("contains")
+                Text("No longer contains text").tag("not-contains")
+                Text("Value above").tag("above")
+                Text("Value below").tag("below")
+            }
+            if (current.rule ?? "changed") != "changed" { TextField("Comparison value", text: field(\.value, default: "")) }
+            TextField("Optional JSON field", text: field(\.jsonPath, default: ""))
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            Toggle("Run if the first check meets the condition", isOn: field(\.fireOnFirst, default: false))
+        case .event:
+            Picker("Event", selection: field(\.event, default: "task.completed")) {
+                if let event = current.event, !events.contains(event) { Text(event).tag(event) }
+                ForEach(events, id: \.self) { Text($0).tag($0) }
+            }
+            Picker("Condition", selection: field(\.operatorName, default: "")) {
+                Text("Every occurrence").tag("")
+                Text("Field equals").tag("equals")
+                Text("Field contains").tag("contains")
+                Text("Value above").tag("above")
+                Text("Value below").tag("below")
+            }
+            if let operation = current.operatorName, !operation.isEmpty {
+                TextField("Event field", text: field(\.path, default: ""))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Comparison value", text: field(\.value, default: ""))
+            }
+        }
+    }
+
+    private var intervalField: some View {
+        TextField("Interval in minutes", value: Binding(
+            get: { Double(trigger.seconds ?? 3_600) / 60 },
+            set: { minutes in
+                guard minutes.isFinite, (0...525_600).contains(minutes) else { return }
+                trigger.seconds = Int((minutes * 60).rounded())
+            }), format: .number.grouping(.never)).keyboardType(.decimalPad)
+    }
+
+    private func field<Value>(_ key: WritableKeyPath<HubRoutineEditorData.Trigger, Value?>, default value: Value) -> Binding<Value> {
+        Binding(get: { trigger[keyPath: key] ?? value }, set: { trigger[keyPath: key] = $0 })
+    }
+
+    private func selectTrigger(_ kind: HubRoutineEditorData.Trigger.Kind) {
+        var next = HubRoutineEditorData.Trigger(kind: kind)
+        switch kind {
+        case .manual: break
+        case .once: next.at = Int64(Date().addingTimeInterval(3_600).timeIntervalSince1970 * 1_000)
+        case .interval: next.seconds = 3_600
+        case .calendar:
+            next.hour = 9
+            next.minute = 0
+            next.days = [1, 2, 3, 4, 5]
+            next.timezone = TimeZone.current.identifier
+        case .watch:
+            next.seconds = 3_600
+            next.rule = "changed"
+        case .event: next.event = "task.completed"
+        }
+        trigger = next
     }
 }

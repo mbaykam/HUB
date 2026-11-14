@@ -441,6 +441,7 @@ final class HubConversationTests: XCTestCase {
                     "workingHours":{"start":540,"end":1080,"days":[1,3,5],"timezone":"Europe/Istanbul"}},
           "schedule":{"trigger":{"kind":"interval","seconds":1800},"repeat":"continue","missed":"skip"},
           "recovery":"ask","humanApproval":true,"notification":"pwa",
+          "sourceSessionId":"minke-im-telegram-0123456789abcdef0123456789abcdef",
           "plan":[{"id":"milestone","title":"Original step","dependsOn":[],"status":"pending","evidence":["ref-1"]}]
         }]}
         """#
@@ -469,7 +470,20 @@ final class HubConversationTests: XCTestCase {
             XCTAssertEqual(hours?["start"] as? Int, CatalogFixture.requests.count == 2 ? 540 : 630)
             XCTAssertEqual(hours?["days"] as? [Int], [1, 3, 5])
             XCTAssertEqual(hours?["timezone"] as? String, "Europe/Istanbul")
-            XCTAssertEqual((goal["schedule"] as? [String: Any])?["missed"] as? String, "skip")
+            let schedule = try XCTUnwrap(goal["schedule"] as? [String: Any])
+            let trigger = try XCTUnwrap(schedule["trigger"] as? [String: Any])
+            if CatalogFixture.requests.count == 2 {
+                XCTAssertEqual(schedule["missed"] as? String, "skip")
+                XCTAssertEqual(trigger["seconds"] as? Int, 1_800)
+                XCTAssertEqual(goal["notification"] as? String, "pwa")
+            } else {
+                XCTAssertEqual(schedule["missed"] as? String, "catch-up")
+                XCTAssertEqual(schedule["repeat"] as? String, "fresh")
+                XCTAssertEqual(trigger["kind"] as? String, "event")
+                XCTAssertEqual(trigger["event"] as? String, "task.completed")
+                XCTAssertNil(trigger["operator"])
+                XCTAssertEqual(goal["notification"] as? String, "telegram")
+            }
             XCTAssertNil(goal["state"])
             return (200, Data(#"{"changedId":"saved-goal"}"#.utf8))
         }
@@ -487,6 +501,14 @@ final class HubConversationTests: XCTestCase {
         draft.milestones = milestones
         XCTAssertTrue(draft.workingHours?.isValid == true)
         draft.workingHours?.start = 630
+        XCTAssertTrue(editor.canNotifyTelegram)
+        var event = HubRoutineEditorData.Trigger(kind: .event)
+        event.event = "task.completed"
+        event.operatorName = ""
+        draft.schedule?.trigger = event
+        draft.schedule?.missed = .catchUp
+        draft.schedule?.recurrence = .fresh
+        draft.notification = "telegram"
         let editedID = try await api.saveGoal(draft, from: editor)
         XCTAssertEqual(editedID, id)
     }

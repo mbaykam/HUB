@@ -809,6 +809,18 @@ public struct HubGoalEditorData {
             days.allSatisfy { (0...6).contains($0) } && TimeZone(identifier: timezone) != nil
         }
     }
+    public struct Schedule: Codable, Equatable {
+        public enum Recurrence: String, Codable { case `continue`, fresh }
+        public enum Missed: String, Codable { case catchUp = "catch-up", skip }
+
+        public var trigger: HubRoutineEditorData.Trigger
+        public var recurrence: Recurrence
+        public var missed: Missed
+
+        private enum CodingKeys: String, CodingKey {
+            case trigger, recurrence = "repeat", missed
+        }
+    }
     public struct Draft {
         public var title: String
         public var objective: String
@@ -840,18 +852,21 @@ public struct HubGoalEditorData {
         public var knowledgeOutput: Bool?
         public var milestones: [Milestone]?
         public var workingHours: WorkingHours?
+        public var schedule: Schedule?
+        public var notification: String?
     }
     public let draft: Draft
     public let characters: [Character]
     public let isResearch: Bool
+    public let canNotifyTelegram: Bool
     fileprivate let original: [String: Any]
     fileprivate let id: String?
     fileprivate let revision: Int
 }
 
 public struct HubRoutineEditorData {
-    public struct Trigger: Codable {
-        public enum Kind: String, Codable, CaseIterable { case once, interval, calendar, watch, event }
+    public struct Trigger: Codable, Equatable {
+        public enum Kind: String, Codable, CaseIterable { case manual, once, interval, calendar, watch, event }
         public var kind: Kind = .once
         public var at: Int64?
         public var seconds: Int?
@@ -873,6 +888,14 @@ public struct HubRoutineEditorData {
             case operatorName = "operator"
         }
         public init(kind: Kind) { self.kind = kind }
+
+        public func normalized() -> Self {
+            var value = self
+            if value.operatorName == "" { value.operatorName = nil }
+            if value.jsonPath == "" { value.jsonPath = nil }
+            if value.path == "" { value.path = nil }
+            return value
+        }
     }
 
     public struct Draft: Codable {
@@ -1624,6 +1647,13 @@ public final class HubConversationAPI {
            let days = hours["days"] as? [Int], let zone = hours["timezone"] as? String {
             draft.workingHours = HubGoalEditorData.WorkingHours(start: start, end: end, days: days, timezone: zone)
         }
+        if let schedule = definition["schedule"] as? [String: Any] {
+            draft.schedule = try? JSONDecoder().decode(HubGoalEditorData.Schedule.self,
+                                                       from: JSONSerialization.data(withJSONObject: schedule))
+        }
+        draft.notification = definition["notification"] as? String
+        let telegram = (definition["sourceSessionId"] as? String)?.range(of: "^minke-im-telegram-[a-f0-9]{32}$",
+                                                                        options: .regularExpression) != nil
         draft.recovery = definition["recovery"] as? String
         draft.helpers = definition["helpers"] as? [String]
         draft.fallbacks = definition["fallbacks"] as? [String]
@@ -1643,6 +1673,7 @@ public final class HubConversationAPI {
             "instructions", "helpers", "verifierId", "fallbacks", "resources", "limits", "schedule", "recovery",
             "humanApproval", "notification", "sourceSessionId"]
         return HubGoalEditorData(draft: draft, characters: characters, isResearch: definition["research"] is [String: Any],
+            canNotifyTelegram: telegram,
             original: definition.filter { fields.contains($0.key) }, id: id, revision: revision)
     }
 
@@ -1685,6 +1716,10 @@ public final class HubConversationAPI {
                     limits["workingHours"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(hours))
                 } else { limits.removeValue(forKey: "workingHours") }
             }
+            if var schedule = draft.schedule, schedule != loaded.draft.schedule {
+                schedule.trigger = schedule.trigger.normalized()
+                value["schedule"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(schedule))
+            }
             for (key, entries) in [
                 ("folders", draft.folders), ("files", draft.files), ("writeFolders", draft.writeFolders), ("tools", draft.tools),
             ] { if let entries { resources[key] = entries } }
@@ -1694,6 +1729,12 @@ public final class HubConversationAPI {
             if let fallbacks = draft.fallbacks { value["fallbacks"] = fallbacks }
             if let verifierID = draft.verifierID, !verifierID.isEmpty { value["verifierId"] = verifierID }
             else { value.removeValue(forKey: "verifierId") }
+        }
+        if let notification = draft.notification, notification != loaded.draft.notification {
+            guard notification == "pwa" || (notification == "telegram" && loaded.canNotifyTelegram) else {
+                throw HubAttachmentError.invalidResponse
+            }
+            value["notification"] = notification
         }
         value["resources"] = resources
         value["limits"] = limits
@@ -1764,6 +1805,7 @@ public final class HubConversationAPI {
         struct Receipt: Decodable { let revision: Int }
         guard !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, draft.title.utf16.count <= 160,
               !draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, draft.prompt.utf16.count <= 12_000,
+              draft.trigger.kind != .manual,
               loaded.characters.contains(where: { $0.id == draft.characterId && $0.route != nil }),
               draft.sourceSessionId == loaded.draft.sourceSessionId else { throw HubAttachmentError.invalidResponse }
         let body = try JSONEncoder().encode(Command(id: loaded.id, revision: loaded.revision, automation: draft))

@@ -102,13 +102,43 @@ struct HubGoalEditorView: View {
                 }
             }
             workingHours(current)
+            if let schedule = current.schedule { scheduleFields(schedule) }
             collaborators(data, current: current)
+        }
+        if data.canNotifyTelegram {
+            Section("Results") {
+                Picker("Notify me in", selection: optional(\.notification, default: "pwa")) {
+                    Text("HUB activity").tag("pwa")
+                    Text("Originating Telegram chat").tag("telegram")
+                }
+            }
         }
         Section {
             Button(id == nil ? "Save draft" : "Save changes") { Task { await save() } }
                 .disabled(!canSave(current))
             if id == nil { Text("Start the saved draft from Tasks when you’re ready.").font(.footnote).foregroundStyle(.secondary) }
         }
+    }
+
+    private func scheduleFields(_ current: HubGoalEditorData.Schedule) -> some View {
+        Section("Start & recurrence") {
+            HubScheduleTriggerFields(trigger: scheduleField(\.trigger, current: current), allowsManual: true)
+            if current.trigger.kind != .manual {
+                Picker("On recurring starts", selection: scheduleField(\.recurrence, current: current)) {
+                    Text("Continue the same goal").tag(HubGoalEditorData.Schedule.Recurrence.continue)
+                    Text("Produce a separate result").tag(HubGoalEditorData.Schedule.Recurrence.fresh)
+                }
+                Picker("If HUB missed a start", selection: scheduleField(\.missed, current: current)) {
+                    Text("Catch up once").tag(HubGoalEditorData.Schedule.Missed.catchUp)
+                    Text("Skip").tag(HubGoalEditorData.Schedule.Missed.skip)
+                }
+            }
+        }
+    }
+
+    private func scheduleField<Value>(_ key: WritableKeyPath<HubGoalEditorData.Schedule, Value>,
+                                      current: HubGoalEditorData.Schedule) -> Binding<Value> {
+        Binding(get: { draft?.schedule?[keyPath: key] ?? current[keyPath: key] }, set: { draft?.schedule?[keyPath: key] = $0 })
     }
 
     private func workingHours(_ current: HubGoalEditorData.Draft) -> some View {
