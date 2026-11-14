@@ -437,7 +437,8 @@ final class HubConversationTests: XCTestCase {
           "criteria":["Verify result"],"characterId":"hub","approach":"balanced","instructions":"",
           "resources":{"knowledge":true,"browser":false,"folders":["C:/Fixture"],"writeFolders":[],
                        "tools":["read"],"files":[],"knowledgeOutput":false},
-          "limits":{"activeMinutes":30,"dailyBudget":0.2,"totalBudget":1},
+          "limits":{"activeMinutes":30,"dailyBudget":0.2,"totalBudget":1,
+                    "workingHours":{"start":540,"end":1080,"days":[1,3,5],"timezone":"Europe/Istanbul"}},
           "schedule":{"trigger":{"kind":"interval","seconds":1800},"repeat":"continue","missed":"skip"},
           "recovery":"ask","humanApproval":true,"notification":"pwa",
           "plan":[{"id":"milestone","title":"Original step","dependsOn":[],"status":"pending","evidence":["ref-1"]}]
@@ -464,6 +465,10 @@ final class HubConversationTests: XCTestCase {
             XCTAssertEqual((goal["resources"] as? [String: Any])?["folders"] as? [String], ["C:/Fixture"])
             XCTAssertEqual((goal["limits"] as? [String: Any])?["dailyBudget"] as? Double, 0.25)
             XCTAssertEqual((goal["limits"] as? [String: Any])?["totalBudget"] as? Double, 1)
+            let hours = (goal["limits"] as? [String: Any])?["workingHours"] as? [String: Any]
+            XCTAssertEqual(hours?["start"] as? Int, CatalogFixture.requests.count == 2 ? 540 : 630)
+            XCTAssertEqual(hours?["days"] as? [Int], [1, 3, 5])
+            XCTAssertEqual(hours?["timezone"] as? String, "Europe/Istanbul")
             XCTAssertEqual((goal["schedule"] as? [String: Any])?["missed"] as? String, "skip")
             XCTAssertNil(goal["state"])
             return (200, Data(#"{"changedId":"saved-goal"}"#.utf8))
@@ -480,6 +485,8 @@ final class HubConversationTests: XCTestCase {
         followUp.dependsOn = [milestones[0].id]
         milestones.append(followUp)
         draft.milestones = milestones
+        XCTAssertTrue(draft.workingHours?.isValid == true)
+        draft.workingHours?.start = 630
         let editedID = try await api.saveGoal(draft, from: editor)
         XCTAssertEqual(editedID, id)
     }

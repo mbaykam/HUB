@@ -101,6 +101,7 @@ struct HubGoalEditorView: View {
                     Text("Wait for me").tag("ask")
                 }
             }
+            workingHours(current)
             collaborators(data, current: current)
         }
         Section {
@@ -108,6 +109,49 @@ struct HubGoalEditorView: View {
                 .disabled(!canSave(current))
             if id == nil { Text("Start the saved draft from Tasks when you’re ready.").font(.footnote).foregroundStyle(.secondary) }
         }
+    }
+
+    private func workingHours(_ current: HubGoalEditorData.Draft) -> some View {
+        Section("Working hours") {
+            Toggle("Restrict working hours", isOn: Binding(
+                get: { draft?.workingHours != nil },
+                set: { enabled in
+                    if enabled {
+                        if draft?.workingHours == nil { draft?.workingHours = .init() }
+                    } else { draft?.workingHours = nil }
+                }))
+            if let hours = current.workingHours {
+                DatePicker("Start", selection: workClock(\.start), displayedComponents: .hourAndMinute)
+                DatePicker("End", selection: workClock(\.end), displayedComponents: .hourAndMinute)
+                TextField("Time zone", text: Binding(get: { draft?.workingHours?.timezone ?? hours.timezone },
+                    set: { draft?.workingHours?.timezone = $0.trimmingCharacters(in: .whitespacesAndNewlines) }))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                DisclosureGroup("Weekdays · \(hours.days.count) selected") {
+                    let weekdays = Calendar.current.weekdaySymbols
+                    ForEach(weekdays.indices, id: \.self) { day in
+                        Toggle(weekdays[day], isOn: Binding(get: { draft?.workingHours?.days.contains(day) == true }, set: { selected in
+                            var values = Set(draft?.workingHours?.days ?? [])
+                            if selected { values.insert(day) } else { values.remove(day) }
+                            draft?.workingHours?.days = values.sorted()
+                        }))
+                    }
+                }
+                if !hours.isValid {
+                    Text("Choose weekdays, different start and end times, and a time zone such as Europe/Istanbul.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .environment(\.timeZone, TimeZone(secondsFromGMT: 0)!)
+    }
+
+    private func workClock(_ key: WritableKeyPath<HubGoalEditorData.WorkingHours, Int>) -> Binding<Date> {
+        Binding(get: {
+            Date(timeIntervalSince1970: Double(draft?.workingHours?[keyPath: key] ?? 0) * 60)
+        }, set: { date in
+            let minutes = Int(date.timeIntervalSince1970 / 60)
+            draft?.workingHours?[keyPath: key] = (minutes % 1_440 + 1_440) % 1_440
+        })
     }
 
     private func plan(_ milestones: [HubGoalEditorData.Milestone]) -> some View {
@@ -242,6 +286,7 @@ struct HubGoalEditorView: View {
             !current.objective.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !current.characterID.isEmpty && (1...20).contains(criteriaLines.count) &&
             (1...10_080).contains(current.activeMinutes) &&
+            (current.workingHours?.isValid ?? true) &&
             (current.milestones?.allSatisfy { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
     }
 

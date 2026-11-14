@@ -790,6 +790,25 @@ public struct HubGoalEditorData {
             evidence = []
         }
     }
+    public struct WorkingHours: Codable, Equatable {
+        public var start: Int
+        public var end: Int
+        public var days: [Int]
+        public var timezone: String
+
+        public init(start: Int = 540, end: Int = 1_080, days: [Int] = [1, 2, 3, 4, 5],
+                    timezone: String = TimeZone.current.identifier) {
+            self.start = start
+            self.end = end
+            self.days = days
+            self.timezone = timezone
+        }
+
+        public var isValid: Bool {
+            (0...1439).contains(start) && (0...1439).contains(end) && start != end && !days.isEmpty &&
+            days.allSatisfy { (0...6).contains($0) } && TimeZone(identifier: timezone) != nil
+        }
+    }
     public struct Draft {
         public var title: String
         public var objective: String
@@ -820,6 +839,7 @@ public struct HubGoalEditorData {
         public var tools: [String]?
         public var knowledgeOutput: Bool?
         public var milestones: [Milestone]?
+        public var workingHours: WorkingHours?
     }
     public let draft: Draft
     public let characters: [Character]
@@ -1599,6 +1619,11 @@ public final class HubConversationAPI {
         draft.inputPrice = limits["inputPrice"] as? Double
         draft.outputPrice = limits["outputPrice"] as? Double
         if let deadline = limits["deadline"] as? Double { draft.deadline = Date(timeIntervalSince1970: deadline / 1_000) }
+        if let hours = limits["workingHours"] as? [String: Any],
+           let start = hours["start"] as? Int, let end = hours["end"] as? Int,
+           let days = hours["days"] as? [Int], let zone = hours["timezone"] as? String {
+            draft.workingHours = HubGoalEditorData.WorkingHours(start: start, end: end, days: days, timezone: zone)
+        }
         draft.recovery = definition["recovery"] as? String
         draft.helpers = definition["helpers"] as? [String]
         draft.fallbacks = definition["fallbacks"] as? [String]
@@ -1654,6 +1679,12 @@ public final class HubConversationAPI {
                 guard stamp.isFinite, stamp > 0, stamp <= 9_007_199_254_740 else { throw HubAttachmentError.invalidResponse }
                 limits["deadline"] = Int64((stamp * 1_000).rounded())
             } else { limits.removeValue(forKey: "deadline") }
+            if draft.workingHours != loaded.draft.workingHours {
+                if let hours = draft.workingHours {
+                    guard hours.isValid else { throw HubAttachmentError.invalidResponse }
+                    limits["workingHours"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(hours))
+                } else { limits.removeValue(forKey: "workingHours") }
+            }
             for (key, entries) in [
                 ("folders", draft.folders), ("files", draft.files), ("writeFolders", draft.writeFolders), ("tools", draft.tools),
             ] { if let entries { resources[key] = entries } }
