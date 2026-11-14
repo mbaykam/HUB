@@ -1101,7 +1101,8 @@ struct HubLiveChatView: View {
                     if awaitingAfter == previous {
                         awaitingAfter = nil
                         error = "HUB accepted your message. Reconnecting to check its status."
-                        attempt += 1
+                        connectionLost = true
+                        reconnect()
                     }
                 }
             } catch HubChatSendError.unknownDelivery(_) {
