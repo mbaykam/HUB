@@ -34,6 +34,78 @@ final class HubConversationTests: XCTestCase {
         CatalogFixture.responder = nil
     }
 
+    func testKnowledgeSkillEditorSendsExplicitCreateNullAndObservedUpdateHash() async throws {
+        let api = try client()
+        let observedHash = String(repeating: "a", count: 64)
+        let skill = """
+        {"id":"fixture-skill","name":"weekly-review","title":"Weekly review","description":"Review progress",
+         "requiredTools":["read"],"hash":"\(observedHash)","content":"Gather the latest updates."}
+        """
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/skills")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-skills"), "1")
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.query, "name=weekly-review")
+                return (200, Data("{\"skill\":\(skill)}".utf8))
+            }
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(body["name"] as? String, "weekly-review")
+            XCTAssertEqual(body["requiredTools"] as? [String], ["read"])
+            if CatalogFixture.requests.count == 1 { XCTAssertTrue(body["expectedHash"] is NSNull) }
+            else { XCTAssertEqual(body["expectedHash"] as? String, observedHash) }
+            return (200, Data("{\"skills\":[\(skill)],\"issues\":[]}".utf8))
+        }
+        var draft = HubKnowledgeSkillDraft()
+        draft.name = "weekly-review"
+        draft.title = "Weekly review"
+        draft.description = "Review progress"
+        draft.content = "Gather the latest updates."
+        draft.requiredTools = ["read"]
+        let created = try await api.saveKnowledgeSkill(draft)
+        XCTAssertEqual(created.skills.first?.name, draft.name)
+        let existing = try await api.knowledgeSkill(name: draft.name)
+        XCTAssertEqual(existing.content, draft.content)
+        var edit = HubKnowledgeSkillDraft(skill: existing)
+        edit.content = "Review progress with verified inputs."
+        _ = try await api.saveKnowledgeSkill(edit)
+        XCTAssertEqual(CatalogFixture.requests.count, 3)
+    }
+
+    func testKnowledgeAttachmentUploadAndReadAreScopedAndVerifyOriginalBytes() async throws {
+        let api = try client()
+        let original = Data(#"{"fixture":true}"#.utf8)
+        let id = HubAttachmentStore.digest(original)
+        let hash = String(repeating: "e", count: 64)
+        let note = try JSONDecoder().decode(HubKnowledgeNote.self, from: Data("""
+        {"id":"fixture-note","title":"Fixture","content":"Source","hash":"\(hash)","kind":"note"}
+        """.utf8))
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-filename"), "Fixture%20file%2Ejson")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/octet-stream")
+                XCTAssertEqual(request.url?.query, "action=upload-asset&noteId=fixture-note&hash=\(hash)")
+                XCTAssertEqual(try Self.requestBody(request), original)
+                return (200, Data("""
+                {"asset":{"id":"\(id)","name":"Fixture file.json","mediaType":"application/json","bytes":\(original.count)},
+                 "note":{"id":"fixture-note","title":"Fixture","content":"Source with attachment","kind":"note"}}
+                """.utf8))
+            }
+            XCTAssertEqual(request.url?.query, "view=asset&id=\(id)")
+            let data = CatalogFixture.requests.count == 2 ? original : Data(repeating: 0x20, count: original.count)
+            return (200, data)
+        }
+        let result = try await api.uploadKnowledgeAsset(original, name: "Fixture file.json", attachingTo: note)
+        XCTAssertEqual(result.note?.content, "Source with attachment")
+        let data = try await api.knowledgeAssetBytes(result.asset)
+        XCTAssertEqual(data, original)
+        do {
+            _ = try await api.knowledgeAssetBytes(result.asset)
+            XCTFail("An attachment must match the saved digest")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
     func testKnowledgeArchiveStagingPreservesBytesAndDoesNotAdmit() async throws {
         let api = try client()
         let source = Data(#"{"fixture":true}"#.utf8)

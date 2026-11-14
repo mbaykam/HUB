@@ -94,6 +94,8 @@ struct HubHomeView: View {
     @State private var knowledgeDomainsOpen = false
     @State private var knowledgeBackupsOpen = false
     @State private var knowledgeArchivesOpen = false
+    @State private var knowledgeSkillsOpen = false
+    @State private var knowledgeAssetsOpen = false
     @State private var knowledgeConnectionsOpen = false
     @State private var knowledgeRefreshError = false
     @State private var selectedNoteID: String?
@@ -926,6 +928,8 @@ struct HubHomeView: View {
                         Button("Domains") { knowledgeDomainsOpen = true }
                         Button("Backups") { knowledgeBackupsOpen = true }
                         Button("Conversation archives") { knowledgeArchivesOpen = true }
+                        Button("Skills") { knowledgeSkillsOpen = true }
+                        Button("Attachments") { knowledgeAssetsOpen = true }
                     } label: {
                         Image(systemName: "ellipsis").frame(width: 44, height: 36)
                     }
@@ -982,6 +986,17 @@ struct HubHomeView: View {
         .sheet(isPresented: $knowledgeArchivesOpen) {
             if let api = chatAPI() { HubKnowledgeArchivesView(api: api, changed: refreshKnowledgeGraph) }
         }
+        .sheet(isPresented: $knowledgeSkillsOpen) {
+            if let api = chatAPI() { HubKnowledgeSkillsView(api: api, changed: refreshKnowledgeGraph) }
+        }
+        .sheet(isPresented: $knowledgeAssetsOpen) {
+            if let api = chatAPI() {
+                HubKnowledgeAssetsView(api: api, note: selectedNote) { updated in
+                    if let updated, selectedNoteID == updated.id { selectedNote = updated }
+                    await refreshKnowledgeGraph()
+                }
+            }
+        }
         .sheet(isPresented: $knowledgeConnectionsOpen) {
             if let api = chatAPI(), let note = selectedNote {
                 HubKnowledgeConnectionsView(api: api, note: note) { id in
@@ -1014,6 +1029,9 @@ struct HubHomeView: View {
                     Button("Save") { Task { await saveNote(note) } }.disabled(noteSaving || noteDraft == note.content || noteSaveFailed)
                 } else if note.kind != "conversation", note.protected != true, note.hash != nil {
                     Button("Edit") { noteDraft = note.content; noteEditing = true }
+                    Button { knowledgeAssetsOpen = true } label: { Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44) }
+                        .accessibilityLabel("Attach file to note")
+                        .disabled(model.connection != .connected)
                 }
             }
             if noteEditing {

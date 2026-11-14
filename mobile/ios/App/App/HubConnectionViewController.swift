@@ -998,6 +998,17 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
         if url.path == "/api/settings/describe", request.httpMethod == "POST" {
             return settingsDescription()
         }
+        if url.path == "/api/hub/skills", request.httpMethod == "GET",
+           request.value(forHTTPHeaderField: "x-hub-skills") == "1" {
+            let skill = #"""
+            {"id":"fixture-skill","name":"weekly-review","title":"Weekly review","description":"Review progress",
+             "requiredTools":["read"],"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+             "content":"Gather the latest updates."}
+            """#
+            if url.query == "name=weekly-review" { return Data("{\"skill\":\(skill)}".utf8) }
+            if url.query == nil { return Data("{\"skills\":[\(skill)],\"issues\":[]}".utf8) }
+            return nil
+        }
         guard url.path == "/api/hub/memory", request.httpMethod == "GET",
               request.value(forHTTPHeaderField: "x-hub-memory") == "1" else { return nil }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []

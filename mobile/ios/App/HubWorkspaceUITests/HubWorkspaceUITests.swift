@@ -162,6 +162,29 @@ final class HubWorkspaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testNativeKnowledgeSkillsFindsExistingWorkflows() {
+        let app = readFixtureApp()
+        let explore = app.buttons["Explore knowledge"]
+        XCTAssertTrue(explore.waitForExistence(timeout: 20))
+        explore.tap()
+        app.buttons["Manage Knowledge"].tap()
+        app.buttons["Skills"].tap()
+        let search = app.textFields["Find a skill"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("Weekly")
+        let skill = app.buttons["hub.knowledge.skill.weekly-review"]
+        XCTAssertTrue(skill.waitForExistence(timeout: 5))
+        skill.tap()
+        XCTAssertTrue(app.navigationBars["Edit skill"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textViews["Workflow instructions"].value as? String, "Gather the latest updates.")
+        XCTAssertFalse(app.textFields["Stable skill name"].isEnabled)
+        XCTAssertFalse(app.buttons["Save"].isEnabled)
+        XCTAssertEqual(app.webViews.count, 0)
+        capture("Knowledge Skills")
+    }
+
+    @MainActor
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name

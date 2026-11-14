@@ -2,6 +2,372 @@ import SwiftUI
 import UIKit
 import HubNative
 import UniformTypeIdentifiers
+import PDFKit
+
+@MainActor
+struct HubKnowledgeAssetsView: View {
+    let api: HubConversationAPI
+    @State private var note: HubKnowledgeNote?
+    let changed: (HubKnowledgeNote?) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var assets: [HubKnowledgeAsset]?
+    @State private var preview: Preview?
+    @State private var busy = false
+    @State private var chooseFiles = false
+    @State private var export = false
+    @State private var checkBeforeUpload = false
+    @State private var notice: LocalizedStringKey?
+
+    private struct Preview {
+        let asset: HubKnowledgeAsset
+        let data: Data
+    }
+
+    init(api: HubConversationAPI, note: HubKnowledgeNote?, changed: @escaping (HubKnowledgeNote?) async -> Void) {
+        self.api = api
+        self.changed = changed
+        _note = State(initialValue: note)
+    }
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if let preview { attachment(preview) }
+                else { library }
+            }
+            .navigationTitle(preview?.asset.name ?? "Attachments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(preview == nil ? "Done" : "Back") {
+                        if preview == nil { dismiss() }
+                        else { preview = nil; notice = nil }
+                    }
+                    .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if preview != nil { Button("Save to Files") { export = true } }
+                    else { Button(note == nil ? "Add files" : "Attach files") { chooseFiles = true }.disabled(busy || checkBeforeUpload) }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(busy)
+        .task { await load() }
+        .fileImporter(isPresented: $chooseFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls): Task { await upload(urls) }
+            case .failure: notice = "Could not open the selected files."
+            }
+        }
+        .fileExporter(isPresented: $export, document: preview.map { HubFileDocument(bytes: $0.data) },
+                      contentType: preview.flatMap { UTType(mimeType: $0.asset.mediaType) } ?? .data,
+                      defaultFilename: preview?.asset.name) { result in
+            if case .failure = result { notice = "Could not save this attachment." }
+        }
+    }
+
+    private var library: some View {
+        List {
+            if let note { Label(note.title, systemImage: "note.text") }
+            if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+            if busy { ProgressView("Working…") }
+            if let assets {
+                if assets.isEmpty { Text("No saved attachments yet.").foregroundStyle(.secondary) }
+                ForEach(assets) { asset in
+                    Button { Task { await open(asset) } } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(asset.name).font(.headline)
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(asset.bytes), countStyle: .file))
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                }
+            }
+            if !busy {
+                Button(checkBeforeUpload ? "Check saved files" : assets == nil ? "Retry" : "Refresh attachments") { Task { await load() } }
+            }
+        }
+        .disabled(busy)
+    }
+
+    private func attachment(_ preview: Preview) -> some View {
+        VStack(alignment: .leading) {
+            if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary).padding() }
+            if preview.asset.mediaType.hasPrefix("image/"), let image = UIImage(data: preview.data) {
+                ScrollView { Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(preview.asset.name) }
+            } else if preview.asset.mediaType == "application/pdf", let document = PDFDocument(data: preview.data) {
+                HubKnowledgePDFView(document: document)
+            } else if preview.data.count <= 400_000,
+                      preview.asset.mediaType.hasPrefix("text/") || preview.asset.mediaType == "application/json",
+                      let text = String(data: preview.data, encoding: .utf8) {
+                ScrollView { Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding() }
+            } else {
+                Text("Use Save to Files to open this attachment in another app.").foregroundStyle(.secondary).padding()
+                Spacer()
+            }
+        }
+    }
+
+    private func load() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let current = try await api.knowledgeAssets()
+            if checkBeforeUpload, let note {
+                let updated = try await api.knowledgeNote(id: note.id)
+                self.note = updated
+                await changed(updated)
+            }
+            assets = current
+            checkBeforeUpload = false
+            notice = nil
+        }
+        catch { notice = "Could not load attachments. Try again." }
+    }
+
+    private func open(_ asset: HubKnowledgeAsset) async {
+        guard !busy else { return }
+        busy = true
+        notice = nil
+        defer { busy = false }
+        do { preview = Preview(asset: asset, data: try await api.knowledgeAssetBytes(asset)) }
+        catch { notice = "Could not open this attachment. Try opening it again." }
+    }
+
+    private func upload(_ urls: [URL]) async {
+        guard !busy, !urls.isEmpty else { return }
+        busy = true
+        defer { busy = false }
+        var saved = 0
+        do {
+            for url in urls {
+                let bytes = try await Task.detached(priority: .userInitiated) {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let limit = HubConversationAPI.knowledgeAssetLimit
+                    let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                    guard values.isRegularFile == true, let size = values.fileSize, (1...limit).contains(size) else {
+                        throw HubAttachmentError.invalidFile
+                    }
+                    let file = try FileHandle(forReadingFrom: url)
+                    defer { try? file.close() }
+                    guard let data = try file.read(upToCount: limit + 1), (1...limit).contains(data.count) else {
+                        throw HubAttachmentError.invalidFile
+                    }
+                    return data
+                }.value
+                let result = try await api.uploadKnowledgeAsset(bytes, name: url.lastPathComponent, attachingTo: note)
+                if let updated = result.note { note = updated }
+                let previous = assets ?? []
+                assets = previous.contains(where: { $0.id == result.asset.id }) ? previous : previous + [result.asset]
+                saved += 1
+            }
+            notice = "\(saved) files saved."
+        } catch {
+            checkBeforeUpload = true
+            notice = "\(saved) files confirmed. Check what was saved before uploading again. Choose files up to 25 MB."
+        }
+        if saved > 0 { await changed(note) }
+    }
+}
+
+private struct HubKnowledgePDFView: UIViewRepresentable {
+    let document: PDFDocument
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        return view
+    }
+
+    func updateUIView(_ view: PDFView, context: Context) {
+        if view.document !== document { view.document = document }
+    }
+}
+
+@MainActor
+struct HubKnowledgeSkillsView: View {
+    let api: HubConversationAPI
+    let changed: () async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var catalog: HubKnowledgeSkillCatalog?
+    @State private var query = ""
+    @State private var draft: HubKnowledgeSkillDraft?
+    @State private var baseline: HubKnowledgeSkillDraft?
+    @State private var busy = false
+    @State private var notice: LocalizedStringKey?
+    @State private var confirmDiscard = false
+    @State private var toolsText = ""
+    @State private var customName = false
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if let draft { editor(draft) }
+                else { library }
+            }
+            .navigationTitle(draft == nil ? "Skills" : baseline?.expectedHash == nil ? "New skill" : "Edit skill")
+            .navigationBarTitleDisplayMode(.inline)
+            .disabled(busy)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(draft == nil ? "Done" : "Cancel") { close() }.disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if let draft {
+                        Button("Save") { Task { await save(draft) } }.disabled(busy || !draft.isValid || draft == baseline)
+                    } else {
+                        Button("New skill") { edit(HubKnowledgeSkillDraft()) }.disabled(busy || catalog == nil)
+                    }
+                }
+            }
+            .alert("Discard skill changes?", isPresented: $confirmDiscard) {
+                Button("Discard changes", role: .destructive) { endEditing() }
+                Button("Keep editing", role: .cancel) {}
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(busy || draft != baseline)
+        .task { await load() }
+    }
+
+    private var library: some View {
+        List {
+            if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+            if busy { ProgressView("Loading skills…") }
+            if let catalog {
+                TextField("Find a skill", text: $query).autocorrectionDisabled()
+                let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                let skills = catalog.skills.filter { skill in
+                    search.isEmpty || [skill.title, skill.name, skill.description].contains { $0.localizedCaseInsensitiveContains(search) }
+                }
+                if skills.isEmpty { Text(catalog.skills.isEmpty ? "No saved skills yet." : "No matching skills.") }
+                ForEach(skills) { skill in
+                    Button { Task { await open(skill.name) } } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(skill.title).font(.headline)
+                            Text(skill.description).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                    .accessibilityIdentifier("hub.knowledge.skill.\(skill.name)")
+                }
+                if let issues = catalog.issues, !issues.isEmpty {
+                    Section("Skills needing repair") {
+                        ForEach(issues.indices, id: \.self) { index in
+                            Text(issues[index].name).font(.subheadline)
+                            Text(issues[index].reason).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            if !busy { Button(catalog == nil ? "Retry" : "Refresh skills") { Task { await load() } } }
+        }
+    }
+
+    private func editor(_ value: HubKnowledgeSkillDraft) -> some View {
+        Form {
+            if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+            if busy { ProgressView("Saving skill…") }
+            Section("Details") {
+                TextField("Name", text: Binding(get: { draft?.title ?? "" }, set: { title in
+                    draft?.title = title
+                    if baseline?.expectedHash == nil && !customName { draft?.name = Self.slug(title) }
+                }))
+                TextField("When to use this", text: field(\.description))
+            }
+            Section("Workflow instructions") {
+                TextEditor(text: field(\.content)).frame(minHeight: 175)
+                    .accessibilityLabel("Workflow instructions")
+            }
+            Section("Advanced") {
+                TextField("Stable skill name", text: Binding(get: { draft?.name ?? "" }, set: { name in
+                    customName = true
+                    draft?.name = name
+                }))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .disabled(value.expectedHash != nil)
+                TextField("Required tools, separated by commas", text: Binding(get: { toolsText }, set: { text in
+                    toolsText = text
+                    draft?.requiredTools = text.split { $0 == "," || $0.isWhitespace }.map(String.init)
+                }))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Text("Character permissions control which tools a workflow can use.").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private static func slug(_ title: String) -> String {
+        let text = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        let words = text.lowercased().split { !$0.isASCII || !($0.isLetter || $0.isNumber) }
+        return String(words.joined(separator: "-").prefix(80)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private func field(_ key: WritableKeyPath<HubKnowledgeSkillDraft, String>) -> Binding<String> {
+        Binding(get: { draft?[keyPath: key] ?? "" }, set: { draft?[keyPath: key] = $0 })
+    }
+
+    private func edit(_ value: HubKnowledgeSkillDraft) {
+        toolsText = value.requiredTools.joined(separator: ", ")
+        customName = false
+        baseline = value
+        draft = value
+        notice = nil
+    }
+
+    private func endEditing() {
+        draft = nil
+        baseline = nil
+        notice = nil
+    }
+
+    private func close() {
+        if draft == nil { dismiss() }
+        else if draft == baseline { endEditing() }
+        else { confirmDiscard = true }
+    }
+
+    private func load() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let found = try await api.knowledgeSkills()
+            if !Task.isCancelled { catalog = found; notice = nil }
+        } catch {
+            if !Task.isCancelled { notice = "Could not load skills. Try again." }
+        }
+    }
+
+    private func open(_ name: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let saved = try await api.knowledgeSkill(name: name)
+            if !Task.isCancelled { edit(HubKnowledgeSkillDraft(skill: saved)) }
+        } catch {
+            if !Task.isCancelled { notice = "Could not open this skill. Refresh the list and try again." }
+        }
+    }
+
+    private func save(_ value: HubKnowledgeSkillDraft) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            catalog = try await api.saveKnowledgeSkill(value)
+            endEditing()
+            notice = "Skill saved."
+            await changed()
+        } catch {
+            notice = "Could not confirm the save. Copy your draft before reopening the skill to check its current version."
+        }
+    }
+}
 
 @MainActor
 struct HubKnowledgeConnectionsView: View {

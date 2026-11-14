@@ -459,6 +459,18 @@ public struct HubKnowledgeNote: Decodable {
     public let links: [HubHomeKnowledge.Node]?
 }
 
+public struct HubKnowledgeAsset: Decodable, Identifiable {
+    public let id: String
+    public let name: String
+    public let mediaType: String
+    public let bytes: Int
+}
+
+public struct HubKnowledgeAssetReceipt: Decodable {
+    public let asset: HubKnowledgeAsset
+    public let note: HubKnowledgeNote?
+}
+
 public struct HubKnowledgeRelationship: Decodable, Identifiable {
     public struct Citation: Decodable {
         public let sourceId: String
@@ -535,6 +547,68 @@ public struct HubChatSkill: Decodable, Identifiable {
     public let name: String
     public let description: String
     public var id: String { name }
+}
+
+public struct HubKnowledgeSkillCatalog: Decodable {
+    public struct Skill: Decodable, Identifiable {
+        public let id: String
+        public let name: String
+        public let title: String
+        public let description: String
+        public let requiredTools: [String]
+        public let hash: String
+        public let content: String?
+    }
+    public struct Issue: Decodable {
+        public let name: String
+        public let reason: String
+    }
+    public let skills: [Skill]
+    public let issues: [Issue]?
+}
+
+public struct HubKnowledgeSkillDraft: Encodable, Equatable {
+    public var name: String
+    public var title: String
+    public var description: String
+    public var content: String
+    public var requiredTools: [String]
+    public let expectedHash: String?
+
+    public init(skill: HubKnowledgeSkillCatalog.Skill? = nil) {
+        name = skill?.name ?? ""
+        title = skill?.title ?? ""
+        description = skill?.description ?? ""
+        content = skill?.content ?? ""
+        requiredTools = skill?.requiredTools ?? []
+        expectedHash = skill?.hash
+    }
+
+    static func validName(_ name: String) -> Bool {
+        name.utf8.count <= 80 && name.range(of: #"\A[a-z0-9]+(?:-[a-z0-9]+)*\z"#, options: .regularExpression) != nil
+    }
+
+    public var isValid: Bool {
+        Self.validName(name) && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.utf16.count <= 100 &&
+            !title.unicodeScalars.contains { $0.value < 32 } &&
+            !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && description.utf16.count <= 500 &&
+            !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && content.utf8.count <= 30_000 &&
+            requiredTools.count <= 32 && requiredTools.allSatisfy {
+                $0.range(of: #"\A[-A-Za-z0-9_.]+\z"#, options: .regularExpression) != nil
+            }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        enum Key: String, CodingKey { case name, title, description, content, requiredTools, expectedHash }
+        var fields = encoder.container(keyedBy: Key.self)
+        try fields.encode(name, forKey: .name)
+        try fields.encode(title, forKey: .title)
+        try fields.encode(description, forKey: .description)
+        try fields.encode(content, forKey: .content)
+        try fields.encode(requiredTools, forKey: .requiredTools)
+        if let expectedHash { try fields.encode(expectedHash, forKey: .expectedHash) }
+        else { try fields.encodeNil(forKey: .expectedHash) }
+    }
 }
 
 public struct HubChatCommandReceipt: Decodable {
@@ -2122,6 +2196,88 @@ public final class HubConversationAPI {
         let note = try JSONDecoder().decode(HubKnowledgeNote.self, from: data)
         guard note.id == id else { throw HubAttachmentError.invalidResponse }
         return note
+    }
+
+    public static let knowledgeAssetLimit = 25_000_000
+
+    public func knowledgeAssets() async throws -> [HubKnowledgeAsset] {
+        struct Catalog: Decodable { let assets: [HubKnowledgeAsset] }
+        let catalog: Catalog = try await readKnowledge("assets", arguments: [:])
+        guard catalog.assets.count <= 500, Set(catalog.assets.map(\.id)).count == catalog.assets.count,
+              catalog.assets.allSatisfy(Self.validKnowledgeAsset) else { throw HubAttachmentError.invalidResponse }
+        return catalog.assets
+    }
+
+    public func knowledgeAssetBytes(_ asset: HubKnowledgeAsset) async throws -> Data {
+        guard Self.validKnowledgeAsset(asset) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
+            URLQueryItem(name: "view", value: "asset"), URLQueryItem(name: "id", value: asset.id)
+        ], mediaTypes: [asset.mediaType], maxBytes: asset.bytes)
+        guard data.count == asset.bytes, HubAttachmentStore.digest(data) == asset.id else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return data
+    }
+
+    public func uploadKnowledgeAsset(_ bytes: Data, name: String, attachingTo note: HubKnowledgeNote? = nil) async throws -> HubKnowledgeAssetReceipt {
+        guard (1...Self.knowledgeAssetLimit).contains(bytes.count), !name.isEmpty, name.utf8.count <= 960,
+              !name.contains("/"), !name.contains("\\"),
+              let encoded = name.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")) else {
+            throw HubAttachmentError.invalidFile
+        }
+        var query = [URLQueryItem(name: "action", value: "upload-asset")]
+        if let note {
+            guard note.protected != true, note.kind != "conversation", let hash = note.hash, Self.isScreenshotID(hash),
+                  !note.id.isEmpty, note.id.utf8.count <= 1_024 else { throw HubAttachmentError.invalidResponse }
+            query += [URLQueryItem(name: "noteId", value: note.id), URLQueryItem(name: "hash", value: hash)]
+        }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1", "x-hub-filename": encoded],
+                                         query: query, body: bytes, operationTimeout: 60, contentType: "application/octet-stream")
+        let receipt = try JSONDecoder().decode(HubKnowledgeAssetReceipt.self, from: data)
+        guard Self.validKnowledgeAsset(receipt.asset), receipt.asset.bytes == bytes.count,
+              receipt.asset.id == HubAttachmentStore.digest(bytes), receipt.note?.id == note?.id else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return receipt
+    }
+
+    private static func validKnowledgeAsset(_ asset: HubKnowledgeAsset) -> Bool {
+        isScreenshotID(asset.id) && (1...knowledgeAssetLimit).contains(asset.bytes) && !asset.name.isEmpty &&
+            asset.name.utf8.count <= 960 && !asset.name.contains("/") && !asset.name.contains("\\") &&
+            asset.mediaType.range(of: #"\A[a-z0-9.+-]+/[a-z0-9.+-]+\z"#, options: .regularExpression) != nil
+    }
+
+    public func knowledgeSkills() async throws -> HubKnowledgeSkillCatalog {
+        try await knowledgeSkillCatalog(body: nil)
+    }
+
+    public func knowledgeSkill(name: String) async throws -> HubKnowledgeSkillCatalog.Skill {
+        struct Receipt: Decodable { let skill: HubKnowledgeSkillCatalog.Skill }
+        guard HubKnowledgeSkillDraft.validName(name) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/skills", headers: ["x-hub-skills": "1"],
+                                         query: [URLQueryItem(name: "name", value: name)], maxBytes: 80_000)
+        let skill = try JSONDecoder().decode(Receipt.self, from: data).skill
+        guard skill.name == name, !skill.id.isEmpty, Self.isScreenshotID(skill.hash), skill.content != nil else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return skill
+    }
+
+    public func saveKnowledgeSkill(_ draft: HubKnowledgeSkillDraft) async throws -> HubKnowledgeSkillCatalog {
+        guard draft.isValid, draft.expectedHash.map(Self.isScreenshotID) ?? true else { throw HubAttachmentError.invalidFile }
+        let body = try JSONEncoder().encode(draft)
+        guard body.count <= 45_000 else { throw HubAttachmentError.tooLarge }
+        let catalog = try await knowledgeSkillCatalog(body: body)
+        guard catalog.skills.contains(where: { $0.name == draft.name }) else { throw HubAttachmentError.invalidResponse }
+        return catalog
+    }
+
+    private func knowledgeSkillCatalog(body: Data?) async throws -> HubKnowledgeSkillCatalog {
+        let data = try await requestData("api/hub/skills", headers: ["x-hub-skills": "1"], body: body, maxBytes: 4_194_304)
+        let catalog = try JSONDecoder().decode(HubKnowledgeSkillCatalog.self, from: data)
+        guard catalog.skills.allSatisfy({ !$0.id.isEmpty && HubKnowledgeSkillDraft.validName($0.name) && Self.isScreenshotID($0.hash) }),
+              Set(catalog.skills.map(\.id)).count == catalog.skills.count else { throw HubAttachmentError.invalidResponse }
+        return catalog
     }
 
     public func knowledgeNeighbors(id: String, cursor: String = "") async throws -> HubKnowledgeNeighborhood {
