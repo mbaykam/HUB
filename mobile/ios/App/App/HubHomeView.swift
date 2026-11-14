@@ -1108,6 +1108,7 @@ struct HubHomeView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("hub.knowledge.record.\(node.id)")
                     Divider()
                 }
             }

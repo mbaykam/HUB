@@ -75,7 +75,7 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         search.typeText("Planning")
-        let record = app.buttons["Planning a coding project"]
+        let record = app.buttons["hub.knowledge.record.note-project"]
         if !record.isHittable { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(record.waitForExistence(timeout: 5))
         record.tap()
@@ -117,11 +117,12 @@ final class HubWorkspaceUITests: XCTestCase {
         general.tap()
 
         XCTAssertTrue(app.staticTexts["Appearance"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Dark"].exists)
-        XCTAssertTrue(app.staticTexts["English"].exists)
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Conversation text size · 16")).firstMatch.exists)
-        XCTAssertTrue(app.staticTexts["Steer current turn"].exists)
-        XCTAssertTrue(app.staticTexts["Compact"].exists)
+        for value in ["Dark", "English", "Conversation text size · 16", "Steer current turn", "Compact"] {
+            let preference = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@ OR value == %@", value, value)).firstMatch
+            if !preference.exists { app.swipeUp() }
+            XCTAssertTrue(preference.exists, "Missing preference \(value)")
+        }
         XCTAssertEqual(app.webViews.count, 0)
         capture("General settings")
     }
