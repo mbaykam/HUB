@@ -1024,8 +1024,12 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
         case ("note", "note-project"):
             return Data(#"""
             {"id":"note-project","title":"Planning a coding project","kind":"note",
-             "content":"## First release\n\nSketch the first release before choosing the tools.\n\n```swift\nlet firstRelease = true\n```"}
+             "content":"## First release\n\nSketch the first release before choosing the tools.\n\n```swift\nlet firstRelease = true\n```",
+             "sources":[{"id":"fixture-source","completedAt":1794500000000,"channel":"import","reason":"Planning evidence",
+                         "evidence":{"quote":"The release plan starts with a sketch."}}]}
             """#.utf8)
+        case ("source", "fixture-source"):
+            return Data(#"{"id":"fixture-source","content":"The release plan starts with a sketch."}"#.utf8)
         case ("activity", nil):
             return Data(#"""
             {"state":"ready","enabled":true,"total":1,"lastStartedAt":1794499999000,"lastFinishedAt":1794500000000,

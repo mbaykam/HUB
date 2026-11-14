@@ -85,6 +85,15 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Copy code"].exists)
         XCTAssertTrue(app.buttons["Connections and sources"].exists)
         XCTAssertEqual(app.webViews.count, 0)
+        let sources = app.buttons["Sources"]
+        if !sources.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        sources.tap()
+        XCTAssertTrue(app.staticTexts["Planning evidence"].waitForExistence(timeout: 5))
+        app.buttons["Import"].tap()
+        XCTAssertTrue(app.navigationBars["Original source"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["The release plan starts with a sketch."].waitForExistence(timeout: 5))
+        app.navigationBars["Original source"].buttons["Done"].tap()
+        if !app.buttons["Local graph"].isHittable { app.scrollViews.firstMatch.swipeDown() }
         app.buttons["Local graph"].tap()
         let allKnowledge = app.buttons["All knowledge"]
         XCTAssertTrue(allKnowledge.waitForExistence(timeout: 5))
