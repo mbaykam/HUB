@@ -96,6 +96,25 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
     public let memberships: [Membership]?
     public let similarities: [Similarity]?
     public let communityCandidates: Communities?
+
+    public func neighborhood(of id: String) -> HubHomeKnowledge? {
+        guard nodes.contains(where: { $0.id == id }) else { return nil }
+        var members: Set<String> = [id]
+        for edge in edges {
+            if edge.source == id { members.insert(edge.target) }
+            if edge.target == id { members.insert(edge.source) }
+        }
+        let localNodes = nodes.filter { members.contains($0.id) }
+        let known = Set(localNodes.map(\.id))
+        return HubHomeKnowledge(
+            nodes: localNodes,
+            edges: edges.filter { known.contains($0.source) && known.contains($0.target) },
+            domains: domains,
+            memberships: memberships?.filter { known.contains($0.nodeId) },
+            similarities: similarities?.filter { known.contains($0.source) && known.contains($0.target) },
+            communityCandidates: nil
+        )
+    }
 }
 
 public struct HubKnowledgeDomains: Decodable {

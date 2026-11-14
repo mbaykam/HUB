@@ -85,6 +85,11 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Copy code"].exists)
         XCTAssertTrue(app.buttons["Connections and sources"].exists)
         XCTAssertEqual(app.webViews.count, 0)
+        app.buttons["Local graph"].tap()
+        let allKnowledge = app.buttons["All knowledge"]
+        XCTAssertTrue(allKnowledge.waitForExistence(timeout: 5))
+        capture("Knowledge local graph")
+        allKnowledge.tap()
         app.buttons["Done"].tap()
 
         app.buttons["Workspace tools"].tap()

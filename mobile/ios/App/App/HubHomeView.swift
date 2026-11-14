@@ -109,6 +109,8 @@ struct HubHomeView: View {
     @State private var noteSaveFailed = false
     @State private var knowledgeScope = HubKnowledgeGraphView.Scope.all
     @State private var knowledgeSpatial = false
+    @State private var knowledgeLocalCenter: String?
+    @State private var knowledgeGraphReset = 0
     @State private var knowledgeTab = KnowledgeTab.graph
     @State private var knowledgeQuery = ""
     @State private var knowledgeSearchResult: [HubHomeKnowledge.Node]?
@@ -189,7 +191,10 @@ struct HubHomeView: View {
         .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(chatPreferences.appearance.colorScheme)
         .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
-        .sheet(isPresented: $knowledgeOpen, onDismiss: clearKnowledgeSelection) { knowledgeScreen }
+        .sheet(isPresented: $knowledgeOpen, onDismiss: {
+            clearKnowledgeSelection()
+            knowledgeLocalCenter = nil
+        }) { knowledgeScreen }
         .sheet(isPresented: $tasksOpen) {
             if let api = chatAPI() { HubTasksView(load: readTasks, api: api, openChat: showChat) }
         }
@@ -1055,6 +1060,14 @@ struct HubHomeView: View {
                             Label("Connections and sources", systemImage: "point.3.connected.trianglepath.dotted")
                         }
                         .frame(minHeight: 44)
+                        if model.knowledge?.nodes.contains(where: { $0.id == note.id }) == true {
+                            Button {
+                                knowledgeLocalCenter = note.id
+                                knowledgeTab = .graph
+                                clearKnowledgeSelection()
+                            } label: { Label("Local graph", systemImage: "point.3.connected.trianglepath.dotted") }
+                            .frame(minHeight: 44)
+                        }
                         knowledgeLinks("Links", nodes: note.links ?? [])
                         knowledgeLinks("Backlinks", nodes: note.backlinks ?? [])
                     }
@@ -1093,8 +1106,12 @@ struct HubHomeView: View {
     private func knowledgeOverview(_ graph: HubHomeKnowledge) -> some View {
         let query = knowledgeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let api = chatAPI()
+        let neighborhood = knowledgeLocalCenter.flatMap { graph.neighborhood(of: $0) }
+        let graphToShow = neighborhood ?? graph
+        let graphScope: HubKnowledgeGraphView.Scope = neighborhood == nil ? knowledgeScope : .all
         let search = KnowledgeSearch(query: query, scope: knowledgeScope, retry: knowledgeSearchRetry, apiID: api.map { ObjectIdentifier($0) })
-        let records = (query.isEmpty ? graph.nodes : knowledgeSearchResult ?? []).filter { knowledgeScope.includes($0) }
+        let records = (query.isEmpty ? (knowledgeTab == .graph ? graphToShow.nodes : graph.nodes) : knowledgeSearchResult ?? [])
+            .filter { (query.isEmpty && knowledgeTab == .graph ? graphScope : knowledgeScope).includes($0) }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if knowledgeRefreshError {
@@ -1111,12 +1128,24 @@ struct HubHomeView: View {
                 }
                 .pickerStyle(.segmented)
                 if knowledgeTab == .graph {
-                    HubKnowledgeGraphView(graph: graph, height: 330, scope: knowledgeScope, spatial: knowledgeSpatial, select: selectKnowledgeNode)
-                        .id("\(knowledgeScope.rawValue)/\(knowledgeSpatial)")
+                    if let center = knowledgeLocalCenter, let neighborhood {
+                        HStack {
+                            Button { knowledgeLocalCenter = nil } label: { Label("All knowledge", systemImage: "chevron.left") }
+                            Spacer()
+                            Text(neighborhood.nodes.first { $0.id == center }?.title ?? "Local graph")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        if neighborhood.edges.isEmpty { Text("This record has no connections yet.").font(.footnote).foregroundStyle(.secondary) }
+                    }
+                    HubKnowledgeGraphView(graph: graphToShow, height: 330, scope: graphScope, spatial: knowledgeSpatial,
+                                          focusID: neighborhood == nil ? nil : knowledgeLocalCenter, select: selectKnowledgeNode)
+                        .id("\(graphScope.rawValue)/\(knowledgeSpatial)/\(knowledgeLocalCenter ?? "")/\(knowledgeGraphReset)")
                         .overlay(alignment: .topTrailing) {
                             Menu {
                                 Button("2D") { knowledgeSpatial = false }
                                 Button("3D") { knowledgeSpatial = true }
+                                Button("Reset view") { knowledgeGraphReset += 1 }
+                                Button("Refresh graph") { Task { await refreshKnowledgeGraph() } }
                             } label: {
                                 Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
                                     .frame(minWidth: 44, minHeight: 44)

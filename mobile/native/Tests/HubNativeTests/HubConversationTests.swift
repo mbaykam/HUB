@@ -34,6 +34,21 @@ final class HubConversationTests: XCTestCase {
         CatalogFixture.responder = nil
     }
 
+    func testLocalKnowledgeGraphKeepsOnlyTheSelectedRecordItsNeighborsAndTheirEdges() throws {
+        let graph = try JSONDecoder().decode(HubHomeKnowledge.self, from: Data(#"""
+        {"nodes":[{"id":"center"},{"id":"incoming"},{"id":"archive","kind":"conversation"},{"id":"two-hops"}],
+         "edges":[{"source":"incoming","target":"center"},{"source":"center","target":"archive"},
+                  {"source":"incoming","target":"archive"},{"source":"archive","target":"two-hops"},
+                  {"source":"center","target":"missing"}],
+         "memberships":[{"nodeId":"incoming","domainId":"domain"},{"nodeId":"two-hops","domainId":"other"}]}
+        """#.utf8))
+        let local = try XCTUnwrap(graph.neighborhood(of: "center"))
+        XCTAssertEqual(local.nodes.map(\.id), ["center", "incoming", "archive"])
+        XCTAssertEqual(local.edges.count, 3)
+        XCTAssertEqual(local.memberships?.map(\.nodeId), ["incoming"])
+        XCTAssertNil(graph.neighborhood(of: "missing"))
+    }
+
     func testKnowledgeSkillEditorSendsExplicitCreateNullAndObservedUpdateHash() async throws {
         let api = try client()
         let observedHash = String(repeating: "a", count: 64)

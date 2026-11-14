@@ -1044,6 +1044,7 @@ struct HubKnowledgeGraphView: View {
     var overview = false
     var showsControls = true
     var spatial = false
+    var focusID: String? = nil
     let select: (String) -> Void
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -1128,7 +1129,7 @@ struct HubKnowledgeGraphView: View {
                 var highlighted = Path()
                 for edge in graph.edges {
                     guard let from = points[edge.source], let to = points[edge.target] else { continue }
-                    if edge.source == selectedID || edge.target == selectedID {
+                    if edge.source == (selectedID ?? focusID) || edge.target == (selectedID ?? focusID) {
                         highlighted.move(to: from)
                         highlighted.addLine(to: to)
                     } else {
@@ -1153,7 +1154,7 @@ struct HubKnowledgeGraphView: View {
                 context.stroke(highlighted, with: .color(HubWorkspacePalette.border.opacity(0.52)), lineWidth: 1.5)
                 for node in projected {
                     let point = node.projection.point
-                    let r: CGFloat = (node.item.id == selectedID ? 7 : 4) * sqrt(zoom) * node.projection.perspective
+                    let r: CGFloat = (node.item.id == (selectedID ?? focusID) ? 7 : 4) * sqrt(zoom) * node.projection.perspective
                     let dot = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
                     context.fill(Path(ellipseIn: dot), with: .color(color(node.item.hue, id: node.item.groupID)))
                 }
@@ -1200,6 +1201,7 @@ struct HubKnowledgeGraphView: View {
     private func spatialSample(_ roots: [HubKnowledgeLayout.Group]) -> Set<String> {
         var ids: Set<String> = []
         if let selectedID { ids.insert(selectedID) }
+        if let focusID { ids.insert(focusID) }
         let length = roots.map { $0.members.count }.max() ?? 0
         for index in 0..<length {
             for root in roots where root.members.indices.contains(index) {
@@ -1237,7 +1239,7 @@ struct HubKnowledgeGraphView: View {
                 context.stroke(lines, with: .color(HubWorkspacePalette.muted.opacity(0.38)), lineWidth: 1)
                 for item in layout.points {
                     guard let point = points[item.id] else { continue }
-                    let radius: CGFloat = item.groupID == HubKnowledgeLayout.archiveID ? 2.5 : 4.7
+                    let radius: CGFloat = item.id == focusID ? 7 : item.groupID == HubKnowledgeLayout.archiveID ? 2.5 : 4.7
                     let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
                     context.fill(Path(ellipseIn: dot), with: .color(color(item.hue, id: item.groupID)))
                 }
@@ -1265,7 +1267,7 @@ struct HubKnowledgeGraphView: View {
                 })
             .simultaneousGesture(MagnificationGesture().updating($pinch) { value, state, _ in state = value }
                 .onEnded { scale = min(4, max(0.5, scale * $0)) })
-            ForEach(layout.points.filter { $0.groupID != HubKnowledgeLayout.archiveID || zoom > 1.8 }, id: \.id) { item in
+            ForEach(layout.points.filter { focusID != nil || $0.groupID != HubKnowledgeLayout.archiveID || zoom > 1.8 }, id: \.id) { item in
                 if let point = points[item.id], CGRect(origin: .zero, size: size).contains(point) {
                     Button { select(item.id) } label: {
                         Color.clear.frame(width: 20, height: 20).contentShape(Rectangle())
