@@ -3067,6 +3067,19 @@ public final class HubConversationAPI {
         }, onCancel: { socket.cancel(with: .goingAway, reason: nil) })
     }
 
+    public func createWorkspaceDirectory(parent: String, name: String) async throws -> String {
+        let segment = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !parent.isEmpty, parent.utf8.count <= 32_768, !segment.isEmpty, segment.utf8.count <= 255,
+              segment != ".", segment != "..", !segment.contains("/"), !segment.contains("\\"),
+              segment.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            throw HubAttachmentError.invalidFile
+        }
+        let method = "directoryPicker/createDirectory"
+        guard let path = try await rpcValue(method, arguments: ["path": parent, "name": segment]) as? String,
+              !path.isEmpty, path.utf8.count <= 32_768, path != parent else { throw HubAttachmentError.invalidResponse }
+        return path
+    }
+
     public func workspaceDirectory(_ path: String?) async throws -> HubWorkspaceDirectory {
         let arguments: [String: Any]
         if let path { arguments = ["path": path] } else { arguments = [:] }

@@ -13,6 +13,9 @@ struct HubWorkspaceDirectoryView: View {
     @State private var loading = true
     @State private var saving = false
     @State private var error: String?
+    @State private var newFolderName = ""
+    @State private var newFolderPrompt = false
+    @State private var newFolderError = false
 
     private struct Request: Equatable {
         let path: String?
@@ -35,6 +38,23 @@ struct HubWorkspaceDirectoryView: View {
                         }
                         Button("Use this folder") { Task { await create(listing.path) } }
                             .disabled(loading || saving || error != nil)
+                        Button {
+                            newFolderName = ""
+                            newFolderError = false
+                            newFolderPrompt = true
+                        } label: { Label("New folder", systemImage: "folder.badge.plus") }
+                        .disabled(loading || saving || error != nil)
+                        if newFolderPrompt {
+                            TextField("Folder name", text: $newFolderName).disabled(saving)
+                                .onChange(of: newFolderName) { _ in newFolderError = false }
+                            if newFolderError { Text("Enter a single folder name without slashes.").font(.footnote) }
+                            Button("Create folder") {
+                                let name = newFolderName
+                                Task { await createFolder(in: listing.path, name: name) }
+                            }
+                            .disabled(saving || loading || newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Button("Cancel new folder") { newFolderPrompt = false }.disabled(saving)
+                        }
                         Toggle("Show hidden folders", isOn: $showHidden)
                     }
                     Section("Folders") {
@@ -68,6 +88,7 @@ struct HubWorkspaceDirectoryView: View {
     }
 
     private func browse(_ folder: String) {
+        newFolderPrompt = false
         loading = true
         path = folder
         attempt += 1
@@ -98,6 +119,21 @@ struct HubWorkspaceDirectoryView: View {
             dismiss()
         } catch {
             self.error = "Could not confirm the workspace. Reload the folder to try again."
+        }
+    }
+
+    private func createFolder(in parent: String, name: String) async {
+        guard !saving, !loading else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            let folder = try await api.createWorkspaceDirectory(parent: parent, name: name)
+            browse(folder)
+        } catch HubAttachmentError.invalidFile {
+            newFolderError = true
+        } catch {
+            newFolderPrompt = false
+            self.error = "Could not confirm the new folder. Reload this folder to see whether it was created."
         }
     }
 }
