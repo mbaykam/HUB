@@ -1736,6 +1736,30 @@ public final class HubConversationAPI {
         try await voiceProfilesRequest()
     }
 
+    public func voiceProfileCatalog() async throws -> HubVoiceProfileCatalog {
+        let data = try await requestData("api/hub/voice/catalog", headers: [:])
+        let catalog = try JSONDecoder().decode(HubVoiceProfileCatalog.self, from: data)
+        guard Self.validVoiceCatalogIDs(catalog.providers.map(\.id)),
+              Self.validVoiceCatalogIDs(catalog.tools.map(\.id)) else { throw HubAttachmentError.invalidResponse }
+        return catalog
+    }
+
+    public func voiceProfileModels(provider: String) async throws -> [HubVoiceProfileCatalog.Model] {
+        struct Catalog: Decodable { let models: [HubVoiceProfileCatalog.Model] }
+        guard Self.validVoiceCatalogIDs([provider]) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/voice/catalog", headers: [:],
+                                         query: [URLQueryItem(name: "provider", value: provider)], maxBytes: 4_194_304)
+        let models = try JSONDecoder().decode(Catalog.self, from: data).models
+        guard Self.validVoiceCatalogIDs(models.map(\.id)), models.allSatisfy({
+            $0.provider == provider && Self.validVoiceCatalogIDs($0.efforts.map(\.id))
+        }) else { throw HubAttachmentError.invalidResponse }
+        return models
+    }
+
+    private static func validVoiceCatalogIDs(_ ids: [String]) -> Bool {
+        Set(ids).count == ids.count && ids.allSatisfy { (1...200).contains($0.utf16.count) }
+    }
+
     public func changeVoiceProfile(_ change: VoiceProfileChange, revision: Int) async throws -> HubVoiceProfiles {
         struct Command: Encodable {
             let type: String

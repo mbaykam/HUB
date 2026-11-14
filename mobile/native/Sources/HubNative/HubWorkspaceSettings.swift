@@ -254,6 +254,25 @@ public struct HubVoiceProfiles: Decodable {
     public let active: Active?
 }
 
+public struct HubVoiceProfileCatalog: Decodable {
+    public struct Tool: Decodable, Identifiable {
+        public let name: String
+        public let description: String
+        public var id: String { name }
+    }
+
+    public struct Model: Decodable, Identifiable {
+        public let id: String
+        public let provider: String
+        public let name: String
+        public let efforts: [HubModelCatalog.Model.Effort]
+    }
+
+    public let providers: [HubModelCatalog.Provider]
+    public let tools: [Tool]
+    public let speech: HubSpeechCatalog
+}
+
 public struct HubSpeechCatalog: Decodable {
     public struct Option: Decodable, Identifiable {
         public let engine: String

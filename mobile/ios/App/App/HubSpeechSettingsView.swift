@@ -5,6 +5,7 @@ import HubNative
 @MainActor
 struct HubSpeechSettingsView: View {
     let api: HubConversationAPI
+    var downloadsOnly = false
     private typealias Engine = HubCharacterSettings.Character.Speech.Engine
     private typealias Attention = HubCharacterSettings.Character.Speech.Attention
     @State private var settings: HubSpeechSettings?
@@ -31,7 +32,9 @@ struct HubSpeechSettingsView: View {
         Form {
             if loading || busy { ProgressView() }
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
-            if let catalog, settings != nil {
+            if downloadsOnly, let catalog {
+                installs(catalog)
+            } else if let catalog, settings != nil {
                 recognitionSection(catalog)
                 voiceSection(catalog)
                 backgroundSection
@@ -42,11 +45,13 @@ struct HubSpeechSettingsView: View {
             }
         }
         .disabled(busy)
-        .navigationTitle("Speech")
+        .navigationTitle(downloadsOnly ? "Speech downloads" : "Speech")
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { Task { await save() } }
-                    .disabled(loading || busy || settings == nil || catalog == nil)
+            if !downloadsOnly {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(loading || busy || settings == nil || catalog == nil)
+                }
             }
         }
         .task { await load() }
@@ -180,6 +185,13 @@ struct HubSpeechSettingsView: View {
         loading = true
         defer { loading = false }
         do {
+            if downloadsOnly {
+                async let choices = api.speechCatalog()
+                async let status = api.speechDownload()
+                catalog = try await choices
+                download = try await status
+                return
+            }
             async let settings = api.speechSettings()
             async let catalog = api.speechCatalog()
             let (saved, choices) = try await (settings, catalog)

@@ -550,6 +550,32 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual((edited["tools"] as? [String: Any])?["names"] as? [String], ["read"])
     }
 
+    func testVoiceProfileCatalogKeepsVoiceOnlyToolsAndProviderScopedModels() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/voice/catalog")
+            XCTAssertEqual(request.httpMethod, "GET")
+            if request.url?.query == nil {
+                return (200, Data(#"{"providers":[{"id":"fixture","name":"Fixture"}],"tools":[{"name":"hub_view_screen","description":"Read one consented frame"}],"speech":{"stt":[],"tts":[]}}"#.utf8))
+            }
+            XCTAssertEqual(request.url?.query, "provider=fixture")
+            let provider = CatalogFixture.requests.count == 2 ? "fixture" : "other"
+            return (200, Data("""
+                {"models":[{"id":"family/test","name":"Test","provider":"\(provider)","efforts":[{"id":"low","name":"Low"}]}]}
+                """.utf8))
+        }
+        let catalog = try await api.voiceProfileCatalog()
+        XCTAssertEqual(catalog.providers.map(\.id), ["fixture"])
+        XCTAssertEqual(catalog.tools.map(\.id), ["hub_view_screen"])
+        let models = try await api.voiceProfileModels(provider: "fixture")
+        XCTAssertEqual(models.map(\.id), ["family/test"])
+        XCTAssertEqual(models.first?.efforts.map(\.id), ["low"])
+        do {
+            _ = try await api.voiceProfileModels(provider: "fixture")
+            XCTFail("A different provider's model cannot be selected")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
     func testConversationFileDownloadChecksSessionAndSnapshotDigest() async throws {
         let api = try client()
         let data = Data("Text output\r\n".utf8)

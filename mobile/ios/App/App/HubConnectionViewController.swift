@@ -1007,6 +1007,23 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
     }
 
     private func responseData(_ url: URL) -> Data? {
+        if request.httpMethod == "GET", url.path == "/api/hub/voice/profiles" {
+            return Data(#"""
+            {"revision":3,"selectedId":"216cb7b2-8e8f-48d5-86f9-cf92a29aca14","profiles":[
+                {"id":"216cb7b2-8e8f-48d5-86f9-cf92a29aca14","name":"Fixture Vera","instructions":"Use short replies.",
+                 "route":{"provider":"fixture","model":"fixture-model"},
+                 "speech":{"stt":{"engine":"whisper","model":"base"},"tts":{"engine":"supertonic","model":"supertonic-3","voice":"F5"}},
+                 "tools":{"mode":"allow","names":["hub_view_screen"]}}]}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/voice/catalog" {
+            if url.query == "provider=fixture" {
+                return Data(#"{"models":[{"id":"fixture-model","provider":"fixture","name":"Fixture Voice Model","efforts":[]}]}"#.utf8)
+            }
+            if url.query == nil {
+                return Data(#"{"providers":[{"id":"fixture","name":"Fixture Provider"}],"tools":[{"name":"hub_view_screen","description":"Read one consented frame"}],"speech":{"stt":[],"tts":[]}}"#.utf8)
+            }
+        }
         if url.path == "/api/settings/describe", request.httpMethod == "POST" {
             return settingsDescription()
         }

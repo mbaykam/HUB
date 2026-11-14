@@ -139,6 +139,24 @@ final class HubWorkspaceUITests: XCTestCase {
         }
         XCTAssertEqual(app.webViews.count, 0)
         capture("General settings")
+
+        app.navigationBars["General"].buttons["Settings"].tap()
+        let personalities = app.descendants(matching: .any)["hub.settings.voice-personalities"].firstMatch
+        if !personalities.isHittable { app.swipeUp() }
+        XCTAssertTrue(personalities.waitForExistence(timeout: 5))
+        personalities.tap()
+        let menu = app.buttons["Options for Fixture Vera"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        app.buttons["Edit"].tap()
+        let name = app.textFields["Name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "Fixture Vera")
+        let model = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value == %@", "Fixture Voice Model", "Fixture Voice Model")).firstMatch
+        XCTAssertTrue(model.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.webViews.count, 0)
+        capture("Voice personality")
     }
 
     @MainActor

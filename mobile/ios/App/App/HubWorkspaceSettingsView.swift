@@ -34,6 +34,7 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubVoiceProfilesView(api: api)) {
                         Label("Voice personalities", systemImage: "person.wave.2")
                     }
+                    .accessibilityIdentifier("hub.settings.voice-personalities")
                     NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
                         Label("Knowledge AI", systemImage: "circle.hexagongrid")
                     }
@@ -77,9 +78,12 @@ struct HubVoiceProfilesView: View {
     @State private var notice: String?
     @State private var deleting: HubVoiceProfiles.Profile?
     @State private var showingDelete = false
-    @State private var models: HubModelCatalog?
-    @State private var speech: HubSpeechCatalog?
-    @State private var tools: HubToolCatalog?
+    @State private var catalog: HubVoiceProfileCatalog?
+    @State private var models: [String: [HubVoiceProfileCatalog.Model]] = [:]
+    @State private var catalogAttempt = 0
+    @State private var modelAttempt = 0
+    @State private var catalogError = false
+    @State private var failedModelProvider: String?
 
     var body: some View {
         List {
@@ -173,42 +177,57 @@ struct HubVoiceProfilesView: View {
         }
         .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy)
-        .task { await loadEditorOptions() }
+        .task(id: catalogAttempt) { await loadCatalog() }
+        .task(id: ModelRequest(provider: editor?.settings.route.provider, attempt: modelAttempt)) {
+            guard let provider = editor?.settings.route.provider else { return }
+            await loadModels(provider)
+        }
     }
 
     private func modelSection(_ route: HubCharacterSettings.Character.Route) -> some View {
-        let current = models?.models.first { $0.provider == route.provider && $0.modelID == route.model }
+        let options = models[route.provider]
+        let current = options?.first { $0.id == route.model }
         return Section("Conversation model") {
-            if let models {
-                Picker("Model", selection: Binding(get: { route.provider + "/" + route.model }, set: { id in
-                    if let model = models.models.first(where: { $0.id == id }) {
-                        editor?.settings.route = .init(provider: model.provider, model: model.modelID)
-                    }
+            if let catalog {
+                Picker("Connection", selection: Binding(get: { route.provider }, set: { provider in
+                    if provider != route.provider { editor?.settings.route = .init(provider: provider, model: "") }
                 })) {
-                    if current == nil { Text(route.model).tag(route.provider + "/" + route.model) }
-                    ForEach(models.models.filter { ($0.available != false && $0.enabled != false) || $0.id == current?.id }) { model in
-                        Text(model.name).tag(model.id)
-                    }
+                    if !catalog.providers.contains(where: { $0.id == route.provider }) { Text(route.provider).tag(route.provider) }
+                    ForEach(catalog.providers) { Text($0.name).tag($0.id) }
                 }
-                if let efforts = current?.efforts, !efforts.isEmpty {
-                    Picker("Reasoning effort", selection: Binding(get: { route.reasoningEffort ?? "" }, set: {
-                        editor?.settings.route.reasoningEffort = $0.isEmpty ? nil : $0
+                if let options {
+                    Picker("Model", selection: Binding(get: { route.model }, set: { model in
+                        if model != route.model { editor?.settings.route = .init(provider: route.provider, model: model) }
                     })) {
-                        Text("Provider default").tag("")
-                        if let saved = route.reasoningEffort, !efforts.contains(where: { $0.id == saved }) { Text(saved).tag(saved) }
-                        ForEach(efforts) { Text($0.name).tag($0.id) }
+                        if current == nil { Text(route.model.isEmpty ? "Choose a model" : route.model).tag(route.model) }
+                        ForEach(options) { Text($0.name).tag($0.id) }
                     }
+                    if let efforts = current?.efforts, !efforts.isEmpty {
+                        Picker("Reasoning effort", selection: Binding(get: { route.reasoningEffort ?? "" }, set: {
+                            editor?.settings.route.reasoningEffort = $0.isEmpty ? nil : $0
+                        })) {
+                            Text("Provider default").tag("")
+                            if let saved = route.reasoningEffort, !efforts.contains(where: { $0.id == saved }) { Text(saved).tag(saved) }
+                            ForEach(efforts) { Text($0.name).tag($0.id) }
+                        }
+                    }
+                } else if failedModelProvider == route.provider {
+                    Button("Retry loading models") { modelAttempt += 1 }
+                } else {
+                    ProgressView("Loading models…")
                 }
-            } else {
+            } else if catalogError {
                 Text(route.model)
-                Button("Load model options") { Task { await loadEditorOptions() } }
+                Button("Retry loading voice options") { catalogAttempt += 1; modelAttempt += 1 }
+            } else {
+                ProgressView("Loading voice options…")
             }
         }
     }
 
     private func speechSection(_ value: HubCharacterSettings.Character.Speech) -> some View {
         Section("Local speech") {
-            if let speech {
+            if let speech = catalog?.speech {
                 Picker("Recognition model", selection: Binding(get: { value.stt.id }, set: { id in
                     if let option = speech.stt.first(where: { $0.id == id && $0.available }) {
                         editor?.settings.speech.stt = .init(engine: option.engine, model: option.model,
@@ -247,53 +266,80 @@ struct HubVoiceProfilesView: View {
                         Text("Automatic").tag("auto"); Text("English").tag("en"); Text("Türkçe").tag("tr")
                     }
                 }
+                NavigationLink {
+                    HubSpeechSettingsView(api: api, downloadsOnly: true)
+                        .onDisappear { catalogAttempt += 1 }
+                } label: {
+                    Text("Manage speech downloads")
+                }
             } else {
                 Text("Recognition · \(value.stt.model)")
                 Text("Spoken voice · \(value.tts.voice ?? value.tts.model)")
-                Button("Load speech options") { Task { await loadEditorOptions() } }
             }
         }
     }
 
     private func toolSection(_ policy: HubCharacterSettings.Character.ToolPolicy) -> some View {
         Section("Tools & permissions") {
-            if let tools {
+            if let catalog {
                 Toggle("Inherit tools", isOn: Binding(get: { policy.mode == "inherit" }, set: { inherit in
                     editor?.settings.tools = .init(mode: inherit ? "inherit" : "allow", names: inherit ? nil : [])
                 }))
                 if policy.mode == "allow" {
-                    let registered = tools.tools.filter { !$0.isRetired && $0.isRegistered }.map(\.name)
+                    let registered = catalog.tools.map(\.name)
                     let names = Set(registered + (policy.names ?? [])).sorted()
-                    ForEach(names, id: \.self) { name in
-                        Toggle(name, isOn: Binding(get: { policy.names?.contains(name) == true }, set: { allowed in
-                            var selected = Set(editor?.settings.tools.names ?? [])
-                            if allowed, selected.count < 512 { selected.insert(name) }
-                            if !allowed { selected.remove(name) }
-                            editor?.settings.tools.names = selected.sorted()
-                        }))
-                    }
+                    ForEach(names, id: \.self) { name in profileTool(name, policy: policy, catalog: catalog) }
                 }
-            } else {
-                Button("Load tools") { Task { await loadEditorOptions() } }
             }
         }
     }
 
-    private func loadEditorOptions() async {
-        async let modelCatalog = try? api.modelCatalog()
-        async let speechCatalog = try? api.speechCatalog()
-        async let toolCatalog = try? api.toolCatalog()
-        let (newModels, newSpeech, newTools) = await (modelCatalog, speechCatalog, toolCatalog)
-        guard !Task.isCancelled else { return }
-        models = newModels ?? models
-        speech = newSpeech ?? speech
-        tools = newTools ?? tools
+    private func profileTool(_ name: String, policy: HubCharacterSettings.Character.ToolPolicy,
+                             catalog: HubVoiceProfileCatalog) -> some View {
+        Toggle(isOn: Binding(get: { policy.names?.contains(name) == true }, set: { allowed in
+            var selected = Set(editor?.settings.tools.names ?? [])
+            if allowed, selected.count < 512 { selected.insert(name) }
+            if !allowed { selected.remove(name) }
+            editor?.settings.tools.names = selected.sorted()
+        })) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                Text(catalog.tools.first { $0.id == name }?.description ?? "Unavailable on this host")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private struct ModelRequest: Equatable {
+        let provider: String?
+        let attempt: Int
+    }
+
+    private func loadCatalog() async {
+        catalogError = false
+        do {
+            let value = try await api.voiceProfileCatalog()
+            if !Task.isCancelled { catalog = value }
+        } catch {
+            if !Task.isCancelled { catalogError = true }
+        }
+    }
+
+    private func loadModels(_ provider: String) async {
+        guard models[provider] == nil else { return }
+        failedModelProvider = nil
+        do {
+            let options = try await api.voiceProfileModels(provider: provider)
+            if !Task.isCancelled { models[provider] = options }
+        } catch {
+            if !Task.isCancelled { failedModelProvider = provider }
+        }
     }
 
     private var validEditor: Bool {
         guard let settings = editor?.settings else { return false }
         return (1...60).contains(settings.name.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count)
-            && settings.instructions.utf16.count <= 12_000
+            && settings.instructions.utf16.count <= 12_000 && !settings.route.model.isEmpty
     }
 
     private func saveEditor() {
