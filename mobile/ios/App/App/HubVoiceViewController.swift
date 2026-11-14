@@ -31,6 +31,7 @@ final class HubVoiceViewController: UIViewController {
             UIAction(title: "Canvas", image: UIImage(systemName: "rectangle.on.rectangle")) { [weak self] _ in self?.openCanvas() },
             UIAction(title: "Share a file", image: UIImage(systemName: "paperclip")) { [weak self] _ in self?.shareFile() },
             UIAction(title: "Camera", image: UIImage(systemName: "camera")) { [weak self] _ in self?.openCamera() },
+            UIAction(title: "Voice personalities", image: UIImage(systemName: "person.wave.2")) { [weak self] _ in self?.openProfiles() },
             UIAction(title: "Reconnect audio", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.voice.reconnect() }
             ,UIAction(title: "Interrupt reply", image: UIImage(systemName: "hand.raised")) { [weak self] _ in self?.voice.interrupt() }
         ]))
@@ -173,6 +174,19 @@ final class HubVoiceViewController: UIViewController {
             return
         }
         present(UIHostingController(rootView: HubVoicePhotoView(context: context)), animated: true)
+    }
+
+    private func openProfiles() {
+        guard presentedViewController == nil else { return }
+        let api = voice.conversationAPI()
+        present(UIHostingController(rootView: NavigationView {
+            HubVoiceProfilesView(api: api)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { [weak self] in self?.dismiss(animated: true) }
+                    }
+                }
+        }.navigationViewStyle(.stack)), animated: true)
     }
 }
 

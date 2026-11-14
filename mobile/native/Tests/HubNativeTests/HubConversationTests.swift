@@ -514,6 +514,42 @@ final class HubConversationTests: XCTestCase {
         }
     }
 
+    func testVoiceProfileEditUsesExpectedRevisionAndPreservesExistingConfiguration() async throws {
+        let api = try client()
+        let id = UUID(uuidString: "216cb7b2-8e8f-48d5-86f9-cf92a29aca14")!
+        let profile: [String: Any] = [
+            "id": id.uuidString.lowercased(), "name": "Vera", "instructions": "Use short replies.",
+            "route": ["provider": "fixture", "model": "test", "maxTokens": 1000],
+            "speech": ["stt": ["engine": "whisper", "model": "base"],
+                       "tts": ["engine": "supertonic", "model": "supertonic-3", "voice": "F5", "steps": 6]],
+            "tools": ["mode": "allow", "names": ["read"]],
+        ]
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/voice/profiles")
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-voice-profiles"), "1")
+            }
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "revision": 4, "selectedId": id.uuidString.lowercased(), "profiles": [profile],
+            ]))
+        }
+        let current = try await api.voiceProfiles()
+        var settings = try XCTUnwrap(current.profiles.first?.settings)
+        settings.name = "Updated"
+        _ = try await api.changeVoiceProfile(.edit(id, settings), revision: current.revision)
+        let body = try Self.requestBody(XCTUnwrap(CatalogFixture.request))
+        let command = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(Set(command.keys), ["type", "id", "revision", "profile"])
+        XCTAssertEqual(command["type"] as? String, "edit")
+        XCTAssertEqual(command["revision"] as? Int, 4)
+        XCTAssertEqual(command["id"] as? String, id.uuidString.lowercased())
+        let edited = try XCTUnwrap(command["profile"] as? [String: Any])
+        XCTAssertNil(edited["id"])
+        XCTAssertEqual(edited["name"] as? String, "Updated")
+        XCTAssertEqual((edited["route"] as? [String: Any])?["maxTokens"] as? Int, 1000)
+        XCTAssertEqual((edited["tools"] as? [String: Any])?["names"] as? [String], ["read"])
+    }
+
     func testConversationFileDownloadChecksSessionAndSnapshotDigest() async throws {
         let api = try client()
         let data = Data("Text output\r\n".utf8)

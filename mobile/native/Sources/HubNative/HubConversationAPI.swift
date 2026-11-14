@@ -1724,6 +1724,50 @@ public final class HubConversationAPI {
         return records.sorted { $0.createdAt > $1.createdAt }
     }
 
+    public enum VoiceProfileChange {
+        case select(UUID)
+        case create(HubVoiceProfiles.Profile.Settings)
+        case edit(UUID, HubVoiceProfiles.Profile.Settings)
+        case duplicate(UUID, name: String)
+        case delete(UUID)
+    }
+
+    public func voiceProfiles() async throws -> HubVoiceProfiles {
+        try await voiceProfilesRequest()
+    }
+
+    public func changeVoiceProfile(_ change: VoiceProfileChange, revision: Int) async throws -> HubVoiceProfiles {
+        struct Command: Encodable {
+            let type: String
+            let revision: Int
+            var id: String? = nil
+            var name: String? = nil
+            var profile: HubVoiceProfiles.Profile.Settings? = nil
+        }
+        guard (0..<9_007_199_254_740_991).contains(revision) else { throw HubAttachmentError.invalidResponse }
+        let command: Command
+        switch change {
+        case .select(let id): command = .init(type: "select", revision: revision, id: id.uuidString.lowercased())
+        case .create(let profile): command = .init(type: "create", revision: revision, profile: profile)
+        case .edit(let id, let profile): command = .init(type: "edit", revision: revision, id: id.uuidString.lowercased(), profile: profile)
+        case .duplicate(let id, let name): command = .init(type: "duplicate", revision: revision, id: id.uuidString.lowercased(), name: name)
+        case .delete(let id): command = .init(type: "delete", revision: revision, id: id.uuidString.lowercased())
+        }
+        return try await voiceProfilesRequest(JSONEncoder().encode(command))
+    }
+
+    private func voiceProfilesRequest(_ body: Data? = nil) async throws -> HubVoiceProfiles {
+        let headers = body == nil ? [:] : ["x-hub-voice-profiles": "1", "Origin": String(server.origin.absoluteString.dropLast())]
+        let data = try await requestData("api/hub/voice/profiles", headers: headers, body: body, maxBytes: 10_000_000)
+        let value = try JSONDecoder().decode(HubVoiceProfiles.self, from: data)
+        let ids = Set(value.profiles.map(\.id))
+        guard (1...50).contains(value.profiles.count), ids.count == value.profiles.count, ids.contains(value.selectedId),
+              (0..<9_007_199_254_740_991).contains(value.revision),
+              value.profiles.allSatisfy({ (1...60).contains($0.settings.name.utf16.count) && $0.settings.instructions.utf16.count <= 12_000 })
+        else { throw HubAttachmentError.invalidResponse }
+        return value
+    }
+
     public func saveVoiceConversation(sessionID: String) async throws {
         guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
         struct Receipt: Decodable { let sessionId: String; let saved: Bool; let kind: String }

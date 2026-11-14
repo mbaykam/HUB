@@ -31,6 +31,9 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubSpeechSettingsView(api: api)) {
                         Label("Speech", systemImage: "waveform")
                     }
+                    NavigationLink(destination: HubVoiceProfilesView(api: api)) {
+                        Label("Voice personalities", systemImage: "person.wave.2")
+                    }
                     NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
                         Label("Knowledge AI", systemImage: "circle.hexagongrid")
                     }
@@ -55,6 +58,271 @@ struct HubWorkspaceSettingsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+}
+
+@MainActor
+struct HubVoiceProfilesView: View {
+    private struct Editor: Identifiable {
+        let id = UUID()
+        let profileID: UUID?
+        let revision: Int
+        var settings: HubVoiceProfiles.Profile.Settings
+    }
+
+    let api: HubConversationAPI
+    @State private var state: HubVoiceProfiles?
+    @State private var editor: Editor?
+    @State private var busy = true
+    @State private var notice: String?
+    @State private var deleting: HubVoiceProfiles.Profile?
+    @State private var showingDelete = false
+    @State private var models: HubModelCatalog?
+    @State private var speech: HubSpeechCatalog?
+    @State private var tools: HubToolCatalog?
+
+    var body: some View {
+        List {
+            if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+            if let state {
+                Section {
+                    if let active = state.active { Text("Current call · \(active.name)") }
+                    Text("Your selection applies to the next voice call.").foregroundStyle(.secondary)
+                }
+                Section("Personalities") {
+                    ForEach(state.profiles) { profile in profileRow(profile, state: state) }
+                }
+                if state.profiles.count < 50,
+                   let seed = state.profiles.first(where: { $0.id == state.selectedId }) {
+                    Button("New personality") {
+                        var settings = seed.settings
+                        settings.name = ""
+                        settings.instructions = ""
+                        editor = Editor(profileID: nil, revision: state.revision, settings: settings)
+                    }
+                }
+            }
+            if busy { ProgressView() }
+            Button("Reload") { Task { await reload() } }.disabled(busy)
+        }
+        .navigationTitle("Voice personalities")
+        .disabled(busy)
+        .task { await reload() }
+        .sheet(item: $editor) { editForm($0) }
+        .alert("Delete personality?", isPresented: $showingDelete, presenting: deleting) { profile in
+            Button("Delete", role: .destructive) {
+                if let revision = state?.revision { Task { await change(.delete(profile.id), revision: revision) } }
+            }
+        } message: { profile in
+            Text(profile.settings.name)
+        }
+    }
+
+    private func profileRow(_ profile: HubVoiceProfiles.Profile, state: HubVoiceProfiles) -> some View {
+        HStack {
+            Button {
+                Task { await change(.select(profile.id), revision: state.revision) }
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(profile.settings.name, systemImage: profile.id == state.selectedId ? "checkmark.circle.fill" : "circle")
+                    Text(profile.settings.route.model).font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            .disabled(profile.id == state.selectedId)
+            Menu {
+                Button("Edit") { editor = Editor(profileID: profile.id, revision: state.revision, settings: profile.settings) }
+                if state.profiles.count < 50 {
+                    Button("Duplicate") {
+                        let name = profile.settings.name.utf16.count <= 53 ? profile.settings.name + " (copy)" : "Voice personality copy"
+                        Task { await change(.duplicate(profile.id, name: name), revision: state.revision) }
+                    }
+                }
+                if state.profiles.count > 1 {
+                    Button("Delete", role: .destructive) { deleting = profile; showingDelete = true }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Options for \(profile.settings.name)")
+        }
+    }
+
+    private func editForm(_ draft: Editor) -> some View {
+        NavigationView {
+            Form {
+                if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                Section("Personality") {
+                    TextField("Name", text: Binding(get: { editor?.settings.name ?? "" }, set: { editor?.settings.name = $0 }))
+                    TextEditor(text: Binding(get: { editor?.settings.instructions ?? "" }, set: { editor?.settings.instructions = $0 }))
+                        .frame(minHeight: 120).accessibilityLabel("Personality instructions")
+                }
+                if let settings = editor?.settings {
+                    modelSection(settings.route)
+                    speechSection(settings.speech)
+                    toolSection(settings.tools)
+                }
+            }
+            .disabled(busy)
+            .navigationTitle(draft.profileID == nil ? "New personality" : "Edit personality")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editor = nil }.disabled(busy) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { saveEditor() }.disabled(busy || !validEditor) }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(busy)
+        .task { await loadEditorOptions() }
+    }
+
+    private func modelSection(_ route: HubCharacterSettings.Character.Route) -> some View {
+        let current = models?.models.first { $0.provider == route.provider && $0.modelID == route.model }
+        return Section("Conversation model") {
+            if let models {
+                Picker("Model", selection: Binding(get: { route.provider + "/" + route.model }, set: { id in
+                    if let model = models.models.first(where: { $0.id == id }) {
+                        editor?.settings.route = .init(provider: model.provider, model: model.modelID)
+                    }
+                })) {
+                    if current == nil { Text(route.model).tag(route.provider + "/" + route.model) }
+                    ForEach(models.models.filter { ($0.available != false && $0.enabled != false) || $0.id == current?.id }) { model in
+                        Text(model.name).tag(model.id)
+                    }
+                }
+                if let efforts = current?.efforts, !efforts.isEmpty {
+                    Picker("Reasoning effort", selection: Binding(get: { route.reasoningEffort ?? "" }, set: {
+                        editor?.settings.route.reasoningEffort = $0.isEmpty ? nil : $0
+                    })) {
+                        Text("Provider default").tag("")
+                        if let saved = route.reasoningEffort, !efforts.contains(where: { $0.id == saved }) { Text(saved).tag(saved) }
+                        ForEach(efforts) { Text($0.name).tag($0.id) }
+                    }
+                }
+            } else {
+                Text(route.model)
+                Button("Load model options") { Task { await loadEditorOptions() } }
+            }
+        }
+    }
+
+    private func speechSection(_ value: HubCharacterSettings.Character.Speech) -> some View {
+        Section("Local speech") {
+            if let speech {
+                Picker("Recognition model", selection: Binding(get: { value.stt.id }, set: { id in
+                    if let option = speech.stt.first(where: { $0.id == id && $0.available }) {
+                        editor?.settings.speech.stt = .init(engine: option.engine, model: option.model,
+                                                           language: option.model.hasSuffix(".en") ? "en" : "auto")
+                    }
+                })) {
+                    if !speech.stt.contains(where: { $0.id == value.stt.id && $0.available }) { Text(value.stt.id).tag(value.stt.id) }
+                    ForEach(speech.stt.filter(\.available)) { Text($0.id).tag($0.id) }
+                }
+                Picker("Recognition language", selection: Binding(get: { value.stt.language ?? "auto" }, set: {
+                    editor?.settings.speech.stt.language = $0
+                })) {
+                    Text("Automatic").tag("auto"); Text("English + Türkçe").tag("en-tr")
+                    Text("English").tag("en"); Text("Türkçe").tag("tr")
+                }.disabled(value.stt.model.hasSuffix(".en"))
+                Picker("Voice engine", selection: Binding(get: { value.tts.id }, set: { id in
+                    if let option = speech.tts.first(where: { $0.id == id && $0.available }),
+                       let voice = option.voices?.first {
+                        let multilingual = option.engine == "supertonic" || option.engine == "bilingual"
+                        editor?.settings.speech.tts = .init(engine: option.engine, model: option.model, voice: voice,
+                            language: multilingual ? "auto" : nil, steps: option.engine == "supertonic" ? 6 : nil,
+                            turkishVoice: option.engine == "bilingual" ? "tr_TR-dfki-medium" : nil)
+                    }
+                })) {
+                    if !speech.tts.contains(where: { $0.id == value.tts.id && $0.available }) { Text(value.tts.id).tag(value.tts.id) }
+                    ForEach(speech.tts.filter(\.available)) { Text($0.id).tag($0.id) }
+                }
+                if let voices = speech.tts.first(where: { $0.id == value.tts.id })?.voices, !voices.isEmpty {
+                    Picker("Spoken voice", selection: Binding(get: { value.tts.voice ?? "" }, set: { editor?.settings.speech.tts.voice = $0 })) {
+                        if !voices.contains(value.tts.voice ?? "") { Text(value.tts.voice ?? "Default").tag(value.tts.voice ?? "") }
+                        ForEach(voices, id: \.self) { Text($0).tag($0) }
+                    }
+                }
+                if ["supertonic", "bilingual"].contains(value.tts.engine) {
+                    Picker("Spoken language", selection: Binding(get: { value.tts.language ?? "auto" }, set: { editor?.settings.speech.tts.language = $0 })) {
+                        Text("Automatic").tag("auto"); Text("English").tag("en"); Text("Türkçe").tag("tr")
+                    }
+                }
+            } else {
+                Text("Recognition · \(value.stt.model)")
+                Text("Spoken voice · \(value.tts.voice ?? value.tts.model)")
+                Button("Load speech options") { Task { await loadEditorOptions() } }
+            }
+        }
+    }
+
+    private func toolSection(_ policy: HubCharacterSettings.Character.ToolPolicy) -> some View {
+        Section("Tools & permissions") {
+            if let tools {
+                Toggle("Inherit tools", isOn: Binding(get: { policy.mode == "inherit" }, set: { inherit in
+                    editor?.settings.tools = .init(mode: inherit ? "inherit" : "allow", names: inherit ? nil : [])
+                }))
+                if policy.mode == "allow" {
+                    let registered = tools.tools.filter { !$0.isRetired && $0.isRegistered }.map(\.name)
+                    let names = Set(registered + (policy.names ?? [])).sorted()
+                    ForEach(names, id: \.self) { name in
+                        Toggle(name, isOn: Binding(get: { policy.names?.contains(name) == true }, set: { allowed in
+                            var selected = Set(editor?.settings.tools.names ?? [])
+                            if allowed, selected.count < 512 { selected.insert(name) }
+                            if !allowed { selected.remove(name) }
+                            editor?.settings.tools.names = selected.sorted()
+                        }))
+                    }
+                }
+            } else {
+                Button("Load tools") { Task { await loadEditorOptions() } }
+            }
+        }
+    }
+
+    private func loadEditorOptions() async {
+        async let modelCatalog = try? api.modelCatalog()
+        async let speechCatalog = try? api.speechCatalog()
+        async let toolCatalog = try? api.toolCatalog()
+        let (newModels, newSpeech, newTools) = await (modelCatalog, speechCatalog, toolCatalog)
+        guard !Task.isCancelled else { return }
+        models = newModels ?? models
+        speech = newSpeech ?? speech
+        tools = newTools ?? tools
+    }
+
+    private var validEditor: Bool {
+        guard let settings = editor?.settings else { return false }
+        return (1...60).contains(settings.name.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count)
+            && settings.instructions.utf16.count <= 12_000
+    }
+
+    private func saveEditor() {
+        guard var editor, validEditor, !busy else { return }
+        editor.settings.name = editor.settings.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command: HubConversationAPI.VoiceProfileChange
+        if let id = editor.profileID { command = .edit(id, editor.settings) }
+        else { command = .create(editor.settings) }
+        Task { await change(command, revision: editor.revision, closeEditor: true) }
+    }
+
+    private func change(_ command: HubConversationAPI.VoiceProfileChange, revision: Int, closeEditor: Bool = false) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            state = try await api.changeVoiceProfile(command, revision: revision)
+            if closeEditor { editor = nil }
+            notice = "Saved for your next voice call."
+        } catch {
+            notice = "HUB could not confirm the change. Check your connection and reload the list before trying again."
+        }
+    }
+
+    private func reload() async {
+        busy = true
+        defer { busy = false }
+        do { state = try await api.voiceProfiles(); notice = nil }
+        catch { if !Task.isCancelled { notice = "Voice personalities could not load." } }
     }
 }
 

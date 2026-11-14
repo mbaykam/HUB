@@ -222,6 +222,38 @@ public struct HubSpeechSettings: Codable {
     public var speech: HubCharacterSettings.Character.Speech
 }
 
+public struct HubVoiceProfiles: Decodable {
+    public struct Profile: Decodable, Identifiable {
+        public struct Settings: Codable {
+            public var name: String
+            public var instructions: String
+            public var route: HubCharacterSettings.Character.Route
+            public var speech: HubCharacterSettings.Character.Speech
+            public var tools: HubCharacterSettings.Character.ToolPolicy
+        }
+
+        public let id: UUID
+        public let settings: Settings
+
+        public init(from decoder: Decoder) throws {
+            enum Keys: String, CodingKey { case id }
+            id = try decoder.container(keyedBy: Keys.self).decode(UUID.self, forKey: .id)
+            settings = try Settings(from: decoder)
+        }
+    }
+
+    public struct Active: Decodable {
+        public let id: UUID
+        public let name: String
+        public let revision: Int
+    }
+
+    public let revision: Int
+    public let selectedId: UUID
+    public let profiles: [Profile]
+    public let active: Active?
+}
+
 public struct HubSpeechCatalog: Decodable {
     public struct Option: Decodable, Identifiable {
         public let engine: String

@@ -64,6 +64,10 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
         return try? HubNotificationDestination(data: data)
     }
+    func conversationAPI() -> HubConversationAPI {
+        HubConversationAPI(server: server) { [deviceState] in (try? deviceState.cookies()) ?? [] }
+    }
+
     func attachmentContext() -> HubVoiceAttachmentContext? {
         guard isActive, let owned = lease else { return nil }
         return HubVoiceAttachmentContext(server: server, sessionID: owned.sessionId, callID: owned.callId, voiceAPI: api,
