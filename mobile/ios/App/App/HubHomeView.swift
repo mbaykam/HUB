@@ -115,8 +115,7 @@ struct HubHomeView: View {
     @State private var knowledgeGraphReset = 0
     @State private var knowledgeTab = KnowledgeTab.graph
     @State private var knowledgeQuery = ""
-    @State private var knowledgeSearchResult: [HubHomeKnowledge.Node]?
-    @State private var knowledgeSearchFailure = false
+    @State private var knowledgeSearchResponse: KnowledgeSearchResponse?
     @State private var knowledgeSearchRetry = 0
     @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
     @State private var tasksOpen = false
@@ -295,7 +294,7 @@ struct HubHomeView: View {
                 knowledgeConnectionsOpen = false
                 knowledgeLocalCenter = nil
                 knowledgeQuery = ""
-                knowledgeSearchResult = nil
+                knowledgeSearchResponse = nil
                 knowledgeRefreshError = false
                 clearKnowledgeSelection()
                 tasksOpen = false
@@ -1160,7 +1159,8 @@ struct HubHomeView: View {
         let graphToShow = neighborhood ?? graph
         let graphScope: HubKnowledgeGraphView.Scope = neighborhood == nil ? knowledgeScope : .all
         let search = KnowledgeSearch(query: query, scope: knowledgeScope, retry: knowledgeSearchRetry, apiID: api.map { ObjectIdentifier($0) })
-        let records = (query.isEmpty ? (knowledgeTab == .graph ? graphToShow.nodes : graph.nodes) : knowledgeSearchResult ?? [])
+        let response = knowledgeSearchResponse.flatMap { $0.request == search ? $0 : nil }
+        let records = (query.isEmpty ? (knowledgeTab == .graph ? graphToShow.nodes : graph.nodes) : response?.nodes ?? [])
             .filter { (query.isEmpty && knowledgeTab == .graph ? graphScope : knowledgeScope).includes($0) }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
@@ -1207,9 +1207,9 @@ struct HubHomeView: View {
                 TextField("Find records", text: $knowledgeQuery).textFieldStyle(.roundedBorder).submitLabel(.search)
                 if query.utf16.count > 200 {
                     Text("Use 200 characters or fewer.").foregroundStyle(.secondary)
-                } else if knowledgeSearchFailure && !query.isEmpty {
+                } else if !query.isEmpty, let response, response.nodes == nil {
                     Button("Retry searching Knowledge") { knowledgeSearchRetry += 1 }
-                } else if knowledgeSearchResult == nil && !query.isEmpty {
+                } else if response == nil && !query.isEmpty {
                     ProgressView("Searching Knowledge…")
                 } else if records.isEmpty {
                     Text("No matching records").foregroundStyle(.secondary)
@@ -1242,21 +1242,28 @@ struct HubHomeView: View {
         let apiID: ObjectIdentifier?
     }
 
+    private struct KnowledgeSearchResponse {
+        let request: KnowledgeSearch
+        let nodes: [HubHomeKnowledge.Node]?
+    }
+
     private func searchKnowledge(_ search: KnowledgeSearch, api: HubConversationAPI?) async {
-        knowledgeSearchResult = nil
-        knowledgeSearchFailure = false
-        guard !search.query.isEmpty else { return }
-        guard let api, search.query.utf16.count <= 200 else {
-            knowledgeSearchFailure = true
+        guard !Task.isCancelled, !search.query.isEmpty, search.query.utf16.count <= 200 else { return }
+        guard let api else {
+            knowledgeSearchResponse = KnowledgeSearchResponse(request: search, nodes: nil)
             return
         }
         let scope: HubHomeKnowledge.SearchScope = search.scope == .all ? .all : search.scope == .notes ? .brain : .archive
         do {
             try await Task.sleep(nanoseconds: 250_000_000)
             let records = try await api.searchKnowledge(search.query, scope: scope)
-            if !Task.isCancelled, chatAPI() === api { knowledgeSearchResult = records }
+            if !Task.isCancelled, chatAPI() === api {
+                knowledgeSearchResponse = KnowledgeSearchResponse(request: search, nodes: records)
+            }
         } catch {
-            if !Task.isCancelled, chatAPI() === api { knowledgeSearchFailure = true }
+            if !Task.isCancelled, chatAPI() === api {
+                knowledgeSearchResponse = KnowledgeSearchResponse(request: search, nodes: nil)
+            }
         }
     }
 
