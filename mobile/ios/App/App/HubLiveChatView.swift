@@ -1467,6 +1467,9 @@ private struct HubChatImageView: View {
     @State private var savedFile: SavedFile?
     @State private var exporting = false
     @State private var exportFailed = false
+    @State private var sharing = false
+    @State private var sharedFile: URL?
+    @State private var shareFailed = false
     @State private var failed = false
     @State private var attempt = 0
 
@@ -1485,6 +1488,11 @@ private struct HubChatImageView: View {
                         HStack {
                             Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             Spacer()
+                            Button { shareScreenshot() } label: {
+                                Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Share screenshot")
                             Button {
                                 exportFailed = false
                                 exporting = true
@@ -1495,6 +1503,7 @@ private struct HubChatImageView: View {
                             .accessibilityLabel("Save screenshot to Files")
                         }
                         if exportFailed { Text("Could not save the screenshot.").font(.footnote).foregroundStyle(.secondary) }
+                        if shareFailed { Text("Could not prepare the screenshot for sharing.").font(.footnote).foregroundStyle(.secondary) }
                     }
                 }
             } else if failed {
@@ -1506,6 +1515,9 @@ private struct HubChatImageView: View {
         .fileExporter(isPresented: $exporting, document: savedFile.map { HubFileDocument(bytes: $0.bytes) },
                       contentType: savedFile?.type ?? .image, defaultFilename: savedFile?.name) { result in
             if case .failure = result { exportFailed = true }
+        }
+        .sheet(isPresented: $sharing, onDismiss: clearSharedFile) {
+            if let sharedFile { HubShareSheet(file: sharedFile) }
         }
         .task(id: attempt) {
             do {
@@ -1527,6 +1539,42 @@ private struct HubChatImageView: View {
             }
         }
     }
+
+    private func shareScreenshot() {
+        guard let savedFile, !sharing else { return }
+        clearSharedFile()
+        shareFailed = false
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            let file = directory.appendingPathComponent(savedFile.name)
+            try savedFile.bytes.write(to: file, options: [.atomic, .completeFileProtection])
+            sharedFile = file
+            sharing = true
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            shareFailed = true
+        }
+    }
+
+    private func clearSharedFile() {
+        guard let sharedFile else { return }
+        try? FileManager.default.removeItem(at: sharedFile.deletingLastPathComponent())
+        self.sharedFile = nil
+    }
+}
+
+private struct HubShareSheet: UIViewControllerRepresentable {
+    let file: URL
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in dismiss() }
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 @MainActor
