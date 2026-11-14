@@ -77,6 +77,21 @@ private struct HubGeneralSettingsView: View {
                     }
                 }
                 .disabled(busy || !settings.writable)
+                if settings.canSetLanguage {
+                    Section("Language") {
+                        Picker("Workspace language", selection: Binding(get: { settings.interfaceLanguage ?? "" }, set: { id in
+                            if let language = HubChatPreferences.Language(rawValue: id) { update(.language(language)) }
+                        })) {
+                            if settings.interfaceLanguage == nil { Text("Device language").tag("") }
+                            if let selected = settings.interfaceLanguage, HubChatPreferences.Language(rawValue: selected) == nil {
+                                Text(Locale.current.localizedString(forIdentifier: selected) ?? selected).tag(selected)
+                            }
+                            Text(verbatim: "English").tag("en")
+                            Text(verbatim: "中文").tag("zh")
+                        }
+                    }
+                    .disabled(busy)
+                }
                 Section("Chat") {
                     Stepper("Conversation text size · \(settings.fontSize)", value: Binding(
                         get: { settings.fontSize }, set: { update(.fontSize($0)) }), in: 12...17)

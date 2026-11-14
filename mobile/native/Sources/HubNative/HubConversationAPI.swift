@@ -665,22 +665,26 @@ public struct HubChatPreferences {
     public enum Delivery: String, CaseIterable { case queue, steer }
     public enum Transcript: String, CaseIterable { case normal, compact }
     public enum Appearance: String, CaseIterable { case light, dark, system }
+    public enum Language: String, CaseIterable { case en, zh }
 
     public let fontSize: Int
     public let busyEnter: Delivery
     public let transcript: Transcript
     public let appearance: Appearance
+    public let interfaceLanguage: String?
+    public var canSetLanguage: Bool { writable && revisions["locale"] != nil }
     public let writable: Bool
     fileprivate let revisions: [String: Int]
 
     public static let defaults = HubChatPreferences(fontSize: 14, busyEnter: .queue, transcript: .compact,
-                                                     appearance: .dark, writable: false, revisions: [:])
+                                                     appearance: .dark, interfaceLanguage: nil, writable: false, revisions: [:])
 
     public enum Change {
         case fontSize(Int)
         case busyEnter(Delivery)
         case transcript(Transcript)
         case appearance(Appearance)
+        case language(Language)
 
         fileprivate var field: (namespace: String, key: String, value: Any) {
             switch self {
@@ -688,6 +692,7 @@ public struct HubChatPreferences {
             case .busyEnter(let mode): return ("ui-conversation", "busyEnter", mode.rawValue)
             case .transcript(let mode): return ("ui-chat", "transcriptView", mode.rawValue)
             case .appearance(let mode): return ("ui-theme", "preference", mode.rawValue)
+            case .language(let language): return ("locale", "preference", language.rawValue)
             }
         }
     }
@@ -2624,7 +2629,7 @@ public final class HubConversationAPI {
         var fields: [String: [String: Any]] = [:]
         var revisions: [String: Int] = [:]
         for item in namespaces {
-            guard let name = item["ns"] as? String, ["ui-theme", "ui-conversation", "ui-chat"].contains(name),
+            guard let name = item["ns"] as? String, ["ui-theme", "ui-conversation", "ui-chat", "locale"].contains(name),
                   let value = item["value"] as? [String: Any], let revision = item["revision"] as? Int, revision >= 0 else { continue }
             guard revisions[name] == nil else { throw HubAttachmentError.invalidResponse }
             fields[name] = value
@@ -2636,8 +2641,10 @@ public final class HubConversationAPI {
             throw HubAttachmentError.invalidResponse
         }
         let appearance = (fields["ui-theme"]?["preference"] as? String).flatMap(HubChatPreferences.Appearance.init(rawValue:)) ?? .system
+        let locale = fields["locale"]?["preference"] as? String
+        let language = locale?.range(of: "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$", options: .regularExpression) != nil ? locale : nil
         return HubChatPreferences(fontSize: size, busyEnter: delivery, transcript: transcript, appearance: appearance,
-                                  writable: writable, revisions: revisions)
+                                  interfaceLanguage: language, writable: writable, revisions: revisions)
     }
 
     public func updateChatPreferences(_ change: HubChatPreferences.Change, from preferences: HubChatPreferences) async throws -> HubChatPreferences {

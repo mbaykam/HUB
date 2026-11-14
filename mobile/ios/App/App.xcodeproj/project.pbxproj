@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1E000000000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000002; };
 		A1D000000000000000000001 /* HubWorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000002; };
 		A1C000000000000000000011 /* HubSpeechSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000012 /* HubSpeechSettingsView.swift */; };
 		A1C000000000000000000013 /* HubBrowserPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000014 /* HubBrowserPreviewView.swift */; };
@@ -57,6 +58,7 @@ A17000000000000000000007 = {isa = PBXBuildFile; fileRef = A170000000000000000000
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A1E000000000000000000003 /* zh */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh; path = zh.lproj/Localizable.strings; sourceTree = "<group>"; };
 		A1D000000000000000000002 /* HubWorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubWorkspaceUITests/HubWorkspaceUITests.swift; sourceTree = "<group>"; };
 		A1D000000000000000000003 /* HubWorkspaceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = HubWorkspaceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1C000000000000000000012 /* HubSpeechSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubSpeechSettingsView.swift; sourceTree = "<group>"; };
@@ -178,6 +180,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
+				A1E000000000000000000002 /* Localizable.strings */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
  A17000000000000000000002,
@@ -262,6 +265,7 @@ A17000000000000000000010 = {isa = PBXNativeTarget; buildConfigurationList = A170
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				zh,
 				Base,
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
@@ -290,6 +294,7 @@ A17000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147
 			buildActionMask = 2147483647;
 			files = (
 				504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */,
+				A1E000000000000000000001 /* Localizable.strings in Resources */,
 				A16000000000000000000001,
 				50B271D11FEDC1A000F3C39B /* public in Resources */,
 				504EC30F1FED79650016851F /* Assets.xcassets in Resources */,
@@ -341,6 +346,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXVariantGroup section */
+		A1E000000000000000000002 /* Localizable.strings */ = {isa = PBXVariantGroup; children = (A1E000000000000000000003, ); name = Localizable.strings; sourceTree = "<group>"; };
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
 			isa = PBXVariantGroup;
 			children = (

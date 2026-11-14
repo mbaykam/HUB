@@ -412,14 +412,17 @@ final class HubConversationTests: XCTestCase {
                     ["ns": "ui-theme", "revision": 7, "value": ["fontSize": 16, "preference": CatalogFixture.requests.count >= 5 ? "light" : "dark"]],
                     ["ns": "ui-conversation", "revision": 3, "value": ["busyEnter": "steer"]],
                     ["ns": "ui-chat", "revision": 2, "value": ["transcriptView": "normal"]],
+                    ["ns": "locale", "revision": 11, "value": ["preference": CatalogFixture.requests.count >= 7 ? "zh" : "en"]],
                 ]]
             } else {
                 XCTAssertEqual(request.url?.path, "/api/settings/update")
-                XCTAssertEqual(arguments["ns"] as? String, "ui-theme")
+                let languageWrite = CatalogFixture.requests.count == 6
+                let namespace = languageWrite ? "locale" : "ui-theme"
+                XCTAssertEqual(arguments["ns"] as? String, namespace)
                 if CatalogFixture.requests.count == 2 { XCTAssertEqual(arguments["patch"] as? [String: Int], ["fontSize": 16]) }
-                else { XCTAssertEqual(arguments["patch"] as? [String: String], ["preference": "light"]) }
-                XCTAssertEqual(arguments["expectedRevision"] as? Int, 7)
-                value = ["ns": "ui-theme"]
+                else { XCTAssertEqual(arguments["patch"] as? [String: String], ["preference": languageWrite ? "zh" : "light"]) }
+                XCTAssertEqual(arguments["expectedRevision"] as? Int, languageWrite ? 11 : 7)
+                value = ["ns": namespace]
             }
             return (200, try JSONSerialization.data(withJSONObject: [
                 "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": value],
@@ -436,6 +439,10 @@ final class HubConversationTests: XCTestCase {
         let themed = try await api.updateChatPreferences(.appearance(.light), from: updated)
         XCTAssertEqual(themed.appearance, .light)
         XCTAssertEqual(themed.fontSize, updated.fontSize)
+        XCTAssertTrue(themed.canSetLanguage)
+        let localized = try await api.updateChatPreferences(.language(.zh), from: themed)
+        XCTAssertEqual(localized.interfaceLanguage, "zh")
+        XCTAssertEqual(localized.appearance, .light)
     }
 
     func testCreatingAChatUsesTheSelectedWorkspaceAndDoesNotUseItsPath() async throws {

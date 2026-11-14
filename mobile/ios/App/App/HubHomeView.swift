@@ -146,9 +146,9 @@ struct HubHomeView: View {
     private let card = HubWorkspacePalette.panel
     private let accent = HubWorkspacePalette.accent
 
-    private enum PlannerTab: String, CaseIterable {
-        case agenda = "Agenda"
-        case todos = "To-dos"
+    private enum PlannerTab: CaseIterable {
+        case agenda, todos
+        var title: LocalizedStringKey { self == .agenda ? "Agenda" : "To-dos" }
     }
 
     private struct PlannerEdit: Identifiable {
@@ -180,6 +180,7 @@ struct HubHomeView: View {
         .tint(accent)
         .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
         .preferredColorScheme(chatPreferences.appearance.colorScheme)
+        .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
         .sheet(isPresented: $knowledgeOpen, onDismiss: clearKnowledgeSelection) { knowledgeScreen }
         .sheet(isPresented: $tasksOpen) {
             if let api = chatAPI() { HubTasksView(load: readTasks, api: api, openChat: showChat) }
@@ -556,7 +557,7 @@ struct HubHomeView: View {
         }
     }
 
-    private func toolTile(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+    private func toolTile(_ title: LocalizedStringKey, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 Image(systemName: icon).font(.title3)
@@ -1167,7 +1168,7 @@ struct HubHomeView: View {
         .padding(.vertical, 8)
     }
 
-    private func startChatAction(_ title: String, icon: String, action: HubNativeChatRequest.ComposerAction) -> some View {
+    private func startChatAction(_ title: LocalizedStringKey, icon: String, action: HubNativeChatRequest.ComposerAction) -> some View {
         Button {
             hideKeyboard()
             Task { await newChat(action: action) }
@@ -1200,7 +1201,7 @@ struct HubHomeView: View {
                         hideKeyboard()
                         plannerTab = tab
                     } label: {
-                        Text(tab.rawValue)
+                        Text(tab.title)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(plannerTab == tab ? accent : HubWorkspacePalette.muted)
                             .frame(minHeight: 44)
@@ -1396,7 +1397,7 @@ struct HubHomeView: View {
         }
     }
 
-    private func section<Content: View>(_ title: String, actionLabel: String = "Open", open: (() -> Void)? = nil,
+    private func section<Content: View>(_ title: LocalizedStringKey, actionLabel: LocalizedStringKey = "Open", open: (() -> Void)? = nil,
                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1407,7 +1408,7 @@ struct HubHomeView: View {
                     Spacer()
                     Button(action: open) { Text(actionLabel).font(.footnote).frame(minHeight: 40) }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Open \(title)")
+                        .accessibilityLabel(Text(actionLabel))
                 }
             }
             content()
