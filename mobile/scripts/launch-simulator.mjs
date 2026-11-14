@@ -7,6 +7,7 @@ if(process.platform!=='darwin')throw Error('Native simulator launch requires mac
 const run=(command,args,timeout=60000)=>execFileSync(command,args,{encoding:'utf8',timeout,killSignal:'SIGKILL',maxBuffer:10_000_000,stdio:['ignore','pipe','pipe']}).trim();
 const sim=(...args)=>run('xcrun',['simctl',...args]);
 const nativeDevelopment=process.env.HUB_NATIVE_WORKSPACE_SIMULATOR==='1';
+const workspaceUITest=nativeDevelopment && process.env.HUB_NATIVE_WORKSPACE_UI_TEST==='1';
 let source;
 if(nativeDevelopment){
   const {GITHUB_REPOSITORY:repository,GITHUB_REF:ref,GITHUB_SHA:sha,GITHUB_RUN_ID:runId}=process.env;
@@ -78,11 +79,24 @@ try{
   }
   stage='bootstatus';console.log('Waiting for native simulator startup');
   run('xcrun',['simctl','bootstatus',device,'-b'],480000);
-  stage='install';console.log('Installing the verified existing bundle');
-  if(!nativeDevelopment){
-    try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
+  if(workspaceUITest){
+    stage='xctest';
+    console.log('Exercising the HUB workspace with XCUITest');
+    const result=resolve(folder,'workspace-ui.xcresult');
+    run('xcodebuild',['test-without-building','-project','mobile/ios/App/App.xcodeproj','-scheme','App',
+      '-destination','platform=iOS Simulator,id='+device,'-derivedDataPath','mobile/build/DerivedData',
+      '-parallel-testing-enabled','NO','-only-testing:HubWorkspaceUITests',
+      '-resultBundlePath',result,'CODE_SIGNING_ALLOWED=NO'],420000);
+    await writeFile(resolve(folder,'workspace-ui-proof.json'),JSON.stringify({...source,runtime:selected.runtime,
+      isolatedSimulator:true,nativeHomeFixture:true,physicalAcceptance:false,drawersPlannerComposerKeyboardPassed:true},null,2));
+    try{sim('terminate',device,'com.mbaykam.hub');}catch{}
+  }else{
+    stage='install';console.log('Installing the verified existing bundle');
+    if(!nativeDevelopment){
+      try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
+    }
+    run('xcrun',['simctl','install',device,app],120000);
   }
-  run('xcrun',['simctl','install',device,app],120000);
   const testInstalledUI=process.env.TEST_INSTALLED_UI==='1';
   const launchArguments = [];
   if(testInstalledUI){
