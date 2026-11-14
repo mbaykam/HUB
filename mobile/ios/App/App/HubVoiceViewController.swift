@@ -12,6 +12,11 @@ final class HubVoiceViewController: UIViewController {
     private let interrupt = UIButton(type: .system)
     private let end = UIButton(type: .system)
     private let attention = UIButton(type: .system)
+    private let canvas = UIButton(type: .system)
+    private var canvasWatch: Task<Void, Never>?
+    private var lastCanvasCall: String?
+    private var lastSurfacedCanvas: UUID?
+    private var latestCanvas: HubChatPresentation?
 
     init(voice: HubNativeVoice, restart: @escaping () -> Void, openConversation: @escaping () -> Void) { self.voice = voice; self.restart = restart; self.openConversation = openConversation; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Use init(voice:)") }
@@ -55,16 +60,20 @@ final class HubVoiceViewController: UIViewController {
         interrupt.addAction(UIAction { [weak self] _ in self?.voice.interrupt() }, for: .touchUpInside)
         attention.configuration = .tinted()
         attention.addAction(UIAction { [weak self] _ in self?.voice.toggleAttention() }, for: .touchUpInside)
+        canvas.configuration = .tinted()
+        canvas.isHidden = true
+        canvas.setTitle("Open Canvas", for: .normal)
+        canvas.addAction(UIAction { [weak self] _ in self?.openCanvas() }, for: .touchUpInside)
         end.configuration = .filled(); end.configuration?.baseBackgroundColor = .systemRed
         end.setTitle("End conversation", for: .normal)
         end.addAction(UIAction { [weak self] _ in guard let self else { return }; if self.voice.isActive { self.voice.end() } else { self.restart() } }, for: .touchUpInside)
-        let actions = UIStackView(arrangedSubviews: [mute, attention])
+        let actions = UIStackView(arrangedSubviews: [mute, interrupt])
         actions.distribution = .fillEqually; actions.spacing = 12
         let symbol = UIImageView(image: UIImage(systemName: "waveform.circle.fill"))
         symbol.contentMode = .scaleAspectFit; symbol.tintColor = .label
         symbol.heightAnchor.constraint(equalToConstant: 96).isActive = true
         symbol.isAccessibilityElement = false
-        let stack = UIStackView(arrangedSubviews: [symbol, status, transcript, actions, end])
+        let stack = UIStackView(arrangedSubviews: [symbol, status, canvas, transcript, attention, actions, end])
         stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -78,6 +87,49 @@ final class HubVoiceViewController: UIViewController {
         ])
         refresh()
     }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        watchCanvas()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        canvasWatch?.cancel()
+        canvasWatch = nil
+    }
+
+    private func watchCanvas() {
+        guard canvasWatch == nil else { return }
+        canvasWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                let seconds = await self?.pollCanvas() ?? 0
+                guard seconds > 0 else { return }
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            }
+        }
+    }
+
+    private func pollCanvas() async -> UInt64 {
+        guard UIApplication.shared.applicationState == .active, view.window != nil, presentedViewController == nil,
+              let context = voice.attachmentContext() else { return 3 }
+        if lastCanvasCall != context.callID {
+            lastCanvasCall = context.callID
+            lastSurfacedCanvas = nil
+            latestCanvas = nil
+            canvas.isHidden = true
+        }
+        do {
+            let presentation = try await context.voiceAPI.presentation(callID: context.callID)
+            guard !Task.isCancelled, context.stillOwned(), view.window != nil else { return 0 }
+            latestCanvas = presentation
+            canvas.isHidden = presentation == nil
+            if let presentation, lastSurfacedCanvas != presentation.id, presentedViewController == nil {
+                openCanvas()
+            }
+            return 3
+        } catch { return 8 }
+    }
     func refresh() {
         status.text = voice.status
         transcript.text = voice.transcript.isEmpty ? "Your conversation will appear here. Hide returns to HUB while keeping the call active. End stops the microphone." : voice.transcript
@@ -88,15 +140,18 @@ final class HubVoiceViewController: UIViewController {
         end.setTitle(voice.isActive ? "End conversation" : "Resume conversation", for: .normal)
         end.configuration?.baseBackgroundColor = voice.isActive ? .systemRed : .systemIndigo
         navigationItem.leftBarButtonItem?.title = voice.isActive ? "Hide" : "Close"
+        if !voice.isActive { canvas.isHidden = true }
     }
     @objc private func hide() { dismiss(animated: true) }
     private func openCanvas() {
+        guard presentedViewController == nil else { return }
         guard let context = voice.attachmentContext() else {
             let alert = UIAlertController(title: "Canvas unavailable", message: "Connect to a voice conversation first.", preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             present(alert, animated: true)
             return
         }
+        lastSurfacedCanvas = latestCanvas?.id
         present(UIHostingController(rootView: HubVoiceCanvasView(context: context)), animated: true)
     }
     private func shareFile() {
