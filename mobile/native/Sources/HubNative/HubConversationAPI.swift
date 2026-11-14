@@ -259,12 +259,18 @@ public struct HubKnowledgeArchivePage: Decodable {
 }
 
 public struct HubKnowledgeArchivePreview: Decodable {
+    public struct Prices: Decodable {
+        public let inputPrice: Double
+        public let outputPrice: Double
+    }
     public struct Record: Decodable, Identifiable {
         public let id: String
         public let title: String
         public let messages: Int
         public let channel: String
         public let status: String
+        public let estimatedCalls: Int?
+        public let inputBytes: Int?
         public var canAdmit: Bool { ["new", "withdrawn", "interrupted"].contains(status) }
     }
     public let id: UUID
@@ -272,11 +278,13 @@ public struct HubKnowledgeArchivePreview: Decodable {
     public let state: String
     public let error: String?
     public let conversations: Int
+    public let messages: Int?
     public let admitted: Int
     public let records: [Record]
     public let previewHash: String
     public let nextOffset: Int?
     public let warnings: [String]
+    public let prices: Prices?
 }
 
 public struct HubKnowledgeArchiveMessages: Decodable {
@@ -284,6 +292,7 @@ public struct HubKnowledgeArchiveMessages: Decodable {
         public let role: String
         public let text: String
         public let truncated: Bool
+        public let at: Double?
     }
     public let id: String
     public let title: String
@@ -296,6 +305,12 @@ public struct HubKnowledgeArchiveAdmission: Decodable {
     public let admitted: Int
     public let duplicates: Int
     public let queued: Int
+    public let warnings: [String]?
+}
+
+public struct HubKnowledgeArchiveWithdrawal: Decodable {
+    public let withdrawn: Int
+    public let domainReviewRequired: [String]?
 }
 
 public struct HubKnowledgeActivity: Decodable {
@@ -2189,10 +2204,9 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubKnowledgeArchiveAdmission.self, from: data)
     }
 
-    public func withdrawKnowledgeArchive(_ id: UUID) async throws -> Int {
-        struct Receipt: Decodable { let withdrawn: Int }
+    public func withdrawKnowledgeArchive(_ id: UUID) async throws -> HubKnowledgeArchiveWithdrawal {
         let data = try await archiveCommand(["action": "withdraw-import", "id": id.uuidString.lowercased()])
-        return try JSONDecoder().decode(Receipt.self, from: data).withdrawn
+        return try JSONDecoder().decode(HubKnowledgeArchiveWithdrawal.self, from: data)
     }
 
     private func archiveCommand(_ command: [String: Any]) async throws -> Data {

@@ -234,7 +234,9 @@ struct HubKnowledgeArchivesView: View {
     @State private var moreBatches: Int?
     @State private var preview: HubKnowledgeArchivePreview?
     @State private var offset = 0
-    @State private var selected: Set<String> = []
+    @State private var selected: [String: HubKnowledgeArchivePreview.Record] = [:]
+    @State private var archiveSearch = ""
+    @State private var knowledgePricing: HubKnowledgeSettings?
     @State private var record: HubKnowledgeArchivePreview.Record?
     @State private var original: HubKnowledgeArchiveMessages?
     @State private var originalOffset = 0
@@ -271,6 +273,7 @@ struct HubKnowledgeArchivesView: View {
         }
         .navigationViewStyle(.stack)
         .task { await loadBatches() }
+        .task { knowledgePricing = try? await api.knowledgeStatus().settings }
         .interactiveDismissDisabled(busy || !selected.isEmpty)
         .fileImporter(isPresented: $pickerOpen, allowedContentTypes: [.zip, .json, .html]) { result in
             switch result {
@@ -320,6 +323,7 @@ struct HubKnowledgeArchivesView: View {
             Section {
                 Text(preview.filename).font(.headline)
                 Text("\(preview.conversations) conversations · \(preview.admitted) admitted").font(.footnote)
+                if let count = preview.messages { Text("\(count) original messages").font(.footnote).foregroundStyle(.secondary) }
                 if let error = preview.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
                 ForEach(Array(preview.warnings.enumerated()), id: \.offset) { _, warning in
                     Text(warning).font(.footnote).foregroundStyle(.secondary)
@@ -330,6 +334,9 @@ struct HubKnowledgeArchivesView: View {
                         Button("Keep archive private") { Task { await keepPrivate(preview) } }
                     }
                     if selected.count > 0 {
+                        if let estimate = selectionEstimate(preview) {
+                            Text(estimate).font(.footnote).foregroundStyle(.secondary)
+                        }
                         Button("Review selected admission · \(selected.count)") { confirmation = .admit }.disabled(stale)
                         Button("Clear selection") { selected.removeAll() }
                     }
@@ -340,13 +347,17 @@ struct HubKnowledgeArchivesView: View {
             }
             if preview.state != "failed" {
                 Section("Original conversations") {
-                    ForEach(preview.records) { item in
+                    TextField("Filter this archive page", text: $archiveSearch)
+                    let query = archiveSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let matches = preview.records.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
+                    if matches.isEmpty { Text("No matching conversations on this page.").foregroundStyle(.secondary) }
+                    ForEach(matches) { item in
                         VStack(alignment: .leading, spacing: 6) {
-                            Toggle(item.title, isOn: Binding(get: { selected.contains(item.id) }, set: { on in
+                            Toggle(item.title, isOn: Binding(get: { selected[item.id] != nil }, set: { on in
                                 if on {
-                                    if selected.count < 50 { selected.insert(item.id) }
+                                    if selected.count < 50 { selected[item.id] = item }
                                     else { notice = "Select up to 50 conversations at a time." }
-                                } else { selected.remove(item.id) }
+                                } else { selected.removeValue(forKey: item.id) }
                             }))
                             .disabled(!item.canAdmit || stale)
                             Text("\(item.channel) · \(item.messages) messages · \(item.status)")
@@ -365,6 +376,18 @@ struct HubKnowledgeArchivesView: View {
         }
     }
 
+    private func selectionEstimate(_ preview: HubKnowledgeArchivePreview) -> String? {
+        guard selected.values.allSatisfy({ $0.estimatedCalls != nil && $0.inputBytes != nil }) else { return nil }
+        let calls = selected.values.reduce(0.0) { $0 + Double($1.estimatedCalls ?? 0) }
+        let inputBytes = selected.values.reduce(0.0) { $0 + Double($1.inputBytes ?? 0) }
+        let chunks = "Up to \(calls.formatted(.number.precision(.fractionLength(0)))) organization chunks."
+        guard let inputPrice = knowledgePricing?.inputPrice ?? preview.prices?.inputPrice,
+              let outputPrice = knowledgePricing?.outputPrice ?? preview.prices?.outputPrice else { return chunks }
+        let amount = ((inputBytes + calls * 50_000) * inputPrice + calls * 6_000 * outputPrice) / 1_000_000
+        guard amount.isFinite, amount >= 0 else { return chunks }
+        return chunks + " Estimated cost \(amount.formatted(.currency(code: "USD").precision(.fractionLength(3))))."
+    }
+
     private func originalMessages(_ item: HubKnowledgeArchivePreview.Record) -> some View {
         Section(item.title) {
             if let original {
@@ -372,6 +395,9 @@ struct HubKnowledgeArchivesView: View {
                 ForEach(Array(original.messages.enumerated()), id: \.offset) { _, message in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(message.role.capitalized).font(.caption.weight(.semibold))
+                        if let at = message.at {
+                            Text(Date(timeIntervalSince1970: at / 1_000).formatted()).font(.caption).foregroundStyle(.secondary)
+                        }
                         Text(message.text).textSelection(.enabled)
                         if message.truncated { Text("Excerpt. HUB retained the full original.").font(.caption2).foregroundStyle(.secondary) }
                     }
@@ -422,6 +448,7 @@ struct HubKnowledgeArchivesView: View {
 
     private func show(_ value: HubKnowledgeArchivePreview, offset: Int) {
         if preview?.id != value.id || preview?.previewHash != value.previewHash { selected.removeAll() }
+        if preview?.id != value.id || self.offset != offset { archiveSearch = "" }
         preview = value
         self.offset = offset
         stale = false
@@ -482,11 +509,14 @@ struct HubKnowledgeArchivesView: View {
             stale = true
             switch action {
             case .admit:
-                let receipt = try await api.admitKnowledgeArchive(preview, recordIDs: selected.sorted())
-                notice = "\(receipt.admitted) admitted · \(receipt.duplicates) duplicates · \(receipt.queued) organization jobs queued."
+                let receipt = try await api.admitKnowledgeArchive(preview, recordIDs: selected.keys.sorted())
+                let summary = "\(receipt.admitted) admitted · \(receipt.duplicates) duplicates · \(receipt.queued) organization jobs queued."
+                notice = ([summary] + (receipt.warnings ?? [])).joined(separator: "\n")
             case .withdraw:
-                let count = try await api.withdrawKnowledgeArchive(preview.id)
-                notice = "\(count) conversations withdrawn."
+                let receipt = try await api.withdrawKnowledgeArchive(preview.id)
+                let count = receipt.domainReviewRequired?.count ?? 0
+                notice = count == 0 ? "\(receipt.withdrawn) conversations withdrawn. Originals retained."
+                    : "\(receipt.withdrawn) conversations withdrawn. Originals retained. Review affected changes in Domains (\(count))."
             }
             selected.removeAll()
             if let current = try? await api.knowledgeArchive(preview.id) { show(current, offset: 0) }
