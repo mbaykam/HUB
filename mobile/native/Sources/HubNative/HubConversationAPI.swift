@@ -322,6 +322,29 @@ public struct HubKnowledgeActivity: Decodable {
     public let historyNotice: String
 }
 
+public struct HubKnowledgeProfileReview: Decodable {
+    public struct Suggestion: Decodable, Identifiable {
+        public let id: String
+        public let target: String
+        public let text: String
+        public let evidence: String
+        public let status: String
+        public let at: Double
+        public let conversationId: String?
+    }
+    public struct Reflection: Decodable, Identifiable {
+        public let id: String
+        public let scope: String
+        public let observation: String
+        public let evidence: String
+        public let at: Double
+        public let conversationId: String?
+    }
+    public enum Decision: String { case approve, reject, undo }
+    public let suggestions: [Suggestion]
+    public let reflections: [Reflection]
+}
+
 public struct HubKnowledgeNote: Decodable {
     public let id: String
     public let title: String
@@ -2033,6 +2056,21 @@ public final class HubConversationAPI {
     public func knowledgeStatus() async throws -> HubKnowledgeStatus {
         let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"])
         return try JSONDecoder().decode(HubKnowledgeStatus.self, from: data)
+    }
+
+    public func knowledgeProfileReview() async throws -> HubKnowledgeProfileReview {
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
+            URLQueryItem(name: "view", value: "organization"),
+        ], maxBytes: 12_000_000)
+        return try JSONDecoder().decode(HubKnowledgeProfileReview.self, from: data)
+    }
+
+    public func decideKnowledgeProfile(_ suggestion: HubKnowledgeProfileReview.Suggestion, decision: HubKnowledgeProfileReview.Decision) async throws {
+        guard !suggestion.id.isEmpty, suggestion.id.utf8.count <= 1_024,
+              suggestion.status == (decision == .undo ? "applied" : "pending") else { throw HubAttachmentError.invalidResponse }
+        let command = ["action": "profile-review", "id": suggestion.id, "decision": decision.rawValue]
+        let body = try JSONSerialization.data(withJSONObject: command)
+        _ = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body)
     }
 
     public func processKnowledgeQueue() async throws -> HubKnowledgeStatus {

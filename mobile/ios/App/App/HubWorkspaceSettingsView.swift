@@ -412,6 +412,7 @@ private struct HubKnowledgeSettingsView: View {
                 Stepper("Maximum links · \(draft.maxLinks)", value: setting(\.maxLinks, fallback: draft.maxLinks), in: 1...12)
                 Toggle("Save sourced reflections", isOn: flag(\.reflections))
                 Toggle("Suggest profile edits", isOn: flag(\.profileSuggestions))
+                NavigationLink("Reflections and profile suggestions", destination: HubKnowledgeProfileReviewView(api: api))
                 TextEditor(text: setting(\.instructions, fallback: draft.instructions))
                     .frame(minHeight: 86).accessibilityLabel("Knowledge instructions")
             }
@@ -514,6 +515,135 @@ private struct HubKnowledgeSettingsView: View {
             error = nil
         } catch {
             self.error = "Could not confirm the save. Your settings draft is retained."
+        }
+    }
+}
+
+@MainActor
+private struct HubKnowledgeProfileReviewView: View {
+    let api: HubConversationAPI
+    @State private var review: HubKnowledgeProfileReview?
+    @State private var request: Pending?
+    @State private var busy = false
+    @State private var error: String?
+    @State private var needsRefresh = false
+
+    private struct Pending: Identifiable {
+        let suggestion: HubKnowledgeProfileReview.Suggestion
+        let decision: HubKnowledgeProfileReview.Decision
+        var id: String { suggestion.id }
+        var title: String {
+            switch decision {
+            case .approve: "Apply this profile suggestion?"
+            case .reject: "Reject this profile suggestion?"
+            case .undo: "Undo this profile change?"
+            }
+        }
+    }
+
+    var body: some View {
+        List {
+            if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if busy { ProgressView() }
+            if let review {
+                Section("Profile suggestions") {
+                    if review.suggestions.isEmpty { Text("No profile suggestions yet.").foregroundStyle(.secondary) }
+                    ForEach(review.suggestions.reversed()) { suggestion in
+                        DisclosureGroup(suggestion.target == "USER.md" ? "Shared user profile" : "Character profile") {
+                            Text(suggestion.text).textSelection(.enabled)
+                            Text(suggestion.evidence).italic().textSelection(.enabled)
+                            Text(suggestion.status.capitalized).font(.footnote).foregroundStyle(.secondary)
+                            if let id = suggestion.conversationId { sourceLink(id) }
+                            if suggestion.status == "pending" {
+                                Button("Apply to profile") { request = Pending(suggestion: suggestion, decision: .approve) }
+                                    .disabled(needsRefresh)
+                                Button("Reject", role: .destructive) { request = Pending(suggestion: suggestion, decision: .reject) }
+                                    .disabled(needsRefresh)
+                            } else if suggestion.status == "applied" {
+                                Button("Undo profile change") { request = Pending(suggestion: suggestion, decision: .undo) }
+                                    .disabled(needsRefresh)
+                            }
+                        }
+                    }
+                }
+                Section("Sourced reflections") {
+                    if review.reflections.isEmpty { Text("No reflections yet.").foregroundStyle(.secondary) }
+                    ForEach(review.reflections.reversed()) { reflection in
+                        DisclosureGroup(reflection.scope == "character" ? "Character reflection" : "User reflection") {
+                            Text(reflection.observation).textSelection(.enabled)
+                            Text(reflection.evidence).italic().textSelection(.enabled)
+                            if let id = reflection.conversationId { sourceLink(id) }
+                        }
+                    }
+                }
+            }
+            Button("Refresh") { Task { await refresh() } }
+        }
+        .disabled(busy)
+        .navigationTitle("Profile review")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await refresh() }
+        .alert(item: $request) { pending in
+            Alert(title: Text(pending.title), message: Text(pending.suggestion.text),
+                  primaryButton: .default(Text("Confirm")) { Task { await apply(pending) } }, secondaryButton: .cancel())
+        }
+    }
+
+    private func sourceLink(_ id: String) -> some View {
+        NavigationLink("View original source", destination: HubKnowledgeProfileSourceView(api: api, id: id))
+    }
+
+    private func refresh() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            review = try await api.knowledgeProfileReview()
+            error = nil
+            needsRefresh = false
+        } catch {
+            error = "Could not load reflections and profile suggestions."
+            needsRefresh = true
+        }
+    }
+
+    private func apply(_ pending: Pending) async {
+        guard !busy, !needsRefresh else { return }
+        busy = true
+        do {
+            try await api.decideKnowledgeProfile(pending.suggestion, decision: pending.decision)
+        } catch {
+            busy = false
+            needsRefresh = true
+            error = "Could not confirm the profile change. Refresh to check what HUB saved."
+            return
+        }
+        busy = false
+        needsRefresh = true
+        await refresh()
+    }
+}
+
+@MainActor
+private struct HubKnowledgeProfileSourceView: View {
+    let api: HubConversationAPI
+    let id: String
+    @State private var note: HubKnowledgeNote?
+    @State private var failed = false
+    @State private var attempt = 0
+
+    var body: some View {
+        ScrollView {
+            if let note { Text(note.content).textSelection(.enabled).padding() }
+            else if failed { Button("Retry loading source") { attempt += 1 }.padding() }
+            else { ProgressView("Loading source…").padding() }
+        }
+        .navigationTitle(note?.title ?? "Original source")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: attempt) {
+            failed = false
+            do { note = try await api.knowledgeNote(id: id) }
+            catch { if !Task.isCancelled { failed = true } }
         }
     }
 }
