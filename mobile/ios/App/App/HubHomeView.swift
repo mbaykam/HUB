@@ -1025,8 +1025,7 @@ struct HubHomeView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        let text = try? AttributedString(markdown: note.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
-                        Text(text ?? AttributedString(note.content)).textSelection(.enabled)
+                        HubMarkdownText(source: note.content)
                         Button {
                             knowledgeConnectionsOpen = true
                         } label: {

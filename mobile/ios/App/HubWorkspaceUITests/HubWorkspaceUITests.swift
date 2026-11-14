@@ -81,6 +81,8 @@ final class HubWorkspaceUITests: XCTestCase {
         record.tap()
         let source = app.staticTexts["Sketch the first release before choosing the tools."]
         XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["First release"].exists)
+        XCTAssertTrue(app.buttons["Copy code"].exists)
         XCTAssertTrue(app.buttons["Connections and sources"].exists)
         XCTAssertEqual(app.webViews.count, 0)
         app.buttons["Done"].tap()

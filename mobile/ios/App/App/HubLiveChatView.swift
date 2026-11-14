@@ -504,9 +504,8 @@ struct HubLiveChatView: View {
                                     .font(.footnote)
                                     .foregroundStyle(message.role == "command-error" ? Color.red : Color.secondary)
                                 } else {
-                                    let formatted = try? AttributedString(markdown: message.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
                                     if !message.text.isEmpty {
-                                        Text(formatted ?? AttributedString(message.text)).textSelection(.enabled)
+                                        HubMarkdownText(source: message.text)
                                     }
                                     chatPhotos(message)
                                     if let turn = message.turn, messages.last(where: { $0.turn == turn && $0.role == "assistant" })?.id == message.id {
