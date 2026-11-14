@@ -1256,7 +1256,7 @@ private struct HubKnowledgeCurationReviewView: View {
     }
 
     @ViewBuilder private func details<Row, Content: View>(_ name: LocalizedStringKey, _ values: [Row]?,
-                                                          @ViewBuilder content: (Row) -> Content) -> some View {
+                                                          @ViewBuilder content: @escaping (Row) -> Content) -> some View {
         if let values, !values.isEmpty {
             DisclosureGroup(name) {
                 ForEach(values.indices, id: \.self) { index in
