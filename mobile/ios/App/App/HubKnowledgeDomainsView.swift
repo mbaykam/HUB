@@ -16,6 +16,56 @@ struct HubKnowledgeDomainsView: View {
     @State private var saving = false
     @State private var stale = false
     @State private var attempt = 0
+    @State private var organization: Organization?
+    @State private var preview: HubKnowledgeDomains.Preview?
+    @State private var confirmation: Confirmation?
+    @State private var domainLimit: Int?
+
+    private enum Confirmation: Identifiable {
+        case merge(String, String, String)
+        case split(String, [HubKnowledgeDomains.Change.SplitGroup], Bool)
+        case review(HubKnowledgeDomains.Preview, Bool)
+        case undo(HubKnowledgeDomains.Audit)
+
+        var id: String { title }
+        var title: String {
+            switch self {
+            case .merge: "Merge domains?"
+            case .split: "Split selected memberships?"
+            case .review(_, let approve): approve ? "Apply this proposal?" : "Reject this proposal?"
+            case .undo: "Undo the latest domain change?"
+            }
+        }
+        var detail: String {
+            switch self {
+            case .merge(_, _, let name): "Move the memberships and subdomains into \(name)."
+            case .split(_, let groups, _): "Move the selected memberships into \(groups.count) domains."
+            case .review(let preview, let approve): approve ? "Apply the reviewed change affecting \(preview.affectedRecords) records." : "Dismiss this proposal from the review queue."
+            case .undo: "Restore the registry to its state before this change."
+            }
+        }
+    }
+
+    private struct Organization {
+        struct Group: Identifiable {
+            let id = UUID()
+            var title = ""
+            var notes: Set<String> = []
+        }
+        var source: HubKnowledgeDomains.Domain
+        var target = ""
+        var groups = [Group(), Group()]
+        var deactivate = false
+        var splitting: Bool
+
+        var splitGroups: [HubKnowledgeDomains.Change.SplitGroup]? {
+            let names = groups.map { $0.title.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard (2...8).contains(groups.count), names.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 100 }),
+                  Set(names.map { $0.lowercased() }).count == groups.count,
+                  groups.allSatisfy({ !$0.notes.isEmpty }) else { return nil }
+            return zip(groups, names).map { .init(title: $0.1, noteIDs: $0.0.notes.sorted()) }
+        }
+    }
 
     private struct Draft {
         var id: String?
@@ -39,26 +89,30 @@ struct HubKnowledgeDomainsView: View {
                 if let notice {
                     Text(notice).font(.footnote).foregroundStyle(.secondary)
                     if stale {
-                        Button(draft == nil && memberDomain == nil ? "Reload domains" : "Reload domains and discard draft") {
+                        Button(isEditing ? "Reload domains and discard draft" : "Reload domains") {
                             draft = nil
                             memberDomain = nil
+                            organization = nil
+                            preview = nil
                             attempt += 1
                         }
                     }
                 }
                 if let registry {
-                    if let draft { editor(draft, registry: registry) }
+                    if let preview { proposalReview(preview) }
+                    else if let organization { organize(organization, registry: registry) }
+                    else if let draft { editor(draft, registry: registry) }
                     else if let memberDomain { memberships(memberDomain, registry: registry) }
                     else { domains(registry) }
                 }
             }
             .disabled(saving)
-            .navigationTitle(memberDomain?.title ?? "Knowledge domains")
+            .navigationTitle(memberDomain?.title ?? organization?.source.title ?? "Knowledge domains")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(draft == nil && memberDomain == nil ? "Done" : "Cancel") {
-                        if draft != nil || memberDomain != nil { draft = nil; memberDomain = nil }
+                    Button(isEditing ? "Cancel" : "Done") {
+                        if isEditing { draft = nil; memberDomain = nil; organization = nil; preview = nil }
                         else { dismiss() }
                     }
                     .disabled(saving)
@@ -66,14 +120,20 @@ struct HubKnowledgeDomainsView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .interactiveDismissDisabled(draft != nil || memberDomain != nil || saving)
+        .interactiveDismissDisabled(isEditing || saving)
+        .alert(item: $confirmation) { action in
+            Alert(title: Text(action.title), message: Text(action.detail),
+                  primaryButton: .default(Text("Confirm")) { Task { await apply(action) } }, secondaryButton: .cancel())
+        }
         .task(id: attempt) { await load() }
     }
 
-    private func domains(_ registry: HubKnowledgeDomains) -> some View {
+    private var isEditing: Bool { draft != nil || memberDomain != nil || organization != nil || preview != nil }
+
+    @ViewBuilder private func domains(_ registry: HubKnowledgeDomains) -> some View {
         let available = registry.domains.filter { $0.status != "merged" }
         let roots = available.filter { $0.parentId == nil && $0.status == "active" }
-        return Section {
+        Section {
             Button { draft = Draft() } label: { Label("New domain", systemImage: "plus") }
                 .disabled(stale)
             if available.isEmpty { Text("No domains yet").foregroundStyle(.secondary) }
@@ -92,12 +152,48 @@ struct HubKnowledgeDomainsView: View {
                             selectedNotes = Set(registry.memberships.filter { $0.domainId == domain.id }.map(\.nodeId))
                             search = ""
                         }
+                        Button("Merge into another domain") { organization = Organization(source: domain, splitting: false) }
+                        Button("Split memberships") { organization = Organization(source: domain, splitting: true) }
+                            .disabled(notes == 0)
                     } label: { Label("Manage", systemImage: "ellipsis.circle").frame(minHeight: 44) }
                     .disabled(stale)
                 }
             }
         } header: {
             Text("\(roots.count) of \(registry.maxActiveDomains) active main domains")
+        }
+        let pending = (registry.proposals ?? []).filter { $0.status == "pending" }
+        if !pending.isEmpty {
+            Section("Proposed changes") {
+                ForEach(pending) { proposal in
+                    Button("Review \(proposal.operation.type) proposal") { Task { await loadPreview(proposal.id) } }
+                        .disabled(stale || loading)
+                }
+            }
+        }
+        if let history = registry.history, !history.isEmpty {
+            Section("Recent changes") {
+                ForEach(history.suffix(12).reversed()) { audit in
+                    VStack(alignment: .leading) {
+                        Text(audit.operations.map(\.type).joined(separator: ", ").capitalized)
+                        Text(Date(timeIntervalSince1970: audit.at / 1_000), format: .dateTime.month().day().hour().minute())
+                        Text(audit.actor.capitalized + (audit.undone == true ? " · Undone" : ""))
+                    }
+                    .font(.footnote)
+                }
+                if let latest = history.last(where: { $0.undone != true }) {
+                    Button("Undo latest change") { confirmation = .undo(latest) }.disabled(stale)
+                }
+            }
+        }
+        Section("Domain limit") {
+            Stepper("Maximum active main domains · \(domainLimit ?? registry.maxActiveDomains)",
+                    value: Binding(get: { domainLimit ?? registry.maxActiveDomains }, set: { domainLimit = $0 }), in: 1...20)
+            if let domainLimit, domainLimit != registry.maxActiveDomains {
+                Button("Save domain limit") { Task { await save([], revision: registry.revision, maxActiveDomains: domainLimit) } }
+                    .disabled(stale || domainLimit < roots.count)
+                if domainLimit < roots.count { Text("Deactivate a main domain before lowering the limit.").font(.footnote) }
+            }
         }
     }
 
@@ -160,6 +256,97 @@ struct HubKnowledgeDomainsView: View {
         } header: { Text("Brain note memberships") }
     }
 
+    @ViewBuilder
+    private func organize(_ value: Organization, registry: HubKnowledgeDomains) -> some View {
+        if value.splitting {
+            let ids = Set(registry.memberships.filter { $0.domainId == value.source.id }.map(\.nodeId))
+            let notes = registry.nodes.filter { ids.contains($0.id) }
+            Section {
+                if notes.isEmpty { Text("No available memberships to split.").foregroundStyle(.secondary) }
+                ForEach(value.groups) { group in
+                    DisclosureGroup(group.title.isEmpty ? "New domain · \(group.notes.count) notes" : "\(group.title) · \(group.notes.count) notes") {
+                        TextField("New domain name", text: groupField(\.title, for: group))
+                        ForEach(notes) { note in
+                            let membership = groupField(\.notes, for: group)
+                            Toggle(note.title, isOn: Binding(get: { membership.wrappedValue.contains(note.id) }, set: { selected in
+                                var notes = membership.wrappedValue
+                                if selected { notes.insert(note.id) }
+                                else { notes.remove(note.id) }
+                                membership.wrappedValue = notes
+                            }))
+                        }
+                        if value.groups.count > 2 {
+                            Button("Remove group", role: .destructive) { organization?.groups.removeAll { $0.id == group.id } }
+                        }
+                    }
+                }
+                Button("Add group") { organization?.groups.append(Organization.Group()) }.disabled(value.groups.count >= 8)
+                Toggle("Deactivate the original domain", isOn: Binding(get: { organization?.deactivate == true },
+                                                                       set: { organization?.deactivate = $0 }))
+                Button("Review split") {
+                    if let groups = value.splitGroups { confirmation = .split(value.source.id, groups, value.deactivate) }
+                }
+                .disabled(value.splitGroups == nil || stale)
+            } header: { Text("Split memberships") }
+        } else {
+            let options = registry.domains.filter { $0.status != "merged" && $0.id != value.source.id &&
+                !isDescendant($0, of: value.source.id, in: registry.domains) }
+            Section("Merge into") {
+                Picker("Destination", selection: Binding(get: { organization?.target ?? "" }, set: { organization?.target = $0 })) {
+                    Text("Choose a domain").tag("")
+                    ForEach(options) { Text(path($0, in: registry.domains)).tag($0.id) }
+                }
+                Button("Review merge") {
+                    if let target = options.first(where: { $0.id == value.target }) {
+                        confirmation = .merge(value.source.id, target.id, path(target, in: registry.domains))
+                    }
+                }
+                .disabled(value.target.isEmpty || stale)
+            }
+        }
+    }
+
+    private func groupField<Value>(_ key: WritableKeyPath<Organization.Group, Value>, for group: Organization.Group) -> Binding<Value> {
+        Binding(get: { organization?.groups.first(where: { $0.id == group.id })?[keyPath: key] ?? group[keyPath: key] }, set: { value in
+            guard let index = organization?.groups.firstIndex(where: { $0.id == group.id }) else { return }
+            organization?.groups[index][keyPath: key] = value
+        })
+    }
+
+    @ViewBuilder
+    private func proposalReview(_ preview: HubKnowledgeDomains.Preview) -> some View {
+        Section("Proposed \(preview.proposal.operation.type)") {
+            Text(preview.proposal.evidence).textSelection(.enabled)
+            Text("\(preview.affectedRecords) affected record memberships")
+            if preview.stale { Text("This preview uses the current domain list.").font(.footnote).foregroundStyle(.secondary) }
+        }
+        Section("Before") { previewDomains(preview.before) }
+        Section("After") { previewDomains(preview.after) }
+        Section {
+            Button("Approve proposal") { confirmation = .review(preview, true) }.disabled(stale)
+            Button("Reject proposal", role: .destructive) { confirmation = .review(preview, false) }.disabled(stale)
+        }
+    }
+
+    private func previewDomains(_ domains: [HubKnowledgeDomains.Domain]) -> some View {
+        ForEach(domains.filter { $0.status != "merged" }) { domain in
+            VStack(alignment: .leading) {
+                Text(path(domain, in: domains))
+                Text(domain.status.capitalized).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func loadPreview(_ id: String) async {
+        guard !loading, !stale else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            preview = try await api.knowledgeDomainPreview(id)
+            notice = nil
+        } catch { notice = "Could not load this proposal. It may have changed." }
+    }
+
     private func path(_ domain: HubKnowledgeDomains.Domain, in domains: [HubKnowledgeDomains.Domain]) -> String {
         lineage(domain, in: domains).reversed().map(\.title).joined(separator: " / ")
     }
@@ -185,6 +372,7 @@ struct HubKnowledgeDomainsView: View {
             let current = try await api.knowledgeDomains()
             guard !Task.isCancelled else { return }
             registry = current
+            domainLimit = nil
             stale = false
             notice = nil
         } catch {
@@ -194,14 +382,33 @@ struct HubKnowledgeDomainsView: View {
         }
     }
 
-    private func save(_ changes: [HubKnowledgeDomains.Change], revision: Int) async {
+    private func save(_ changes: [HubKnowledgeDomains.Change], revision: Int, maxActiveDomains: Int? = nil) async {
+        await performChange { try await api.changeKnowledgeDomains(changes, revision: revision, maxActiveDomains: maxActiveDomains) }
+    }
+
+    private func apply(_ confirmation: Confirmation) async {
+        guard let revision = registry?.revision else { return }
+        switch confirmation {
+        case .merge(let id, let target, _): await save([.merge(id: id, into: target)], revision: revision)
+        case .split(let id, let groups, let deactivate):
+            await save([.split(id: id, groups: groups, deactivateSource: deactivate)], revision: revision)
+        case .review(let preview, let approve):
+            await performChange { try await api.reviewKnowledgeDomain(preview, approve: approve) }
+        case .undo(let audit):
+            await performChange { try await api.undoKnowledgeDomain(audit, revision: revision) }
+        }
+    }
+
+    private func performChange(_ operation: () async throws -> Void) async {
         guard !saving, !stale else { return }
         saving = true
         defer { saving = false }
         do {
-            try await api.changeKnowledgeDomains(changes, revision: revision)
+            try await operation()
             draft = nil
             memberDomain = nil
+            organization = nil
+            preview = nil
             await load()
             await changed()
         } catch {

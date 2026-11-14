@@ -195,6 +195,44 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(source.excerpt?.text, "More context")
     }
 
+    func testKnowledgeDomainApprovalUsesReviewedRevisionAndSplitUsesHostReferences() async throws {
+        let api = try client()
+        let hash = String(repeating: "a", count: 64)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.query, "view=domain-preview&id=proposal")
+                let response = #"{"revision":7,"previewHash":"\#(hash)","proposal":{"id":"proposal","status":"pending","operation":{"type":"merge"},"evidence":"Fixture source"},"stale":false,"affectedRecords":2,"before":[],"after":[]}"#
+                return (200, Data(response.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            if command["action"] as? String == "domain-review" {
+                XCTAssertEqual(command["revision"] as? Int, 7)
+                XCTAssertEqual(command["id"] as? String, "proposal")
+                if command["approve"] as? Bool == true { XCTAssertEqual(command["previewHash"] as? String, hash) }
+                else { XCTAssertNil(command["previewHash"]) }
+            } else {
+                XCTAssertEqual(command["action"] as? String, "domains")
+                XCTAssertEqual(command["revision"] as? Int, 8)
+                let operations = try XCTUnwrap(command["operations"] as? [[String: Any]])
+                let operation = try XCTUnwrap(operations.first)
+                XCTAssertEqual(operation["type"] as? String, "split")
+                let groups = try XCTUnwrap(operation["groups"] as? [[String: Any]])
+                XCTAssertEqual(groups.compactMap { $0["ref"] as? String }, ["new-split-0", "new-split-1"])
+                XCTAssertEqual(groups[0]["nodeIds"] as? [String], ["note-a"])
+                XCTAssertEqual(operation["deactivateSource"] as? Bool, true)
+            }
+            return (200, Data("{}".utf8))
+        }
+        let preview = try await api.knowledgeDomainPreview("proposal")
+        XCTAssertEqual(preview.affectedRecords, 2)
+        try await api.reviewKnowledgeDomain(preview, approve: true)
+        try await api.reviewKnowledgeDomain(preview, approve: false)
+        try await api.changeKnowledgeDomains([.split(id: "domain", groups: [
+            .init(title: "First", noteIDs: ["note-a"]), .init(title: "Second", noteIDs: ["note-b"]),
+        ], deactivateSource: true)], revision: 8)
+    }
+
     func testFollowTimelineCombinesPackedAndLiveTextAndSettlesOnEnd() throws {
         let decoder = JSONDecoder()
         var timeline = HubChatTimeline()

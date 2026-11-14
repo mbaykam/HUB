@@ -109,17 +109,55 @@ public struct HubKnowledgeDomains: Decodable {
         public let id: String
         public let title: String
     }
+    public struct Operation: Decodable { public let type: String }
+    public struct Proposal: Decodable, Identifiable {
+        public let id: String
+        public let status: String
+        public let operation: Operation
+        public let evidence: String
+    }
+    public struct Audit: Decodable, Identifiable {
+        public let id: String
+        public let at: Double
+        public let actor: String
+        public let operations: [Operation]
+        public let undone: Bool?
+    }
+    public struct Preview: Decodable, Identifiable {
+        public let revision: Int
+        public let previewHash: String
+        public let proposal: Proposal
+        public let stale: Bool
+        public let affectedRecords: Int
+        public let before: [Domain]
+        public let after: [Domain]
+        public var id: String { proposal.id }
+    }
     public let revision: Int
     public let maxActiveDomains: Int
     public let domains: [Domain]
     public let memberships: [HubHomeKnowledge.Membership]
     public let nodes: [Note]
+    public let proposals: [Proposal]?
+    public let history: [Audit]?
 
     public enum Change {
         case create(title: String, aliases: [String], parent: String?)
         case edit(id: String, title: String, aliases: [String], parent: String?)
         case activate(id: String, active: Bool)
         case membership(note: String, domain: String, assigned: Bool)
+        case merge(id: String, into: String)
+        case split(id: String, groups: [SplitGroup], deactivateSource: Bool)
+
+        public struct SplitGroup {
+            public let title: String
+            public let noteIDs: [String]
+
+            public init(title: String, noteIDs: [String]) {
+                self.title = title
+                self.noteIDs = noteIDs
+            }
+        }
 
         fileprivate var operations: [[String: Any]] {
             switch self {
@@ -135,6 +173,13 @@ public struct HubKnowledgeDomains: Decodable {
                 return [["type": "status", "id": id, "status": active ? "active" : "inactive"]]
             case .membership(let note, let domain, let assigned):
                 return [["type": assigned ? "assign" : "unassign", "nodeId": note, "domainId": domain]]
+            case .merge(let id, let target):
+                return [["type": "merge", "id": id, "targetId": target]]
+            case .split(let id, let groups, let deactivateSource):
+                let values = groups.enumerated().map { index, group -> [String: Any] in
+                    ["ref": "new-split-\(index)", "title": group.title, "nodeIds": group.noteIDs]
+                }
+                return [["type": "split", "id": id, "groups": values, "deactivateSource": deactivateSource]]
             }
         }
     }
@@ -2047,10 +2092,39 @@ public final class HubConversationAPI {
         return value
     }
 
-    public func changeKnowledgeDomains(_ changes: [HubKnowledgeDomains.Change], revision: Int) async throws {
+    public func changeKnowledgeDomains(_ changes: [HubKnowledgeDomains.Change], revision: Int, maxActiveDomains: Int? = nil) async throws {
         let operations = changes.flatMap(\.operations)
-        guard revision >= 0, !operations.isEmpty else { throw HubAttachmentError.invalidResponse }
-        let command: [String: Any] = ["action": "domains", "revision": revision, "operations": operations]
+        guard revision >= 0, !operations.isEmpty || maxActiveDomains != nil else { throw HubAttachmentError.invalidResponse }
+        var command: [String: Any] = ["action": "domains", "revision": revision, "operations": operations]
+        if let maxActiveDomains { command["maxActiveDomains"] = maxActiveDomains }
+        try await writeKnowledgeDomainChange(command)
+    }
+
+    public func knowledgeDomainPreview(_ id: String) async throws -> HubKnowledgeDomains.Preview {
+        guard !id.isEmpty, id.utf8.count <= 1_024 else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
+            URLQueryItem(name: "view", value: "domain-preview"), URLQueryItem(name: "id", value: id),
+        ], maxBytes: 12_000_000)
+        let preview = try JSONDecoder().decode(HubKnowledgeDomains.Preview.self, from: data)
+        guard preview.id == id, preview.revision >= 0, preview.affectedRecords >= 0,
+              Self.isScreenshotID(preview.previewHash), preview.proposal.status == "pending" else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return preview
+    }
+
+    public func reviewKnowledgeDomain(_ preview: HubKnowledgeDomains.Preview, approve: Bool) async throws {
+        var command: [String: Any] = ["action": "domain-review", "revision": preview.revision, "id": preview.id, "approve": approve]
+        if approve { command["previewHash"] = preview.previewHash }
+        try await writeKnowledgeDomainChange(command)
+    }
+
+    public func undoKnowledgeDomain(_ change: HubKnowledgeDomains.Audit, revision: Int) async throws {
+        guard revision >= 0, change.undone != true, !change.id.isEmpty else { throw HubAttachmentError.invalidResponse }
+        try await writeKnowledgeDomainChange(["action": "domain-undo", "revision": revision, "id": change.id])
+    }
+
+    private func writeKnowledgeDomainChange(_ command: [String: Any]) async throws {
         let body = try JSONSerialization.data(withJSONObject: command)
         guard body.count <= 200_000 else { throw HubAttachmentError.invalidResponse }
         _ = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, maxBytes: 12_000_000)
