@@ -59,6 +59,7 @@ struct HubHomeView: View {
     @State private var knowledgeDomainsOpen = false
     @State private var knowledgeBackupsOpen = false
     @State private var knowledgeArchivesOpen = false
+    @State private var knowledgeConnectionsOpen = false
     @State private var knowledgeRefreshError = false
     @State private var selectedNoteID: String?
     @State private var selectedNote: HubKnowledgeNote?
@@ -223,6 +224,7 @@ struct HubHomeView: View {
                 knowledgeDomainsOpen = false
                 knowledgeBackupsOpen = false
                 knowledgeArchivesOpen = false
+                knowledgeConnectionsOpen = false
                 knowledgeRefreshError = false
                 clearKnowledgeSelection()
                 tasksOpen = false
@@ -866,6 +868,14 @@ struct HubHomeView: View {
         .sheet(isPresented: $knowledgeArchivesOpen) {
             if let api = chatAPI() { HubKnowledgeArchivesView(api: api, changed: refreshKnowledgeGraph) }
         }
+        .sheet(isPresented: $knowledgeConnectionsOpen) {
+            if let api = chatAPI(), let note = selectedNote {
+                HubKnowledgeConnectionsView(api: api, note: note) { id in
+                    knowledgeConnectionsOpen = false
+                    selectKnowledgeNode(id)
+                }
+            }
+        }
     }
 
     private func refreshKnowledgeGraph() async {
@@ -904,6 +914,10 @@ struct HubHomeView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         let text = try? AttributedString(markdown: note.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
                         Text(text ?? AttributedString(note.content)).textSelection(.enabled)
+                        Button("Connections and sources", systemImage: "point.3.connected.trianglepath.dotted") {
+                            knowledgeConnectionsOpen = true
+                        }
+                        .frame(minHeight: 44)
                         knowledgeLinks("Links", nodes: note.links ?? [])
                         knowledgeLinks("Backlinks", nodes: note.backlinks ?? [])
                     }

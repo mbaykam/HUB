@@ -147,6 +147,54 @@ final class HubConversationTests: XCTestCase {
         XCTAssertTrue(CatalogFixture.requests.allSatisfy { $0.httpMethod == "GET" })
     }
 
+    func testKnowledgeConnectionsDistinguishARecordedPathAndItsPrivateEvidence() async throws {
+        let api = try client()
+        let node = #"{"id":"target","title":"Fixture target"}"#
+        let quote = #"{"sourceId":"source","quote":"Fixture excerpt","role":"user"}"#
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            let relation = #"""
+            "id":"relation","scope":"short","interpretation":true,"predicate":"explains","evidence":[\#(quote)]
+            """#
+            let response: String
+            switch query["view"] {
+            case "neighbors":
+                XCTAssertEqual(query["id"], "source")
+                XCTAssertEqual(query["cursor"], "older+&ß")
+                XCTAssertTrue(components.percentEncodedQuery?.contains("cursor=older%2B%26") == true)
+                response = #"{"recordId":"source","total":2,"items":[{\#(relation),"node":\#(node)}],"nextCursor":"relation"}"#
+            case "search":
+                XCTAssertEqual(query["q"], "İki & bir")
+                response = #"{"nodes":[\#(node)]}"#
+            case "path":
+                XCTAssertEqual(query["target"], "target")
+                response = #"{"sourceId":"source","targetId":"target","found":true,"complete":true,"meaning":"Sourced path","nodes":[{"id":"source"},\#(node)],"relations":[{\#(relation)}]}"#
+            case "evidence":
+                XCTAssertEqual(query["relation"], "relation")
+                XCTAssertEqual(query["index"], "0")
+                response = #"{"citation":\#(quote),"sourceTitle":"Fixture source","version":"archived","excerpt":{"text":"More context"}}"#
+            default:
+                XCTFail("Unexpected Knowledge query \(query)")
+                return (400, Data())
+            }
+            return (200, Data(response.utf8))
+        }
+        let page = try await api.knowledgeNeighbors(id: "source", cursor: "older+&ß")
+        XCTAssertEqual(page.items.first?.node?.id, "target")
+        let matches = try await api.searchKnowledgeRecords(" İki & bir ")
+        XCTAssertEqual(matches.first?.title, "Fixture target")
+        let path = try await api.knowledgeConnectionPath(from: "source", to: "target")
+        XCTAssertTrue(path.found)
+        XCTAssertEqual(path.relations.first?.evidence.first?.quote, "Fixture excerpt")
+        let source = try await api.knowledgeSourceEvidence(relation: "relation", index: 0)
+        XCTAssertEqual(source.version, "archived")
+        XCTAssertEqual(source.excerpt?.text, "More context")
+    }
+
     func testFollowTimelineCombinesPackedAndLiveTextAndSettlesOnEnd() throws {
         let decoder = JSONDecoder()
         var timeline = HubChatTimeline()
@@ -165,7 +213,8 @@ final class HubConversationTests: XCTestCase {
             #"{"type":"assistant/chunk","seq":5,"data":{"chunk":{"type":"text-delta","index":0,"text":"world"}}}"#,
             #"{"type":"tool/result","seq":6,"data":{"turn":1,"meta":{"kind":"hub-screenshot"}}}"#,
             #"{"type":"assistant/message","seq":7,"data":{"turn":1,"message":{"content":[{"type":"text","text":"Hello world"}]}}}"#,
-            #"{"type":"turn/end","seq":8,"data":{"reason":{"kind":"completed"}}}"#,
+            #"{"type":"command/done","seq":8,"data":{"kind":"text","text":"Command output"}}"#,
+            #"{"type":"turn/end","seq":9,"data":{"reason":{"kind":"completed"}}}"#,
         ]
         for (index, source) in updates.enumerated() {
             let event = try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8))
@@ -176,7 +225,9 @@ final class HubConversationTests: XCTestCase {
                 XCTAssertTrue(timeline.snapshot.running)
             }
         }
-        XCTAssertEqual(timeline.snapshot.messages.map(\.text), ["Fixture", "Hello world"])
+        XCTAssertEqual(timeline.snapshot.messages.map(\.text), ["Fixture", "Hello world", "Command output"])
+        XCTAssertEqual(timeline.snapshot.latestUserMessageID, "2")
+        XCTAssertEqual(timeline.snapshot.latestMessageTurn, 1)
         XCTAssertFalse(timeline.snapshot.running)
         XCTAssertTrue(timeline.snapshot.partial.isEmpty)
     }

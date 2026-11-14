@@ -460,7 +460,7 @@ struct HubLiveChatView: View {
                             let messages = olderMessages + snapshot.messages
                             let activity = Dictionary(grouping: olderActivity + snapshot.activity, by: \.turn)
                             let usage = olderUsage.merging(snapshot.usageByTurn) { $0.combining($1) }
-                            let currentTurn = snapshot.running ? messages.last?.turn : nil
+                            let currentTurn = snapshot.running ? snapshot.latestMessageTurn : nil
                             ForEach(messages) { message in
                                 if message.role == "user" {
                                     HStack {
@@ -910,7 +910,7 @@ struct HubLiveChatView: View {
                 snapshot = value
                 if selectedModel == value.model { selectedModel = nil }
                 if renamedTitle == value.title { renamedTitle = nil }
-                if value.running || completed || (awaitingAfter != nil && value.messages.last?.id != awaitingAfter) {
+                if value.running || completed || (awaitingAfter != nil && (value.latestUserMessageID ?? "") != awaitingAfter) {
                     awaitingAfter = nil
                 }
             }
@@ -959,7 +959,7 @@ struct HubLiveChatView: View {
         let delivery = snapshot?.running == true ? preferences.busyEnter : .queue
         let text = draft
         let files = fileDrafts
-        let previous = snapshot?.messages.last?.id ?? ""
+        let previous = snapshot?.latestUserMessageID ?? ""
         composerFocused = false
         readingLatest = true
         bottomRequest += 1
@@ -1022,7 +1022,7 @@ struct HubLiveChatView: View {
                         fileDrafts.removeAll { $0.id == file.id }
                     }
                 }
-                if command == nil, !connectionLost, snapshot?.running != true, (snapshot?.messages.last?.id ?? "") == previous {
+                if command == nil, !connectionLost, snapshot?.running != true, (snapshot?.latestUserMessageID ?? "") == previous {
                     awaitingAfter = previous
                     try? await Task.sleep(nanoseconds: 12_000_000_000)
                     if awaitingAfter == previous {

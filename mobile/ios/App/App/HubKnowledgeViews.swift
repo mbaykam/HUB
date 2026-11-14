@@ -4,6 +4,227 @@ import HubNative
 import UniformTypeIdentifiers
 
 @MainActor
+struct HubKnowledgeConnectionsView: View {
+    private struct EvidenceSelection: Identifiable {
+        let relation: String
+        let index: Int
+        var id: String { "\(relation)/\(index)" }
+    }
+
+    let api: HubConversationAPI
+    let note: HubKnowledgeNote
+    let openRecord: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [HubKnowledgeRelationship] = []
+    @State private var total: Int?
+    @State private var cursor: String?
+    @State private var loading = false
+    @State private var pageError = false
+    @State private var query = ""
+    @State private var matches: [HubHomeKnowledge.Node] = []
+    @State private var searchBusy = false
+    @State private var searchFailed = false
+    @State private var target: HubHomeKnowledge.Node?
+    @State private var trace: HubKnowledgeConnectionPath?
+    @State private var traceBusy = false
+    @State private var traceFailed = false
+    @State private var traceAttempt = 0
+    @State private var selectedEvidence: EvidenceSelection?
+    @State private var evidence: HubKnowledgeSourceEvidence?
+    @State private var evidenceFailed = false
+    @State private var evidenceAttempt = 0
+
+    private var search: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(note.title) {
+                    if let total {
+                        Text(total > 0 ? "\(items.count) of \(total) sourced connections" : "No sourced connections yet.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    ForEach(items) { item in
+                        if let node = item.node { relationship(item, node: node) }
+                    }
+                    if loading || (total == nil && !pageError) { ProgressView("Loading connections…") }
+                    if pageError {
+                        Text("Could not load connections.").foregroundStyle(.secondary)
+                        Button("Refresh connections") { Task { await loadPage("") } }.disabled(loading)
+                    } else if let cursor {
+                        Button("More connections") { Task { await loadPage(cursor) } }.disabled(loading)
+                    }
+                }
+                Section("Trace connections") {
+                    TextField("Find another record…", text: $query)
+                        .accessibilityLabel("Find a connection target")
+                    if searchBusy { ProgressView("Searching…") }
+                    if searchFailed {
+                        Button("Retry search") { Task { await findTargets(search) } }.disabled(searchBusy)
+                    }
+                    if !searchBusy, !searchFailed, search.count >= 2, matches.isEmpty {
+                        Text("No matching records.").foregroundStyle(.secondary)
+                    }
+                    ForEach(matches.prefix(8), id: \.id) { node in
+                        Button(node.title ?? "Knowledge record") { target = node }
+                            .accessibilityAddTraits(target?.id == node.id ? .isSelected : [])
+                    }
+                    if matches.count > 8 { Text("Refine your search to see more matches.").font(.footnote) }
+                }
+                if let target { traceSection(target) }
+            }
+            .navigationTitle("Connections")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+        }
+        .preferredColorScheme(.dark)
+        .task { await loadPage("") }
+        .task(id: search) { await findTargets(search) }
+        .task(id: target.map { "\($0.id)/\(traceAttempt)" }) {
+            if let target { await findPath(target.id) }
+        }
+        .sheet(item: $selectedEvidence) { selection in
+            NavigationStack {
+                List {
+                    if let evidence {
+                        Section(evidence.sourceTitle) {
+                            Text(evidence.citation.quote).textSelection(.enabled)
+                            Text(evidenceVersion(evidence.version)).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        if let excerpt = evidence.excerpt {
+                            Section("Context") { Text(excerpt.text).textSelection(.enabled) }
+                        }
+                    } else if evidenceFailed {
+                        Text("Could not load this source. The connection may have changed.")
+                        Button("Retry") { evidenceAttempt += 1 }
+                    } else {
+                        ProgressView("Loading source…")
+                    }
+                }
+                .navigationTitle("Source evidence")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { selectedEvidence = nil } } }
+            }
+            .task(id: evidenceAttempt) { await loadEvidence(selection) }
+        }
+    }
+
+    private func relationship(_ item: HubKnowledgeRelationship, node: HubHomeKnowledge.Node) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(node.title ?? "Knowledge record") { openRecord(node.id) }.font(.headline)
+            Text(item.predicate)
+            Text([scope(item.scope), item.interpretation ? "Knowledge AI interpretation" : "Recorded relationship"].joined(separator: " · "))
+                .font(.caption).foregroundStyle(.secondary)
+            if !item.evidence.isEmpty {
+                DisclosureGroup("Source excerpts") {
+                    ForEach(item.evidence.indices, id: \.self) { index in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.evidence[index].quote).textSelection(.enabled)
+                            if let role = item.evidence[index].role { Text(role.capitalized).font(.caption) }
+                            Button("Inspect source") {
+                                evidence = nil
+                                evidenceFailed = false
+                                selectedEvidence = EvidenceSelection(relation: item.id, index: index)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.borderless)
+        .padding(.vertical, 4)
+    }
+
+    private func traceSection(_ node: HubHomeKnowledge.Node) -> some View {
+        Section(node.title ?? "Connection path") {
+            if traceBusy { ProgressView("Tracing connections…") }
+            if traceFailed { Button("Retry tracing") { traceAttempt += 1 } }
+            if let trace, trace.targetId == node.id {
+                if trace.found {
+                    Text(trace.nodes.map { $0.title ?? "Knowledge record" }.joined(separator: " → "))
+                    Text(trace.meaning).font(.footnote).foregroundStyle(.secondary)
+                    ForEach(trace.relations.indices, id: \.self) { index in
+                        relationship(trace.relations[index], node: trace.nodes[index + 1])
+                    }
+                } else {
+                    Text(trace.complete ? "No sourced connection chain found." : "Search limit reached before finding this record.")
+                }
+            }
+        }
+    }
+
+    private func loadPage(_ requested: String) async {
+        guard !loading else { return }
+        loading = true
+        pageError = false
+        defer { loading = false }
+        do {
+            let page = try await api.knowledgeNeighbors(id: note.id, cursor: requested)
+            guard !Task.isCancelled else { return }
+            if requested.isEmpty { items = [] }
+            var seen = Set(items.map(\.id))
+            items.append(contentsOf: page.items.filter { seen.insert($0.id).inserted })
+            total = page.total
+            cursor = page.nextCursor
+        } catch { if !Task.isCancelled { pageError = true } }
+    }
+
+    private func findTargets(_ input: String) async {
+        matches = []
+        target = nil
+        trace = nil
+        searchBusy = input.count >= 2
+        searchFailed = false
+        guard searchBusy else { return }
+        defer { if search == input, !Task.isCancelled { searchBusy = false } }
+        do {
+            try await Task.sleep(for: .milliseconds(250))
+            let results = try await api.searchKnowledgeRecords(input)
+            guard search == input, !Task.isCancelled else { return }
+            matches = results.filter { $0.id != note.id }
+        } catch { if search == input, !Task.isCancelled { searchFailed = true } }
+    }
+
+    private func findPath(_ id: String) async {
+        trace = nil
+        traceBusy = true
+        traceFailed = false
+        defer { if target?.id == id, !Task.isCancelled { traceBusy = false } }
+        do {
+            let result = try await api.knowledgeConnectionPath(from: note.id, to: id)
+            if target?.id == id, !Task.isCancelled { trace = result }
+        } catch { if target?.id == id, !Task.isCancelled { traceFailed = true } }
+    }
+
+    private func loadEvidence(_ selection: EvidenceSelection) async {
+        evidenceFailed = false
+        do {
+            let result = try await api.knowledgeSourceEvidence(relation: selection.relation, index: selection.index)
+            if selectedEvidence?.id == selection.id, !Task.isCancelled { evidence = result }
+        } catch { if selectedEvidence?.id == selection.id, !Task.isCancelled { evidenceFailed = true } }
+    }
+
+    private func scope(_ value: String) -> String {
+        switch value {
+        case "short": "Within a domain"
+        case "long": "Across domains"
+        case "archive": "Chat archive link"
+        default: "Domain unassigned"
+        }
+    }
+
+    private func evidenceVersion(_ value: String) -> String {
+        switch value {
+        case "current": "Current source"
+        case "archived": "Archived source"
+        case "captured-episode": "Captured source excerpt"
+        default: "Recorded quote"
+        }
+    }
+}
+
+@MainActor
 struct HubKnowledgeArchivesView: View {
     let api: HubConversationAPI
     let changed: () async -> Void

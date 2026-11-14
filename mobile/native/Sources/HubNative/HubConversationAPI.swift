@@ -249,6 +249,45 @@ public struct HubKnowledgeNote: Decodable {
     public let links: [HubHomeKnowledge.Node]?
 }
 
+public struct HubKnowledgeRelationship: Decodable, Identifiable {
+    public struct Citation: Decodable {
+        public let sourceId: String
+        public let quote: String
+        public let role: String?
+    }
+    public let id: String
+    public let predicate: String
+    public let scope: String
+    public let interpretation: Bool
+    public let evidence: [Citation]
+    public let node: HubHomeKnowledge.Node?
+}
+
+public struct HubKnowledgeNeighborhood: Decodable {
+    public let recordId: String
+    public let total: Int
+    public let items: [HubKnowledgeRelationship]
+    public let nextCursor: String?
+}
+
+public struct HubKnowledgeConnectionPath: Decodable {
+    public let sourceId: String
+    public let targetId: String
+    public let found: Bool
+    public let complete: Bool
+    public let meaning: String
+    public let nodes: [HubHomeKnowledge.Node]
+    public let relations: [HubKnowledgeRelationship]
+}
+
+public struct HubKnowledgeSourceEvidence: Decodable {
+    public struct Excerpt: Decodable { public let text: String }
+    public let citation: HubKnowledgeRelationship.Citation
+    public let sourceTitle: String
+    public let version: String
+    public let excerpt: Excerpt?
+}
+
 public struct HubChatMessage: Identifiable {
     public struct Photo: Decodable, Identifiable {
         public let attachmentId: String
@@ -338,6 +377,11 @@ public struct HubChatSnapshot {
     public let title: String?
     public let model: HubChatModelSelection?
     public let usageByTurn: [Int: HubChatTurnUsage]
+
+    public var latestUserMessageID: String? { messages.last(where: { $0.role == "user" })?.id }
+    public var latestMessageTurn: Int? {
+        messages.last(where: { $0.role == "user" || $0.role == "assistant" })?.turn
+    }
 }
 
 public struct HubChatTurnUsage {
@@ -1149,7 +1193,10 @@ public final class HubConversationAPI {
                              mediaTypes: Set<String> = ["application/json"], maxBytes: Int = 1_048_576,
                              operationTimeout: TimeInterval? = nil, contentType: String = "application/json") async throws -> Data {
         var components = URLComponents(url: server.origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        if !query.isEmpty { components.queryItems = query }
+        if !query.isEmpty {
+            components.queryItems = query
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         guard let url = components.url else { throw HubAttachmentError.invalidResponse }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.allHTTPHeaderFields = HTTPCookie.requestHeaderFields(with: server.cookies(await cookies(), for: url))
@@ -1691,6 +1738,48 @@ public final class HubConversationAPI {
         let note = try JSONDecoder().decode(HubKnowledgeNote.self, from: data)
         guard note.id == id else { throw HubAttachmentError.invalidResponse }
         return note
+    }
+
+    public func knowledgeNeighbors(id: String, cursor: String = "") async throws -> HubKnowledgeNeighborhood {
+        guard !id.isEmpty else { throw HubAttachmentError.invalidResponse }
+        let page: HubKnowledgeNeighborhood = try await readKnowledge("neighbors", arguments: ["id": id, "cursor": cursor])
+        guard page.recordId == id, page.total >= page.items.count, page.items.allSatisfy({ $0.node != nil }),
+              page.nextCursor.map({ !$0.isEmpty && $0 != cursor && $0 == page.items.last?.id }) ?? true else {
+            throw HubAttachmentError.invalidResponse
+        }
+        return page
+    }
+
+    public func searchKnowledgeRecords(_ search: String) async throws -> [HubHomeKnowledge.Node] {
+        struct SearchPage: Decodable { let nodes: [HubHomeKnowledge.Node] }
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, query.utf16.count <= 200 else { throw HubAttachmentError.invalidResponse }
+        let page: SearchPage = try await readKnowledge("search", arguments: ["q": query])
+        return page.nodes
+    }
+
+    public func knowledgeConnectionPath(from source: String, to target: String) async throws -> HubKnowledgeConnectionPath {
+        guard !source.isEmpty, !target.isEmpty else { throw HubAttachmentError.invalidResponse }
+        let path: HubKnowledgeConnectionPath = try await readKnowledge("path", arguments: ["id": source, "target": target])
+        guard path.sourceId == source, path.targetId == target else { throw HubAttachmentError.invalidResponse }
+        if path.found {
+            guard path.nodes.first?.id == source, path.nodes.last?.id == target, path.nodes.count == path.relations.count + 1 else {
+                throw HubAttachmentError.invalidResponse
+            }
+        }
+        return path
+    }
+
+    public func knowledgeSourceEvidence(relation: String, index: Int) async throws -> HubKnowledgeSourceEvidence {
+        guard !relation.isEmpty, index >= 0 else { throw HubAttachmentError.invalidResponse }
+        return try await readKnowledge("evidence", arguments: ["relation": relation, "index": String(index)])
+    }
+
+    private func readKnowledge<Value: Decodable>(_ view: String, arguments: [String: String]) async throws -> Value {
+        guard arguments.values.allSatisfy({ $0.utf8.count <= 1_024 }) else { throw HubAttachmentError.invalidResponse }
+        let query = [URLQueryItem(name: "view", value: view)] + arguments.map { URLQueryItem(name: $0.key, value: $0.value) }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: query)
+        return try JSONDecoder().decode(Value.self, from: data)
     }
 
     public func saveKnowledgeNote(_ note: HubKnowledgeNote, content: String) async throws -> HubKnowledgeNote {
