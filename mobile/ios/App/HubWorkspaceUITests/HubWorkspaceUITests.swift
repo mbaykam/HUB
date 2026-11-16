@@ -125,8 +125,15 @@ final class HubWorkspaceUITests: XCTestCase {
         let tools = app.buttons["Workspace tools"]
         XCTAssertTrue(tools.waitForExistence(timeout: 20))
         tools.tap()
-        app.buttons["Settings"].tap()
+        // The drawer slides in; tapping Settings mid-animation can miss it, so
+        // wait until it is hittable and retry once if the sheet did not open.
+        let settings = app.buttons["Settings"].firstMatch
         let general = app.descendants(matching: .any)["hub.settings.general"].firstMatch
+        XCTAssertTrue(waitUntilHittable(settings, timeout: 8))
+        settings.tap()
+        if !general.waitForExistence(timeout: 8), waitUntilHittable(settings, timeout: 3) {
+            settings.tap()
+        }
         XCTAssertTrue(general.waitForExistence(timeout: 8))
         general.tap()
 
@@ -148,7 +155,9 @@ final class HubWorkspaceUITests: XCTestCase {
         let menu = app.buttons["Options for Fixture Vera"]
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         menu.tap()
-        app.buttons["Edit"].tap()
+        let edit = app.buttons["Edit"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
         let name = app.textFields["Name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         XCTAssertEqual(name.value as? String, "Fixture Vera")
@@ -250,6 +259,12 @@ final class HubWorkspaceUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: element)
+        return XCTWaiter.wait(for: [hittable], timeout: timeout) == .completed
     }
 
     @MainActor
