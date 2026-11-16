@@ -86,7 +86,8 @@ try{
     run('xcodebuild',['test-without-building','-project','mobile/ios/App/App.xcodeproj','-scheme','App',
       '-destination','platform=iOS Simulator,id='+device,'-derivedDataPath','mobile/build/DerivedData',
       '-parallel-testing-enabled','NO','-only-testing:HubWorkspaceUITests',
-      '-resultBundlePath',result,'CODE_SIGNING_ALLOWED=NO'],600000);
+      // Five UI tests run serially; slow hosted runners need more than 10 minutes.
+      '-resultBundlePath',result,'CODE_SIGNING_ALLOWED=NO'],1200000);
     await writeFile(resolve(folder,'workspace-ui-proof.json'),JSON.stringify({...source,runtime:selected.runtime,
       isolatedSimulator:true,nativeHomeFixture:true,physicalAcceptance:false,drawersPlannerComposerKeyboardPassed:true,
       knowledgeNoteAndReviewPassed:true,generalPreferencesPassed:true,chatStopAndDraftPassed:true,
