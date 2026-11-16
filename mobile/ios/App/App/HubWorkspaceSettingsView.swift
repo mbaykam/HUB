@@ -65,7 +65,7 @@ struct HubWorkspaceSettingsView: View {
 
 @MainActor
 struct HubVoiceProfilesView: View {
-    private struct Editor: Identifiable {
+    struct Editor: Identifiable {
         let id = UUID()
         let profileID: UUID?
         let revision: Int
@@ -79,12 +79,6 @@ struct HubVoiceProfilesView: View {
     @State private var notice: String?
     @State private var deleting: HubVoiceProfiles.Profile?
     @State private var showingDelete = false
-    @State private var catalog: HubVoiceProfileCatalog?
-    @State private var models: [String: [HubVoiceProfileCatalog.Model]] = [:]
-    @State private var catalogAttempt = 0
-    @State private var modelAttempt = 0
-    @State private var catalogError = false
-    @State private var failedModelProvider: String?
 
     var body: some View {
         List {
@@ -113,7 +107,11 @@ struct HubVoiceProfilesView: View {
         .navigationTitle("Voice personalities")
         .disabled(busy)
         .task { await reload() }
-        .sheet(item: $editor) { editForm($0) }
+        .sheet(item: $editor) { draft in
+            HubVoiceProfileEditor(api: api, original: draft) { command, revision in
+                await change(command, revision: revision, closeEditor: true)
+            }
+        }
         .alert("Delete personality?", isPresented: $showingDelete, presenting: deleting) { profile in
             Button("Delete", role: .destructive) {
                 if let revision = state?.revision { Task { await change(.delete(profile.id), revision: revision) } }
@@ -153,6 +151,59 @@ struct HubVoiceProfilesView: View {
         }
     }
 
+    @discardableResult
+    private func change(_ command: HubConversationAPI.VoiceProfileChange, revision: Int, closeEditor: Bool = false) async -> Bool {
+        guard !busy else { return false }
+        busy = true
+        defer { busy = false }
+        do {
+            state = try await api.changeVoiceProfile(command, revision: revision)
+            if closeEditor { editor = nil }
+            notice = "Saved for your next voice call."
+            return true
+        } catch {
+            notice = "HUB could not confirm the change. Check your connection and reload the list before trying again."
+            return false
+        }
+    }
+
+    private func reload() async {
+        busy = true
+        defer { busy = false }
+        do { state = try await api.voiceProfiles(); notice = nil }
+        catch { if !Task.isCancelled { notice = "Voice personalities could not load." } }
+    }
+}
+
+/// The editor owns its draft so the sheet never depends on the list's state
+/// being readable while it is presented.
+@MainActor
+private struct HubVoiceProfileEditor: View {
+    typealias Editor = HubVoiceProfilesView.Editor
+    let api: HubConversationAPI
+    let original: Editor
+    let save: (HubConversationAPI.VoiceProfileChange, Int) async -> Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var editor: Editor?
+    @State private var busy = false
+    @State private var notice: String?
+    @State private var catalog: HubVoiceProfileCatalog?
+    @State private var models: [String: [HubVoiceProfileCatalog.Model]] = [:]
+    @State private var catalogAttempt = 0
+    @State private var modelAttempt = 0
+    @State private var catalogError = false
+    @State private var failedModelProvider: String?
+
+    init(api: HubConversationAPI, original: Editor,
+         save: @escaping (HubConversationAPI.VoiceProfileChange, Int) async -> Bool) {
+        self.api = api
+        self.original = original
+        self.save = save
+        _editor = State(initialValue: original)
+    }
+
+    var body: some View { editForm(original) }
+
     private func editForm(_ draft: Editor) -> some View {
         NavigationView {
             Form {
@@ -172,7 +223,7 @@ struct HubVoiceProfilesView: View {
             .navigationTitle(draft.profileID == nil ? "New personality" : "Edit personality")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editor = nil }.disabled(busy) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") { saveEditor() }.disabled(busy || !validEditor) }
             }
         }
@@ -349,27 +400,13 @@ struct HubVoiceProfilesView: View {
         let command: HubConversationAPI.VoiceProfileChange
         if let id = editor.profileID { command = .edit(id, editor.settings) }
         else { command = .create(editor.settings) }
-        Task { await change(command, revision: editor.revision, closeEditor: true) }
-    }
-
-    private func change(_ command: HubConversationAPI.VoiceProfileChange, revision: Int, closeEditor: Bool = false) async {
-        guard !busy else { return }
-        busy = true
-        defer { busy = false }
-        do {
-            state = try await api.changeVoiceProfile(command, revision: revision)
-            if closeEditor { editor = nil }
-            notice = "Saved for your next voice call."
-        } catch {
-            notice = "HUB could not confirm the change. Check your connection and reload the list before trying again."
+        let revision = editor.revision
+        Task {
+            busy = true
+            let saved = await save(command, revision)
+            busy = false
+            if !saved { notice = "HUB could not confirm the change. Check your connection and reload the list before trying again." }
         }
-    }
-
-    private func reload() async {
-        busy = true
-        defer { busy = false }
-        do { state = try await api.voiceProfiles(); notice = nil }
-        catch { if !Task.isCancelled { notice = "Voice personalities could not load." } }
     }
 }
 
