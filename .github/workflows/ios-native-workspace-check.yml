@@ -54,6 +54,7 @@ jobs:
           path: |
             mobile/build/simulator-launch/*.json
             mobile/build/simulator-launch/*.png
+            mobile/build/simulator-launch/*.txt
             mobile/build/simulator-launch/workspace-ui.xcresult
           if-no-files-found: ignore
           retention-days: 7

@@ -153,6 +153,15 @@ try{
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
   await writeFile(resolve(folder,'launch-failure.json'),JSON.stringify({...source,stage,runtime:selected.runtime,baselineMode,code:error.code??null,signal:error.signal??null,message:String(error.message).slice(0,4000),stdout:String(error.stdout??'').slice(-12000),stderr:String(error.stderr??'').slice(-12000)},null,2));
+  if(stage==='xctest'){
+    // Keep the whole XCUITest transcript and the per-test failure summary; the
+    // JSON above only holds the tail, which hides the failing step.
+    await writeFile(resolve(folder,'xctest-output.txt'),String(error.stdout??'')+'\n--- stderr ---\n'+String(error.stderr??'')).catch(()=>{});
+    try{
+      const summary=run('xcrun',['xcresulttool','get','test-results','tests','--path',resolve(folder,'workspace-ui.xcresult')],60000);
+      await writeFile(resolve(folder,'xctest-results.json'),summary);
+    }catch(summaryError){console.warn('No xcresult summary: '+String(summaryError.message).slice(0,400));}
+  }
   throw error;
 }finally{
   if(device&&/^[A-F0-9-]{36}$/i.test(device)){
