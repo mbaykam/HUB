@@ -218,6 +218,11 @@ final class HubDictation: ObservableObject {
             notice = "Connect to HUB to type with your voice."
             return
         }
+        // A live voice conversation owns the microphone; taking it would cut the call.
+        if HubAssistantCoordinator.shared.voice?.isActive == true {
+            notice = "End the voice conversation first, then type with your voice."
+            return
+        }
         take += 1
         let current = take
         phase = .starting
