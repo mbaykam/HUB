@@ -1741,8 +1741,8 @@ private struct HubChatImageView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { fullScreen = true }
                         .accessibilityLabel(name)
-                        .accessibilityHint("Opens the image full screen")
-                        .accessibilityAction { fullScreen = true }
+                        .accessibilityAddTraits(.isImage)
+                        .accessibilityAction(named: "Open full screen") { fullScreen = true }
                     .fullScreenCover(isPresented: $fullScreen) {
                         HubImageViewer(image: image, name: name)
                     }

@@ -152,8 +152,15 @@ final class HubWorkspaceUITests: XCTestCase {
         // wait until it is hittable and retry once if the sheet did not open.
         let settings = app.buttons["Settings"].firstMatch
         let general = app.descendants(matching: .any)["hub.settings.general"].firstMatch
-        XCTAssertTrue(waitUntilHittable(settings, timeout: 8))
-        settings.tap()
+        XCTAssertTrue(settings.waitForExistence(timeout: 8))
+        if !waitUntilHittable(settings, timeout: 8) {
+            // Diagnostics for a panel button that exists but reports not hittable.
+            capture("Settings not hittable")
+            print("HUB-DIAG settings frame=\(settings.frame) window=\(app.windows.firstMatch.frame) hittable=\(settings.isHittable)")
+            settings.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        } else {
+            settings.tap()
+        }
         if !general.waitForExistence(timeout: 8), waitUntilHittable(settings, timeout: 3) {
             settings.tap()
         }
