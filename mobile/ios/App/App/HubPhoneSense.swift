@@ -68,11 +68,11 @@ final class HubPhoneSense: NSObject, CLLocationManagerDelegate {
             while !Task.isCancelled {
                 guard let self else { return }
                 // Answer an assistant's request within seconds while HUB runs;
-                // otherwise refresh every three minutes.
+                // otherwise refresh every three minutes (45 four-second ticks).
                 let wanted = (try? await self.api?.phoneContextRequested()) ?? false
-                if wanted || tick % 18 == 0 { await self.sendNow(force: wanted) }
+                if wanted || tick % 45 == 0 { await self.sendNow(force: wanted) }
                 tick += 1
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
         }
     }

@@ -1592,9 +1592,12 @@ struct HubHomeView: View {
                     dismissKeyboard(then: send)
                 } label: {
                     Image(systemName: "arrow.up")
-                        .font(.body.weight(.semibold))
+                        .font(.body.weight(.bold))
+                        .foregroundColor(canSend ? HubWorkspacePalette.onAccent : HubWorkspacePalette.muted)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(canSend ? accent : accent.opacity(0.10)))
                         .frame(width: 44, height: 44)
-                        .background(Circle().fill(accent.opacity(canSend ? 0.28 : 0.10)))
+                        .animation(.easeOut(duration: 0.15), value: canSend)
                 }
                 .accessibilityLabel("Send")
                 .accessibilityIdentifier("hub.home.send")

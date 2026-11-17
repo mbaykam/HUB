@@ -508,12 +508,20 @@ struct HubLiveChatView: View {
                                     HStack {
                                         Spacer(minLength: 48)
                                         VStack(alignment: .trailing, spacing: 8) {
-                                            if !message.text.isEmpty { Text(message.text) }
+                                            if !message.text.isEmpty { Text(message.text).textSelection(.enabled) }
                                             chatPhotos(message)
-                                            if !message.text.isEmpty { copyMessage(message.text) }
                                         }
-                                        .padding(14)
-                                        .background(panel, in: RoundedRectangle(cornerRadius: 18))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(accent.opacity(0.18)))
+                                        .contextMenu {
+                                            if !message.text.isEmpty {
+                                                Button { UIPasteboard.general.string = message.text } label: {
+                                                    Label("Copy message", systemImage: "doc.on.doc")
+                                                }
+                                            }
+                                        }
                                     }
                                 } else if message.role == "command" || message.role == "command-error" {
                                     Label {
@@ -553,7 +561,7 @@ struct HubLiveChatView: View {
                             }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
-                            if snapshot.running && snapshot.partial.isEmpty && !connectionLost { ProgressView("Working…") }
+                            if snapshot.running && snapshot.partial.isEmpty && !connectionLost { HubThinkingIndicator() }
                         } else if !connectionLost {
                             ProgressView("Loading chat…")
                         }
@@ -783,16 +791,24 @@ struct HubLiveChatView: View {
                 .accessibilityIdentifier("hub.chat.voice")
                 if snapshot?.running == true || awaitingAfter != nil {
                     Button(action: stop) {
-                        Image(systemName: "stop.fill").frame(width: 44, height: 44)
-                            .background(Circle().fill(accent.opacity(0.28)))
+                        Image(systemName: "stop.fill")
+                            .foregroundColor(HubWorkspacePalette.onAccent)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(accent))
+                            .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Stop")
                     .accessibilityIdentifier("hub.chat.stop")
                     .disabled(stopRequest != nil)
                 } else {
                     Button { send() } label: {
-                        Image(systemName: "arrow.up").frame(width: 44, height: 44)
-                            .background(Circle().fill(accent.opacity(canSend ? 0.28 : 0.10)))
+                        Image(systemName: "arrow.up")
+                            .font(.body.weight(.bold))
+                            .foregroundColor(canSend ? HubWorkspacePalette.onAccent : HubWorkspacePalette.muted)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(canSend ? accent : accent.opacity(0.10)))
+                            .frame(width: 44, height: 44)
+                            .animation(.easeOut(duration: 0.15), value: canSend)
                     }
                         .accessibilityLabel("Send")
                         .accessibilityIdentifier("hub.chat.send")
@@ -1658,5 +1674,32 @@ private struct HubChatPhotoPicker: UIViewControllerRepresentable {
                 DispatchQueue.main.async { completion(result) }
             }
         }
+    }
+}
+
+/// Three softly pulsing dots while the assistant works, instead of a spinner.
+struct HubThinkingIndicator: View {
+    @State private var phase = 0
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<3) { index in
+                Circle()
+                    .fill(HubWorkspacePalette.accent)
+                    .frame(width: 7, height: 7)
+                    .opacity(phase == index ? 1 : 0.3)
+                    .scaleEffect(phase == index ? 1.15 : 0.9)
+            }
+        }
+        .padding(.vertical, 6)
+        .animation(.easeInOut(duration: 0.3), value: phase)
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                phase = (phase + 1) % 3
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Working")
     }
 }
