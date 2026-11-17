@@ -95,7 +95,7 @@ export function apply(ctx: Context, config: Config): void {
     history = await openConversationHistory(ctx.storageDomain);
     if (lifetime.signal.aborted) return;
     offTitles=installVoiceTitles(ctx,history);
-    screenTools=installVoiceScreenTools(ctx,{current:sessionId=>web?.screenIdentity(sessionId),frame:sessionId=>web?.screenFrame(sessionId)});
+    screenTools=installVoiceScreenTools(ctx,{current:sessionId=>web?.screenIdentity(sessionId),frame:sessionId=>web?.screenFrame(sessionId),highlight:(sessionId,regions,note)=>{if(!web)throw new Error("Voice is unavailable.");return web.screenHighlight(sessionId,regions,note);}});
     const localProfiles = await openVoiceProfiles(ctx.storageDomain, {
       name: "HUB", instructions: "Be warm, concise and practical. Ask one question at a time.",
       route: { provider: config.provider, model: config.model, ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}) },
