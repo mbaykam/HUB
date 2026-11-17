@@ -1,8 +1,21 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const SCREEN_MAX_BYTES = 2_000_000, SCREEN_MAX_AGE_MS = 5000;
 export interface ScreenOwner { callId: string; sessionId: string }
+/** Normalized to the shared frame: 0,0 is the top left, 1,1 the bottom right. */
+export interface ScreenRegion { x: number; y: number; width: number; height: number; label?: string }
+export interface ScreenHighlight { id: string; regions: ScreenRegion[]; note: string; sequence: number; createdAt: number }
+export function parseScreenRegions(value: unknown): ScreenRegion[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 6) throw new Error("Give one to six regions.");
+  return value.map(r => {
+    const ok = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+    if (!r || typeof r !== "object" || !ok(r.x) || !ok(r.y) || !ok(r.width) || !ok(r.height) || r.width <= 0 || r.height <= 0 || r.x + r.width > 1.0001 || r.y + r.height > 1.0001) throw new Error("Each region needs x, y, width and height between 0 and 1.");
+    const label = typeof r.label === "string" && r.label.trim() ? r.label.trim().slice(0, 40) : undefined;
+    return { x: r.x, y: r.y, width: r.width, height: r.height, ...(label ? { label } : {}) };
+  });
+}
 type Lease = ScreenOwner & { shareId: string; sequence: number; attemptedAt: number; activeAt: number; frame?: { bytes: Buffer; expiresAt: number } };
 export class ScreenError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -40,10 +53,11 @@ export class VoiceScreenFrames {
   private seen = new Set<string>();
   private decoding = false;
   private expiry?: ReturnType<typeof setTimeout>;
+  private marked?: ScreenHighlight & { shareId: string };
   constructor(private readonly validate: (bytes: Uint8Array) => Promise<void>, private readonly now = Date.now) {}
   private owns(owner: ScreenOwner) { return this.scope?.callId === owner.callId && this.scope.sessionId === owner.sessionId; }
   private forgetFrame() { if (this.expiry) clearTimeout(this.expiry); this.expiry = undefined; if (this.lease) this.lease.frame = undefined; }
-  clear() { this.forgetFrame(); this.lease = undefined; this.scope = undefined; this.seen.clear(); }
+  clear() { this.forgetFrame(); this.lease = undefined; this.scope = undefined; this.seen.clear(); this.marked = undefined; }
   private expireIdle() { if (this.lease && this.now() - this.lease.activeAt >= 15_000) { this.forgetFrame(); this.lease = undefined; } }
   start(owner: ScreenOwner, shareId: unknown) {
     requireId(shareId);
@@ -94,7 +108,19 @@ export class VoiceScreenFrames {
     if (!lease?.frame || lease.sessionId !== sessionId) return;
     return { bytes: Buffer.from(lease.frame.bytes), shareId: lease.shareId, sequence: lease.sequence, remainingMs: lease.frame.expiresAt - this.now() };
   }
-  status(owner: ScreenOwner) { this.expireIdle(); const owned = this.owns(owner); return { sharing: owned && Boolean(this.lease), hasFrame: owned && Boolean(this.frame(owner.sessionId)), maxAgeMs: SCREEN_MAX_AGE_MS }; }
+  /** An assistant marks regions of the shared screen; the phone shows them. */
+  highlight(sessionId: string, regions: ScreenRegion[], note: string) {
+    const lease = this.lease;
+    if (!lease || lease.sessionId !== sessionId) throw new Error("Screen sharing is not active.");
+    this.marked = { id: randomUUID(), regions, note, sequence: lease.sequence, createdAt: this.now(), shareId: lease.shareId };
+    return this.marked.id;
+  }
+  status(owner: ScreenOwner) {
+    this.expireIdle();
+    const owned = this.owns(owner), marked = owned && this.marked && this.marked.shareId === this.lease?.shareId && this.now() - this.marked.createdAt < 60_000 ? this.marked : undefined;
+    return { sharing: owned && Boolean(this.lease), hasFrame: owned && Boolean(this.frame(owner.sessionId)), maxAgeMs: SCREEN_MAX_AGE_MS,
+      ...(marked ? { highlight: { id: marked.id, regions: marked.regions, note: marked.note, sequence: marked.sequence } } : {}) };
+  }
 }
 
 async function body(request: IncomingMessage, limit: number) {

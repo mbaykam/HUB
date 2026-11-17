@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.7
+
+- Assistants can read the iPhone's location, place, nearby places and battery with hub_phone_context when the HUB app shares them.
+- During screen sharing, assistants can mark regions with hub_highlight_screen; the iPhone shows the marked screenshot as a notification.
+
 ## 1.10.6
 
 - Knowledge AI keeps the verified links of a plan when one proposed link is misquoted, and says how many were left out.
