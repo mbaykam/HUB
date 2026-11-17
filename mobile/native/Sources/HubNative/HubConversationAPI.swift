@@ -1981,6 +1981,21 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubCharacterSettings.self, from: data)
     }
 
+    /// Sends the phone's latest context (location, surroundings, device) so
+    /// assistants can answer "where am I" and "what is around me".
+    public func sendPhoneContext(_ context: HubPhoneContext) async throws {
+        let body = try JSONEncoder().encode(context)
+        guard body.count <= 16_000 else { throw HubAttachmentError.invalidResponse }
+        _ = try await requestData("api/hub/phone/context", headers: ["x-hub-phone-context": "1"], body: body, maxBytes: 4_096)
+    }
+
+    /// True while an assistant is waiting for a fresh phone reading.
+    public func phoneContextRequested() async throws -> Bool {
+        struct State: Decodable { let requested: Bool }
+        let data = try await requestData("api/hub/phone/context", headers: ["x-hub-phone-context": "1"], maxBytes: 1_024)
+        return try JSONDecoder().decode(State.self, from: data).requested
+    }
+
     /// Lets organization work saved in a restored Knowledge copy run again
     /// under the current Knowledge AI settings.
     public func resumeRestoredKnowledgeWork() async throws {

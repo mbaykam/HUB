@@ -401,6 +401,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
         sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
         sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
+        let sense = HubPhoneSense.shared
+        sheet.addAction(UIAlertAction(title: sense.enabled ? "Phone context: On" : "Phone context: Off", style: .default) { [weak self] _ in
+            self?.afterOptions { controller in
+                sense.enabled.toggle()
+                controller.showNotice(sense.enabled
+                    ? "Assistants can ask for this iPhone's location, nearby places and battery while HUB is open."
+                    : "Assistants no longer receive this iPhone's location or surroundings.")
+            }
+        })
         if server != nil {
             sheet.addAction(UIAlertAction(title: "Cloudflare access token", style: .default) { [weak self] _ in self?.afterOptions { $0.showAccessToken() } })
         }
@@ -474,6 +483,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         uiAPI = HubInstalledUIAPI(server: value, cookies: cookies)
         conversationAPI = HubConversationAPI(server: value, cookies: cookies)
         chatAttachmentAPI = HubAttachmentAPI(server: value, cookies: cookies)
+        HubPhoneSense.shared.attach(conversationAPI)
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         home.knowledge = nil
         home.planner = nil

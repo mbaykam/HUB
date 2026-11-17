@@ -1188,6 +1188,36 @@ final class HubConversationTests: XCTestCase {
         }
     }
 
+    func testPhoneContextIsSentToHUBAndFreshRequestsAreRead() async throws {
+        let api = try client()
+        CatalogFixture.reply = #"{"saved":true}"#
+        let context = HubPhoneContext(
+            capturedAt: Date(timeIntervalSince1970: 1_794_900_000),
+            location: .init(latitude: 41.0082, longitude: 28.9784, accuracyMeters: 12, speedMetersPerSecond: -1, courseDegrees: -1),
+            place: .init(name: "Sultanahmet Square", city: "Istanbul", country: "Türkiye"),
+            nearby: [.init(name: "Hagia Sophia", category: "Museum", distanceMeters: 180), .init(name: "")],
+            device: .init(batteryPercent: 57, charging: false, network: "wifi"))
+        XCTAssertNil(context.location?.speedMetersPerSecond, "Unknown speed is left out, not sent as -1")
+        XCTAssertEqual(context.nearby?.count, 1)
+        try await api.sendPhoneContext(context)
+        let request = try XCTUnwrap(CatalogFixture.request)
+        XCTAssertEqual(request.url?.absoluteString, "https://hub.example.com/api/hub/phone/context")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-phone-context"), "1")
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(request.httpBodyStream.map(readAll) ?? request.httpBody)) as? [String: Any])
+        XCTAssertEqual(sent["capturedAt"] as? Double, 1_794_900_000_000)
+        XCTAssertEqual((sent["place"] as? [String: Any])?["city"] as? String, "Istanbul")
+        CatalogFixture.reply = #"{"requested":true}"#
+        XCTAssertTrue(try await api.phoneContextRequested())
+    }
+
+    private func readAll(_ stream: InputStream) -> Data {
+        stream.open(); defer { stream.close() }
+        var data = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable { let n = stream.read(&buffer, maxLength: buffer.count); if n <= 0 { break }; data.append(buffer, count: n) }
+        return data
+    }
+
     func testRestoredKnowledgeWorkStaysPausedUntilTheOwnerResumesIt() async throws {
         let api = try client()
         CatalogFixture.reply = #"{"items":[],"total":0,"storage":"C:/HUB/backups","restoreHold":{"version":1,"state":"needs-review","queued":3,"mode":"review","provider":"fixture","model":"fixture-model"}}"#
