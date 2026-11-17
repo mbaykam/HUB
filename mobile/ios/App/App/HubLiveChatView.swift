@@ -1344,7 +1344,38 @@ private struct HubChatModelPicker: View {
             } catch {
                 if !Task.isCancelled { self.error = "Could not load the available models." }
             }
+            // HUB's own catalogue adds context size, prices and inputs; the
+            // picker still works without it.
+            if let extra = try? await api.modelCatalog(), !Task.isCancelled {
+                details = Dictionary(extra.models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            }
         }
+    }
+
+    @State private var details: [String: HubModelCatalog.Model] = [:]
+
+    /// What the picker knows about one model, from both catalogues.
+    private struct Spec {
+        var contextWindow: Int?
+        var maxTokens: Int?
+        var images: Bool?
+        var reasoning: Bool
+        var pricing: HubModelCatalog.Model.Pricing?
+        var favorite: Bool
+    }
+
+    private func spec(_ choice: HubChatModels.Provider.Model, provider: String) -> Spec {
+        let extra = details[provider + "/" + choice.id]
+        return Spec(contextWindow: extra?.contextWindow ?? choice.contextWindow,
+                    maxTokens: choice.defaultMaxTokens ?? extra?.maxTokens,
+                    images: extra.map { $0.input.contains("image") } ?? choice.inputModalities.map { $0.contains("image") },
+                    reasoning: choice.canReason || extra?.reasoning == true,
+                    pricing: extra?.pricing,
+                    favorite: extra?.favorite == true)
+    }
+
+    private static func price(_ value: Double) -> String {
+        value == 0 ? "free" : value < 0.1 ? String(format: "$%.3f", value) : String(format: "$%.2f", value)
     }
 
     private enum ModelFilter: String, CaseIterable, Identifiable {
@@ -1354,12 +1385,12 @@ private struct HubChatModelPicker: View {
         case longContext = "Long context"
         var id: Self { self }
 
-        func includes(_ model: HubChatModels.Provider.Model) -> Bool {
+        func includes(_ spec: Spec) -> Bool {
             switch self {
             case .all: return true
-            case .reasoning: return model.canReason
-            case .images: return model.acceptsImages
-            case .longContext: return (model.contextWindow ?? 0) >= 200_000
+            case .reasoning: return spec.reasoning
+            case .images: return spec.images == true
+            case .longContext: return (spec.contextWindow ?? 0) >= 200_000
             }
         }
     }
@@ -1400,7 +1431,7 @@ private struct HubChatModelPicker: View {
                     .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 }
                 let groups = catalog.groups.compactMap { group -> FilteredGroup? in
-                    let models = group.models.filter { filter.includes($0) && (search.isEmpty ||
+                    let models = group.models.filter { filter.includes(spec($0, provider: group.id)) && (search.isEmpty ||
                         "\($0.name) \($0.id) \(group.name) \($0.description ?? "")".localizedCaseInsensitiveContains(search)) }
                     return models.isEmpty ? nil : FilteredGroup(id: group.id, name: group.name, models: models)
                 }
@@ -1434,6 +1465,7 @@ private struct HubChatModelPicker: View {
     private func modelRow(_ choice: HubChatModels.Provider.Model, provider: String, catalog: HubChatModels, showProvider: Bool) -> some View {
         let isCurrent = current?.provider == provider && current?.model == choice.id
         let isDefault = catalog.defaultSelection?.provider == provider && catalog.defaultSelection?.model == choice.id
+        let info = spec(choice, provider: provider)
         return Button {
             model = choice
             self.provider = provider
@@ -1444,14 +1476,16 @@ private struct HubChatModelPicker: View {
                     HStack(spacing: 6) {
                         Text(choice.name).font(.body.weight(isCurrent ? .semibold : .regular)).lineLimit(1)
                         if isDefault { badge("Default", tint: .green) }
+                        if info.favorite { Image(systemName: "heart.fill").font(.caption2).foregroundStyle(.pink).accessibilityLabel("Favorite") }
                     }
                     if let description = choice.description, !description.isEmpty {
                         Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
                     HStack(spacing: 5) {
-                        if let window = choice.contextWindow { badge(HubChatModels.tokens(window) + " context") }
-                        if choice.canReason { badge("Reasoning") }
-                        if choice.acceptsImages { badge("Images") }
+                        if let window = info.contextWindow { badge(HubChatModels.tokens(window) + " context") }
+                        if info.reasoning { badge("Reasoning") }
+                        if info.images == true { badge("Images") }
+                        if let price = info.pricing { badge(Self.price(price.input) + " in", tint: .secondary) }
                         if showProvider { badge(catalog.groups.first(where: { $0.id == provider })?.name ?? provider) }
                     }
                 }
@@ -1489,6 +1523,7 @@ private struct HubChatModelPicker: View {
 
     private func options(_ choice: HubChatModels.Provider.Model, provider: String) -> some View {
         let providerName = catalog?.groups.first(where: { $0.id == provider })?.name ?? provider
+        let info = spec(choice, provider: provider)
         return HubForm {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
@@ -1500,10 +1535,13 @@ private struct HubChatModelPicker: View {
             }
             Section("Details") {
                 detail("Model ID", choice.id, monospaced: true)
-                detail("Context window", choice.contextWindow.map { HubChatModels.tokens($0) + " tokens" } ?? "Not reported")
-                if let output = choice.defaultMaxTokens { detail("Reply length cap", HubChatModels.tokens(output) + " tokens") }
-                detail("Reads images", choice.inputModalities == nil ? "Not reported" : (choice.acceptsImages ? "Yes" : "No"))
-                detail("Reasoning", choice.canReason ? "\(choice.reasoning?.efforts.count ?? 0) levels" : "No")
+                detail("Context window", info.contextWindow.map { HubChatModels.tokens($0) + " tokens" } ?? "Not reported")
+                if let output = info.maxTokens { detail("Longest reply", HubChatModels.tokens(output) + " tokens") }
+                detail("Reads images", info.images.map { $0 ? "Yes" : "No" } ?? "Not reported")
+                detail("Reasoning", choice.canReason ? "\(choice.reasoning?.efforts.count ?? 0) levels" : (info.reasoning ? "Yes" : "No"))
+                if let price = info.pricing {
+                    detail("Price per 1M tokens", Self.price(price.input) + " in · " + Self.price(price.output) + " out")
+                }
             }
             if let efforts = choice.reasoning?.efforts, !efforts.isEmpty {
                 Section {
