@@ -31,6 +31,7 @@ import {installCharacterRequests} from "./host/character-requests.ts";
 import {isLegacyMemoryTool,knowledgeToolChoices} from "./memory-tool-groups.ts";
 import {installPlanner} from "./host/planner.ts";
 import {installConversationTitles} from "./host/conversation-titles.ts";
+import {PhoneContextStore,createPhoneContextHandler,attachPhoneContextTool,PHONE_CONTEXT_TOOL} from "./host/phone-context.ts";
 import {installNativePush} from "./host/native-push-install.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
@@ -68,6 +69,7 @@ export class HubCharacters extends Service {
   readonly mounts=new Map<string,Mount>();
   readonly dispatches=new Map<string,unknown>();
   readonly presentations=new PresentationRuntime();
+  readonly phoneContext=new PhoneContextStore(join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-phone"));
   constructor(ctx:CharacterHost,root=join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-characters"),camoRuntime?:CamofoxRuntime){
     super(ctx,"hubCharacters");this.host=ctx;this.store=new CharacterStore(root);this.speechSettings=new SharedSpeechSettings(root);this.instructions=new InstructionFiles(join(root,"instructions"));this.quota=providerGate(join(root,"..","hub-provider-health"));
     ctx.effect(()=>installCharacterRequests(ctx,this),"HUB full request inspector");
@@ -93,6 +95,7 @@ export class HubCharacters extends Service {
       if(agent.session.header.origin==="subagent" || agent.id.startsWith("hub-automation-") || agent.id.startsWith("hub-memory-") || agent.id.startsWith("hub-goal-") || agent.id.startsWith("hub-character-eval-") || this.mounts.has(agent.id))return;
       const mount:Mount={revision:-1,fibers:[],names:new Map()};this.mounts.set(agent.id,mount);
       agent.ctx.effect(()=>this.presentations.attach(agent),"HUB conversation canvas");
+      agent.ctx.effect(()=>attachPhoneContextTool(agent,this.phoneContext,()=>{const c=selected;return !c||c.tools.mode!=="allow"||(c.tools.names??[]).includes(PHONE_CONTEXT_TOOL);}),"HUB phone context");
       let selected:HubCharacter|undefined;
       const coordinatesTelegram=(s:HubCharactersState,c?:HubCharacter)=>agent.id.startsWith("minke-im-")&&(!c||c.id===s.mainId||c.id===s.voiceId);
       const characterPrompt=(s:HubCharactersState,character:HubCharacter)=>{
@@ -186,6 +189,7 @@ export class HubCharacters extends Service {
         try{return [...observation.events];}finally{observation[Symbol.dispose]();}
       });
       const off=["presentation","presentation-document"].map(action=>ctx.webServer.register({kind:"exact",path:`/api/hub/${action}`,handler}));
+      off.push(ctx.webServer.register({kind:"exact",path:"/api/hub/phone/context",handler:createPhoneContextHandler(this.phoneContext,req=>ctx.connection.requestRejection(req))}));
       return ()=>off.forEach(remove=>remove());
     },"HUB conversation visuals");
     ctx.effect(()=>installInstructionFiles(ctx,this,this.instructions),"HUB editable instruction files");
@@ -300,6 +304,7 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_delegate"))tools.push({name:"hub_delegate",description:"Delegate to a configured character from a text or voice conversation."});
           if(!tools.some(t=>t.name==="hub_switch_character"))tools.push({name:"hub_switch_character",description:"Switch the active speaker after an explicit request to speak to that character."});
           if(!tools.some(t=>t.name==="hub_task"))tools.push({name:"hub_task",description:"Start background work with the voice character’s default specialist. Available during a voice call."});
+          if(!tools.some(t=>t.name===PHONE_CONTEXT_TOOL))tools.push({name:PHONE_CONTEXT_TOOL,description:"Read the user's iPhone location, nearby places, battery and network when they ask about their surroundings."});
           if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's diagram, chart, simulation or interactive HTML app; see canvas.md."});
           if(!tools.some(t=>t.name==="hub_view_screen"))tools.push({name:"hub_view_screen",description:"Inspect one fresh phone-screen frame during an authorized voice call or its direct delegated task. Needs an image-capable model; requested analysis snapshots are retained in the conversation."});
           send(200,{...this.store.snapshot(),tools,sharedSpeech:this.speechSettings.snapshot()});return;
