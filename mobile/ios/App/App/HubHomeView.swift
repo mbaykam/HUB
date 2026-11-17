@@ -192,6 +192,8 @@ extension View {
     /// Any scroll of this content puts the keyboard away.
     @ViewBuilder func hubDismissesKeyboardOnScroll(_ hide: @escaping () -> Void) -> some View {
         if #available(iOS 16.0, *) {
+            // Any scroll of the page puts the keyboard away. The composer sits
+            // outside this scroll view, so the keyboard appearing is no scroll.
             scrollDismissesKeyboard(.immediately)
         } else {
             simultaneousGesture(DragGesture(minimumDistance: 16).onChanged { _ in hide() })

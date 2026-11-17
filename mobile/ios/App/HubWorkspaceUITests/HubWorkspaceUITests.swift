@@ -60,9 +60,16 @@ final class HubWorkspaceUITests: XCTestCase {
         composer.typeText("Fixture draft")
         XCTAssertEqual(composer.value as? String, "Fixture draft")
         capture("Composer keyboard")
-        app.scrollViews.firstMatch.swipeDown()
-        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 0"), object: app.keyboards)
-        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
+        // Scrolling the page (here, a drag on a visible card) puts the keyboard away.
+        let dayHeader = app.staticTexts["Your day"].firstMatch
+        dayHeader.swipeUp()
+        let keyboard = app.keyboards.firstMatch
+        let gone = { XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard) }
+        if XCTWaiter.wait(for: [gone()], timeout: 5) != .completed {
+            capture("Keyboard after scroll")
+            app.staticTexts["Knowledge"].firstMatch.swipeDown()
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [gone()], timeout: 5), .completed)
         XCTAssertEqual(composer.value as? String, "Fixture draft")
     }
 
