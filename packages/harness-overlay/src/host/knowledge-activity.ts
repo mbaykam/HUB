@@ -28,6 +28,7 @@ export async function knowledgeActivity(curator:KnowledgeCurator,offset=0):Promi
       for(const suggestion of organization.suggestions.filter(s=>s.revisionId===revision.id))changes.push({kind:"suggestion",action:suggestion.status,title:`${suggestion.target}: ${suggestion.text}`});
       if(!organization.relationRecords&&revision.plan.relations.length)warnings.push("Older relation receipts do not record individual committed links; proposed links are not listed as completed.");
     }else if(job.revision)warnings.push("The organization receipt is unavailable; its changes cannot be listed.");
+    if(job.droppedRelations)warnings.push(`${job.droppedRelations} proposed ${job.droppedRelations===1?"link was":"links were"} not saved because ${job.droppedRelations===1?"its quote":"their quotes"} could not be verified.`);
     if(job.memoryRevision&&/^[a-f0-9-]{36}$/i.test(job.memoryRevision)){
       try{
         const path=join(store.root,"journal",`${job.memoryRevision}.json`),info=await lstat(path);
