@@ -22,6 +22,14 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertLessThanOrEqual(dictate.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, send.frame.minX)
         capture("Home")
+        // The Home graph's zoom buttons change the zoom.
+        let zoomIn = app.buttons["Zoom in"].firstMatch
+        XCTAssertTrue(zoomIn.waitForExistence(timeout: 5))
+        XCTAssertEqual(zoomIn.value as? String, "100%")
+        zoomIn.tap()
+        XCTAssertEqual(zoomIn.value as? String, "125%")
+        app.buttons["Fit graph"].firstMatch.tap()
+        XCTAssertEqual(zoomIn.value as? String, "100%")
         add.tap()
         XCTAssertTrue(app.buttons["Choose character"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Research…"].exists)
@@ -256,6 +264,27 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Save"].isEnabled)
         XCTAssertEqual(app.webViews.count, 0)
         capture("Knowledge Skills")
+    }
+
+    /// A visual the model made with hub_present opens as a canvas in the chat
+    /// and runs its own script.
+    @MainActor
+    func testChatShowsAnInteractiveVisualFromTheModel() {
+        let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture", "--hub-native-canvas-fixture"])
+        let history = app.buttons["Chat history"]
+        XCTAssertTrue(history.waitForExistence(timeout: 20))
+        history.tap()
+        let conversation = app.buttons["hub.history.fixture-work"]
+        XCTAssertTrue(conversation.waitForExistence(timeout: 5))
+        conversation.tap()
+        XCTAssertTrue(app.staticTexts["Pendulum simulator"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.sliders.firstMatch.waitForExistence(timeout: 10), "The visual's own controls are shown")
+        sleep(1)
+        capture("Chat canvas")
+        app.buttons["Expand canvas"].tap()
+        sleep(1)
+        capture("Chat canvas expanded")
     }
 
     /// Screenshots of the task and settings screens for visual review. A

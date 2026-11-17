@@ -1166,6 +1166,31 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
              "tools":[{"name":"hub_view_screen","description":"Read one consented frame"}]}
             """#.utf8)
         }
+        if request.httpMethod == "GET", url.path.hasPrefix("/api/hub/presentation"),
+           request.value(forHTTPHeaderField: "x-hub-session") == "fixture-work",
+           ProcessInfo.processInfo.arguments.contains("--hub-native-canvas-fixture") {
+            let id = "5b1c2a9e-7d3f-4c1a-9e2b-0f6d8a4c3e21"
+            if url.path == "/api/hub/presentation" {
+                return Data("{\"presentation\":{\"id\":\"\(id)\",\"title\":\"Pendulum simulator\",\"kind\":\"app\",\"createdAt\":1763359200000}}".utf8)
+            }
+            guard request.value(forHTTPHeaderField: "x-hub-presentation") == id else { return nil }
+            // A small interactive app like the one HUB made in the voice chat.
+            let html = #"""
+            <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+            body{margin:0;background:#0b101b;color:#bfcbff;font:14px -apple-system,sans-serif}
+            canvas{display:block;width:100%;height:170px}label{display:block;padding:4px 12px}</style></head><body>
+            <canvas id="c" width="600" height="340"></canvas>
+            <label>Length <input id="l" type="range" min="80" max="300" value="220"></label>
+            <script>
+            const c=document.getElementById('c'),x=c.getContext('2d'),l=document.getElementById('l');
+            let a=1.1,v=0;function step(){const L=+l.value;v+=-9.8/L*Math.sin(a)*0.6;v*=0.999;a+=v;
+            x.clearRect(0,0,600,340);const px=300+L*Math.sin(a),py=20+L*Math.cos(a);
+            x.strokeStyle='#a8b3cc';x.lineWidth=3;x.beginPath();x.moveTo(300,20);x.lineTo(px,py);x.stroke();
+            x.fillStyle='#bfcbff';x.beginPath();x.arc(px,py,18,0,7);x.fill();requestAnimationFrame(step)}step();
+            </script></body></html>
+            """#
+            return try? JSONSerialization.data(withJSONObject: ["document": html])
+        }
         if request.httpMethod == "GET", url.path == "/api/hub/goals",
            request.value(forHTTPHeaderField: "x-hub-goals") == "1" {
             return Data(#"""

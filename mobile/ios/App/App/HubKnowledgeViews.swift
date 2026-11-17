@@ -1434,19 +1434,41 @@ struct HubKnowledgeGraphView: View {
                     let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
                     context.fill(Path(ellipseIn: dot), with: .color(color(item.hue, id: item.groupID)))
                 }
+                // Labels never overlap: each one claims its space, and a label
+                // that would cover another is left out until you zoom further.
+                var taken: [CGRect] = []
                 for group in visibleGroups {
                     if overview, group.id == HubKnowledgeLayout.unassignedID || height < 120 { continue }
                     if selectDomain != nil && canSelectDomain(group.id) { continue }
                     guard let location = groupLabelPosition(group, points: points) else { continue }
                     var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
                     label.shading = .color(color(group.hue, id: group.id))
+                    let measured = label.measure(in: CGSize(width: 220, height: 40))
+                    let box = CGRect(x: location.x - measured.width / 2 - 3, y: location.y - measured.height / 2 - 1,
+                                     width: measured.width + 6, height: measured.height + 2)
+                    if taken.contains(where: { $0.intersects(box) }) { continue }
+                    taken.append(box)
                     context.draw(label, at: location)
                 }
                 if !overview, zoom >= 2.2 {
-                    for item in layout.points {
-                        guard let point = points[item.id], let title = byID[item.id]?.title,
-                              CGRect(origin: .zero, size: size).contains(point) else { continue }
-                        context.draw(Text(String(title.prefix(36))).font(.caption2), at: CGPoint(x: point.x, y: point.y + 11))
+                    let visible = CGRect(origin: .zero, size: size)
+                    let ordered = layout.points.sorted { first, second in
+                        func rank(_ item: HubKnowledgeLayout.Point) -> Int {
+                            item.id == focusID ? 0 : item.groupID == HubKnowledgeLayout.archiveID ? 2 : 1
+                        }
+                        return rank(first) < rank(second)
+                    }
+                    for item in ordered {
+                        guard let point = points[item.id], let title = byID[item.id]?.title, visible.contains(point) else { continue }
+                        let short = title.count > 28 ? String(title.prefix(27)) + "…" : title
+                        let label = context.resolve(Text(short).font(.caption2))
+                        let measured = label.measure(in: CGSize(width: 180, height: 30))
+                        let box = CGRect(x: point.x - measured.width / 2 - 3, y: point.y + 5,
+                                         width: measured.width + 6, height: measured.height + 2)
+                        if taken.contains(where: { $0.intersects(box) }) { continue }
+                        taken.append(box)
+                        context.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(HubWorkspacePalette.panel.opacity(0.85)))
+                        context.draw(label, at: CGPoint(x: box.midX, y: box.midY))
                     }
                 }
             }
@@ -1484,11 +1506,20 @@ struct HubKnowledgeGraphView: View {
                 }
             }
             if showsControls { HStack(spacing: 2) {
-                Button { scale = max(0.5, scale / 1.25) } label: { Image(systemName: "minus").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Zoom out")
-                Button("Fit") { scale = 1; offset = .zero }.frame(minWidth: 44, minHeight: 44)
-                Button { scale = min(4, scale * 1.25) } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Zoom in")
+                // The whole 44-point square is tappable, not only the glyph.
+                Button { scale = max(0.5, scale / 1.25) } label: {
+                    Image(systemName: "minus").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Zoom out")
+                Button { scale = 1; offset = .zero } label: {
+                    Text("Fit").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Fit graph")
+                Button { scale = min(4, scale * 1.25) } label: {
+                    Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Zoom in")
+                .accessibilityValue("\(Int((min(4, max(0.5, scale)) * 100).rounded()))%")
             }
             .buttonStyle(.plain)
             .font(.caption)

@@ -457,7 +457,7 @@ struct HubHomeView: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     connectionRow
                     section("Knowledge", actionLabel: "Explore knowledge", open: showKnowledge) {
