@@ -1384,6 +1384,7 @@ struct HubKnowledgeGraphView: View {
             .padding(4)
         }
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("3D Knowledge graph")
         .accessibilityHint("Drag to rotate. Use the record list to browse all notes.")
     }
@@ -1529,6 +1530,7 @@ struct HubKnowledgeGraphView: View {
             }
         }
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Knowledge graph")
     }
 

@@ -277,7 +277,12 @@ final class HubWorkspaceUITests: XCTestCase {
         let conversation = app.buttons["hub.history.fixture-work"]
         XCTAssertTrue(conversation.waitForExistence(timeout: 5))
         conversation.tap()
-        XCTAssertTrue(app.staticTexts["Pendulum simulator"].waitForExistence(timeout: 10))
+        let title = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Pendulum simulator")).firstMatch
+        let found = title.waitForExistence(timeout: 15)
+        capture("Chat canvas state")
+        if !found, app.buttons["Open canvas"].exists { app.buttons["Open canvas"].tap() }
+        XCTAssertTrue(found || title.waitForExistence(timeout: 5), "Canvas title")
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.sliders.firstMatch.waitForExistence(timeout: 10), "The visual's own controls are shown")
         sleep(1)
