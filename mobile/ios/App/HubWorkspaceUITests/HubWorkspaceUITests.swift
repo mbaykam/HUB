@@ -240,6 +240,10 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["hub.chat.send"].isEnabled)
         XCTAssertEqual(app.webViews.count, 0)
         capture("Conversation after Stop")
+        app.buttons["Trajectory"].tap()
+        sleep(1)
+        capture("Trajectory")
+        app.buttons["Chat"].tap()
 
         more.tap()
         app.buttons["Conversation outputs"].tap()

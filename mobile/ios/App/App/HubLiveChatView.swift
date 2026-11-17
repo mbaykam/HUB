@@ -473,10 +473,12 @@ struct HubLiveChatView: View {
                     .disabled(historyLoading || connectionLost)
                 }
                 let entries = olderActivity + (snapshot?.activity ?? [])
-                if entries.isEmpty { Text("No recorded activity").foregroundStyle(.secondary) }
-                ForEach(entries) { item in
-                    activityRow(item)
-                    Divider()
+                let turns = HubTrajectory.turns(messages: olderMessages + (snapshot?.messages ?? []), activity: entries,
+                                                usage: olderUsage.merging(snapshot?.usageByTurn ?? [:]) { $0.combining($1) })
+                if entries.isEmpty && turns.isEmpty { Text("No recorded activity").foregroundStyle(.secondary) }
+                if !turns.isEmpty { HubTrajectorySummary(turns: turns, model: (selectedModel ?? snapshot?.model)?.model) }
+                ForEach(turns) { turn in
+                    HubTrajectoryTurnCard(turn: turn, running: snapshot?.running == true && turn.id == turns.last?.id)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2000,6 +2002,211 @@ struct HubZoomableImage: UIViewRepresentable {
                 let size = CGSize(width: scroll.bounds.width / 2.5, height: scroll.bounds.height / 2.5)
                 scroll.zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height), animated: true)
             }
+        }
+    }
+}
+
+/// The Trajectory tab: what happened in each turn, in order.
+enum HubTrajectory {
+    struct Step: Identifiable {
+        enum Kind { case tool, instructions, context, retry, command, failure }
+        let id: Int
+        let kind: Kind
+        let title: String
+        let rawName: String?
+        let detail: String?
+        let result: String?
+        let failed: Bool
+    }
+
+    struct Turn: Identifiable {
+        let id: Int
+        let number: Int
+        let prompt: String?
+        let reply: String?
+        let steps: [Step]
+        let usage: HubChatTurnUsage?
+        var toolCount: Int { steps.filter { $0.kind == .tool }.count }
+        var failures: Int { steps.filter(\.failed).count }
+    }
+
+    static func turns(messages: [HubChatMessage], activity: [HubChatActivity], usage: [Int: HubChatTurnUsage]) -> [Turn] {
+        let asks = messages.compactMap { message -> (seq: Int, message: HubChatMessage)? in
+            guard message.role == "user", let seq = Int(message.id) else { return nil }
+            return (seq, message)
+        }.sorted { $0.seq < $1.seq }
+        guard !asks.isEmpty || !activity.isEmpty else { return [] }
+        let starts = asks.map(\.seq)
+        func owner(_ sequence: Int) -> Int { starts.last { $0 < sequence } ?? 0 }
+        let grouped = Dictionary(grouping: activity.sorted { $0.sequence < $1.sequence }) { owner($0.sequence) }
+        let keys = Set(starts).union(grouped.keys).sorted()
+        return keys.enumerated().map { index, key in
+            let ask = asks.first { $0.seq == key }?.message
+            let next = starts.first { $0 > key } ?? Int.max
+            let reply = messages.last {
+                $0.role == "assistant" && (Int($0.id).map { $0 > key && $0 < next } ?? ($0.turn != nil && $0.turn == ask?.turn))
+            }?.text
+            return Turn(id: key, number: index + 1, prompt: ask?.text, reply: reply, steps: steps(grouped[key] ?? []),
+                        usage: ask?.turn.flatMap { usage[$0] })
+        }
+    }
+
+    /// Pairs each tool call with its result and names it in plain words.
+    static func steps(_ entries: [HubChatActivity]) -> [Step] {
+        var steps: [Step] = []
+        for entry in entries {
+            switch entry.title {
+            case "Tool result", "Tool failed":
+                if let index = steps.lastIndex(where: { $0.kind == .tool && $0.result == nil }) {
+                    let call = steps[index]
+                    steps[index] = Step(id: call.id, kind: .tool, title: call.title, rawName: call.rawName, detail: call.detail,
+                                        result: entry.detail ?? (entry.title == "Tool failed" ? "Failed" : "Done"),
+                                        failed: entry.title == "Tool failed" || entry.failed)
+                }
+            case "System prompt":
+                steps.append(Step(id: entry.sequence, kind: .instructions, title: "Instructions sent to the model", rawName: nil, detail: entry.detail, result: nil, failed: false))
+            case "Context updated":
+                steps.append(Step(id: entry.sequence, kind: .context, title: "Context refreshed", rawName: nil, detail: nil, result: nil, failed: false))
+            case "Waiting to retry model request", "Retrying model request":
+                steps.append(Step(id: entry.sequence, kind: .retry, title: entry.title == "Retrying model request" ? "Retried the model" : "Model busy; waiting to retry", rawName: nil, detail: entry.detail, result: nil, failed: false))
+            case "Command started", "Command finished", "Command failed":
+                steps.append(Step(id: entry.sequence, kind: .command, title: entry.title, rawName: nil, detail: entry.detail, result: nil, failed: entry.failed))
+            case "This turn failed":
+                steps.append(Step(id: entry.sequence, kind: .failure, title: "This turn failed", rawName: nil, detail: entry.detail, result: nil, failed: true))
+            default:
+                steps.append(Step(id: entry.sequence, kind: .tool, title: HubLiveSteps.describe(tool: entry.title), rawName: entry.title, detail: entry.detail, result: nil, failed: entry.failed))
+            }
+        }
+        // Context refreshes are noise once there are real steps.
+        return steps.count > 3 ? steps.filter { $0.kind != .context } : steps
+    }
+}
+
+struct HubTrajectorySummary: View {
+    let turns: [HubTrajectory.Turn]
+    let model: String?
+
+    var body: some View {
+        let tools = turns.reduce(0) { $0 + $1.toolCount }
+        let failures = turns.reduce(0) { $0 + $1.failures }
+        let tokens = turns.reduce(0) { $0 + ($1.usage.map { $0.input + $0.output } ?? 0) }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                stat("\(turns.count)", "turns")
+                stat("\(tools)", "tool calls")
+                stat("\(failures)", failures == 1 ? "failure" : "failures", warn: failures > 0)
+                if tokens > 0 { stat(HubChatModels.tokens(tokens), "tokens") }
+            }
+            if let model { Text(model).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func stat(_ value: String, _ label: String, warn: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.headline).foregroundStyle(warn ? Color.orange : Color.primary)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HubWorkspacePalette.border.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+struct HubTrajectoryTurnCard: View {
+    let turn: HubTrajectory.Turn
+    let running: Bool
+    @State private var expanded: Set<Int> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Turn \(turn.number)").font(.caption.weight(.semibold)).foregroundStyle(HubWorkspacePalette.accent)
+                Spacer()
+                Group {
+                    if running { Text("Working…") }
+                    else {
+                        Text([turn.toolCount > 0 ? "\(turn.toolCount) tools" : nil,
+                              turn.usage.map { HubChatModels.tokens($0.input + $0.output) + " tokens" }]
+                            .compactMap { $0 }.joined(separator: " · "))
+                    }
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let prompt = turn.prompt, !prompt.isEmpty {
+                Text(prompt).font(.subheadline.weight(.medium)).lineLimit(3)
+            }
+            if !turn.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(turn.steps.enumerated()), id: \.element.id) { index, step in
+                        stepRow(step, last: index == turn.steps.count - 1)
+                    }
+                }
+            }
+            if let reply = turn.reply, !reply.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "text.bubble").font(.caption).foregroundStyle(.secondary)
+                    Text(reply).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+        }
+        .padding(12)
+        .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(HubWorkspacePalette.border.opacity(0.06)))
+    }
+
+    private func icon(_ step: HubTrajectory.Step) -> (String, Color) {
+        if step.failed { return ("exclamationmark.circle.fill", .orange) }
+        switch step.kind {
+        case .tool: return (step.result == nil && running ? "circle.dotted" : "checkmark.circle.fill", HubWorkspacePalette.accent)
+        case .instructions: return ("doc.text", .secondary)
+        case .context: return ("arrow.triangle.2.circlepath", .secondary)
+        case .retry: return ("arrow.clockwise", .orange)
+        case .command: return ("terminal", .secondary)
+        case .failure: return ("xmark.octagon.fill", .red)
+        }
+    }
+
+    private func stepRow(_ step: HubTrajectory.Step, last: Bool) -> some View {
+        let open = expanded.contains(step.id)
+        let (symbol, tint) = icon(step)
+        let hasDetail = (step.detail?.isEmpty == false) || (step.result?.isEmpty == false)
+        return HStack(alignment: .top, spacing: 10) {
+            VStack(spacing: 0) {
+                Image(systemName: symbol).font(.footnote).foregroundStyle(tint).frame(width: 18, height: 18)
+                if !last { Rectangle().fill(HubWorkspacePalette.border.opacity(0.12)).frame(width: 1.5).frame(maxHeight: .infinity) }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Button {
+                    guard hasDetail else { return }
+                    if open { expanded.remove(step.id) } else { expanded.insert(step.id) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(step.title).font(.footnote.weight(step.kind == .tool ? .semibold : .regular))
+                            .foregroundStyle(step.failed ? Color.orange : Color.primary)
+                        if let raw = step.rawName, raw != step.title {
+                            Text(raw).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        if hasDetail { Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary) }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if open {
+                    if let detail = step.detail, !detail.isEmpty {
+                        Text(detail.count > 4000 ? String(detail.prefix(4000)) + "…" : detail)
+                            .font(.caption.monospaced()).textSelection(.enabled)
+                            .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(HubWorkspacePalette.border.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    if let result = step.result, !result.isEmpty, result != "Done" {
+                        Text(result).font(.caption.monospaced()).foregroundStyle(step.failed ? Color.orange : Color.secondary).textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(.bottom, last ? 0 : 10)
         }
     }
 }
