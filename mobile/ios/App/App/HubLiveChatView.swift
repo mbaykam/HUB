@@ -24,7 +24,7 @@ struct HubLiveChatView: View {
     let composerAction: HubNativeChatRequest.ComposerAction?
     let preferences: HubChatPreferences
     let renamed: (String) -> Void
-    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var activity = HubAppActivity.shared
     @FocusState private var composerFocused: Bool
     @StateObject private var dictation = HubDictation()
     @State private var dictationBase = ""
@@ -138,17 +138,17 @@ struct HubLiveChatView: View {
             }
             if !visualExpanded { composer }
         }
-        .task(id: scenePhase == .active && tab == .chat) {
-            if scenePhase == .active && tab == .chat { await followPresentations() }
+        .task(id: activity.isActive && tab == .chat) {
+            if activity.isActive && tab == .chat { await followPresentations() }
         }
-        .task(id: VisualLoad(id: scenePhase == .active ? requestedVisual?.id : nil, retry: visualRetry)) {
-            if scenePhase == .active, let requestedVisual, loadedVisual?.summary.id != requestedVisual.id {
+        .task(id: VisualLoad(id: activity.isActive ? requestedVisual?.id : nil, retry: visualRetry)) {
+            if activity.isActive, let requestedVisual, loadedVisual?.summary.id != requestedVisual.id {
                 await loadVisual(requestedVisual)
             }
         }
         .task(id: attempt) { await follow() }
-        .onChange(of: scenePhase) { phase in
-            if phase == .active && connectionLost { reconnect() }
+        .onChange(of: activity.isActive) { active in
+            if active && connectionLost { reconnect() }
         }
         .task(id: historyRequest) {
             if historyRequest != 0 { await loadEarlierMessages() }

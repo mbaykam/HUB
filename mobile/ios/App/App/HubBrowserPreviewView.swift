@@ -8,7 +8,7 @@ struct HubBrowserPreviewView: View {
     let api: HubConversationAPI
     let conversations: [HubConversationChoice]
     let visible: Bool
-    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var activity = HubAppActivity.shared
     @State private var tabs: [HubBrowserTab] = []
     @State private var selection: String?
     @State private var image: UIImage?
@@ -17,7 +17,7 @@ struct HubBrowserPreviewView: View {
     @State private var zoomed = false
 
     private var tab: HubBrowserTab? { tabs.first { $0.id == selection } ?? tabs.first }
-    private var polling: Bool { scenePhase == .active && (visible || expanded) }
+    private var polling: Bool { activity.isActive && (visible || expanded) }
 
     var body: some View {
         Group {
