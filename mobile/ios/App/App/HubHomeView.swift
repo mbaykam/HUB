@@ -188,8 +188,14 @@ extension View {
         .frame(minHeight: 44)
         .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
+}
 
-    /// Any scroll of this content puts the keyboard away.
+struct HomeScrollOffset: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
+}
+
+extension View {
     /// The composer is a UIKit text view outside the scroll view, which the
     /// system's scroll dismissal does not always reach, so a drag on the page
     /// also clears its focus directly.
@@ -246,6 +252,8 @@ struct HubHomeView: View {
 
     @State private var panel: Panel?
     @State private var draggingPanel: Panel?
+    @State private var homeScrollOffset: CGFloat?
+    @State private var keyboardShownAt = Date.distantPast
     @State private var panelDrag: CGFloat = 0
     @StateObject private var dictation = HubDictation()
     @State private var dictationBase = ""
@@ -660,8 +668,24 @@ struct HubHomeView: View {
                 .padding(.top, 5)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: HomeScrollOffset.self, value: geometry.frame(in: .named("homeScroll")).minY)
+                })
             }
-            // Scrolling the page puts the keyboard away, like Messages.
+            .coordinateSpace(name: "homeScroll")
+            // Scrolling the page puts the keyboard away, like Messages. The
+            // scroll position is the signal: it moves whichever way the page
+            // is dragged, and iOS's own scroll as the keyboard appears is
+            // ignored for a moment after focus.
+            .onPreferenceChange(HomeScrollOffset.self) { offset in
+                defer { homeScrollOffset = offset }
+                guard composerFocused || todoFocused, let last = homeScrollOffset, abs(offset - last) > 4,
+                      Date().timeIntervalSince(keyboardShownAt) > 0.7 else { return }
+                hideKeyboard()
+            }
+            .onChange(of: composerFocused || todoFocused) { focused in
+                if focused { keyboardShownAt = Date() }
+            }
             .hubDismissesKeyboardOnScroll(hideKeyboard)
             composer
         }
