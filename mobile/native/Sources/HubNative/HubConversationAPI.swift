@@ -1971,6 +1971,16 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubCharacterSettings.self, from: data)
     }
 
+    /// Adds earlier HUB conversations to the Knowledge queue. Conversations
+    /// already queued or organized are counted as duplicates, not repeated.
+    public func queueEarlierConversationsForKnowledge() async throws -> HubKnowledgeHistoryImport {
+        let body = try JSONEncoder().encode(["action": "import-hub"])
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, operationTimeout: 150)
+        let value = try JSONDecoder().decode(HubKnowledgeHistoryImport.self, from: data)
+        guard value.queued >= 0, value.duplicates >= 0, value.skipped >= 0 else { throw HubAttachmentError.invalidResponse }
+        return value
+    }
+
     /// The complete request HUB last sent to a model for this character.
     /// Reading it never calls a model.
     public func characterRequest(id: String) async throws -> HubCharacterRequest {

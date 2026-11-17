@@ -745,6 +745,7 @@ struct HubKnowledgeArchivesView: View {
     @State private var pickerOpen = false
     @State private var confirmation: Mutation?
     @State private var stale = false
+    @State private var confirmQueueHistory = false
 
     private enum Mutation: String, Identifiable {
         case admit, withdraw
@@ -796,9 +797,28 @@ struct HubKnowledgeArchivesView: View {
             }
     }
 
+    private func queueHistory() async {
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await api.queueEarlierConversationsForKnowledge()
+            notice = "\(result.queued) queued · \(result.duplicates) already known · \(result.skipped) skipped"
+            await changed()
+        } catch {
+            notice = "HUB could not queue your earlier conversations. Check your connection and try again."
+        }
+    }
+
     private var archiveList: some View {
         Section {
             Button("Add a private archive") { pickerOpen = true }
+            Button("Queue earlier HUB conversations") { confirmQueueHistory = true }
+                .alert("Queue earlier HUB conversations?", isPresented: $confirmQueueHistory) {
+                    Button("Queue conversations") { Task { await queueHistory() } }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("HUB adds your earlier conversations to the Knowledge queue. Organizing them may use your Knowledge AI budget.")
+                }
             Button("Refresh archives") { Task { await loadBatches() } }
             if batches.isEmpty && !busy { Text("No private archives").foregroundStyle(.secondary) }
             ForEach(batches) { batch in

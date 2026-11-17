@@ -18,6 +18,13 @@ public struct HubCharacterRequest: Decodable, Equatable, Sendable {
     public let retention: String
 }
 
+/// Result of queueing earlier HUB conversations for Knowledge.
+public struct HubKnowledgeHistoryImport: Decodable, Equatable, Sendable {
+    public let queued: Int
+    public let duplicates: Int
+    public let skipped: Int
+}
+
 /// What HUB hands the phone for one voice-typing take: the fixed recognition
 /// endpoint and the first socket message, which carries a key that expires in
 /// minutes. The stored Soniox key never reaches the phone.

@@ -1188,6 +1188,21 @@ final class HubConversationTests: XCTestCase {
         }
     }
 
+    func testQueueingEarlierConversationsForKnowledgeReportsWhatHUBDid() async throws {
+        let api = try client()
+        CatalogFixture.reply = #"{"queued":4,"duplicates":12,"skipped":1}"#
+        let result = try await api.queueEarlierConversationsForKnowledge()
+        XCTAssertEqual(result, HubKnowledgeHistoryImport(queued: 4, duplicates: 12, skipped: 1))
+        let request = try XCTUnwrap(CatalogFixture.request)
+        XCTAssertEqual(request.url?.absoluteString, "https://hub.example.com/api/hub/memory")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+        CatalogFixture.reply = #"{"queued":-1,"duplicates":0,"skipped":0}"#
+        do { _ = try await api.queueEarlierConversationsForKnowledge(); XCTFail("Negative counts are not a HUB result") } catch {
+            XCTAssertEqual(error as? HubAttachmentError, .invalidResponse)
+        }
+    }
+
     func testVoiceTypingKeepsConfirmedWordsAndReplacesWordsStillBeingRecognized() throws {
         var transcript = HubDictationTranscript()
         try transcript.receive(Data(#"{"tokens":[{"text":"Bugün","is_final":true},{"text":" hava","is_final":false}]}"#.utf8))
