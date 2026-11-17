@@ -311,6 +311,21 @@ final class HubWorkspaceUITests: XCTestCase {
         // A running voice call stays in reach above its chat.
         XCTAssertTrue(app.buttons["hub.voice.bar"].exists)
         XCTAssertTrue(app.buttons["End voice call"].exists)
+
+        // In a chat, the right edge opens the tools and the left edge the history;
+        // a second left-edge swipe goes back Home.
+        func edgeSwipe(from x: CGFloat, to endX: CGFloat) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: endX, dy: 0.55)))
+        }
+        edgeSwipe(from: 0.995, to: 0.3)
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
+        app.buttons["Close panel"].tap()
+        edgeSwipe(from: 0.005, to: 0.7)
+        XCTAssertTrue(app.buttons["New chat"].waitForExistence(timeout: 5))
+        capture("History over a chat")
+        edgeSwipe(from: 0.005, to: 0.7)
+        XCTAssertTrue(app.buttons["Explore knowledge"].waitForExistence(timeout: 5))
     }
 
     /// Screenshots of the task and settings screens for visual review. A

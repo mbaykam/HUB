@@ -245,6 +245,8 @@ struct HubHomeView: View {
     }
 
     @State private var panel: Panel?
+    @State private var draggingPanel: Panel?
+    @State private var panelDrag: CGFloat = 0
     @StateObject private var dictation = HubDictation()
     @State private var dictationBase = ""
     @State private var knowledgeOpen = false
@@ -331,11 +333,25 @@ struct HubHomeView: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                mainLayers
+                panelLayer(width: min(geometry.size.width * 0.85, 380))
+            }
+            .simultaneousGesture(edgeSwipe(size: geometry.size))
+        }
+        .foregroundStyle(.primary)
+        .tint(accent)
+        .preferredColorScheme(chatPreferences.appearance.colorScheme)
+        .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
+    }
+
+    private var mainLayers: some View {
         ZStack {
             workspaceContent
                 .opacity(selectedChat == nil ? 1 : 0)
-                .allowsHitTesting(selectedChat == nil)
-                .accessibilityHidden(selectedChat != nil)
+                .allowsHitTesting(selectedChat == nil && panel == nil)
+                .accessibilityHidden(selectedChat != nil || panel != nil)
             if let selectedChat {
                 HubLiveChatView(chat: selectedChat.request.choice, api: selectedChat.api,
                                 back: { unsent in
@@ -500,33 +516,84 @@ struct HubHomeView: View {
         }
     }
 
-    private var workspaceContent: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: panel?.edge == .trailing ? .trailing : .leading) {
-                homeContent
-                    .accessibilityHidden(panel != nil)
-                if let panel {
-                    Button(action: closePanel) { Color.black.opacity(0.46) }
-                        .buttonStyle(.plain)
-                        .ignoresSafeArea()
-                        .accessibilityHidden(true)
-                    panelContent(panel)
-                        .frame(width: min(geometry.size.width * 0.85, 380))
-                        .transition(.move(edge: panel.edge))
-                }
+    private var workspaceContent: some View { homeContent }
+
+    private static let panelSpring = Animation.spring(response: 0.34, dampingFraction: 0.86)
+    private static let edgeWidth: CGFloat = 30
+
+    /// The side panels float above Home and an open chat alike. While a
+    /// finger drags from the screen edge the panel follows it.
+    @ViewBuilder private func panelLayer(width: CGFloat) -> some View {
+        if let shown = panel ?? draggingPanel {
+            let offset = panelOffset(shown, width: width)
+            let progress = max(0, min(1, 1 - abs(offset) / width))
+            ZStack(alignment: shown.edge == .trailing ? .trailing : .leading) {
+                Color.black.opacity(0.46 * progress)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { closePanel() }
+                    .accessibilityHidden(true)
+                panelContent(shown)
+                    .frame(width: width)
+                    .offset(x: offset)
+                    .shadow(color: .black.opacity(0.25 * progress), radius: 18)
+                    .transition(.move(edge: shown.edge))
             }
-            .simultaneousGesture(DragGesture(minimumDistance: 22).onEnded { value in
-                let dx = value.translation.width
-                guard abs(dx) > 55, abs(dx) > abs(value.translation.height) * 1.5 else { return }
-                if let panel {
-                    if (panel == .history && dx < 0) || (panel == .tools && dx > 0) { closePanel() }
-                } else if dx > 0, value.startLocation.x < 36 {
-                    showPanel(.history)
-                } else if dx < 0, value.startLocation.x > geometry.size.width - 36 {
-                    showPanel(.tools)
-                }
-            })
         }
+    }
+
+    private func panelOffset(_ shown: Panel, width: CGFloat) -> CGFloat {
+        if panel == nil {
+            // Opening from the edge: the panel slides in with the finger.
+            return shown == .history ? -width + min(max(panelDrag, 0), width) : width - min(max(-panelDrag, 0), width)
+        }
+        // Closing: dragging back toward its own edge.
+        return shown == .history ? min(0, panelDrag) : max(0, panelDrag)
+    }
+
+    /// Left edge: chat history. Right edge: workspace tools, in a chat too.
+    /// With history open over a chat, a left-edge swipe goes back Home.
+    private func edgeSwipe(size: CGSize) -> some Gesture {
+        let width = min(size.width * 0.85, 380)
+        return DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                let dx = value.translation.width, dy = value.translation.height
+                if panel == nil && draggingPanel == nil {
+                    guard abs(dx) > abs(dy) * 1.2 else { return }
+                    if value.startLocation.x < Self.edgeWidth && dx > 0 { beginPanelDrag(.history) }
+                    else if value.startLocation.x > size.width - Self.edgeWidth && dx < 0 { beginPanelDrag(.tools) }
+                    else { return }
+                }
+                if draggingPanel != nil || (panel != nil && abs(dx) > abs(dy)) { panelDrag = dx }
+            }
+            .onEnded { value in
+                let dx = value.translation.width, predicted = value.predictedEndTranslation.width
+                if let opening = draggingPanel {
+                    let travel = opening == .history ? max(dx, predicted) : -min(dx, predicted)
+                    withAnimation(Self.panelSpring) {
+                        if travel > width * 0.3 { panel = opening }
+                        draggingPanel = nil
+                        panelDrag = 0
+                    }
+                    return
+                }
+                guard let open = panel else { panelDrag = 0; return }
+                if open == .history, selectedChat != nil, value.startLocation.x < Self.edgeWidth, dx > 50, abs(dx) > abs(value.translation.height) {
+                    // Second swipe from the left edge: leave the chat for Home.
+                    selectedChat = nil
+                    closePanel()
+                    return
+                }
+                let travel = open == .history ? -min(dx, predicted) : max(dx, predicted)
+                if travel > width * 0.3 { closePanel() }
+                else { withAnimation(Self.panelSpring) { panelDrag = 0 } }
+            }
+    }
+
+    private func beginPanelDrag(_ destination: Panel) {
+        hideKeyboard()
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        draggingPanel = destination
     }
 
     private var homeContent: some View {
@@ -704,14 +771,14 @@ struct HubHomeView: View {
 
     private func showPanel(_ destination: Panel) {
         hideKeyboard()
-        withAnimation(.easeInOut(duration: 0.2)) { panel = destination }
+        withAnimation(Self.panelSpring) { panelDrag = 0; panel = destination }
     }
 
     private func closePanel() {
         historyQuery = ""
         historyResults = nil
         historyFailed = false
-        withAnimation(.easeInOut(duration: 0.2)) { panel = nil }
+        withAnimation(Self.panelSpring) { panel = nil; panelDrag = 0; draggingPanel = nil }
     }
 
     private func dismissKeyboard(then action: () -> Void) {
@@ -1205,14 +1272,16 @@ struct HubHomeView: View {
     }
 
     private func newChat(workspaceID: String? = nil, action: HubNativeChatRequest.ComposerAction? = nil) async {
-        guard selectedChat == nil, !model.sending, !creatingChat, let api = chatAPI() else { return }
+        guard !model.sending, !creatingChat, let api = chatAPI() else { return }
+        // Started from Home or from the drawer over a chat; give up if the user opens another chat meanwhile.
+        let startedIn = selectedChat?.request.id
         creatingChat = true
         let initialDraft = action == nil ? "" : model.draft
         defer { creatingChat = false }
         do {
             let id = try await api.createChat(workspaceID: workspaceID)
             guard chatAPI() === api else { return }
-            guard selectedChat == nil else { return }
+            guard selectedChat?.request.id == startedIn else { return }
             if action != nil, model.draft == initialDraft { model.draft = "" }
             showChat(HubNativeChatRequest(choice: HubConversationChoice(sessionId: id, title: "New chat", updatedAt: 0),
                                           initialDraft: initialDraft, composerAction: action))
