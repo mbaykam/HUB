@@ -20,7 +20,71 @@ final class HubHomeModel: ObservableObject {
     @Published var work: HubHomeWork?
     @Published var workUnavailable = false
     @Published var hasActiveVoice = false
+    @Published var voiceCall: HubVoiceCallSummary?
     @Published var openNativeChat: HubNativeChatRequest?
+}
+
+/// What the chat's voice bar shows while a call is running.
+struct HubVoiceCallSummary: Equatable {
+    var sessionID: String?
+    var status: String
+    var muted: Bool
+}
+
+enum HubVoiceCallControl {
+    case open, mute, end
+}
+
+/// A slim bar that keeps a running voice call in reach while reading its chat.
+struct HubVoiceCallBar: View {
+    let call: HubVoiceCallSummary
+    let inThisChat: Bool
+    let control: (HubVoiceCallControl) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { control(.open) } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: call.muted ? "mic.slash.fill" : "waveform")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(HubWorkspacePalette.onAccent)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.green))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(inThisChat ? "Voice call · this chat" : "Voice call")
+                            .font(.subheadline.weight(.semibold))
+                        Text(call.muted ? "Muted" : call.status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Open voice controls")
+            .accessibilityIdentifier("hub.voice.bar")
+            Button { control(.mute) } label: {
+                Image(systemName: call.muted ? "mic.slash" : "mic")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(call.muted ? "Unmute" : "Mute")
+            Button { control(.end) } label: {
+                Image(systemName: "phone.down.fill")
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Color.red))
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("End voice call")
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        .background(Color.green.opacity(0.12))
+        .overlay(alignment: .bottom) { Divider() }
+    }
 }
 
 struct HubNativeChatRequest: Equatable {
@@ -124,6 +188,15 @@ extension View {
         .frame(minHeight: 44)
         .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
+
+    /// Any scroll of this content puts the keyboard away.
+    @ViewBuilder func hubDismissesKeyboardOnScroll(_ hide: @escaping () -> Void) -> some View {
+        if #available(iOS 16.0, *) {
+            scrollDismissesKeyboard(.immediately)
+        } else {
+            simultaneousGesture(DragGesture(minimumDistance: 16).onChanged { _ in hide() })
+        }
+    }
 }
 
 extension HubChatPreferences.Appearance {
@@ -156,6 +229,7 @@ struct HubHomeView: View {
     var chatAPI: () -> HubConversationAPI?
     var readTasks: () async throws -> HubWorkspaceTasks
     var appearanceChanged: (HubChatPreferences.Appearance) -> Void
+    var voiceControl: (HubVoiceCallControl) -> Void = { _ in }
 
     private enum Panel {
         case history
@@ -209,7 +283,6 @@ struct HubHomeView: View {
     @State private var bookmarks: HubChatBookmarks?
     @State private var bookmarksError = false
     @State private var bookmarksBusy = false
-    @State private var pinnedExpanded = false
     @State private var creatingChat = false
     @State private var workspaces: [HubWorkspaceItem]?
     @State private var archivedSessions: Set<String> = []
@@ -267,6 +340,17 @@ struct HubHomeView: View {
                     .id(selectedChat.request.choice.sessionId)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let call = model.voiceCall {
+                HubVoiceCallBar(call: call, inThisChat: call.sessionID != nil && call.sessionID == selectedChat?.request.choice.sessionId) { control in
+                    composerFocused = false
+                    todoFocused = false
+                    voiceControl(control)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.voiceCall == nil)
         .foregroundStyle(.primary)
         .tint(accent)
         .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
@@ -446,12 +530,6 @@ struct HubHomeView: View {
                 Spacer(minLength: 4)
                 greeting
                 Spacer(minLength: 4)
-                if composerFocused || todoFocused {
-                    Button(action: hideKeyboard) {
-                        Image(systemName: "keyboard.chevron.compact.down").frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Hide keyboard")
-                }
                 Button { showPanel(.tools) } label: {
                     Image(systemName: "sidebar.right").frame(width: 44, height: 44)
                 }
@@ -498,6 +576,8 @@ struct HubHomeView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
+            // Scrolling the page puts the keyboard away, like Messages.
+            .hubDismissesKeyboardOnScroll(hideKeyboard)
             composer
         }
     }
@@ -630,7 +710,7 @@ struct HubHomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 if destination == .history {
-                    Text("Chat history").font(.headline).accessibilityAddTraits(.isHeader)
+                    Text("Chats").font(.title3.bold()).accessibilityAddTraits(.isHeader)
                 } else {
                     Button {
                         closePanel()
@@ -715,25 +795,43 @@ struct HubHomeView: View {
 
     private var historyPanel: some View {
         let query = String(historyQuery.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 10) {
             TextField("Search chats", text: $historyQuery)
                 .hubSearchField()
                 .submitLabel(.search)
                 .disabled(model.connection != .connected)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+            Button { Task { await newChat() } } label: {
+                Label("New chat", systemImage: "square.and.pencil")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(uiColor: .systemBackground))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(creatingChat || model.connection != .connected)
+            .opacity(creatingChat || model.connection != .connected ? 0.5 : 1)
+            ScrollView(showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 2) {
                     if query.isEmpty {
                         pinnedHistory
-                        Text("Recents").font(.subheadline.bold()).foregroundStyle(.secondary).padding(.vertical, 10)
                     }
                     if let results = query.isEmpty ? model.conversations : historyResults?.conversations {
-                        let conversations = results.filter { !archivedSessions.contains($0.sessionId) }
-                        if conversations.isEmpty {
+                        let pinnedIDs = query.isEmpty ? Set(bookmarks?.sessionIds ?? []) : []
+                        let conversations = results.filter { !archivedSessions.contains($0.sessionId) && !pinnedIDs.contains($0.sessionId) }
+                        if conversations.isEmpty && pinnedIDs.isEmpty {
                             Text(query.isEmpty ? "No conversations yet" : "No matching conversations")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                .padding(.vertical, 12)
                         }
-                        ForEach(conversations, id: \.sessionId) { chat in
-                            historyRow(chat)
+                        if query.isEmpty {
+                            ForEach(historyGroups(conversations)) { group in
+                                historySectionLabel(group.title)
+                                ForEach(group.chats, id: \.sessionId) { chat in historyRow(chat) }
+                            }
+                        } else {
+                            ForEach(conversations, id: \.sessionId) { chat in
+                                historyRow(chat)
+                            }
                         }
                         if !query.isEmpty, historyResults?.hasMore == true {
                             Text("Narrow your search to see more matches.").font(.footnote).foregroundStyle(.secondary)
@@ -748,24 +846,16 @@ struct HubHomeView: View {
                     if query.isEmpty { workspaceHistory }
                 }
             }
-            Button { workspaceDirectoryOpen = true } label: {
-                Label("New workspace", systemImage: "folder.badge.plus").frame(maxWidth: .infinity, minHeight: 44)
+            Divider()
+            HStack(spacing: 8) {
+                historyFooterButton("Voice calls", icon: "waveform") {
+                    closePanel()
+                    voiceHistoryOpen = true
+                }
+                historyFooterButton("New workspace", icon: "folder.badge.plus") { workspaceDirectoryOpen = true }
             }
-            .buttonStyle(.bordered)
             .disabled(model.connection != .connected)
-            Button { Task { await newChat() } } label: {
-                Label("New Session", systemImage: "plus.square").frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .buttonStyle(.bordered)
-            .disabled(creatingChat || model.connection != .connected)
-            Button {
-                closePanel()
-                voiceHistoryOpen = true
-            } label: {
-                Label("Voice History", systemImage: "waveform").frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .buttonStyle(.plain)
-            .disabled(model.connection != .connected)
+            .padding(.bottom, 4)
         }
         .task(id: model.connection == .connected) { await loadBookmarks() }
         .task(id: WorkspaceRequest(connected: model.connection == .connected, attempt: workspaceAttempt)) {
@@ -792,7 +882,7 @@ struct HubHomeView: View {
 
     private var workspaceHistory: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Workspaces").font(.subheadline.bold()).foregroundStyle(.secondary).padding(.vertical, 10)
+            historySectionLabel("Workspaces")
             if let workspaceError {
                 Text(workspaceError).font(.footnote).foregroundStyle(.secondary)
                 Button("Refresh workspaces") { workspaceAttempt += 1 }.frame(minHeight: 44)
@@ -942,38 +1032,110 @@ struct HubHomeView: View {
         }
     }
 
-    private var pinnedHistory: some View {
-        DisclosureGroup(isExpanded: $pinnedExpanded) {
-            if let bookmarks {
-                let byID = Dictionary(uniqueKeysWithValues: (model.conversations ?? []).map { ($0.sessionId, $0) })
-                let visible = bookmarks.sessionIds.filter { !archivedSessions.contains($0) }
-                if visible.isEmpty {
-                    Text("No pinned conversations").font(.footnote).foregroundStyle(.secondary).padding(.vertical, 8)
-                }
+    /// Pinned chats sit on top only when there are some; pin and unpin from a row's long-press menu.
+    @ViewBuilder private var pinnedHistory: some View {
+        if let bookmarks {
+            let byID = Dictionary((model.conversations ?? []).map { ($0.sessionId, $0) }, uniquingKeysWith: { first, _ in first })
+            let visible = bookmarks.sessionIds.filter { !archivedSessions.contains($0) }
+            if !visible.isEmpty {
+                historySectionLabel("Pinned")
                 ForEach(visible, id: \.self) { id in
                     historyRow(byID[id] ?? HubConversationChoice(sessionId: id, title: "Pinned conversation", updatedAt: 0))
                 }
             }
-            if bookmarksError { Button("Retry loading pinned chats") { Task { await loadBookmarks() } } }
-        } label: {
-            HStack {
-                Text("Pinned").font(.headline)
-                Spacer()
-                if let bookmarks { Text("\(bookmarks.sessionIds.filter { !archivedSessions.contains($0) }.count)").foregroundStyle(.secondary) }
-                Image(systemName: "star")
-            }
-            .frame(minHeight: 44)
+        }
+        if bookmarksError {
+            Button("Retry loading pinned chats") { Task { await loadBookmarks() } }
+                .font(.footnote)
+                .frame(minHeight: 44)
         }
     }
 
+    private struct HistoryGroup: Identifiable {
+        let title: String
+        let chats: [HubConversationChoice]
+        var id: String { title }
+    }
+
+    private func historyGroups(_ chats: [HubConversationChoice]) -> [HistoryGroup] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        let week = calendar.date(byAdding: .day, value: -7, to: today) ?? today
+        var buckets: [[HubConversationChoice]] = [[], [], [], []]
+        for chat in chats {
+            let date = Date(timeIntervalSince1970: chat.updatedAt / 1_000)
+            let index = chat.updatedAt <= 0 ? 3 : date >= today ? 0 : date >= yesterday ? 1 : date >= week ? 2 : 3
+            buckets[index].append(chat)
+        }
+        let titles = ["Today", "Yesterday", "Previous 7 days", "Earlier"]
+        return titles.indices.compactMap { index in
+            buckets[index].isEmpty ? nil : HistoryGroup(title: titles[index], chats: buckets[index])
+        }
+    }
+
+    private func historySectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func historyFooterButton(_ title: LocalizedStringKey, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.footnote.weight(.medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(HubWorkspacePalette.border.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func historyTime(_ updatedAt: Double) -> String? {
+        guard updatedAt > 0 else { return nil }
+        let date = Date(timeIntervalSince1970: updatedAt / 1_000)
+        if Calendar.current.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
+        if Calendar.current.isDateInYesterday(date) { return String(localized: "Yesterday") }
+        return date.formatted(.dateTime.day().month(.abbreviated))
+    }
+
     private func historyRow(_ chat: HubConversationChoice, workspace: HubWorkspaceItem? = nil) -> some View {
-        HStack(spacing: 6) {
+        let pinned = bookmarks?.sessionIds.contains(chat.sessionId) == true
+        return HStack(spacing: 6) {
             Button { showChat(chat) } label: {
-                Text(chat.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: 10) {
+                    Image(systemName: pinned ? "pin.fill" : "bubble.left")
+                        .font(.caption)
+                        .foregroundStyle(pinned ? accent : HubWorkspacePalette.muted)
+                        .frame(width: 18)
+                    Text(chat.title)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let time = historyTime(chat.updatedAt) {
+                        Text(time).font(.caption2).foregroundStyle(.secondary).fixedSize()
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .accessibilityIdentifier("hub.history.\(chat.sessionId)")
+            .accessibilityLabel(pinned ? "\(chat.title), pinned" : chat.title)
+            .accessibilityAction(named: pinned ? "Unpin" : "Pin") {
+                Task { await setPinned(chat.sessionId, pinned: !pinned) }
+            }
             .contextMenu {
+                if bookmarks != nil {
+                    Button { Task { await setPinned(chat.sessionId, pinned: !pinned) } } label: {
+                        Label(pinned ? "Unpin" : "Pin to top", systemImage: pinned ? "pin.slash" : "pin")
+                    }
+                    .disabled(bookmarksBusy)
+                }
                 if let workspace {
                     let ids = workspace.sessionIds.filter { !archivedSessions.contains($0) }
                     if let index = ids.firstIndex(of: chat.sessionId) {
@@ -988,15 +1150,10 @@ struct HubHomeView: View {
                         }
                     }
                 }
-                Button("Archive conversation", role: .destructive) { sessionToArchive = chat }.disabled(workspaceBusy)
-            }
-            if let bookmarks {
-                let pinned = bookmarks.sessionIds.contains(chat.sessionId)
-                Button { Task { await setPinned(chat.sessionId, pinned: !pinned) } } label: {
-                    Image(systemName: pinned ? "star.fill" : "star").frame(width: 44, height: 44)
+                Button(role: .destructive) { sessionToArchive = chat } label: {
+                    Label("Archive conversation", systemImage: "archivebox")
                 }
-                .accessibilityLabel(pinned ? "Unpin \(chat.title)" : "Pin \(chat.title)")
-                .disabled(bookmarksBusy)
+                .disabled(workspaceBusy)
             }
         }
         .buttonStyle(.plain)

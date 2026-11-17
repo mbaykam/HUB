@@ -39,8 +39,9 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [closedMenu], timeout: 5), .completed)
 
         app.buttons["Chat history"].tap()
-        XCTAssertTrue(app.staticTexts["Recents"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Collect reading notes"].exists)
+        XCTAssertTrue(app.buttons["hub.history.fixture-work"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["New chat"].exists)
+        XCTAssertFalse(app.images["star"].exists)
         capture("Chat history")
         app.buttons["Close panel"].tap()
         app.buttons["Workspace tools"].tap()
@@ -60,13 +61,13 @@ final class HubWorkspaceUITests: XCTestCase {
 
         let composer = app.descendants(matching: .any)["hub.home.draft"].firstMatch
         composer.tap()
-        let hide = app.buttons["Hide keyboard"]
-        XCTAssertTrue(hide.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Hide keyboard"].exists, "Home puts the keyboard away by scrolling, not a button")
         composer.typeText("Fixture draft")
         XCTAssertEqual(composer.value as? String, "Fixture draft")
         capture("Composer keyboard")
-        hide.tap()
-        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: hide)
+        app.scrollViews.firstMatch.swipeDown()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 0"), object: app.keyboards)
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
         XCTAssertEqual(composer.value as? String, "Fixture draft")
     }
@@ -270,7 +271,7 @@ final class HubWorkspaceUITests: XCTestCase {
     /// and runs its own script.
     @MainActor
     func testChatShowsAnInteractiveVisualFromTheModel() {
-        let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture", "--hub-native-canvas-fixture"])
+        let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture", "--hub-native-canvas-fixture", "--hub-native-voice-bar-fixture"])
         let history = app.buttons["Chat history"]
         XCTAssertTrue(history.waitForExistence(timeout: 20))
         history.tap()
@@ -290,6 +291,17 @@ final class HubWorkspaceUITests: XCTestCase {
         app.buttons["Expand canvas"].tap()
         sleep(1)
         capture("Chat canvas expanded")
+        // Closing the visual leaves a card in the chat that opens it again.
+        app.buttons["Hide canvas"].tap()
+        let reopen = app.buttons["hub.chat.visual.reopen"]
+        if !reopen.waitForExistence(timeout: 3) { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(reopen.waitForExistence(timeout: 5))
+        capture("Chat canvas closed")
+        reopen.tap()
+        XCTAssertTrue(app.buttons["Hide canvas"].waitForExistence(timeout: 5))
+        // A running voice call stays in reach above its chat.
+        XCTAssertTrue(app.buttons["hub.voice.bar"].exists)
+        XCTAssertTrue(app.buttons["End voice call"].exists)
     }
 
     /// Screenshots of the task and settings screens for visual review. A

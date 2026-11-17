@@ -396,6 +396,33 @@ struct HubLiveChatView: View {
         .padding(.vertical, 4)
     }
 
+    /// A closed visual stays one tap away in the conversation.
+    private func visualReopenCard(_ visual: HubChatPresentation) -> some View {
+        Button { composerFocused = false; showVisual(visual) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: visual.kind == .vega ? "chart.xyaxis.line" : visual.kind == .app ? "square.grid.2x2" : "doc.richtext")
+                    .font(.title3)
+                    .foregroundStyle(accent)
+                    .frame(width: 42, height: 42)
+                    .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(visual.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(visual.kind == .app ? "Interactive app · Tap to open" : "Visual · Tap to open")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.up.left.and.arrow.down.right").foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(accent.opacity(0.18)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(visual.title)")
+        .accessibilityIdentifier("hub.chat.visual.reopen")
+    }
+
     private func showVisual(_ visual: HubChatPresentation) {
         seenVisualID = visual.id
         visualLoadFailed = false
@@ -559,9 +586,20 @@ struct HubLiveChatView: View {
                             if screenshotListFailed && snapshot.latestScreenshotSequence != nil {
                                 Button("Retry loading screenshots") { screenshotRetry += 1 }.font(.footnote)
                             }
+                            if requestedVisual == nil, let latestVisual {
+                                visualReopenCard(latestVisual)
+                            }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
-                            if snapshot.running && snapshot.partial.isEmpty && !connectionLost { HubThinkingIndicator() }
+                            if snapshot.running && !connectionLost {
+                                let asked = messages.last(where: { $0.role == "user" }).flatMap { Int($0.id) }
+                                let steps = HubLiveSteps.steps(snapshot.activity.filter { entry in
+                                    if let asked { return entry.sequence > asked }
+                                    return currentTurn != nil && entry.turn == currentTurn
+                                })
+                                if !steps.isEmpty { HubLiveStepsView(steps: steps) }
+                                if snapshot.partial.isEmpty && steps.isEmpty { HubThinkingIndicator() }
+                            }
                         } else if !connectionLost {
                             ProgressView("Loading chat…")
                         }
@@ -1678,6 +1716,112 @@ private struct HubChatPhotoPicker: UIViewControllerRepresentable {
 }
 
 /// Three softly pulsing dots while the assistant works, instead of a spinner.
+/// Plain-language steps for the turn that is still running.
+enum HubLiveSteps {
+    struct Step: Identifiable {
+        let id: Int
+        let title: String
+        let failed: Bool
+    }
+
+    static func steps(_ entries: [HubChatActivity]) -> [Step] {
+        var result: [Step] = []
+        for entry in entries {
+            switch entry.title {
+            case "System prompt", "Context updated", "Tool result", "Command finished": continue
+            case "Tool failed":
+                if let last = result.popLast() {
+                    result.append(Step(id: last.id, title: last.title, failed: true))
+                }
+            case "Waiting to retry model request", "Retrying model request":
+                result.append(Step(id: entry.sequence, title: "Retrying the model", failed: false))
+            case "Command started":
+                result.append(Step(id: entry.sequence, title: "Running a command", failed: false))
+            case "Command failed":
+                result.append(Step(id: entry.sequence, title: "A command failed", failed: true))
+            case "This turn failed": continue
+            default:
+                result.append(Step(id: entry.sequence, title: describe(tool: entry.title), failed: entry.failed))
+            }
+        }
+        return Array(result.suffix(5))
+    }
+
+    static func describe(tool name: String) -> String {
+        let key = name.lowercased()
+        let known: [(String, String)] = [
+            ("phone_context", "Checking your phone"),
+            ("view_screen", "Looking at your screen"),
+            ("highlight_screen", "Pointing at your screen"),
+            ("present", "Building a visual"),
+            ("research", "Researching"),
+            ("delegate", "Handing work to a helper"),
+            ("send_message", "Messaging another agent"),
+            ("list_agents", "Checking the other agents"),
+            ("interrupt_agent", "Stopping a helper"),
+            ("switch_character", "Switching assistant"),
+            ("planner", "Checking your planner"),
+            ("goals", "Updating goals"),
+            ("automation", "Updating automations"),
+            ("work_plan", "Planning the work"),
+            ("save_conversation", "Saving the conversation"),
+            ("knowledge", "Searching your knowledge"),
+            ("memory", "Checking memory"),
+            ("web_search", "Searching the web"),
+            ("search", "Searching"),
+            ("fetch", "Reading a web page"),
+            ("browser", "Using the browser"),
+            ("screenshot", "Taking a screenshot"),
+            ("read", "Reading files"),
+            ("write", "Writing a file"),
+            ("edit", "Editing a file"),
+            ("bash", "Running a command"),
+            ("shell", "Running a command"),
+            ("exec", "Running a command"),
+        ]
+        if let match = known.first(where: { key.contains($0.0) }) { return match.1 }
+        var words = key.split(whereSeparator: { $0 == "_" || $0 == "-" || $0 == "." || $0 == "/" }).map(String.init)
+        if words.first == "hub" { words.removeFirst() }
+        let phrase = words.joined(separator: " ")
+        return phrase.isEmpty ? "Working" : "Using " + phrase
+    }
+}
+
+struct HubLiveStepsView: View {
+    let steps: [HubLiveSteps.Step]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                let current = index == steps.count - 1
+                HStack(spacing: 8) {
+                    Group {
+                        if step.failed {
+                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                        } else if current {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(HubWorkspacePalette.accent.opacity(0.7))
+                        }
+                    }
+                    .frame(width: 16, height: 16)
+                    Text(step.title)
+                        .font(.footnote.weight(current ? .semibold : .regular))
+                        .foregroundStyle(current ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(HubWorkspacePalette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .animation(.easeOut(duration: 0.2), value: steps.map(\.id))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Working: " + steps.map(\.title).joined(separator: ", "))
+        .accessibilityIdentifier("hub.chat.liveSteps")
+    }
+}
+
 struct HubThinkingIndicator: View {
     @State private var phase = 0
 

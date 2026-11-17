@@ -46,6 +46,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         set { HubAssistantCoordinator.shared.adopt(newValue) }
     }
     private var deviceState: HubDeviceState?
+    private var openChatWhenVoiceConnects = false
     private var keyboardObserver: NSObjectProtocol?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var pageDeadline: Task<Void, Never>?
@@ -180,7 +181,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 let tasks = try await api.workspaceTasks()
                 guard generation == self.connectionGeneration else { throw CancellationError() }
                 return tasks
-            }, appearanceChanged: { [weak self] in self?.applyWorkspaceAppearance($0) })
+            }, appearanceChanged: { [weak self] in self?.applyWorkspaceAppearance($0) },
+            voiceControl: { [weak self] control in self?.controlVoice(control) })
         let controller = UIHostingController(rootView: screen)
         homeController = controller
         addChild(controller)
@@ -209,7 +211,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if showingHome { applyWorkspaceAppearance(workspaceAppearance) }
-        home.hasActiveVoice = voice?.isActive == true
+        syncVoiceSummary()
         if firstAppearance {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - bootstrapStarted) * 1000)
             launchLog.info("Native Home appeared in \(elapsed, privacy: .public) ms")
@@ -254,6 +256,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         home.work = try? decoder.decode(HubHomeWork.self, from: Data(work.utf8))
         home.conversations = [HubConversationChoice(sessionId: "fixture-work", title: "Collect reading notes", updatedAt: 0)]
         home.connection = .connected
+        if Self.voiceBarFixture {
+            home.voiceCall = HubVoiceCallSummary(sessionID: "fixture-work", status: "Listening", muted: false)
+        }
         if ProcessInfo.processInfo.arguments.contains("--hub-native-read-fixture"),
            let fixtureServer = try? HubServer(address: "https://hub-workspace-fixture.invalid") {
             let configuration = URLSessionConfiguration.ephemeral
@@ -380,7 +385,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func validateForegroundPage() {
         guard !firstAppearance else { return }
         if showingHome {
-            home.hasActiveVoice = voice?.isActive == true
+            syncVoiceSummary()
             refreshHome()
             return
         }
@@ -820,7 +825,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         recovery.isHidden = true
         workspaceBar.isHidden = true
         homeController.view.isHidden = false
-        home.hasActiveVoice = voice?.isActive == true
+        syncVoiceSummary()
         if refresh { refreshHome() }
     }
 
@@ -901,9 +906,56 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let saved: HubVoiceCheckpoint? = pending == nil && voice?.isActive != true ? (try? deviceState.voice()) : nil
         presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: saved, pending: pending, resumeOnlyIfActive: !resumeLastConversation)
     }
+    /// Mirrors the call into the chat's voice bar and, for a call just started,
+    /// takes the user into its conversation as soon as the assistant listens.
+    private func voiceChanged(_ model: HubNativeVoice, sheet: UIViewController?) {
+        guard voice === model else { return }
+        syncVoiceSummary()
+        if !model.isActive { openChatWhenVoiceConnects = false }
+        guard openChatWhenVoiceConnects, model.connectedSessionID != nil,
+              let destination = model.conversationDestination() else { return }
+        openChatWhenVoiceConnects = false
+        if let sheet, presentedViewController === sheet, sheet.presentedViewController == nil {
+            dismiss(animated: true) { [weak self] in self?.openNotification(destination) }
+        } else if presentedViewController == nil {
+            openNotification(destination)
+        }
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private static let voiceBarFixture = ProcessInfo.processInfo.arguments.contains("--hub-native-voice-bar-fixture")
+    #else
+    private static let voiceBarFixture = false
+    #endif
+
+    private func syncVoiceSummary() {
+        guard !Self.voiceBarFixture else { return }
+        let active = voice?.isActive == true
+        if home.hasActiveVoice != active { home.hasActiveVoice = active }
+        let summary = voice.flatMap { model in
+            model.isActive ? HubVoiceCallSummary(sessionID: model.activeSessionID, status: model.status, muted: model.muted) : nil
+        }
+        if home.voiceCall != summary { home.voiceCall = summary }
+    }
+
+    private func controlVoice(_ control: HubVoiceCallControl) {
+        switch control {
+        case .open: showVoice()
+        case .mute: voice?.toggleMute()
+        case .end:
+            guard let voice, voice.isActive else { return }
+            let alert = UIAlertController(title: "End the voice call?", message: "The conversation stays in your chats.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Keep talking", style: .cancel))
+            alert.addAction(UIAlertAction(title: "End call", style: .destructive) { _ in voice.end() })
+            present(alert, animated: true)
+        }
+    }
+
     private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false) {
+        let startsNewCall = voice?.isActive != true
         let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending, resumeOnlyIfActive: resumeOnlyIfActive)
         voice = model
+        if startsNewCall { openChatWhenVoiceConnects = true }
         let sheet = HubVoiceViewController(voice: model, restart: { [weak self] in
             self?.dismiss(animated: true) { [weak self] in self?.showVoice(resumeLastConversation: true) }
         }) { [weak self, weak model] in
@@ -916,11 +968,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
         let voiceNavigation = UINavigationController(rootViewController: sheet)
         voiceNavigation.overrideUserInterfaceStyle = overrideUserInterfaceStyle
-        present(voiceNavigation, animated: true) { [weak self, weak sheet] in
-            model.changed = { [weak sheet] in
+        present(voiceNavigation, animated: true) { [weak self, weak sheet, weak voiceNavigation] in
+            model.changed = { [weak self, weak sheet, weak model, weak voiceNavigation] in
                 sheet?.refresh()
+                if let model { self?.voiceChanged(model, sheet: voiceNavigation) }
             }
             if !model.isActive { model.start() }
+            self?.voiceChanged(model, sheet: voiceNavigation)
         }
     }
     private func showEndVoiceFirst() {
