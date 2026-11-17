@@ -190,13 +190,17 @@ extension View {
     }
 
     /// Any scroll of this content puts the keyboard away.
+    /// The composer is a UIKit text view outside the scroll view, which the
+    /// system's scroll dismissal does not always reach, so a drag on the page
+    /// also clears its focus directly.
     @ViewBuilder func hubDismissesKeyboardOnScroll(_ hide: @escaping () -> Void) -> some View {
+        let drag = DragGesture(minimumDistance: 12).onChanged { value in
+            if abs(value.translation.height) > abs(value.translation.width) { hide() }
+        }
         if #available(iOS 16.0, *) {
-            // Any scroll of the page puts the keyboard away. The composer sits
-            // outside this scroll view, so the keyboard appearing is no scroll.
-            scrollDismissesKeyboard(.immediately)
+            scrollDismissesKeyboard(.immediately).simultaneousGesture(drag)
         } else {
-            simultaneousGesture(DragGesture(minimumDistance: 16).onChanged { _ in hide() })
+            simultaneousGesture(drag)
         }
     }
 }
