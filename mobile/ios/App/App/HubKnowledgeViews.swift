@@ -1861,38 +1861,110 @@ struct HubKnowledgeActivityView: View {
         .foregroundStyle(.secondary)
     }
 
+    /// One entry of the librarian's log: what it was, what the librarian did and why.
     private func activityEntry(_ entry: HubKnowledgeActivity.Entry) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(stateLabel(entry.status)).font(.headline)
-            Text([entry.outcome, entry.source?.channel, activityDate(entry.updatedAt)]
-                .compactMap { $0 }.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
-            if let reason = entry.reason { Text(reason) }
-            if let error = entry.error { failure(error) }
-            if let retryAt = entry.retryAt { Text("Last retry: \(activityDate(retryAt))").font(.footnote) }
-            ForEach(entry.changes.indices, id: \.self) { index in
-                changeRow(entry.changes[index])
+        let review = entry.source?.channel == "domain-review"
+        let (symbol, tint) = entryIcon(entry, review: review)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).font(.subheadline).foregroundStyle(tint)
+                    .frame(width: 32, height: 32)
+                    .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(headline(entry, review: review)).font(.subheadline.weight(.semibold))
+                    Text([sourceLabel(entry, review: review), relativeDate(entry.updatedAt)].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            if let source = entry.source { sourceRow(source) }
-            DisclosureGroup("Timing and attempts") {
-                Text("Started: \(activityDate(entry.startedAt))")
-                Text("Finished: \(activityDate(entry.finishedAt))")
-                if let count = entry.attempts { Text("\(count) model attempts") }
-                if let attempts = entry.previousAttempts {
-                    ForEach(attempts.indices, id: \.self) { index in
-                        attemptRow(attempts[index])
+            if let reason = entry.reason, !reason.isEmpty {
+                Text(reason).font(.callout).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            if let error = entry.error, entry.status == "failed" { failure(error).font(.footnote) }
+            if !entry.changes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(entry.changes.indices, id: \.self) { index in
+                        changeRow(entry.changes[index])
                     }
                 }
+                .padding(.leading, 4)
             }
-            .font(.footnote)
             ForEach(entry.warnings.indices, id: \.self) { index in
-                Text(entry.warnings[index]).font(.footnote).foregroundStyle(.secondary)
+                Label(entry.warnings[index], systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
             }
-            if entry.status == "review" {
-                Button("Review proposed changes") { reviewEntry = entry }
+            HStack(spacing: 14) {
+                if let source = entry.source { sourceRow(source).font(.footnote) }
+                if entry.status == "review" {
+                    Button("Review proposed changes") { reviewEntry = entry }.font(.footnote.weight(.semibold))
+                }
             }
-            Divider()
+            DisclosureGroup("Details") {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text([stateLabel(entry.status), entry.outcome].compactMap { $0 }.joined(separator: " · "))
+                    Text("Started: \(activityDate(entry.startedAt))")
+                    Text("Finished: \(activityDate(entry.finishedAt))")
+                    if let retryAt = entry.retryAt { Text("Last retry: \(activityDate(retryAt))") }
+                    if let count = entry.attempts { Text("\(count) model attempts") }
+                    if let attempts = entry.previousAttempts {
+                        ForEach(attempts.indices, id: \.self) { index in attemptRow(attempts[index]) }
+                    }
+                    if let error = entry.error, entry.status != "failed" { failure(error) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
+        .padding(12)
+        .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(HubWorkspacePalette.border.opacity(0.06)))
+    }
+
+    private func entryIcon(_ entry: HubKnowledgeActivity.Entry, review: Bool) -> (String, Color) {
+        switch entry.status {
+        case "failed": return ("exclamationmark.triangle.fill", .orange)
+        case "review": return ("hand.raised.fill", .yellow)
+        case "working", "queued": return ("hourglass", .secondary)
+        default:
+            if review { return ("books.vertical.fill", HubWorkspacePalette.accent) }
+            return entry.outcome == "organized" ? ("tray.and.arrow.down.fill", HubWorkspacePalette.accent) : ("archivebox", .secondary)
+        }
+    }
+
+    private func headline(_ entry: HubKnowledgeActivity.Entry, review: Bool) -> String {
+        switch entry.status {
+        case "failed": return String(localized: "Couldn't finish")
+        case "review": return String(localized: "Waiting for your approval")
+        case "working": return String(localized: "Reading now")
+        case "queued": return String(localized: "Waiting to read")
+        case "waiting-credit": return String(localized: "Waiting for model credit")
+        default:
+            if review { return entry.outcome == "organized" ? String(localized: "Tidied the domains") : String(localized: "Checked the domains") }
+            switch entry.outcome {
+            case "organized": return String(localized: "Filed")
+            case "archive-only": return String(localized: "Archived, nothing new to keep")
+            case "rejected": return String(localized: "Changes rejected")
+            default: return String(localized: "Nothing to keep")
+            }
+        }
+    }
+
+    private func sourceLabel(_ entry: HubKnowledgeActivity.Entry, review: Bool) -> String? {
+        if review { return String(localized: "Domain review") }
+        switch entry.source?.channel {
+        case "web", "native", "pwa", "chat": return String(localized: "From a chat")
+        case "telegram": return String(localized: "From Telegram")
+        case "voice": return String(localized: "From a voice call")
+        case "workers": return String(localized: "From a background task")
+        case "note", "notes": return String(localized: "From a note")
+        case let channel?: return channel.capitalized
+        case nil: return nil
+        }
+    }
+
+    private func relativeDate(_ value: Double?) -> String? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return Date(timeIntervalSince1970: value / 1000).formatted(.relative(presentation: .named))
     }
 
     @ViewBuilder private func sourceRow(_ source: HubKnowledgeActivity.Entry.Source) -> some View {
@@ -1904,17 +1976,31 @@ struct HubKnowledgeActivityView: View {
     }
 
     private func changeRow(_ change: HubKnowledgeActivity.Entry.Change) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(change.action.capitalized) · \(change.title)")
-            if let openRecord {
-                if change.kind == "note", let id = change.id {
-                    Button("Open note") { openRecord(id) }
-                } else if change.kind == "link", let id = change.targetId {
-                    Button("Open linked record") { openRecord(id) }
+        let symbol: String = {
+            switch change.kind {
+            case "note": return "doc.text"
+            case "domain": return "books.vertical"
+            case "assignment": return "folder"
+            case "link": return "link"
+            case "tag": return "tag"
+            case "reflection": return "lightbulb"
+            default: return "circle.fill"
+            }
+        }()
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol).font(.caption).foregroundStyle(.secondary).frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                (Text(change.action.capitalized).foregroundColor(.secondary) + Text("  ") + Text(change.title))
+                    .font(.footnote)
+                if let openRecord {
+                    if change.kind == "note", let id = change.id {
+                        Button("Open note") { openRecord(id) }.font(.caption)
+                    } else if change.kind == "link", let id = change.targetId {
+                        Button("Open linked record") { openRecord(id) }.font(.caption)
+                    }
                 }
             }
         }
-        .font(.footnote)
     }
 
     private func attemptRow(_ attempt: HubKnowledgeActivity.Entry.Attempt) -> some View {

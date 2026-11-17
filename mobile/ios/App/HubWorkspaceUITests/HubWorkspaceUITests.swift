@@ -127,9 +127,11 @@ final class HubWorkspaceUITests: XCTestCase {
         let review = app.buttons["Review proposed changes"]
         XCTAssertTrue(review.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Read source record"].exists)
-        app.buttons["Timing and attempts"].tap()
-        XCTAssertTrue(app.staticTexts["1 model attempts"].exists)
-        app.buttons["Timing and attempts"].tap()
+        capture("Knowledge AI activity")
+        let details = app.buttons["Details"].firstMatch
+        details.tap()
+        XCTAssertTrue(app.staticTexts["1 model attempts"].waitForExistence(timeout: 3))
+        details.tap()
         review.tap()
         let memories = app.buttons["Memories"]
         XCTAssertTrue(memories.waitForExistence(timeout: 5))
