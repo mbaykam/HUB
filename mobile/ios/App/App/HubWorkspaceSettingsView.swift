@@ -41,7 +41,7 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubTelegramSettingsView(api: api)) {
                         Label("Telegram", systemImage: "paperplane")
                     }
-                    NavigationLink(destination: HubUsageView(api: api)) {
+                    NavigationLink(destination: HubUsageView(api: api, embedded: true)) {
                         Label("Usage limits", systemImage: "chart.bar.xaxis")
                     }
                     .accessibilityIdentifier("hub.settings.usage")

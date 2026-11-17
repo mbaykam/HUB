@@ -72,6 +72,20 @@ struct HubList<Content: View>: View {
     }
 }
 
+/// A form field with its name shown above the value, so a filled field
+/// still says what it is.
+struct HubLabeledField<Content: View>: View {
+    let title: LocalizedStringKey
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+            content()
+        }
+    }
+}
+
 extension View {
     @ViewBuilder func hubGroupedBackground() -> some View {
         if #available(iOS 16.0, *) {

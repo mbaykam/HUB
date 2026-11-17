@@ -407,28 +407,36 @@ struct HubKnowledgeSkillsView: View {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView("Saving skill…") }
             Section("Details") {
-                TextField("Name", text: Binding(get: { draft?.title ?? "" }, set: { title in
-                    draft?.title = title
-                    if baseline?.expectedHash == nil && !customName { draft?.name = Self.slug(title) }
-                }))
-                TextField("When to use this", text: field(\.description))
+                HubLabeledField(title: "Name") {
+                    TextField("Name", text: Binding(get: { draft?.title ?? "" }, set: { title in
+                        draft?.title = title
+                        if baseline?.expectedHash == nil && !customName { draft?.name = Self.slug(title) }
+                    }))
+                }
+                HubLabeledField(title: "When to use this") {
+                    TextField("When to use this", text: field(\.description))
+                }
             }
             Section("Workflow instructions") {
                 TextEditor(text: field(\.content)).frame(minHeight: 175)
                     .accessibilityLabel("Workflow instructions")
             }
             Section("Advanced") {
-                TextField("Stable skill name", text: Binding(get: { draft?.name ?? "" }, set: { name in
-                    customName = true
-                    draft?.name = name
-                }))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .disabled(value.expectedHash != nil)
-                TextField("Required tools, separated by commas", text: Binding(get: { toolsText }, set: { text in
-                    toolsText = text
-                    draft?.requiredTools = text.split { $0 == "," || $0.isWhitespace }.map(String.init)
-                }))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                HubLabeledField(title: "Stable skill name") {
+                    TextField("Stable skill name", text: Binding(get: { draft?.name ?? "" }, set: { name in
+                        customName = true
+                        draft?.name = name
+                    }))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .disabled(value.expectedHash != nil)
+                }
+                HubLabeledField(title: "Required tools") {
+                    TextField("Required tools, separated by commas", text: Binding(get: { toolsText }, set: { text in
+                        toolsText = text
+                        draft?.requiredTools = text.split { $0 == "," || $0.isWhitespace }.map(String.init)
+                    }))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
                 Text("Character permissions control which tools a workflow can use.").font(.footnote).foregroundStyle(.secondary)
             }
         }
