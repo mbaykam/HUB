@@ -19,8 +19,11 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var conversationAPI: HubConversationAPI?
     private var sendTask: Task<Void, Never>?
     private var showingHome = true
-    private var signingIn = false
+    private var workspaceAppearance = HubChatPreferences.Appearance.dark
     private var firstAppearance = true
+    #if DEBUG && targetEnvironment(simulator)
+    private let showHomeFixture = ProcessInfo.processInfo.arguments.contains("--hub-native-home-fixture")
+    #endif
     private var initialServer: HubServer?
     private let bootstrapStarted = ProcessInfo.processInfo.systemUptime
     private var networkMonitor: NWPathMonitor?
@@ -32,12 +35,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var probe: Task<Void, Never>?
     private var api: HubVoiceAPI?
     private var uiAPI: HubInstalledUIAPI?
-    private var installedUI: HubInstalledUI?
-    private var usingInstalledUI = false
-    private var preferRemoteUI = false
-    private var installedProcessRecoveries = 0
     private var connectionGeneration = 0
     private var connected = false
+    private var chatAttachmentStore: HubAttachmentStore?
+    private var chatAttachmentAPI: HubAttachmentAPI?
     private var notificationDestination: HubNotificationDestination?
     private var voice: HubNativeVoice? {
         get { HubAssistantCoordinator.shared.voice }
@@ -54,10 +55,33 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var showingPageLoad = false
     deinit { networkMonitor?.cancel(); sendTask?.cancel(); probe?.cancel(); pageDeadline?.cancel(); api?.invalidate(); uiAPI?.invalidate(); if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) } }
 
-    override var preferredStatusBarStyle: UIStatusBarStyle { showingHome ? .lightContent : .default }
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        guard showingHome else { return .default }
+        switch workspaceAppearance {
+        case .dark: return .lightContent
+        case .light: return .darkContent
+        case .system: return traitCollection.userInterfaceStyle == .dark ? .lightContent : .darkContent
+        }
+    }
+
+    private func applyWorkspaceAppearance(_ appearance: HubChatPreferences.Appearance) {
+        workspaceAppearance = appearance
+        guard showingHome else { return }
+        let style: UIUserInterfaceStyle
+        switch appearance {
+        case .dark: style = .dark
+        case .light: style = .light
+        case .system: style = .unspecified
+        }
+        overrideUserInterfaceStyle = style
+        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
+        setNeedsStatusBarAppearanceUpdate()
+        navigationController?.setNeedsStatusBarAppearanceUpdate()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        applyWorkspaceAppearance(workspaceAppearance)
         view.backgroundColor = HubHomeView.backgroundColor
         navigationController?.setNavigationBarHidden(true, animated: false)
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -115,9 +139,44 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
 
         let screen = HubHomeView(model: home, connect: { [weak self] in self?.performHomeConnectionAction() },
             voice: { [weak self] in self?.openHomeVoice() }, options: { [weak self] in self?.showOptions() },
-            workspace: { [weak self] in self?.openWorkspace() },
             openChat: { [weak self] id in self?.openChat(id) },
-            send: { [weak self] in self?.sendHomeDraft() })
+            send: { [weak self] in self?.sendHomeDraft() },
+            addTodo: { [weak self] id, title, horizon in
+                await self?.changeHomePlanner { try await $0.addTodo(id: id, title: title, horizon: horizon) } ?? false
+            },
+            completeTodo: { [weak self] item in
+                Task { [weak self] in _ = await self?.changeHomePlanner { try await $0.completeTodo(item) } }
+            }, restorePlannerItem: { [weak self] item in
+                Task { [weak self] in _ = await self?.changeHomePlanner { try await $0.restorePlannerItem(item) } }
+            }, savePlannerItem: { [weak self] draft in
+                await self?.changeHomePlanner { try await $0.savePlannerItem(draft) } ?? false
+            }, removePlannerItem: { [weak self] item in
+                await self?.changeHomePlanner { try await $0.removePlannerItem(item) } ?? false
+            }, readKnowledgeNote: { [weak self] id in
+                guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
+                let generation = self.connectionGeneration
+                let note = try await api.knowledgeNote(id: id)
+                guard generation == self.connectionGeneration else { throw CancellationError() }
+                return note
+            }, attachments: { [weak self] in
+                guard let self, self.connected, let server = self.server, let upload = self.chatAttachmentAPI else { return nil }
+                if self.chatAttachmentStore == nil,
+                   let base = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                          appropriateFor: nil, create: true) {
+                    self.chatAttachmentStore = try? HubAttachmentStore(root: base.appendingPathComponent("HubAttachmentOutbox", isDirectory: true))
+                }
+                guard let store = self.chatAttachmentStore else { return nil }
+                return HubChatAttachmentContext(server: server, store: store, upload: upload)
+            }, chatAPI: { [weak self] in
+                guard let self, self.connected else { return nil }
+                return self.conversationAPI
+            }, readTasks: { [weak self] in
+                guard let self, self.connected, let api = self.conversationAPI else { throw HubAttachmentError.unavailable }
+                let generation = self.connectionGeneration
+                let tasks = try await api.workspaceTasks()
+                guard generation == self.connectionGeneration else { throw CancellationError() }
+                return tasks
+            }, appearanceChanged: { [weak self] in self?.applyWorkspaceAppearance($0) })
         let controller = UIHostingController(rootView: screen)
         homeController = controller
         addChild(controller)
@@ -130,6 +189,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         controller.didMove(toParent: self)
+        #if DEBUG && targetEnvironment(simulator)
+        if showHomeFixture {
+            seedHomeFixture()
+            return
+        }
+        #endif
         if let address = UserDefaults.standard.string(forKey: savedOriginKey), let saved = try? HubServer(address: address) {
             initialServer = saved
             home.connection = .connecting
@@ -139,10 +204,17 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if showingHome { applyWorkspaceAppearance(workspaceAppearance) }
         home.hasActiveVoice = voice?.isActive == true
         if firstAppearance {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - bootstrapStarted) * 1000)
             launchLog.info("Native Home appeared in \(elapsed, privacy: .public) ms")
+            #if DEBUG && targetEnvironment(simulator)
+            if showHomeFixture {
+                firstAppearance = false
+                return
+            }
+            #endif
             if let initialServer { connect(initialServer) }
             initialServer = nil
             firstAppearance = false
@@ -150,6 +222,47 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             monitorHomeNetwork()
         }
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private func seedHomeFixture() {
+        let decoder = JSONDecoder()
+        let graph = """
+            {"nodes":[{"id":"note-project","title":"Planning a coding project","kind":"note"},
+             {"id":"note-device","title":"Mobile development","kind":"note"},
+             {"id":"note-research","title":"Research notes","kind":"note"},
+             {"id":"archive-1","title":"An earlier conversation","kind":"conversation"}],
+             "edges":[{"source":"note-device","target":"note-project"},{"source":"note-project","target":"note-research"}],
+             "domains":[{"id":"coding","title":"Coding Projects","status":"active"},
+             {"id":"research","title":"Knowledge AI","status":"active"}],
+             "memberships":[{"nodeId":"note-project","domainId":"coding"},{"nodeId":"note-device","domainId":"coding"},
+             {"nodeId":"note-research","domainId":"research"}]}
+            """
+        let planner = """
+            {"revision":1,"items":[{"id":"11111111-1111-4111-8111-111111111111","title":"Review the weekly plan",
+             "kind":"todo","state":"open","horizon":"near","deleted":false,"version":1}]}
+            """
+        let work = """
+            {"byId":{"fixture-work":{"title":"Collect reading notes","running":true,"completed":false,
+             "failed":false,"stopped":false,"updatedAt":1794500000000}}}
+            """
+        home.knowledge = try? decoder.decode(HubHomeKnowledge.self, from: Data(graph.utf8))
+        home.planner = try? decoder.decode(HubHomePlanner.self, from: Data(planner.utf8))
+        home.work = try? decoder.decode(HubHomeWork.self, from: Data(work.utf8))
+        home.conversations = [HubConversationChoice(sessionId: "fixture-work", title: "Collect reading notes", updatedAt: 0)]
+        home.connection = .connected
+        if ProcessInfo.processInfo.arguments.contains("--hub-native-read-fixture"),
+           let fixtureServer = try? HubServer(address: "https://hub-workspace-fixture.invalid") {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [HubWorkspaceFixtureProtocol.self]
+            let api = HubConversationAPI(server: fixtureServer, configuration: configuration) { [] }
+            if ProcessInfo.processInfo.arguments.contains("--hub-native-chat-fixture") {
+                api.simulatorChatFrames = HubWorkspaceChatFixture.shared.frames
+            }
+            conversationAPI = api
+            connected = true
+        }
+    }
+    #endif
 
     private func monitorHomeNetwork() {
         let monitor = NWPathMonitor()
@@ -177,9 +290,6 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         config.applicationNameForUserAgent = "HUBiOS/0.2"
         // Do not add native message handlers to this configuration.
         webView = HubWebView(frame: .zero, configuration: config)
-        if let resources = Bundle.main.resourceURL {
-            installedUI = try? HubInstalledUI.load(from: resources.appendingPathComponent("public/installed-ui", isDirectory: true))
-        }
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.isOpaque = false
@@ -252,11 +362,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         // During provisional navigation, WebKit still exposes the old document.
         // Its contents must not satisfy the new page's opening deadline.
         guard !webView.isLoading, pageDeadline != nil, inspectingPageEpoch != pageEpoch else { return }
-        let epoch = pageEpoch, installed = usingInstalledUI
+        let epoch = pageEpoch
         inspectingPageEpoch = epoch
-        let expression = installed
-            ? "Array.from(document.querySelectorAll('[data-hub-home-nav],[data-composer-card]')).some(element => {const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility === 'visible';})"
-            : "!!document.body && (document.body.innerText.trim().length > 0 || !!document.body.querySelector('input,button,iframe,canvas,video'))"
+        let expression = "!!document.body && (document.body.innerText.trim().length > 0 || !!document.body.querySelector('input,button,iframe'))"
         webView.evaluateJavaScript(expression) { [weak self] value, _ in
             guard let self else { return }
             if self.inspectingPageEpoch == epoch { self.inspectingPageEpoch = nil }
@@ -291,19 +399,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         sheet.addAction(UIAlertAction(title: voice?.isActive == true ? "Open voice controls" : "Voice", style: .default) { [weak self] _ in self?.afterOptions { $0.showVoice() } })
         sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
         sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
-        if showingHome, connected {
-            sheet.addAction(UIAlertAction(title: "Open workspace", style: .default) { [weak self] _ in
-                self?.afterOptions { $0.openWorkspace() }
-            })
-        }
         sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
-        sheet.addAction(UIAlertAction(title: usingInstalledUI ? "Reload from HUB" : "Reload", style: .default) { [weak self] _ in self?.afterOptions {
-            if $0.usingInstalledUI, let server = $0.server {
-                $0.preferRemoteUI = true
-                $0.connected = false
-                $0.loadRemote(server.origin)
-            } else { $0.reload() }
-        } })
+        sheet.addAction(UIAlertAction(title: showingHome ? "Refresh HUB" : "Retry sign-in", style: .default) { [weak self] _ in
+            self?.afterOptions { $0.reload() }
+        })
         sheet.addAction(UIAlertAction(title: "Sign out on this iPhone", style: .destructive) { [weak self] _ in self?.afterOptions { $0.confirmSignOut() } })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         sheet.popoverPresentationController?.sourceView = view
@@ -351,8 +450,6 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         deviceState = nativeState
         api?.invalidate()
         uiAPI?.invalidate()
-        preferRemoteUI = false
-        installedProcessRecoveries = 0
         let cookies: () async -> [HTTPCookie] = {
             await withCheckedContinuation { continuation in
                 DispatchQueue.main.async {
@@ -369,17 +466,25 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         api = HubVoiceAPI(server: value, cookies: cookies)
         uiAPI = HubInstalledUIAPI(server: value, cookies: cookies)
         conversationAPI = HubConversationAPI(server: value, cookies: cookies)
+        chatAttachmentAPI = HubAttachmentAPI(server: value, cookies: cookies)
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         home.knowledge = nil
         home.planner = nil
+        home.plannerSaving = false
+        home.plannerError = nil
         home.conversations = nil
+        home.work = nil
+        home.workUnavailable = false
         home.uncertainChat = nil
         home.sendError = nil
         if !firstAppearance { returnHome() }
     }
 
     private func refreshHome() {
-        guard showingHome, !home.sending else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if showHomeFixture { return }
+        #endif
+        guard showingHome, !home.sending, !home.plannerSaving else { return }
         let started = ProcessInfo.processInfo.systemUptime
         let attempt = homeState.begin(hasServer: server != nil)
         connected = false
@@ -402,7 +507,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 async let knowledge: Void = self.loadHomeKnowledge(conversationAPI, attempt: attempt)
                 async let planner: Void = self.loadHomePlanner(conversationAPI, attempt: attempt)
                 async let chats: Void = self.loadHomeChats(conversationAPI, attempt: attempt)
-                _ = await (knowledge, planner, chats)
+                async let work: Void = self.loadHomeWork(conversationAPI, attempt: attempt)
+                _ = await (knowledge, planner, chats, work)
                 guard !Task.isCancelled, self.showingHome, self.homeState.isCurrent(attempt) else { return }
                 self.home.refreshing = false
                 let elapsed = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
@@ -427,8 +533,36 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func loadHomePlanner(_ api: HubConversationAPI, attempt: UInt64) async {
         do {
             let value = try await api.planner()
-            if showingHome, !Task.isCancelled, homeState.isCurrent(attempt) { home.planner = value }
+            if showingHome, !Task.isCancelled, homeState.isCurrent(attempt), !home.plannerSaving,
+               (value.revision ?? 0) >= (home.planner?.revision ?? 0) { home.planner = value }
         } catch { homeDataFailed(error, attempt: attempt) }
+    }
+
+    private func changeHomePlanner(_ operation: (HubConversationAPI) async throws -> HubHomePlanner) async -> Bool {
+        guard showingHome, home.connection == .connected, !home.plannerSaving,
+              let conversationAPI else { return false }
+        let generation = connectionGeneration
+        home.plannerSaving = true
+        home.plannerError = nil
+        defer { if generation == connectionGeneration { home.plannerSaving = false } }
+        do {
+            let planner = try await operation(conversationAPI)
+            guard generation == connectionGeneration else { return false }
+            home.planner = planner
+            return true
+        } catch {
+            guard generation == connectionGeneration else { return false }
+            if error as? HubAttachmentError == .signInRequired {
+                let attempt = homeState.begin(hasServer: true)
+                homeConnectionFailed(error, attempt: attempt)
+            } else {
+                home.plannerError = "Could not confirm the change. Check your planner before trying again."
+                if let planner = try? await conversationAPI.planner(), generation == connectionGeneration {
+                    home.planner = planner
+                }
+            }
+            return false
+        }
     }
 
     private func loadHomeChats(_ api: HubConversationAPI, attempt: UInt64) async {
@@ -436,6 +570,19 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             let value = try await api.list()
             if showingHome, !Task.isCancelled, homeState.isCurrent(attempt) { home.conversations = value.conversations }
         } catch { homeDataFailed(error, attempt: attempt) }
+    }
+
+    private func loadHomeWork(_ api: HubConversationAPI, attempt: UInt64) async {
+        do {
+            let value = try await api.workActivity()
+            guard showingHome, !Task.isCancelled, homeState.isCurrent(attempt) else { return }
+            home.work = value
+            home.workUnavailable = false
+        } catch {
+            guard showingHome, !Task.isCancelled, homeState.isCurrent(attempt) else { return }
+            home.workUnavailable = true
+            if error as? HubAttachmentError == .signInRequired { homeDataFailed(error, attempt: attempt) }
+        }
     }
 
     private func homeDataFailed(_ error: Error, attempt: UInt64) {
@@ -455,7 +602,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         connected = false
         home.connection = homeState.connection
         home.refreshing = false
-        if signIn { home.knowledge = nil; home.planner = nil; home.conversations = nil }
+        if signIn { home.knowledge = nil; home.planner = nil; home.conversations = nil; home.work = nil }
     }
 
     private func saveWebSession(_ expected: HubServer) async {
@@ -474,8 +621,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         case .needsSetup: showConnection()
         case .signInRequired:
             if let server {
-                signingIn = true
-                loadRemote(server.origin)
+                loadSignIn(server)
             }
         case .unavailable, .connected: refreshHome()
         case .connecting: break
@@ -485,12 +631,6 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func openHomeVoice() {
         if home.connection == .connected || voice?.isActive == true { showVoice() }
         else { performHomeConnectionAction() }
-    }
-
-    private func openWorkspace() {
-        guard !home.sending else { return }
-        guard connected, let server else { performHomeConnectionAction(); return }
-        loadHub(server)
     }
 
     private func openChat(_ id: String) {
@@ -515,7 +655,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 guard let self, generation == self.connectionGeneration else { return }
                 self.home.sending = false
                 self.home.draft = ""
-                self.openChat(id)
+                self.home.openNativeChat = HubNativeChatRequest(choice: HubConversationChoice(
+                    sessionId: id, title: "New chat", updatedAt: Date().timeIntervalSince1970 * 1000))
             } catch {
                 guard let self, generation == self.connectionGeneration else { return }
                 self.home.sending = false
@@ -535,9 +676,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
     }
 
-    private func returnHome() {
-        signingIn = false
+    private func returnHome(refresh: Bool = true) {
         showingHome = true
+        applyWorkspaceAppearance(workspaceAppearance)
         view.backgroundColor = HubHomeView.backgroundColor
         navigationController?.setNeedsStatusBarAppearanceUpdate()
         activeNavigation = nil
@@ -549,15 +690,18 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         workspaceBar.isHidden = true
         homeController.view.isHidden = false
         home.hasActiveVoice = voice?.isActive == true
-        refreshHome()
+        if refresh { refreshHome() }
     }
 
-    private func showWorkspace() {
+    private func showSignIn() {
+        view.endEditing(true)
         if showingHome {
             probe?.cancel()
             _ = homeState.begin(hasServer: server != nil)
         }
         showingHome = false
+        overrideUserInterfaceStyle = .unspecified
+        view.window?.overrideUserInterfaceStyle = .unspecified
         view.backgroundColor = .systemBackground
         navigationController?.setNeedsStatusBarAppearanceUpdate()
         homeController.view.isHidden = true
@@ -565,36 +709,20 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         prepareWebView()
     }
 
-    private func loadHub(_ value: HubServer) {
-        showWorkspace()
-        // Only static, checksum-verified resources from the signed app are used.
-        // The selected HTTPS origin and WebKit's own cookie store remain intact;
-        // there is no native fetch proxy, JS bridge or restored user snapshot.
-        if !preferRemoteUI, let installedUI {
-            preparePageLoad()
-            usingInstalledUI = true
-            activeNavigation = webView.loadHTMLString(installedUI.html, baseURL: value.origin)
-        } else { loadRemote(value.origin) }
-    }
-    private func loadRemote(_ url: URL) {
-        showWorkspace()
+    private func loadSignIn(_ server: HubServer) {
+        showSignIn()
         preparePageLoad()
-        usingInstalledUI = false
-        activeNavigation = webView.load(URLRequest(url: url))
+        activeNavigation = webView.load(URLRequest(url: server.origin))
     }
 
     private func reload() {
         if showingHome { refreshHome(); return }
-        if server == nil { showConnection(); return }
-        installedProcessRecoveries = 0
-        showContent()
-        if (!connected || usingInstalledUI), let server { loadHub(server); return }
-        if let url = webView.url, server?.contains(url) == true { webView.reload() }
-        else if let server { loadHub(server) }
+        if let server { loadSignIn(server) }
+        else { returnHome(); showConnection() }
     }
 
     private func confirmSignOut() {
-        guard !home.sending else { return }
+        guard !home.sending, !home.plannerSaving else { return }
         guard voice?.isActive != true else { showEndVoiceFirst(); return }
         let alert = UIAlertController(title: "Sign out on this iPhone?", message: "Your conversations, files and settings on HUB will stay intact.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -649,7 +777,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             }
             self.dismiss(animated: true) { [weak self] in self?.openNotification(destination) }
         }
-        present(UINavigationController(rootViewController: sheet), animated: true) { [weak self, weak sheet] in
+        let voiceNavigation = UINavigationController(rootViewController: sheet)
+        voiceNavigation.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        present(voiceNavigation, animated: true) { [weak self, weak sheet] in
             model.changed = { [weak sheet] in
                 sheet?.refresh()
             }
@@ -667,9 +797,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         do {
             let screen = try HubSharedFilesViewController(server: server, state: state, stillConnected: { [weak self] in
                 self?.connected == true && self?.connectionGeneration == generation && self?.server == server
-            }, openDraft: { [weak self] url in
-                guard let self, self.connected, self.connectionGeneration == generation, server.contains(url) else { return }
-                self.loadRemote(url)
+            }, openDraft: { [weak self] draft in
+                guard let self, self.connected, self.connectionGeneration == generation,
+                      draft.origin == server.origin.absoluteString else { return }
+                self.openChat(draft.sessionID)
             })
             present(UINavigationController(rootViewController: screen), animated: true)
         } catch { showNotice("Files are unavailable. Unlock the iPhone and check the app's sharing setup; HUB's normal file button remains available.") }
@@ -708,7 +839,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
         // HTTPS authentication redirects may visit Access and the chosen identity
         // provider. Native API requests still target only the exact selected HUB.
-        if navigationAction.targetFrame == nil { decisionHandler(.cancel); preparePageLoad(); usingInstalledUI = false; activeNavigation = webView.load(navigationAction.request); return }
+        if navigationAction.targetFrame == nil { decisionHandler(.cancel); preparePageLoad(); activeNavigation = webView.load(navigationAction.request); return }
         decisionHandler(.allow)
     }
 
@@ -744,37 +875,15 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 _ = try await api.status()
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration,
                       let url = self.webView.url, expected.contains(url) else { return }
-                if self.usingInstalledUI, let installedUI = self.installedUI, let uiAPI = self.uiAPI {
-                    let compatibility = try await uiAPI.compatibility()
-                    guard !Task.isCancelled, generation == self.connectionGeneration else { return }
-                    if compatibility != installedUI.manifest.compatibility {
-                        // Keep the normal authenticated PWA available when a
-                        // newer host requires a different installed renderer.
-                        self.preferRemoteUI = true
-                        self.loadRemote(expected.origin)
-                        return
-                    }
-                }
                 self.connected = true
                 if !self.showingPageLoad { self.showContent() }
                 self.message.text = "Connected · \(expected.origin.host ?? "HUB")"
                 await self.saveWebSession(expected)
                 guard !Task.isCancelled, generation == self.connectionGeneration else { return }
-                if self.signingIn {
-                    self.returnHome()
-                    return
-                }
-                self.openPendingNotification()
+                self.returnHome()
             } catch {
                 guard let self, !Task.isCancelled, generation == self.connectionGeneration else { return }
                 self.connected = false
-                if self.usingInstalledUI, error as? HubVoiceAPIError == .signInRequired {
-                    // Authentication is completed in the original HTTPS gate,
-                    // never in a local imitation or through copied login tokens.
-                    self.preferRemoteUI = true
-                    self.loadRemote(expected.origin)
-                    return
-                }
                 self.message.text = error as? HubVoiceAPIError == .signInRequired
                     ? "Sign in to HUB, then choose Reload."
                     : "Connection interrupted. Check Connection or choose Reload."
@@ -790,18 +899,19 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             openPendingNotification()
         } else if showingHome {
             if home.connection != .connecting { performHomeConnectionAction() }
-        } else if let server, !signingIn {
-            loadHub(server)
         }
     }
     private func openPendingNotification() {
         guard connected, let server, let destination = notificationDestination else { return }
         notificationDestination = nil
-        guard let url = try? destination.url(for: server) else {
+        guard destination.server == server else {
             message.text = "This notification belongs to a different HUB. Your connection was not changed."
             return
         }
-        loadRemote(url)
+        if !showingHome { returnHome(refresh: false) }
+        let choice = home.conversations?.first(where: { $0.sessionId == destination.sessionID })
+            ?? HubConversationChoice(sessionId: destination.sessionID, title: "Conversation", updatedAt: 0)
+        home.openNativeChat = HubNativeChatRequest(choice: choice)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { if navigation === activeNavigation { showFailure(error) } }
@@ -813,11 +923,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         guard !showingHome else { return }
         cancelPageDeadline()
         connected = false
-        if UIApplication.shared.applicationState != .background, let server, installedUI != nil, !preferRemoteUI, installedProcessRecoveries < 1 {
-            installedProcessRecoveries += 1
-            // Fresh Home, not a cached conversation or a restored screen.
-            showContent(); loadHub(server)
-        } else { showRecovery("HUB needs to reconnect. Tap Retry to continue.") }
+        showRecovery("Sign-in was interrupted. Tap Retry to continue.")
     }
 
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
@@ -833,3 +939,239 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         } else { decisionHandler(trusted && frame.isMainFrame ? .prompt : .deny) }
     }
 }
+
+#if DEBUG && targetEnvironment(simulator)
+private final class HubWorkspaceFixtureProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        if request.url?.path == "/api/session/cancel", request.httpMethod == "POST" {
+            respondToCancellation()
+            return
+        }
+        if request.url?.path == "/api/hub/artifacts", request.httpMethod == "GET",
+           request.value(forHTTPHeaderField: "x-hub-session") == "fixture-work",
+           request.value(forHTTPHeaderField: "x-hub-daily-use") == "1",
+           ProcessInfo.processInfo.arguments.contains("--hub-native-chat-fixture") {
+            let id = String(repeating: "c", count: 64)
+            if request.value(forHTTPHeaderField: "x-hub-artifact-format") == "file" {
+                let fileID = String(repeating: "d", count: 64)
+                let bytes = Data("Fixture meeting notes".utf8)
+                let metadata: [String: Any] = ["id": fileID, "name": "meeting-notes.txt", "bytes": bytes.count,
+                                               "sha256": HubAttachmentStore.digest(bytes)]
+                if request.value(forHTTPHeaderField: "x-hub-artifact") == fileID {
+                    var file = metadata
+                    file["data"] = bytes.base64EncodedString()
+                    respond(with: try? JSONSerialization.data(withJSONObject: file))
+                } else {
+                    respond(with: try? JSONSerialization.data(withJSONObject: ["files": [metadata]]))
+                }
+            } else if request.value(forHTTPHeaderField: "x-hub-screenshot") == id {
+                let image = "iVBORw0KGgoAAAANSUhEUgAAAGAAAAAZCAIAAABB17xmAAAASElEQVR4nO3QMQ0AMAwEseAJj3Iq/DDIVvUHSwfg5OpztVTfD8IDBAgQIEDBAQIECBCg4AABAgQIUHCAAAECBCg4QIAA9UugARgldhmWerIvAAAAAElFTkSuQmCC"
+                respond(with: Data(base64Encoded: image), mediaType: "image/png")
+            } else {
+                respond(with: Data("{\"screenshots\":[{\"id\":\"\(id)\",\"name\":\"Fixture screenshot.png\",\"turn\":1}]}".utf8))
+            }
+            return
+        }
+        respond(with: request.url.flatMap(responseData))
+    }
+
+    private func respond(with data: Data?, mediaType: String = "application/json") {
+        guard let url = request.url, url.host == "hub-workspace-fixture.invalid",
+              request.value(forHTTPHeaderField: "Cookie") == nil, let data,
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                                             headerFields: ["Content-Type": mediaType]) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private func respondToCancellation() {
+        guard request.url?.host == "hub-workspace-fixture.invalid",
+              request.value(forHTTPHeaderField: "Cookie") == nil,
+              ProcessInfo.processInfo.arguments.contains("--hub-native-chat-fixture"),
+              let envelope = rpcEnvelope("session/cancel"), let id = envelope["rpcId"] as? String,
+              let payload = envelope["payload"] as? [String: Any], let args = payload["args"] as? [String: Any],
+              let command = args["request"] as? [String: String], command == ["sessionId": "fixture-work"] else {
+            respond(with: nil)
+            return
+        }
+        respond(with: rpcResult(id, value: ["accepted": true]))
+        Task {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            await HubWorkspaceChatFixture.shared.stop()
+        }
+    }
+
+    private func responseData(_ url: URL) -> Data? {
+        if request.httpMethod == "GET", url.path == "/minke/api/usage" {
+            return Data(#"""
+            {"updatedAt":"2026-11-14T17:45:00.000Z",
+             "codex":{"state":"ready","rateLimits":[{"id":"codex","windows":[{"remainingPercent":42,"windowSeconds":18000}]}]},
+             "openRouter":{"state":"ready","usageDaily":1.25,"limit":{"amount":9,"remaining":6,"reset":"weekly"},
+                           "account":{"totalCredits":20,"totalUsage":4}},
+             "unlid":{"state":"not-configured"},
+             "soniox":{"state":"not-configured"}}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/voice/profiles" {
+            return Data(#"""
+            {"revision":3,"selectedId":"216cb7b2-8e8f-48d5-86f9-cf92a29aca14","profiles":[
+                {"id":"216cb7b2-8e8f-48d5-86f9-cf92a29aca14","name":"Fixture Vera","instructions":"Use short replies.",
+                 "route":{"provider":"fixture","model":"fixture-model"},
+                 "speech":{"stt":{"engine":"whisper","model":"base"},"tts":{"engine":"supertonic","model":"supertonic-3","voice":"F5"}},
+                 "tools":{"mode":"allow","names":["hub_view_screen"]}}]}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/voice/catalog" {
+            if url.query == "provider=fixture" {
+                return Data(#"{"models":[{"id":"fixture-model","provider":"fixture","name":"Fixture Voice Model","efforts":[]}]}"#.utf8)
+            }
+            if url.query == nil {
+                return Data(#"{"providers":[{"id":"fixture","name":"Fixture Provider"}],"tools":[{"name":"hub_view_screen","description":"Read one consented frame"}],"speech":{"stt":[],"tts":[]}}"#.utf8)
+            }
+        }
+        if url.path == "/api/settings/describe", request.httpMethod == "POST" {
+            return settingsDescription()
+        }
+        if url.path == "/api/hub/skills", request.httpMethod == "GET",
+           request.value(forHTTPHeaderField: "x-hub-skills") == "1" {
+            let skill = #"""
+            {"id":"fixture-skill","name":"weekly-review","title":"Weekly review","description":"Review progress",
+             "requiredTools":["read"],"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+             "content":"Gather the latest updates."}
+            """#
+            if url.query == "name=weekly-review" { return Data("{\"skill\":\(skill)}".utf8) }
+            if url.query == nil { return Data("{\"skills\":[\(skill)],\"issues\":[]}".utf8) }
+            return nil
+        }
+        guard url.path == "/api/hub/memory", request.httpMethod == "GET",
+              request.value(forHTTPHeaderField: "x-hub-memory") == "1" else { return nil }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let view = query.first { $0.name == "view" }?.value
+        let id = query.first { $0.name == "id" }?.value
+        switch (view, id) {
+        case ("search", nil):
+            let term = query.first { $0.name == "q" }?.value
+            if term?.localizedCaseInsensitiveContains("choosing the tools") == true {
+                return Data(#"{"nodes":[{"id":"note-project","title":"Planning a coding project","kind":"note"}]}"#.utf8)
+            }
+            return Data(#"{"nodes":[]}"#.utf8)
+        case ("note", "note-project"):
+            return Data(#"""
+            {"id":"note-project","title":"Planning a coding project","kind":"note",
+             "content":"## First release\n\nSketch the first release before choosing the tools.\n\n```swift\nlet firstRelease = true\n```",
+             "sources":[{"id":"fixture-source","completedAt":1794500000000,"channel":"import","reason":"Planning evidence",
+                         "evidence":{"quote":"The release plan starts with a sketch."}}]}
+            """#.utf8)
+        case ("source", "fixture-source"):
+            return Data(#"{"id":"fixture-source","content":"The release plan starts with a sketch."}"#.utf8)
+        case ("activity", nil):
+            return Data(#"""
+            {"state":"ready","enabled":true,"total":1,"lastStartedAt":1794499999000,"lastFinishedAt":1794500000000,
+             "entries":[{"id":"fixture-pass","status":"review","updatedAt":1794500000000,"startedAt":1794499999000,
+                         "finishedAt":1794500000000,"attempts":1,"changes":[],"warnings":[],
+                         "source":{"channel":"pwa","recordId":"note-project"}}],"historyNotice":"No recent activity"}
+            """#.utf8)
+        case ("review", "fixture-pass"):
+            return Data(#"""
+            {"source":{"content":"Sketch the first release before choosing the tools."},"stale":false,
+             "reviewHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+             "plan":{"decision":"organize","reason":"Keep a sourced record","tags":["planning"],
+                     "memories":[{"title":"First release planning","category":"projects","evidence":"Sketch the first release"}]}}
+            """#.utf8)
+        default:
+            return nil
+        }
+    }
+
+    private func settingsDescription() -> Data? {
+        guard let envelope = rpcEnvelope("settings/describe"), let rpcID = envelope["rpcId"] as? String else { return nil }
+        let namespaces: [[String: Any]] = [
+            ["ns": "ui-theme", "revision": 1, "value": ["fontSize": 16, "preference": "dark"]],
+            ["ns": "ui-conversation", "revision": 1, "value": ["busyEnter": "steer"]],
+            ["ns": "ui-chat", "revision": 1, "value": ["transcriptView": "compact"]],
+            ["ns": "locale", "revision": 1, "value": ["preference": "en"]],
+        ]
+        return rpcResult(rpcID, value: ["writable": true, "namespaces": namespaces])
+    }
+
+    private func rpcEnvelope(_ method: String) -> [String: Any]? {
+        let body: Data
+        if let bytes = request.httpBody {
+            body = bytes
+        } else if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4_096)
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0, count < buffer.count else { return nil }
+            body = Data(buffer.prefix(count))
+        } else {
+            return nil
+        }
+        guard let envelope = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+              envelope["type"] as? String == "client-request", envelope["method"] as? String == method else { return nil }
+        return envelope
+    }
+
+    private func rpcResult(_ id: String, value: [String: Any]) -> Data? {
+        return try? JSONSerialization.data(withJSONObject: [
+            "type": "server-response", "rpcId": id,
+            "result": ["ok": true, "value": value],
+        ])
+    }
+}
+
+private actor HubWorkspaceChatFixture {
+    static let shared = HubWorkspaceChatFixture()
+    private typealias Stream = AsyncThrowingStream<Data, Error>
+    private var observers: [UUID: Stream.Continuation] = [:]
+    private var stopped = false
+    private let end = #"{"type":"turn/end","seq":4,"data":{"reason":{"kind":"aborted","reason":{"kind":"user"}}}}"#
+
+    nonisolated func frames(_ session: String) -> AsyncThrowingStream<Data, Error> {
+        AsyncThrowingStream { continuation in
+            guard session == "fixture-work" else {
+                continuation.finish(throwing: URLError(.resourceUnavailable))
+                return
+            }
+            let id = UUID()
+            let registration = Task { await self.register(id, continuation: continuation) }
+            continuation.onTermination = { _ in
+                registration.cancel()
+                Task { await self.remove(id) }
+            }
+        }
+    }
+
+    private func register(_ id: UUID, continuation: Stream.Continuation) {
+        guard !Task.isCancelled else { return }
+        let initial = #"""
+        {"type":"snapshot","records":[
+         {"event":{"type":"user/message","seq":1,"data":{"source":{"kind":"user"},"content":[{"type":"text","text":"Fixture request"}]}}},
+         {"event":{"type":"turn/start","seq":2,"data":{}}},
+         {"event":{"type":"assistant/chunk","seq":3,"data":{"chunk":{"type":"text-delta","index":0,"text":"Collecting fixture references…"}}}}
+        ]}
+        """#
+        if case .terminated = continuation.yield(Data(initial.utf8)) { return }
+        if stopped { continuation.yield(Data("{\"type\":\"event\",\"event\":\(end)}".utf8)) }
+        observers[id] = continuation
+    }
+
+    private func remove(_ id: UUID) { observers.removeValue(forKey: id) }
+
+    func stop() {
+        guard !stopped else { return }
+        stopped = true
+        let update = Data("{\"type\":\"event\",\"event\":\(end)}".utf8)
+        for observer in observers.values { observer.yield(update) }
+    }
+}
+#endif

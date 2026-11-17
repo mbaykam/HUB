@@ -8,21 +8,19 @@ import HubNative
     private let inbox: HubShareInbox
     private let store: HubAttachmentStore
     private let catalog: HubConversationAPI
-    private let upload: HubAttachmentAPI
     private let stillConnected: () -> Bool
-    private let openDraft: (URL) -> Void
+    private let openDraft: (HubAttachmentDraft) -> Void
     private var shared: [HubSharedFile] = []
     private var pending: [HubAttachmentDraft] = []
     private var recovery: [(id: UUID, damaged: Bool)] = []
     private var busy = false { didSet { isModalInPresentation = busy; navigationController?.isModalInPresentation = busy; navigationItem.rightBarButtonItem?.isEnabled = !busy } }
     private var message = "Choose a saved file and its conversation. Review the message in HUB before pressing Send."
-    init(server: HubServer, state: HubDeviceState, stillConnected: @escaping () -> Bool, openDraft: @escaping (URL) -> Void) throws {
+    init(server: HubServer, state: HubDeviceState, stillConnected: @escaping () -> Bool, openDraft: @escaping (HubAttachmentDraft) -> Void) throws {
         self.server = server; self.stillConnected = stillConnected; self.openDraft = openDraft
         inbox = try HubShareInbox.appGroupInbox()
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         store = try HubAttachmentStore(root: base.appendingPathComponent("HubAttachmentOutbox", isDirectory: true))
         catalog = HubConversationAPI(server: server) { (try? state.cookies()) ?? [] }
-        upload = HubAttachmentAPI(server: server) { (try? state.cookies()) ?? [] }
         super.init(style: .insetGrouped)
     }
     required init?(coder: NSCoder) { fatalError("Use init(server:state:)") }
@@ -46,7 +44,7 @@ import HubNative
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section < 2 ? 1 : section == 2 ? shared.count : section == 3 ? pending.count : recovery.count }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 2 ? "Saved from other apps" : section == 3 ? "Prepared copies on this iPhone" : section == 4 && !recovery.isEmpty ? "Interrupted preparation" : nil }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        section == 1 ? "Up to 8 saved files, 10 MB each. Nothing is uploaded until you choose a conversation and confirm. Swipe a saved file to remove its local copy. The normal HUB composer also accepts files directly." : section == 3 ? "Prepared copies keep their original conversation for safe retries. After sending in HUB, you can explicitly remove the local copy here." : nil
+        section == 1 ? "Up to 8 saved files, 10 MB each. Files are uploaded when you press Send in the conversation. Swipe a saved file to remove its local copy." : section == 3 ? "Prepared copies keep their original conversation for safe retries." : nil
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
@@ -101,7 +99,7 @@ import HubNative
     }
     private func review(_ item: HubSharedFile, choice: HubConversationChoice) {
         navigationController?.popToViewController(self, animated: false)
-        let alert = UIAlertController(title: item.name, message: "Prepare this file for “\(choice.title)” on \(server.origin.host ?? "HUB")? HUB will retain the original. You will review the message and press Send separately; this does not start an assistant task.", preferredStyle: .alert)
+        let alert = UIAlertController(title: item.name, message: "Add this file to your draft for “\(choice.title)” on \(server.origin.host ?? "HUB")? You can review it in the conversation before pressing Send.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Prepare message", style: .default) { [weak self] _ in
             guard let self, !self.busy else { return }; self.busy = true
             Task {
@@ -139,21 +137,16 @@ import HubNative
     }
     private func prepare(_ draft: HubAttachmentDraft) async throws {
         guard stillConnected() else { throw HubAttachmentError.signInRequired }
-        let bytes = try await store.bytes(draft, server: server, sessionID: draft.sessionID, callID: "text-composer")
-        message = "Preparing your message…"; tableView.reloadData()
-        try await upload.upload(draft, bytes: bytes)
-        // Older hosts can accept a file but cannot hand it to the composer.
-        // Confirm the exact receipt capability before claiming a draft opened.
-        let url = try await catalog.confirmedDraftURL(draft)
+        _ = try await store.bytes(draft, server: server, sessionID: draft.sessionID, callID: "text-composer")
         guard stillConnected() else { throw HubAttachmentError.signInRequired }
-        dismiss(animated: true) { [openDraft] in openDraft(url) }
+        dismiss(animated: true) { [openDraft] in openDraft(draft) }
     }
     private func describe(_ error: Error) -> String {
         switch error {
         case HubAttachmentError.full: return "Eight prepared copies are waiting. Review Prepared copies or Interrupted preparation and explicitly remove an unneeded local copy, then retry. Nothing was deleted."
         case HubAttachmentError.signInRequired: return "Sign in to HUB again, then retry. Your saved copy is preserved."
         case HubAttachmentError.wrongConversation: return "This copy is already assigned. Retry its saved entry in Prepared copies; it was not moved."
-        default: return "HUB could not confirm the message draft. Reconnect or update the HUB host, then retry its Prepared copy. Your copies are preserved."
+        default: return "Could not open the prepared message. Retry its local copy from Files."
         }
     }
     private func reviewRecovery(_ item: (id: UUID, damaged: Bool)) {

@@ -34,6 +34,262 @@ final class HubConversationTests: XCTestCase {
         CatalogFixture.responder = nil
     }
 
+    func testLocalKnowledgeGraphKeepsOnlyTheSelectedRecordItsNeighborsAndTheirEdges() throws {
+        let graph = try JSONDecoder().decode(HubHomeKnowledge.self, from: Data(#"""
+        {"nodes":[{"id":"center"},{"id":"incoming"},{"id":"archive","kind":"conversation"},{"id":"two-hops"}],
+         "edges":[{"source":"incoming","target":"center"},{"source":"center","target":"archive"},
+                  {"source":"incoming","target":"archive"},{"source":"archive","target":"two-hops"},
+                  {"source":"center","target":"missing"}],
+         "memberships":[{"nodeId":"incoming","domainId":"domain"},{"nodeId":"two-hops","domainId":"other"}]}
+        """#.utf8))
+        let local = try XCTUnwrap(graph.neighborhood(of: "center"))
+        XCTAssertEqual(local.nodes.map(\.id), ["center", "incoming", "archive"])
+        XCTAssertEqual(local.edges.count, 3)
+        XCTAssertEqual(local.memberships?.map(\.nodeId), ["incoming"])
+        XCTAssertNil(graph.neighborhood(of: "missing"))
+    }
+
+    func testKnowledgeDomainFocusIncludesSubdomainsButKeepsTheChatArchiveSeparate() throws {
+        let graph = try JSONDecoder().decode(HubHomeKnowledge.self, from: Data(#"""
+        {"nodes":[{"id":"parent-note"},{"id":"child-note"},{"id":"outside"},{"id":"archived","kind":"conversation"}],
+         "domains":[{"id":"parent","title":"Parent","status":"active"},
+                    {"id":"child","title":"Child","status":"active","parentId":"parent"}],
+         "memberships":[{"nodeId":"parent-note","domainId":"parent"},{"nodeId":"child-note","domainId":"child"},
+                        {"nodeId":"archived","domainId":"child"}],
+         "edges":[{"source":"parent-note","target":"child-note"},{"source":"child-note","target":"outside"}]}
+        """#.utf8))
+        let domain = try XCTUnwrap(graph.graphForDomain("parent"))
+        XCTAssertEqual(domain.nodes.map(\.id), ["parent-note", "child-note"])
+        XCTAssertEqual(domain.edges.count, 1)
+        XCTAssertEqual(graph.graphForDomain(HubKnowledgeLayout.archiveID)?.nodes.map(\.id), ["archived"])
+        XCTAssertNil(graph.graphForDomain("missing"))
+    }
+
+    func testKnowledgeSkillEditorSendsExplicitCreateNullAndObservedUpdateHash() async throws {
+        let api = try client()
+        let observedHash = String(repeating: "a", count: 64)
+        let skill = """
+        {"id":"fixture-skill","name":"weekly-review","title":"Weekly review","description":"Review progress",
+         "requiredTools":["read"],"hash":"\(observedHash)","content":"Gather the latest updates."}
+        """
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/skills")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-skills"), "1")
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.query, "name=weekly-review")
+                return (200, Data("{\"skill\":\(skill)}".utf8))
+            }
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(body["name"] as? String, "weekly-review")
+            XCTAssertEqual(body["requiredTools"] as? [String], ["read"])
+            if CatalogFixture.requests.count == 1 { XCTAssertTrue(body["expectedHash"] is NSNull) }
+            else { XCTAssertEqual(body["expectedHash"] as? String, observedHash) }
+            return (200, Data("{\"skills\":[\(skill)],\"issues\":[]}".utf8))
+        }
+        var draft = HubKnowledgeSkillDraft()
+        draft.name = "weekly-review"
+        draft.title = "Weekly review"
+        draft.description = "Review progress"
+        draft.content = "Gather the latest updates."
+        draft.requiredTools = ["read"]
+        let created = try await api.saveKnowledgeSkill(draft)
+        XCTAssertEqual(created.skills.first?.name, draft.name)
+        let existing = try await api.knowledgeSkill(name: draft.name)
+        XCTAssertEqual(existing.content, draft.content)
+        var edit = HubKnowledgeSkillDraft(skill: existing)
+        edit.content = "Review progress with verified inputs."
+        _ = try await api.saveKnowledgeSkill(edit)
+        XCTAssertEqual(CatalogFixture.requests.count, 3)
+    }
+
+    func testKnowledgeAttachmentUploadAndReadAreScopedAndVerifyOriginalBytes() async throws {
+        let api = try client()
+        let original = Data(#"{"fixture":true}"#.utf8)
+        let id = HubAttachmentStore.digest(original)
+        let hash = String(repeating: "e", count: 64)
+        let note = try JSONDecoder().decode(HubKnowledgeNote.self, from: Data("""
+        {"id":"fixture-note","title":"Fixture","content":"Source","hash":"\(hash)","kind":"note"}
+        """.utf8))
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-filename"), "Fixture%20file%2Ejson")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/octet-stream")
+                XCTAssertEqual(request.url?.query, "action=upload-asset&noteId=fixture-note&hash=\(hash)")
+                XCTAssertEqual(try Self.requestBody(request), original)
+                return (200, Data("""
+                {"asset":{"id":"\(id)","name":"Fixture file.json","mediaType":"application/json","bytes":\(original.count)},
+                 "note":{"id":"fixture-note","title":"Fixture","content":"Source with attachment","kind":"note"}}
+                """.utf8))
+            }
+            XCTAssertEqual(request.url?.query, "view=asset&id=\(id)")
+            let data = CatalogFixture.requests.count == 2 ? original : Data(repeating: 0x20, count: original.count)
+            return (200, data)
+        }
+        let result = try await api.uploadKnowledgeAsset(original, name: "Fixture file.json", attachingTo: note)
+        XCTAssertEqual(result.note?.content, "Source with attachment")
+        let data = try await api.knowledgeAssetBytes(result.asset)
+        XCTAssertEqual(data, original)
+        do {
+            _ = try await api.knowledgeAssetBytes(result.asset)
+            XCTFail("An attachment must match the saved digest")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
+    func testKnowledgeArchiveStagingPreservesBytesAndDoesNotAdmit() async throws {
+        let api = try client()
+        let source = Data(#"{"fixture":true}"#.utf8)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.url?.query, "action=preview-import")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/octet-stream")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-filename"), "Turkish%20archive%2Ejson")
+            XCTAssertEqual(try Self.requestBody(request), source)
+            return (200, Data(#"""
+            {"id":"12345678-1234-1234-1234-123456789abc","filename":"Turkish archive.json","state":"previewed",
+             "conversations":0,"admitted":0,"records":[],"previewHash":"fixture","warnings":[],"nextOffset":null}
+            """#.utf8))
+        }
+        let preview = try await api.stageKnowledgeArchive(source, filename: "Turkish archive.json")
+        XCTAssertEqual(preview.admitted, 0)
+        XCTAssertEqual(CatalogFixture.requests.count, 1)
+    }
+
+    func testKnowledgePassReviewKeepsEvidenceAndApprovesOnlyThePreviewedHash() async throws {
+        let api = try client()
+        let hash = String(repeating: "d", count: 64)
+        let entry = try JSONDecoder().decode(HubKnowledgeActivity.Entry.self, from: Data(
+            #"{"id":"pass-1","status":"review","updatedAt":1,"changes":[],"warnings":[]}"#.utf8
+        ))
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            if request.httpMethod == "GET" {
+                let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+                let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value) })
+                XCTAssertEqual(query["view"] ?? nil, "review")
+                XCTAssertEqual(query["id"] ?? nil, entry.id)
+                let response = #"""
+                {"source":{"content":"Private fixture text"},"stale":true,"reviewHash":"\#(hash)",
+                 "plan":{"decision":"organize","reason":"Keep a sourced record","tags":[],
+                         "domainOps":[{"type":"propose","operation":{"type":"merge","id":"a","targetId":"b"},"evidence":"Fixture excerpt"}],
+                         "memories":[{"title":"Fixture memory","category":"learning","evidence":"Private fixture text"}]}}
+                """#
+                return (200, Data(response.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "review")
+            XCTAssertEqual(command["id"] as? String, entry.id)
+            XCTAssertEqual(command["approve"] as? Bool, true)
+            XCTAssertEqual(command["reviewHash"] as? String, hash)
+            XCTAssertNil(command["source"])
+            return (200, Data("{}".utf8))
+        }
+        let preview = try await api.knowledgeCurationReview(entry)
+        XCTAssertEqual(preview.source.content, "Private fixture text")
+        XCTAssertEqual(preview.plan.domainOps?.first?.operation?.targetId, "b")
+        XCTAssertEqual(preview.plan.memories?.first?.evidence, "Private fixture text")
+        try await api.decideKnowledgeCuration(entry, review: preview, approve: true)
+    }
+
+    func testKnowledgeModelCheckUsesTheSavedRouteAndRejectsAnUnexpectedReceipt() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: String])
+            XCTAssertEqual(command, ["action": "model-check"])
+            return (200, Data(#"{"ok":true,"provider":"fixture","model":"saved","reasoningEffort":"low"}"#.utf8))
+        }
+        try await api.checkKnowledgeModel(provider: "fixture", model: "saved", effort: "low")
+        do {
+            try await api.checkKnowledgeModel(provider: "fixture", model: "different", effort: "low")
+            XCTFail("A receipt for a different route cannot verify the saved model")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
+    func testQueueOnlyDisplaysSelectedSessionAndNeverEditsAttachmentsAsText() async throws {
+        let baseline = Data(#"""
+        {"type":"item","value":{"type":"baseline","value":{"queues":{
+          "owned-chat":[
+            {"id":"text-1","placement":"queued","message":{"content":[{"type":"text","text":"Original"}]}},
+            {"id":"image-1","placement":"queued","message":{"content":[{"type":"image"}]}},
+            {"id":"context-1","placement":"context","message":{"content":[{"type":"text","text":"Hidden"}]}}
+          ],
+          "other-chat":[{"id":"private-1","placement":"queued","message":{"content":[{"type":"text","text":"Other chat"}]}}]
+        }}}}
+        """#.utf8)
+        let update = try XCTUnwrap(HubConversationAPI.chatQueueUpdate(baseline, sessionID: "owned-chat"))
+        let items = try XCTUnwrap(update.items)
+        XCTAssertEqual(items.map(\.id), ["text-1", "image-1"])
+        XCTAssertTrue(items[0].canEdit)
+        XCTAssertFalse(items[1].canEdit)
+        let unrelated = Data(#"{"type":"item","value":{"type":"queue","sessionId":"other-chat","items":[]}}"#.utf8)
+        XCTAssertNil(try HubConversationAPI.chatQueueUpdate(unrelated, sessionID: "owned-chat"))
+
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/updateQueue")
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let command = try XCTUnwrap(arguments["request"] as? [String: Any])
+            XCTAssertEqual(command["sessionId"] as? String, "owned-chat")
+            XCTAssertEqual(command["itemId"] as? String, "text-1")
+            let action = try XCTUnwrap(command["action"] as? [String: Any])
+            XCTAssertEqual(action["kind"] as? String, "edit")
+            XCTAssertEqual(action["content"] as? [[String: String]], [["type": "text", "text": "Revised"]])
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": ["accepted": true]],
+            ]))
+        }
+        try await api.updateChatQueue(sessionID: "owned-chat", item: items[0], action: .edit("Revised"))
+        do {
+            try await api.updateChatQueue(sessionID: "owned-chat", item: items[1], action: .edit("Would lose attachment"))
+            XCTFail("Editing a queued image as text must be refused locally")
+        } catch HubChatSendError.invalidDraft {}
+        XCTAssertEqual(CatalogFixture.requests.count, 1)
+    }
+
+    func testSlashCommandUsesSessionCatalogAndCommandEndpointWithoutPrompting() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            XCTAssertEqual(arguments["agentId"] as? String, "owned-chat")
+            var result: [String: Any] = ["ok": true]
+            switch request.url?.path {
+            case "/api/commands/list":
+                result["value"] = [["name": "echo", "description": "Display text", "input": ["hint": "Text"]]]
+            case "/api/commands/execute":
+                XCTAssertEqual(arguments["line"] as? String, "/echo  keep spacing")
+                XCTAssertEqual((arguments["images"] as? [Any])?.count, 0)
+                if CatalogFixture.requests.count == 2 {
+                    result["value"] = ["commandId": "fixture-command", "result": ["kind": "success", "text": "keep spacing"]]
+                }
+            default:
+                XCTFail("A command must not enter the model prompt route")
+            }
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": result,
+            ]))
+        }
+        let list = try await api.chatCommands(sessionID: "owned-chat")
+        XCTAssertEqual(list.map(\.name), ["echo"])
+        let receipt = try await api.runChatCommand("/echo  keep spacing", sessionID: "owned-chat", photos: [])
+        XCTAssertEqual(receipt?.commandId, "fixture-command")
+        let removed = try await api.runChatCommand("/echo  keep spacing", sessionID: "owned-chat", photos: [])
+        XCTAssertNil(removed)
+        XCTAssertNil(HubChatCommand.leadingName(in: "Read /echo"))
+        XCTAssertNil(HubChatCommand.leadingName(in: "/echo.txt"))
+        XCTAssertEqual(HubChatCommand.leadingName(in: "/echo\r\narguments"), "echo")
+    }
+
     func testHomeReadsUseExistingAuthenticatedRoutes() async throws {
         let api = try client()
         CatalogFixture.reply = #"{"nodes":[{"id":"note","kind":"note"}],"edges":[]}"#
@@ -46,6 +302,752 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(planner.items.first?.title, "Fixture")
         XCTAssertEqual(CatalogFixture.request?.url?.path, "/api/hub/planner")
         XCTAssertTrue(CatalogFixture.requests.allSatisfy { $0.httpMethod == "GET" })
+    }
+
+    func testKnowledgeConnectionsDistinguishARecordedPathAndItsPrivateEvidence() async throws {
+        let api = try client()
+        let node = #"{"id":"target","title":"Fixture target"}"#
+        let quote = #"{"sourceId":"source","quote":"Fixture excerpt","role":"user"}"#
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            let relation = #"""
+            "id":"relation","scope":"short","interpretation":true,"predicate":"explains","evidence":[\#(quote)]
+            """#
+            let response: String
+            switch query["view"] {
+            case "neighbors":
+                XCTAssertEqual(query["id"], "source")
+                XCTAssertEqual(query["cursor"], "older+&ß")
+                XCTAssertTrue(components.percentEncodedQuery?.contains("cursor=older%2B%26") == true)
+                response = #"{"recordId":"source","total":2,"items":[{\#(relation),"node":\#(node)}],"nextCursor":"relation"}"#
+            case "search":
+                XCTAssertEqual(query["q"], "İki & bir")
+                response = #"{"nodes":[\#(node)]}"#
+            case "path":
+                XCTAssertEqual(query["target"], "target")
+                response = #"{"sourceId":"source","targetId":"target","found":true,"complete":true,"meaning":"Sourced path","nodes":[{"id":"source"},\#(node)],"relations":[{\#(relation)}]}"#
+            case "evidence":
+                XCTAssertEqual(query["relation"], "relation")
+                XCTAssertEqual(query["index"], "0")
+                response = #"{"citation":\#(quote),"sourceTitle":"Fixture source","version":"archived","excerpt":{"text":"More context"}}"#
+            default:
+                XCTFail("Unexpected Knowledge query \(query)")
+                return (400, Data())
+            }
+            return (200, Data(response.utf8))
+        }
+        let page = try await api.knowledgeNeighbors(id: "source", cursor: "older+&ß")
+        XCTAssertEqual(page.items.first?.node?.id, "target")
+        let matches = try await api.searchKnowledgeRecords(" İki & bir ")
+        XCTAssertEqual(matches.first?.title, "Fixture target")
+        let path = try await api.knowledgeConnectionPath(from: "source", to: "target")
+        XCTAssertTrue(path.found)
+        XCTAssertEqual(path.relations.first?.evidence.first?.quote, "Fixture excerpt")
+        let source = try await api.knowledgeSourceEvidence(relation: "relation", index: 0)
+        XCTAssertEqual(source.version, "archived")
+        XCTAssertEqual(source.excerpt?.text, "More context")
+    }
+
+    func testKnowledgeDomainApprovalUsesReviewedRevisionAndSplitUsesHostReferences() async throws {
+        let api = try client()
+        let hash = String(repeating: "a", count: 64)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.query, "view=domain-preview&id=proposal")
+                let response = #"{"revision":7,"previewHash":"\#(hash)","proposal":{"id":"proposal","status":"pending","operation":{"type":"merge"},"evidence":"Fixture source"},"stale":false,"affectedRecords":2,"before":[],"after":[]}"#
+                return (200, Data(response.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            if command["action"] as? String == "domain-review" {
+                XCTAssertEqual(command["revision"] as? Int, 7)
+                XCTAssertEqual(command["id"] as? String, "proposal")
+                if command["approve"] as? Bool == true { XCTAssertEqual(command["previewHash"] as? String, hash) }
+                else { XCTAssertNil(command["previewHash"]) }
+            } else {
+                XCTAssertEqual(command["action"] as? String, "domains")
+                XCTAssertEqual(command["revision"] as? Int, 8)
+                let operations = try XCTUnwrap(command["operations"] as? [[String: Any]])
+                let operation = try XCTUnwrap(operations.first)
+                XCTAssertEqual(operation["type"] as? String, "split")
+                let groups = try XCTUnwrap(operation["groups"] as? [[String: Any]])
+                XCTAssertEqual(groups.compactMap { $0["ref"] as? String }, ["new-split-0", "new-split-1"])
+                XCTAssertEqual(groups[0]["nodeIds"] as? [String], ["note-a"])
+                XCTAssertEqual(operation["deactivateSource"] as? Bool, true)
+            }
+            return (200, Data("{}".utf8))
+        }
+        let preview = try await api.knowledgeDomainPreview("proposal")
+        XCTAssertEqual(preview.affectedRecords, 2)
+        try await api.reviewKnowledgeDomain(preview, approve: true)
+        try await api.reviewKnowledgeDomain(preview, approve: false)
+        try await api.changeKnowledgeDomains([.split(id: "domain", groups: [
+            .init(title: "First", noteIDs: ["note-a"]), .init(title: "Second", noteIDs: ["note-b"]),
+        ], deactivateSource: true)], revision: 8)
+    }
+
+    func testKnowledgeOrganizationSendsOnlyReviewedWindowCoordinates() async throws {
+        let api = try client()
+        let hash = String(repeating: "b", count: 64)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            if request.httpMethod == "GET" {
+                let query = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
+                XCTAssertEqual(query?.first(where: { $0.name == "offset" })?.value, "100")
+                let response = #"{"nodeId":"note","title":"Fixture","hash":"\#(hash)","start":100,"end":104,"totalChars":110,"content":"A🌿B","nextOffset":104}"#
+                return (200, Data(response.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "reorganize")
+            XCTAssertEqual(command["nodeIds"] as? [String], ["note"])
+            let window = try XCTUnwrap((command["windows"] as? [[String: Any]])?.first)
+            XCTAssertEqual(window["hash"] as? String, hash)
+            XCTAssertEqual(window["start"] as? Int, 100)
+            XCTAssertEqual(window["end"] as? Int, 104)
+            XCTAssertNil(window["content"])
+            return (200, Data(#"{"queued":1,"automatic":false}"#.utf8))
+        }
+        let excerpt = try await api.knowledgeOrganizationExcerpt("note", offset: 100)
+        let receipt = try await api.queueKnowledgeOrganization(notes: ["note"], excerpts: [excerpt])
+        XCTAssertFalse(receipt.automatic)
+    }
+
+    func testWorkspaceGoalOutputVerifiesArtifactDigestAndSafeName() async throws {
+        let api = try client()
+        let bytes = Data("Verified fixture".utf8)
+        let hash = HubAttachmentStore.digest(bytes)
+        let evidence = try JSONDecoder().decode(HubWorkspaceTask.Evidence.self, from: JSONSerialization.data(withJSONObject: [
+            "id": "file-evidence", "kind": "file", "label": "Fixture", "detail": "Verified", "at": 1, "sha256": hash,
+        ]))
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.query, "view=artifact&id=fixture-goal&evidenceId=file-evidence")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-goals"), "1")
+            let name = CatalogFixture.requests.count == 2 ? "../fixture.txt" : "fixture.txt"
+            let value = ["name": name, "data": bytes.base64EncodedString(), "sha256": hash]
+            return (200, try JSONSerialization.data(withJSONObject: value))
+        }
+        let file = try await api.workspaceTaskOutput(goalID: "fixture-goal", evidence: evidence)
+        XCTAssertEqual(file.name, "fixture.txt")
+        XCTAssertEqual(file.data, bytes)
+        do {
+            _ = try await api.workspaceTaskOutput(goalID: "fixture-goal", evidence: evidence)
+            XCTFail("A file path cannot be used as the exported file name")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
+    func testFollowTimelineCombinesPackedAndLiveTextAndSettlesOnEnd() throws {
+        let decoder = JSONDecoder()
+        var timeline = HubChatTimeline()
+        let opening = try decoder.decode(HubChatStreamFrame.self, from: Data(#"""
+        {"type":"item","value":{"type":"snapshot","hasMore":true,"records":[
+          {"event":{"type":"turn/start","seq":1,"data":{}}},
+          {"event":{"type":"user/message","seq":2,"data":{"source":{"kind":"user"},"content":[{"type":"text","text":"Fixture"}]}}},
+          {"event":{"type":"chunkrow/text-chunks","seq":3,"data":{"index":0,"texts":["Hello"," "]}}}
+        ]}}
+        """#.utf8))
+        timeline.start(try XCTUnwrap(opening.value))
+        XCTAssertEqual(timeline.snapshot.messages.map(\.text), ["Fixture"])
+        XCTAssertTrue(timeline.snapshot.running)
+        XCTAssertTrue(timeline.snapshot.hasMore)
+        let updates = [
+            #"{"type":"assistant/chunk","seq":5,"data":{"chunk":{"type":"text-delta","index":0,"text":"world"}}}"#,
+            #"{"type":"tool/result","seq":6,"data":{"turn":1,"meta":{"kind":"hub-screenshot"}}}"#,
+            #"{"type":"assistant/message","seq":7,"data":{"turn":1,"message":{"content":[{"type":"text","text":"Hello world"}]}}}"#,
+            #"{"type":"command/done","seq":8,"data":{"kind":"text","text":"Command output"}}"#,
+            #"{"type":"turn/end","seq":9,"data":{"reason":{"kind":"completed"}}}"#,
+        ]
+        for (index, source) in updates.enumerated() {
+            let event = try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8))
+            timeline.apply(event)
+            if index == 0 { XCTAssertEqual(timeline.snapshot.partial, "Hello world") }
+            if index == 1 {
+                XCTAssertEqual(timeline.snapshot.latestScreenshotSequence, 6)
+                XCTAssertTrue(timeline.snapshot.running)
+            }
+        }
+        XCTAssertEqual(timeline.snapshot.messages.map(\.text), ["Fixture", "Hello world", "Command output"])
+        XCTAssertEqual(timeline.snapshot.latestUserMessageID, "2")
+        XCTAssertEqual(timeline.snapshot.latestMessageTurn, 1)
+        XCTAssertFalse(timeline.snapshot.running)
+        XCTAssertTrue(timeline.snapshot.partial.isEmpty)
+    }
+
+    func testProviderRetryClearsAbandonedPartialResponseAndPreservesItsActivity() throws {
+        let decoder = JSONDecoder()
+        var timeline = HubChatTimeline()
+        let events = [
+            #"{"type":"turn/start","seq":1,"data":{}}"#,
+            #"{"type":"assistant/chunk","seq":2,"data":{"chunk":{"type":"text-delta","index":0,"text":"Discarded"}}}"#,
+            #"{"type":"llm/retry","seq":3,"data":{"turn":1,"retry":1,"maxRetries":2,"delayMs":2500,"failure":{"code":"server-error"}}}"#,
+            #"{"type":"llm/retry-started","seq":4,"data":{"turn":1,"retry":1}}"#,
+            #"{"type":"assistant/chunk","seq":5,"data":{"chunk":{"type":"text-delta","index":0,"text":"Retried"}}}"#,
+        ]
+        for source in events {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8)))
+        }
+        XCTAssertEqual(timeline.snapshot.partial, "Retried")
+        XCTAssertEqual(timeline.snapshot.activity.map(\.title), ["Waiting to retry model request", "Retrying model request"])
+        XCTAssertTrue(timeline.snapshot.activity.first?.detail?.contains("3 s delay") == true)
+        XCTAssertTrue(timeline.snapshot.running)
+    }
+
+    func testTurnEndKeepsCancellationSeparateFromFailureAndContinuesQueuedWork() throws {
+        let decoder = JSONDecoder()
+        var timeline = HubChatTimeline()
+        let events = [
+            #"{"type":"turn/start","seq":1,"data":{}}"#,
+            #"{"type":"turn/end","seq":2,"data":{"reason":{"kind":"aborted","reason":{"kind":"user"}}}}"#,
+            #"{"type":"turn/start","seq":3,"data":{}}"#,
+            #"{"type":"turn/end","seq":4,"data":{"reason":{"kind":"error","message":"Fixture provider error"}}}"#,
+        ]
+        for (index, json) in events.enumerated() {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(json.utf8)))
+            let snapshot = timeline.snapshot
+            XCTAssertEqual(snapshot.running, index == 0 || index == 2)
+            XCTAssertEqual(snapshot.lastTurnWasStopped, index == 1)
+            XCTAssertEqual(snapshot.lastTurnEndSequence, [nil, 2, 2, 4][index])
+            XCTAssertEqual(snapshot.failure, index == 3 ? "Fixture provider error" : nil)
+        }
+    }
+
+    func testVoiceProfileEditUsesExpectedRevisionAndPreservesExistingConfiguration() async throws {
+        let api = try client()
+        let id = UUID(uuidString: "216cb7b2-8e8f-48d5-86f9-cf92a29aca14")!
+        let profile: [String: Any] = [
+            "id": id.uuidString.lowercased(), "name": "Vera", "instructions": "Use short replies.",
+            "route": ["provider": "fixture", "model": "test", "maxTokens": 1000],
+            "speech": ["stt": ["engine": "whisper", "model": "base"],
+                       "tts": ["engine": "supertonic", "model": "supertonic-3", "voice": "F5", "steps": 6]],
+            "tools": ["mode": "allow", "names": ["read"]],
+        ]
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/voice/profiles")
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-voice-profiles"), "1")
+            }
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "revision": 4, "selectedId": id.uuidString.lowercased(), "profiles": [profile],
+            ]))
+        }
+        let current = try await api.voiceProfiles()
+        var settings = try XCTUnwrap(current.profiles.first?.settings)
+        settings.name = "Updated"
+        _ = try await api.changeVoiceProfile(.edit(id, settings), revision: current.revision)
+        let body = try Self.requestBody(XCTUnwrap(CatalogFixture.request))
+        let command = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(Set(command.keys), ["type", "id", "revision", "profile"])
+        XCTAssertEqual(command["type"] as? String, "edit")
+        XCTAssertEqual(command["revision"] as? Int, 4)
+        XCTAssertEqual(command["id"] as? String, id.uuidString.lowercased())
+        let edited = try XCTUnwrap(command["profile"] as? [String: Any])
+        XCTAssertNil(edited["id"])
+        XCTAssertEqual(edited["name"] as? String, "Updated")
+        XCTAssertEqual((edited["route"] as? [String: Any])?["maxTokens"] as? Int, 1000)
+        XCTAssertEqual((edited["tools"] as? [String: Any])?["names"] as? [String], ["read"])
+    }
+
+    func testVoiceProfileCatalogKeepsVoiceOnlyToolsAndProviderScopedModels() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/voice/catalog")
+            XCTAssertEqual(request.httpMethod, "GET")
+            if request.url?.query == nil {
+                return (200, Data(#"{"providers":[{"id":"fixture","name":"Fixture"}],"tools":[{"name":"hub_view_screen","description":"Read one consented frame"}],"speech":{"stt":[],"tts":[]}}"#.utf8))
+            }
+            XCTAssertEqual(request.url?.query, "provider=fixture")
+            let provider = CatalogFixture.requests.count == 2 ? "fixture" : "other"
+            return (200, Data("""
+                {"models":[{"id":"family/test","name":"Test","provider":"\(provider)","efforts":[{"id":"low","name":"Low"}]}]}
+                """.utf8))
+        }
+        let catalog = try await api.voiceProfileCatalog()
+        XCTAssertEqual(catalog.providers.map(\.id), ["fixture"])
+        XCTAssertEqual(catalog.tools.map(\.id), ["hub_view_screen"])
+        let models = try await api.voiceProfileModels(provider: "fixture")
+        XCTAssertEqual(models.map(\.id), ["family/test"])
+        XCTAssertEqual(models.first?.efforts.map(\.id), ["low"])
+        do {
+            _ = try await api.voiceProfileModels(provider: "fixture")
+            XCTFail("A different provider's model cannot be selected")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
+    func testConversationFileDownloadChecksSessionAndSnapshotDigest() async throws {
+        let api = try client()
+        let data = Data("Text output\r\n".utf8)
+        let digest = HubAttachmentStore.digest(data)
+        let id = String(repeating: "a", count: 64)
+        let file: [String: Any] = ["name": "notes.txt", "id": id, "bytes": data.count, "sha256": digest]
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/artifacts")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-session"), "fixture-chat")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-artifact-format"), "file")
+            if let artifact = request.value(forHTTPHeaderField: "x-hub-artifact") {
+                XCTAssertEqual(artifact, id)
+                var receipt = file
+                let delivered = CatalogFixture.requests.count == 2 ? data : Data(repeating: 0x20, count: data.count)
+                receipt["data"] = delivered.base64EncodedString()
+                return (200, try JSONSerialization.data(withJSONObject: receipt))
+            }
+            return (200, try JSONSerialization.data(withJSONObject: ["files": [file]]))
+        }
+        let files = try await api.conversationFiles(sessionID: "fixture-chat")
+        let selected = try XCTUnwrap(files?.first)
+        let received = try await api.conversationFileBytes(sessionID: "fixture-chat", file: selected)
+        XCTAssertEqual(received, data)
+        do {
+            _ = try await api.conversationFileBytes(sessionID: "fixture-chat", file: selected)
+            XCTFail("An altered file must not reach the preview or share sheet")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
+    func testScreenshotCatalogUsesBoundedConversationRoute() async throws {
+        let api = try client()
+        let id = String(repeating: "a", count: 64)
+        CatalogFixture.reply = """
+        {"screenshots":[{"id":"\(id)","name":"Fixture.png","turn":2}]}
+        """
+        let screenshots = try await api.chatScreenshots(sessionID: "owned-chat")
+        XCTAssertEqual(screenshots.first?.id, id)
+        XCTAssertEqual(CatalogFixture.request?.url?.path, "/api/hub/artifacts")
+        XCTAssertEqual(CatalogFixture.request?.value(forHTTPHeaderField: "x-hub-session"), "owned-chat")
+        XCTAssertEqual(CatalogFixture.request?.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+        do {
+            _ = try await api.chatScreenshot(sessionID: "owned-chat", id: "../other")
+            XCTFail("Invalid image IDs should never reach the host")
+        } catch {}
+        XCTAssertEqual(CatalogFixture.requests.count, 1)
+    }
+
+    func testCanvasReadsOnlyTheSelectedChatAndCurrentDocument() async throws {
+        let api = try client()
+        let id = "850b7c3a-6376-4606-8d29-54080503fdaa"
+        let document = "<!doctype html><html><head></head><body>Fixture</body></html>"
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-session"), "owned-chat")
+            if request.url?.path == "/api/hub/presentation" {
+                return (200, Data("""
+                {"presentation":{"id":"\(id)","title":"Fixture","kind":"vega","createdAt":42}}
+                """.utf8))
+            }
+            XCTAssertEqual(request.url?.path, "/api/hub/presentation-document")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-presentation"), id)
+            return (200, try JSONSerialization.data(withJSONObject: ["document": document]))
+        }
+        let presentation = try await api.chatPresentation(sessionID: "owned-chat")
+        let selected = try XCTUnwrap(presentation)
+        XCTAssertEqual(selected.kind, .vega)
+        let html = try await api.chatPresentationDocument(sessionID: "owned-chat", id: selected.id)
+        XCTAssertEqual(html, document)
+        CatalogFixture.responder = nil
+        CatalogFixture.reply = #"{"presentation":null}"#
+        let empty = try await api.chatPresentation(sessionID: "owned-chat")
+        XCTAssertNil(empty)
+        do {
+            _ = try await api.chatPresentation(sessionID: "../other")
+            XCTFail("Invalid conversation IDs should never reach the host")
+        } catch {}
+        XCTAssertEqual(CatalogFixture.requests.count, 3)
+    }
+
+    func testBrowserPreviewRejectsAFrameFromAnotherConversation() async throws {
+        let api = try client()
+        let tab: [String: String] = [
+            "sessionId": "browser-a", "ownerSessionId": "chat-a",
+            "title": "Fixture", "url": "https://example.com", "status": "ready", "owner": "agent",
+        ]
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/hub/browser-view")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-browser-view"), "1")
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: String])
+            if command == ["type": "list"] { return (200, try JSONSerialization.data(withJSONObject: [tab])) }
+            XCTAssertEqual(command, ["type": "frame", "sessionId": "browser-a", "ownerSessionId": "chat-a"])
+            var foreign = tab
+            foreign["ownerSessionId"] = "chat-b"
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "tab": foreign, "capturedAt": 42, "width": 12, "height": 8,
+                "mimeType": "image/jpeg", "data": "/9j/",
+            ]))
+        }
+        let tabs = try await api.browserTabs()
+        let selected = try XCTUnwrap(tabs.first)
+        do {
+            _ = try await api.browserFrame(for: selected)
+            XCTFail("The frame must match both the tab and its owner")
+        } catch HubAttachmentError.invalidResponse {}
+    }
+
+    func testChatPreferencesUpdateOnlyTheSelectedFieldAndObservedRevision() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let value: [String: Any]
+            if request.url?.path == "/api/settings/describe" {
+                XCTAssertTrue(arguments.isEmpty)
+                value = ["writable": true, "namespaces": [
+                    ["ns": "ui-theme", "revision": 7, "value": ["fontSize": 16, "preference": CatalogFixture.requests.count >= 5 ? "light" : "dark"]],
+                    ["ns": "ui-conversation", "revision": 3, "value": ["busyEnter": "steer"]],
+                    ["ns": "ui-chat", "revision": 2, "value": ["transcriptView": "normal"]],
+                    ["ns": "locale", "revision": 11, "value": ["preference": CatalogFixture.requests.count >= 7 ? "zh" : "en"]],
+                ]]
+            } else {
+                XCTAssertEqual(request.url?.path, "/api/settings/update")
+                let languageWrite = CatalogFixture.requests.count == 6
+                let namespace = languageWrite ? "locale" : "ui-theme"
+                XCTAssertEqual(arguments["ns"] as? String, namespace)
+                if CatalogFixture.requests.count == 2 { XCTAssertEqual(arguments["patch"] as? [String: Int], ["fontSize": 16]) }
+                else { XCTAssertEqual(arguments["patch"] as? [String: String], ["preference": languageWrite ? "zh" : "light"]) }
+                XCTAssertEqual(arguments["expectedRevision"] as? Int, languageWrite ? 11 : 7)
+                value = ["ns": namespace]
+            }
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": value],
+            ]))
+        }
+        let preferences = try await api.chatPreferences()
+        XCTAssertEqual(preferences.busyEnter, .steer)
+        XCTAssertEqual(preferences.transcript, .normal)
+        XCTAssertEqual(preferences.appearance, .dark)
+        let updated = try await api.updateChatPreferences(.fontSize(16), from: preferences)
+        XCTAssertEqual(updated.fontSize, 16)
+        XCTAssertEqual(CatalogFixture.requests.map { $0.url?.path },
+                       ["/api/settings/describe", "/api/settings/update", "/api/settings/describe"])
+        let themed = try await api.updateChatPreferences(.appearance(.light), from: updated)
+        XCTAssertEqual(themed.appearance, .light)
+        XCTAssertEqual(themed.fontSize, updated.fontSize)
+        XCTAssertTrue(themed.canSetLanguage)
+        let localized = try await api.updateChatPreferences(.language(.zh), from: themed)
+        XCTAssertEqual(localized.interfaceLanguage, "zh")
+        XCTAssertEqual(localized.appearance, .light)
+    }
+
+    func testCreatingAChatUsesTheSelectedWorkspaceAndDoesNotUseItsPath() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/create")
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let command = try XCTUnwrap(arguments["request"] as? [String: String])
+            XCTAssertEqual(command["workspaceId"], "owned-workspace")
+            XCTAssertNil(command["cwd"])
+            let session = try XCTUnwrap(command["sessionId"])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": ["sessionId": session]],
+            ]))
+        }
+        let id = try await api.createChat(workspaceID: "owned-workspace")
+        XCTAssertTrue(id.hasPrefix("session-"))
+    }
+
+    func testWorkspaceOrderingAndArchivingUseTheExistingRegistryRPCs() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let arguments = try XCTUnwrap(payload["args"] as? [String: Any])
+            let command = try XCTUnwrap(arguments["request"] as? [String: String])
+            let value: [String: Any]
+            switch request.url?.path {
+            case "/api/workspace/insertBefore":
+                XCTAssertEqual(command, ["workspaceId": "fixture-workspace", "beforeWorkspaceId": "other-workspace"])
+                value = ["workspaceIds": ["fixture-workspace", "other-workspace"]]
+            case "/api/workspace/insertSessionBefore":
+                XCTAssertEqual(command, ["workspaceId": "fixture-workspace", "sessionId": "chat-one"])
+                value = ["workspace": ["workspaceId": "fixture-workspace", "path": "/fixture", "title": "Fixture",
+                                        "sessionIds": ["chat-two", "chat-one"]]]
+            case "/api/workspace/archiveSession":
+                XCTAssertEqual(command, ["sessionId": "chat-one"])
+                value = ["archivedSessionIds": ["chat-one"]]
+            default:
+                throw URLError(.unsupportedURL)
+            }
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": ["ok": true, "value": value],
+            ]))
+        }
+        let order = try await api.moveWorkspace("fixture-workspace", before: "other-workspace")
+        XCTAssertEqual(order, ["fixture-workspace", "other-workspace"])
+        let workspace = try await api.moveWorkspaceSession("chat-one", in: "fixture-workspace", before: nil)
+        XCTAssertEqual(workspace.sessionIds, ["chat-two", "chat-one"])
+        let archived = try await api.archiveWorkspaceSession("chat-one")
+        XCTAssertEqual(archived, ["chat-one"])
+    }
+
+    func testNewWorkspaceFolderUsesTheHostPickerAndRejectsTraversal() async throws {
+        let api = try client()
+        do {
+            _ = try await api.createWorkspaceDirectory(parent: "C:\\Workspace", name: "..\\other")
+            XCTFail("A folder name must be a single path segment")
+        } catch HubAttachmentError.invalidFile {}
+        XCTAssertTrue(CatalogFixture.requests.isEmpty)
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/directoryPicker/createDirectory")
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            XCTAssertEqual(payload["args"] as? [String: String], ["path": "C:\\Workspace", "name": "Fixtures"])
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID,
+                "result": ["ok": true, "value": "C:\\Workspace\\Fixtures"],
+            ]))
+        }
+        let folder = try await api.createWorkspaceDirectory(parent: "C:\\Workspace", name: " Fixtures ")
+        XCTAssertEqual(folder, "C:\\Workspace\\Fixtures")
+    }
+
+    func testChatKeepsAPendingModelThroughThePreviousModelsRequest() throws {
+        let decoder = JSONDecoder()
+        let start = try decoder.decode(HubChatStreamFrame.Value.self, from: Data(#"""
+        {"type":"snapshot","records":[],"projections":{"values":{"title":"Previous","modelSelection":{
+          "next":{"provider":"fixture","model":"new","reasoningEffort":"high"},
+          "lastUsed":{"provider":"fixture","model":"old"}
+        }}}}
+        """#.utf8))
+        var timeline = HubChatTimeline()
+        timeline.start(start)
+        let changes = [
+            #"{"type":"request/header","seq":1,"data":{"header":{"config":{"provider":"fixture","model":"old"}}}}"#,
+            #"{"type":"session/title","seq":2,"data":{"title":"Renamed"}}"#,
+        ]
+        for source in changes {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8)))
+        }
+        XCTAssertEqual(timeline.snapshot.title, "Renamed")
+        XCTAssertEqual(timeline.snapshot.model?.model, "new")
+        XCTAssertEqual(timeline.snapshot.model?.reasoningEffort, "high")
+    }
+
+    func testRecordedTurnTokensExcludeMissingReceiptsAndReplacedEvents() throws {
+        let decoder = JSONDecoder()
+        var timeline = HubChatTimeline()
+        let events = [
+            #"{"type":"assistant/message","seq":1,"data":{"turn":3,"usage":{"inputTokens":30,"outputTokens":10}}}"#,
+            #"{"type":"assistant/message","seq":2,"data":{"turn":3,"usage":{"inputTokens":2}}}"#,
+            #"{"type":"assistant/message","seq":3,"surfaceOp":{"op":"replace","start":1,"end":2},"data":{"turn":3,"usage":{"inputTokens":5,"outputTokens":4,"cacheReadTokens":12}}}"#,
+        ]
+        for source in events {
+            timeline.apply(try decoder.decode(HubChatStreamFrame.Entry.Event.self, from: Data(source.utf8)))
+        }
+        let usage = try XCTUnwrap(timeline.snapshot.usageByTurn[3])
+        XCTAssertEqual(usage.recordedResponses, 1)
+        XCTAssertEqual(usage.input, 5)
+        XCTAssertEqual(usage.output, 4)
+        XCTAssertEqual(usage.cacheRead, 12)
+    }
+
+    func testKnowledgeMembershipWritesOnlyTheRequestedOperationAndRevision() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/memory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.query, "view=domains")
+                return (200, Data(#"{"revision":12,"maxActiveDomains":7,"domains":[],"memberships":[],"nodes":[]}"#.utf8))
+            }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "domains")
+            XCTAssertEqual(command["revision"] as? Int, 12)
+            XCTAssertEqual(command["operations"] as? [[String: String]], [
+                ["type": "unassign", "nodeId": "note-id", "domainId": "domain-id"],
+            ])
+            return (200, Data(#"{"revision":13}"#.utf8))
+        }
+        let registry = try await api.knowledgeDomains()
+        try await api.changeKnowledgeDomains([.membership(note: "note-id", domain: "domain-id", assigned: false)],
+                                             revision: registry.revision)
+        XCTAssertEqual(CatalogFixture.requests.count, 2)
+    }
+
+    func testGoalEditPreservesPermissionsScheduleAndUneditedAllowance() async throws {
+        let api = try client()
+        let original = #"""
+        {"characters":[{"id":"hub","name":"HUB","route":null}],"goals":[{
+          "id":"saved-goal","state":"paused","revision":7,"title":"Original","objective":"Outcome",
+          "criteria":["Verify result"],"characterId":"hub","approach":"balanced","instructions":"",
+          "resources":{"knowledge":true,"browser":false,"folders":["C:/Fixture"],"writeFolders":[],
+                       "tools":["read"],"files":[],"knowledgeOutput":false},
+          "limits":{"activeMinutes":30,"dailyBudget":0.2,"totalBudget":1,
+                    "workingHours":{"start":540,"end":1080,"days":[1,3,5],"timezone":"Europe/Istanbul"}},
+          "schedule":{"trigger":{"kind":"interval","seconds":1800},"repeat":"continue","missed":"skip"},
+          "recovery":"ask","humanApproval":true,"notification":"pwa",
+          "sourceSessionId":"minke-im-telegram-0123456789abcdef0123456789abcdef",
+          "plan":[{"id":"milestone","title":"Original step","dependsOn":[],"status":"pending","evidence":["ref-1"]}]
+        }]}
+        """#
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/goals")
+            if request.httpMethod == "GET" { return (200, Data(original.utf8)) }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "save")
+            XCTAssertEqual(command["id"] as? String, "saved-goal")
+            XCTAssertEqual(command["revision"] as? Int, 7)
+            if CatalogFixture.requests.count == 2 {
+                XCTAssertNil(command["plan"])
+            } else {
+                let milestones = try XCTUnwrap(command["plan"] as? [[String: Any]])
+                XCTAssertEqual(milestones.first?["id"] as? String, "milestone")
+                XCTAssertEqual(milestones.first?["status"] as? String, "working")
+                XCTAssertEqual(milestones.first?["evidence"] as? [String], ["ref-1"])
+                XCTAssertEqual(milestones.last?["dependsOn"] as? [String], ["milestone"])
+            }
+            let goal = try XCTUnwrap(command["goal"] as? [String: Any])
+            XCTAssertEqual(goal["title"] as? String, "Renamed")
+            XCTAssertEqual((goal["resources"] as? [String: Any])?["folders"] as? [String], ["C:/Fixture"])
+            XCTAssertEqual((goal["limits"] as? [String: Any])?["dailyBudget"] as? Double, 0.25)
+            XCTAssertEqual((goal["limits"] as? [String: Any])?["totalBudget"] as? Double, 1)
+            let hours = (goal["limits"] as? [String: Any])?["workingHours"] as? [String: Any]
+            XCTAssertEqual(hours?["start"] as? Int, CatalogFixture.requests.count == 2 ? 540 : 630)
+            XCTAssertEqual(hours?["days"] as? [Int], [1, 3, 5])
+            XCTAssertEqual(hours?["timezone"] as? String, "Europe/Istanbul")
+            let schedule = try XCTUnwrap(goal["schedule"] as? [String: Any])
+            let trigger = try XCTUnwrap(schedule["trigger"] as? [String: Any])
+            if CatalogFixture.requests.count == 2 {
+                XCTAssertEqual(schedule["missed"] as? String, "skip")
+                XCTAssertEqual(trigger["seconds"] as? Int, 1_800)
+                XCTAssertEqual(goal["notification"] as? String, "pwa")
+            } else {
+                XCTAssertEqual(schedule["missed"] as? String, "catch-up")
+                XCTAssertEqual(schedule["repeat"] as? String, "fresh")
+                XCTAssertEqual(trigger["kind"] as? String, "event")
+                XCTAssertEqual(trigger["event"] as? String, "task.completed")
+                XCTAssertNil(trigger["operator"])
+                XCTAssertEqual(goal["notification"] as? String, "telegram")
+            }
+            XCTAssertNil(goal["state"])
+            return (200, Data(#"{"changedId":"saved-goal"}"#.utf8))
+        }
+        let editor = try await api.goalEditor(id: "saved-goal")
+        var draft = editor.draft
+        draft.title = "Renamed"
+        draft.dailyBudget = 0.25
+        let id = try await api.saveGoal(draft, from: editor)
+        XCTAssertEqual(id, "saved-goal")
+        var milestones = try XCTUnwrap(draft.milestones)
+        milestones[0].status = .working
+        var followUp = HubGoalEditorData.Milestone(title: "Follow up")
+        followUp.dependsOn = [milestones[0].id]
+        milestones.append(followUp)
+        draft.milestones = milestones
+        XCTAssertTrue(draft.workingHours?.isValid == true)
+        draft.workingHours?.start = 630
+        XCTAssertTrue(editor.canNotifyTelegram)
+        var event = HubRoutineEditorData.Trigger(kind: .event)
+        event.event = "task.completed"
+        event.operatorName = ""
+        draft.schedule?.trigger = event
+        draft.schedule?.missed = .catchUp
+        draft.schedule?.recurrence = .fresh
+        draft.notification = "telegram"
+        let editedID = try await api.saveGoal(draft, from: editor)
+        XCTAssertEqual(editedID, id)
+    }
+
+    func testRoutineEditorUsesTheRegistryRevisionAndPreservesEventCondition() async throws {
+        let api = try client()
+        let source = #"""
+        {"revision":14,"characters":[{"id":"hub","name":"HUB","route":{"provider":"fixture","model":"local"}}],
+         "automations":[{"id":"routine-id","revision":2,"status":"paused","title":"Original","prompt":"Read",
+            "characterId":"hub","trigger":{"kind":"event","event":"task.completed","operator":"equals","path":"status","value":"done"},
+            "missed":"skip","tools":["web_fetch"],"allowWrites":false,"maxOutputTokens":2048,"maxSteps":3,
+            "dailyMaxRuns":6,"dailyBudget":0.2,"inputPrice":0.1,"outputPrice":0.5,"notification":"pwa"}]}
+        """#
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/automations")
+            if request.httpMethod == "GET" { return (200, Data(source.utf8)) }
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            XCTAssertEqual(command["action"] as? String, "save")
+            XCTAssertEqual(command["id"] as? String, "routine-id")
+            XCTAssertEqual(command["revision"] as? Int, 14)
+            let routine = try XCTUnwrap(command["automation"] as? [String: Any])
+            XCTAssertEqual(routine["title"] as? String, "Renamed")
+            XCTAssertEqual((routine["trigger"] as? [String: String])?["operator"], "equals")
+            XCTAssertNil(routine["status"])
+            return (200, Data(#"{"revision":15}"#.utf8))
+        }
+        let loaded = try await api.routineEditor(id: "routine-id")
+        var draft = loaded.draft
+        draft.title = "Renamed"
+        try await api.saveRoutine(draft, from: loaded)
+        XCTAssertEqual(CatalogFixture.requests.count, 2)
+    }
+
+    func testEarlierChatPageUsesTheOriginalCursorAndExclusiveBoundary() async throws {
+        let api = try client()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/page")
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let args = try XCTUnwrap(payload["args"] as? [String: Any])
+            let query = try XCTUnwrap(args["request"] as? [String: Any])
+            XCTAssertEqual(query["address"] as? [String: String], ["kind": "session", "sessionId": "owned-chat"])
+            XCTAssertEqual(query["throughSeq"] as? Int, 100)
+            XCTAssertEqual(query["beforeSeq"] as? Int, 80)
+            let record: [String: Any] = [
+                "type": "event", "event": ["seq": 74, "type": "user/message", "data": [
+                    "source": ["kind": "user"], "content": [["type": "text", "text": "Earlier fixture"]],
+                ]],
+            ]
+            let rpcID = try XCTUnwrap(envelope["rpcId"] as? String)
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": rpcID, "result": [
+                    "ok": true, "value": ["records": [record], "hasMore": false],
+                ],
+            ]))
+        }
+        let page = try await api.chatHistory(sessionID: "owned-chat", through: 100, before: 80)
+        XCTAssertEqual(page.firstSequence, 74)
+        XCTAssertEqual(page.messages.map(\.text), ["Earlier fixture"])
+        XCTAssertFalse(page.hasMore)
+    }
+
+    func testPlannerWritesUseStableDraftIDAndServerItemVersion() async throws {
+        let api = try client()
+        let id = UUID()
+        let key = id.uuidString.lowercased()
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/hub/planner")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-planner"), "1")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+            let body = try Self.requestBody(request)
+            let command = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let action = try XCTUnwrap(command["action"] as? String)
+            if action == "complete" || action == "reopen" {
+                XCTAssertEqual(command["id"] as? String, key)
+                XCTAssertEqual(command["version"] as? Int, 3)
+            } else {
+                XCTAssertEqual(command["action"] as? String, "save")
+                let item = try XCTUnwrap(command["item"] as? [String: Any])
+                XCTAssertEqual(item["id"] as? String, key)
+                XCTAssertEqual(item["version"] as? Int, 0)
+                XCTAssertEqual(item["title"] as? String, "Read notes")
+                XCTAssertEqual(item["horizon"] as? String, "later")
+            }
+            let state = action == "complete" ? "done" : "open"
+            return (200, Data("""
+                {"revision":5,"items":[{"id":"\(key)","title":"Read notes","kind":"todo","state":"\(state)","deleted":false,"version":3}]}
+                """.utf8))
+        }
+        let created = try await api.addTodo(id: id, title: " Read notes ", horizon: .later)
+        let item = try XCTUnwrap(created.items.first)
+        let completed = try await api.completeTodo(item)
+        XCTAssertEqual(completed.items.first?.state, "done")
+        let reopened = try await api.restorePlannerItem(XCTUnwrap(completed.items.first))
+        XCTAssertEqual(reopened.items.first?.state, "open")
+        XCTAssertEqual(CatalogFixture.requests.count, 3)
     }
 
     func testNewChatPostsOneCorrelatedPromptAndDoesNotReplayAnUncertainDelivery() async throws {

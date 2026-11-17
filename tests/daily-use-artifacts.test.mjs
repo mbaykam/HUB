@@ -45,5 +45,13 @@ test('new PWA activity is reconstructed from host state without opening/replayin
  completed=true;const ended=(await get('/api/hub/activity')).value;assert.equal(ended.byId.child.parentId,'parent','a child that finishes while the PWA is closed retains its durable parent address');assert.equal(projectMobileActivity(ended).length,1);assert.equal(projectMobileActivity(ended)[0].status,'finished');
  const headers={authorization:'fixture','x-hub-daily-use':'1','x-hub-session':'fixture-session'};const apps=(await get('/api/hub/artifacts',headers)).value;assert.equal(apps.artifacts.length,1);assert.equal(apps.artifacts[0].content,undefined);const app=await get('/api/hub/artifacts',{...headers,'x-hub-artifact':apps.artifacts[0].id});assert.equal(app.code,200);assert.match(app.value.document,/Calculator/);assert.equal(disposed,opened);
  assert.equal((await get('/api/hub/artifacts',{...headers,'x-hub-artifact':'missing'})).code,404);
+ const fileHeaders={...headers,'x-hub-artifact-format':'file'};
+ const catalog=(await get('/api/hub/artifacts',fileHeaders)).value.files;
+ assert.equal(catalog.length,1);assert.equal(catalog[0].data,undefined);assert.equal(catalog[0].path,undefined);
+ const file=await get('/api/hub/artifacts',{...fileHeaders,'x-hub-artifact':catalog[0].id});
+ assert.equal(file.code,200);assert.equal(digest(Buffer.from(file.value.data,'base64')),catalog[0].sha256);
+ assert.equal(Buffer.from(file.value.data,'base64').toString('utf8'),JSON.parse(events[2].data.arguments).content);
+ assert.equal((await get('/api/hub/artifacts',{...fileHeaders,'x-hub-artifact':'missing'})).code,404);
+ assert.equal((await get('/api/hub/artifacts',{...fileHeaders,authorization:'private-denied'})).code,401);
  }finally{off();assert.equal(routes.size,0);}
 });

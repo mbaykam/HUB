@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import HubNative
+import UniformTypeIdentifiers
 
 @MainActor
 final class HubHomeModel: ObservableObject {
@@ -13,96 +14,1402 @@ final class HubHomeModel: ObservableObject {
     @Published var sendError: String?
     @Published var knowledge: HubHomeKnowledge?
     @Published var planner: HubHomePlanner?
+    @Published var plannerSaving = false
+    @Published var plannerError: String?
     @Published var conversations: [HubConversationChoice]?
+    @Published var work: HubHomeWork?
+    @Published var workUnavailable = false
     @Published var hasActiveVoice = false
+    @Published var openNativeChat: HubNativeChatRequest?
+}
+
+struct HubNativeChatRequest: Equatable {
+    enum ComposerAction: Equatable {
+        case commands, files, photos, characters, research, researchTasks, instructions
+    }
+
+    let id = UUID()
+    let choice: HubConversationChoice
+    var initialDraft = ""
+    var composerAction: ComposerAction?
+}
+
+enum HubWorkspacePalette {
+    static let background = dynamic(light: 0xF4F6FB, dark: 0x0B101B)
+    static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x161B2A))
+    static let accent = Color(uiColor: dynamic(light: 0x3F51A5, dark: 0xBFCBFF))
+    static let onAccent = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x141B35))
+    static let muted = Color(uiColor: dynamic(light: 0x4E5970, dark: 0xA8B3CC))
+    static let border = Color(uiColor: dynamic(light: 0x172233, dark: 0xFFFFFF))
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
+        UIColor { traits in
+            let rgb = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((rgb >> 16) & 255) / 255,
+                           green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+        }
+    }
+}
+
+extension HubChatPreferences.Appearance {
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light: .light
+        case .dark: .dark
+        case .system: nil
+        }
+    }
 }
 
 @MainActor
 struct HubHomeView: View {
-    static let backgroundColor = UIColor(red: 0.045, green: 0.064, blue: 0.105, alpha: 1)
+    static let backgroundColor = HubWorkspacePalette.background
 
     @ObservedObject var model: HubHomeModel
     var connect: () -> Void
     var voice: () -> Void
     var options: () -> Void
-    var workspace: () -> Void
     var openChat: (String) -> Void
     var send: () -> Void
+    var addTodo: (UUID, String, HubHomePlanner.Horizon) async -> Bool
+    var completeTodo: (HubHomePlanner.Item) -> Void
+    var restorePlannerItem: (HubHomePlanner.Item) -> Void
+    var savePlannerItem: (HubPlannerDraft) async -> Bool
+    var removePlannerItem: (HubHomePlanner.Item) async -> Bool
+    var readKnowledgeNote: (String) async throws -> HubKnowledgeNote
+    var attachments: () -> HubChatAttachmentContext?
+    var chatAPI: () -> HubConversationAPI?
+    var readTasks: () async throws -> HubWorkspaceTasks
+    var appearanceChanged: (HubChatPreferences.Appearance) -> Void
 
-    private let card = Color(red: 0.085, green: 0.105, blue: 0.165)
-    private let accent = Color(red: 0.75, green: 0.80, blue: 1.0)
+    private enum Panel {
+        case history
+        case tools
+
+        var edge: Edge { self == .history ? .leading : .trailing }
+    }
+
+    @State private var panel: Panel?
+    @State private var knowledgeOpen = false
+    @State private var knowledgeDomainsOpen = false
+    @State private var knowledgeBackupsOpen = false
+    @State private var knowledgeArchivesOpen = false
+    @State private var knowledgeSkillsOpen = false
+    @State private var knowledgeAssetsOpen = false
+    @State private var knowledgeConnectionsOpen = false
+    @State private var knowledgeRefreshError = false
+    @State private var selectedNoteID: String?
+    @State private var activityDestination: ActivityDestination?
+    @State private var selectedNote: HubKnowledgeNote?
+    @State private var selectedKnowledgeSource: HubKnowledgeNote.Source?
+    @State private var knowledgeForgetOpen = false
+    @State private var noteLoadFailed = false
+    @State private var noteAttempt = 0
+    @State private var noteEditing = false
+    @State private var noteDraft = ""
+    @State private var noteSaving = false
+    @State private var noteSaveFailed = false
+    @State private var knowledgeScope = HubKnowledgeGraphView.Scope.all
+    @State private var knowledgeSpatial = false
+    @State private var knowledgeLocalCenter: String?
+    @State private var knowledgeFocusedDomain: String?
+    @State private var knowledgeGraphReset = 0
+    @State private var knowledgeTab = KnowledgeTab.graph
+    @State private var knowledgeQuery = ""
+    @State private var knowledgeSearchResponse: KnowledgeSearchResponse?
+    @State private var knowledgeSearchRetry = 0
+    @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
+    @State private var tasksOpen = false
+    @State private var usageOpen = false
+    @State private var settingsOpen = false
+    @State private var chatPreferences = HubChatPreferences.defaults
+    @State private var openPhoneOptions = false
+    @State private var knowledgeActivityOpen = false
+    @State private var historyQuery = ""
+    @State private var historyResults: HubConversationCatalog?
+    @State private var historyFailed = false
+    @State private var historyAttempt = 0
+    @State private var bookmarks: HubChatBookmarks?
+    @State private var bookmarksError = false
+    @State private var bookmarksBusy = false
+    @State private var pinnedExpanded = false
+    @State private var creatingChat = false
+    @State private var workspaces: [HubWorkspaceItem]?
+    @State private var archivedSessions: Set<String> = []
+    @State private var sessionToArchive: HubConversationChoice?
+    @State private var workspaceChats: [String: HubConversationChoice] = [:]
+    @State private var expandedWorkspaces: Set<String> = []
+    @State private var workspaceAttempt = 0
+    @State private var workspaceError: String?
+    @State private var workspaceBusy = false
+    @State private var workspaceDirectoryOpen = false
+    @State private var workspaceToRemove: HubWorkspaceItem?
+    @State private var workspaceToRename: HubWorkspaceItem?
+    @State private var workspaceTitle = ""
+    @State private var voiceHistoryOpen = false
+    @State private var todoDraft = ""
+    @State private var todoDraftID = UUID()
+    @State private var todoHorizon = HubHomePlanner.Horizon.near
+    @State private var agendaDate = Date()
+    @State private var plannerTab = PlannerTab.todos
+    @State private var plannerOpen = false
+    @State private var calendarExpanded = false
+    @State private var plannerEditor: PlannerEdit?
+    @FocusState private var composerFocused: Bool
+    @FocusState private var todoFocused: Bool
+    private let card = HubWorkspacePalette.panel
+    private let accent = HubWorkspacePalette.accent
+
+    private enum PlannerTab: CaseIterable {
+        case agenda, todos
+        var title: LocalizedStringKey { self == .agenda ? "Agenda" : "To-dos" }
+    }
+
+    private struct PlannerEdit: Identifiable {
+        let id = UUID()
+        let item: HubHomePlanner.Item?
+        let kind: HubPlannerDraft.Kind
+    }
 
     var body: some View {
+        ZStack {
+            workspaceContent
+                .opacity(selectedChat == nil ? 1 : 0)
+                .allowsHitTesting(selectedChat == nil)
+                .accessibilityHidden(selectedChat != nil)
+            if let selectedChat {
+                HubLiveChatView(chat: selectedChat.request.choice, api: selectedChat.api,
+                                back: { unsent in
+                                    if selectedChat.request.composerAction != nil, model.draft.isEmpty { model.draft = unsent }
+                                    self.selectedChat = nil
+                                }, voice: voice, openChat: showChat, attachments: attachments,
+                                requestID: selectedChat.request.id, initialDraft: selectedChat.request.initialDraft,
+                                composerAction: selectedChat.request.composerAction, preferences: chatPreferences) { name in
+                    if chatAPI() === selectedChat.api { updateChatTitle(selectedChat.request.choice.sessionId, name: name) }
+                }
+                    .id(selectedChat.request.choice.sessionId)
+            }
+        }
+        .foregroundStyle(.primary)
+        .tint(accent)
+        .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
+        .preferredColorScheme(chatPreferences.appearance.colorScheme)
+        .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
+        .sheet(isPresented: $knowledgeOpen, onDismiss: {
+            clearKnowledgeSelection()
+            knowledgeLocalCenter = nil
+            knowledgeFocusedDomain = nil
+        }) { knowledgeScreen }
+        .sheet(isPresented: $tasksOpen) {
+            if let api = chatAPI() { HubTasksView(load: readTasks, api: api, openChat: showChat) }
+        }
+        .sheet(isPresented: $plannerOpen) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Agenda & to-dos").font(.headline)
+                    Spacer()
+                    Button("Done") { plannerOpen = false }
+                }
+                ScrollView {
+                    if let planner = model.planner { personalPlanner(planner) }
+                    else { connectionRow }
+                }
+            }
+            .padding(18)
+            .foregroundStyle(.primary)
+            .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
+            .sheet(item: $plannerEditor, content: plannerEditorView)
+        }
+        .sheet(item: Binding(get: { plannerOpen ? nil : plannerEditor }, set: { plannerEditor = $0 }), content: plannerEditorView)
+        .sheet(isPresented: $usageOpen) {
+            if let api = chatAPI() { HubUsageView(api: api) }
+        }
+        .sheet(isPresented: $settingsOpen, onDismiss: {
+            if openPhoneOptions {
+                openPhoneOptions = false
+                options()
+            }
+        }) {
+            let api = chatAPI()
+            HubWorkspaceSettingsView(api: api, preferencesChanged: {
+                if let api, api === chatAPI() {
+                    chatPreferences = $0
+                    appearanceChanged($0.appearance)
+                }
+            }) {
+                openPhoneOptions = true
+                settingsOpen = false
+            }
+        }
+        .sheet(isPresented: $knowledgeActivityOpen, onDismiss: openActivityDestination) {
+            if let api = chatAPI() {
+                HubKnowledgeActivityView(api: api, openRecord: { id in
+                    activityDestination = .record(id)
+                    knowledgeActivityOpen = false
+                }, openConversation: { id in
+                    activityDestination = .conversation(id)
+                    knowledgeActivityOpen = false
+                })
+            }
+        }
+        .sheet(isPresented: $voiceHistoryOpen) {
+            if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
+        }
+        .sheet(isPresented: $workspaceDirectoryOpen) {
+            if let api = chatAPI() {
+                HubWorkspaceDirectoryView(api: api) { workspaceAttempt += 1 }
+            }
+        }
+        .alert("Rename workspace", isPresented: Binding(
+            get: { workspaceToRename != nil }, set: { if !$0 { workspaceToRename = nil } }), presenting: workspaceToRename) { item in
+            TextField("Workspace name", text: $workspaceTitle)
+            Button("Rename") {
+                let name = workspaceTitle
+                Task { await renameWorkspace(item, title: name) }
+            }
+            .disabled(workspaceTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Remove workspace?", isPresented: Binding(
+            get: { workspaceToRemove != nil }, set: { if !$0 { workspaceToRemove = nil } }), presenting: workspaceToRemove) { item in
+            Button("Remove", role: .destructive) { Task { await removeWorkspace(item) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            Text("\(item.title) will be removed from the workspace list. Its files and conversations stay on HUB.")
+        }
+        .alert("Archive conversation?", isPresented: Binding(
+            get: { sessionToArchive != nil }, set: { if !$0 { sessionToArchive = nil } }), presenting: sessionToArchive) { chat in
+            Button("Archive", role: .destructive) { Task { await archiveSession(chat.sessionId) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { chat in
+            Text("\(chat.title) will be hidden from the conversation lists. Its messages are kept on HUB.")
+        }
+        .task(id: model.connection == .connected ? chatAPI().map { ObjectIdentifier($0) } : nil) {
+            guard model.connection == .connected, let api = chatAPI(),
+                  let value = try? await api.chatPreferences(), !Task.isCancelled else { return }
+            chatPreferences = value
+            appearanceChanged(value.appearance)
+        }
+        .onChange(of: model.openNativeChat) { request in
+            if let request { showChat(request); model.openNativeChat = nil }
+        }
+        .onChange(of: model.connection) { connection in
+            if connection == .needsSetup || connection == .signInRequired {
+                chatPreferences = .defaults
+                knowledgeOpen = false
+                knowledgeDomainsOpen = false
+                knowledgeBackupsOpen = false
+                knowledgeArchivesOpen = false
+                knowledgeSkillsOpen = false
+                knowledgeAssetsOpen = false
+                knowledgeConnectionsOpen = false
+                knowledgeLocalCenter = nil
+                knowledgeFocusedDomain = nil
+                knowledgeQuery = ""
+                knowledgeSearchResponse = nil
+                knowledgeRefreshError = false
+                clearKnowledgeSelection()
+                tasksOpen = false
+                usageOpen = false
+                knowledgeActivityOpen = false
+                selectedChat = nil
+                bookmarks = nil
+                voiceHistoryOpen = false
+                settingsOpen = false
+                plannerOpen = false
+                plannerEditor = nil
+                workspaces = nil
+                archivedSessions = []
+                sessionToArchive = nil
+                workspaceChats = [:]
+                expandedWorkspaces = []
+                workspaceDirectoryOpen = false
+                workspaceToRename = nil
+                workspaceToRemove = nil
+            }
+        }
+    }
+
+    private var workspaceContent: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: panel?.edge == .trailing ? .trailing : .leading) {
+                homeContent
+                    .accessibilityHidden(panel != nil)
+                if let panel {
+                    Button(action: closePanel) { Color.black.opacity(0.46) }
+                        .buttonStyle(.plain)
+                        .ignoresSafeArea()
+                        .accessibilityHidden(true)
+                    panelContent(panel)
+                        .frame(width: min(geometry.size.width * 0.85, 380))
+                        .transition(.move(edge: panel.edge))
+                }
+            }
+            .simultaneousGesture(DragGesture(minimumDistance: 22).onEnded { value in
+                let dx = value.translation.width
+                guard abs(dx) > 55, abs(dx) > abs(value.translation.height) * 1.5 else { return }
+                if let panel {
+                    if (panel == .history && dx < 0) || (panel == .tools && dx > 0) { closePanel() }
+                } else if dx > 0, value.startLocation.x < 36 {
+                    showPanel(.history)
+                } else if dx < 0, value.startLocation.x > geometry.size.width - 36 {
+                    showPanel(.tools)
+                }
+            })
+        }
+    }
+
+    private var homeContent: some View {
         VStack(spacing: 0) {
+            HStack {
+                Button { showPanel(.history) } label: {
+                    Image(systemName: "sidebar.left").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Chat history")
+                Spacer()
+                if composerFocused || todoFocused {
+                    Button(action: hideKeyboard) {
+                        Image(systemName: "keyboard.chevron.compact.down").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Hide keyboard")
+                }
+                Button { showPanel(.tools) } label: {
+                    Image(systemName: "sidebar.right").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Workspace tools")
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     connectionRow
-                    section("Knowledge", symbol: "circle.hexagongrid") {
+                    section("Knowledge", actionLabel: "Explore knowledge", open: showKnowledge) {
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
-                            Text("\(notes.count) brain notes  ·  \(value.nodes.count - notes.count) chats")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            if !notes.isEmpty { knowledgeMap(value, nodes: Array(notes.prefix(48))) }
+                            knowledgeSummary(value, notes: notes.count)
+                            HubKnowledgeGraphView(graph: value, height: 211, scope: .notes, overview: true, select: selectKnowledgeNode)
                         }
 
                     }
-                    section("Your day", symbol: "calendar") {
+                    section("Your day", actionLabel: "Open ↗", open: {
+                        hideKeyboard()
+                        plannerOpen = true
+                    }) {
                         if let planner = model.planner {
-                            let today = Calendar.current.startOfDay(for: Date())
-                            let date = Calendar.current.dateComponents([.year, .month, .day], from: today)
-                            let day = String(format: "%04d-%02d-%02d", date.year ?? 0, date.month ?? 0, date.day ?? 0)
-                            let events = Array(planner.items.lazy.filter {
-                                !$0.deleted && $0.kind == "event" && ($0.date == day || $0.start?.hasPrefix(day) == true)
-                            }.prefix(3))
-                            ForEach(events, id: \.id) { item in
-                                Label(item.title, systemImage: "calendar").lineLimit(2)
-                            }
-                            let items = Array(planner.items.lazy.filter {
-                                !$0.deleted && $0.state == "open" && $0.kind == "todo"
-                            }.prefix(3))
-                            if items.isEmpty && events.isEmpty {
-                                Text("No open to-dos").foregroundStyle(.secondary)
-                            }
-                            ForEach(items, id: \.id) { item in
-                                Label(item.title, systemImage: "circle").lineLimit(2)
-                            }
+                            personalPlanner(planner)
                         }
 
                     }
-                    section("Recent chats", symbol: "bubble.left.and.bubble.right") {
-                        if let conversations = model.conversations {
-                            if conversations.isEmpty {
-                                Text("No conversations yet").foregroundStyle(.secondary)
-                            }
-                            ForEach(Array(conversations.prefix(5)), id: \.sessionId) { chat in
-                                Button { openChat(chat.sessionId) } label: {
-                                    HStack {
-                                        Text(chat.title).lineLimit(2)
-                                        Spacer()
-                                        Image(systemName: "chevron.right").font(.caption)
-                                    }
-                                    .frame(minHeight: 36)
-                                }
-                                .buttonStyle(.plain)
-                            }
+                    if let work = model.work {
+                        section("Your work") { workSummary(work) }
+                    } else if model.workUnavailable {
+                        section("Your work") {
+                            Button("Retry loading work", action: connect)
                         }
-
                     }
-                    Button(action: workspace) { Label("Open workspace", systemImage: "arrow.up.right") }
-                        .buttonStyle(.bordered)
-                        .disabled(model.connection != .connected)
+                    if model.connection == .connected, let api = chatAPI() {
+                        HubBrowserPreviewView(api: api, conversations: model.conversations ?? [],
+                                              visible: selectedChat == nil && panel == nil &&
+                                                !knowledgeOpen && !plannerOpen && !tasksOpen &&
+                                                !settingsOpen && !usageOpen && !knowledgeActivityOpen)
+                            .id(ObjectIdentifier(api))
+                    }
                 }
-                .padding(.top, 12)
+                .padding(.top, 5)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
             composer
         }
-        .foregroundStyle(.white)
+    }
+
+    private func knowledgeSummary(_ graph: HubHomeKnowledge, notes: Int) -> some View {
+        let domains = graph.domains?.filter { $0.status == "active" && $0.parentId == nil }.count ?? 0
+        let stats = [(notes, "Brain notes"), (domains, "Domains"), (graph.edges.count, "Connections"),
+                     (graph.nodes.count - notes, "Chat archive")]
+        return Group {
+            if #available(iOS 16.0, *) {
+                ViewThatFits(in: .horizontal) {
+                    knowledgeStatsLine(stats)
+                    knowledgeStatsRows(stats)
+                }
+            } else {
+                knowledgeStatsRows(stats)
+            }
+        }
+        .font(.caption2)
+    }
+
+    private func knowledgeStatsLine(_ stats: [(Int, String)]) -> some View {
+        HStack(spacing: 7) {
+            ForEach(stats.indices, id: \.self) { index in
+                knowledgeStat(stats[index].0, label: stats[index].1).fixedSize()
+            }
+        }
+    }
+
+    private func knowledgeStatsRows(_ stats: [(Int, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach([0, 2], id: \.self) { index in
+                HStack(spacing: 12) {
+                    knowledgeStat(stats[index].0, label: stats[index].1)
+                    knowledgeStat(stats[index + 1].0, label: stats[index + 1].1)
+                }
+            }
+        }
+    }
+
+    private func knowledgeStat(_ value: Int, label: String) -> some View {
+        (Text(value, format: .number).fontWeight(.semibold) + Text(" \(label)").foregroundColor(HubWorkspacePalette.muted))
+            .accessibilityElement(children: .combine)
+    }
+
+    private func workSummary(_ work: HubHomeWork) -> some View {
+        let entries = work.byId.filter { _, item in
+            item.origin != "subagent" && (item.running || item.completed || item.failed || item.stopped)
+        }.sorted { $0.value.updatedAt > $1.value.updatedAt }
+        return VStack(alignment: .leading, spacing: 8) {
+            let stale = model.connection != .connected || model.workUnavailable
+            if stale {
+                Text("Status unavailable. Showing last observed work.").font(.footnote).foregroundStyle(.secondary)
+            }
+            if entries.isEmpty { Text("No recent work").foregroundStyle(.secondary) }
+            ForEach([true, false], id: \.self) { running in
+                let matches = entries.filter { $0.value.running == running }
+                if !matches.isEmpty {
+                    Text(running ? "In progress" : "Recently ended").font(.caption.bold()).foregroundStyle(.secondary)
+                }
+                ForEach(matches.prefix(4).map { $0.key }, id: \.self) { id in
+                    if let item = work.byId[id] {
+                    Button {
+                        showChat(HubConversationChoice(sessionId: id, title: item.title ?? "Conversation",
+                                                       updatedAt: item.updatedAt))
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title ?? "Conversation").lineLimit(2)
+                            if !stale {
+                                Text(running ? "Working" : (item.completed ? "Completed" : (item.stopped ? "Stopped" : "Failed")))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.connection != .connected)
+                    }
+                }
+            }
+        }
+    }
+
+    private func showPanel(_ destination: Panel) {
+        hideKeyboard()
+        withAnimation(.easeInOut(duration: 0.2)) { panel = destination }
+    }
+
+    private func closePanel() {
+        historyQuery = ""
+        historyResults = nil
+        historyFailed = false
+        withAnimation(.easeInOut(duration: 0.2)) { panel = nil }
+    }
+
+    private func dismissKeyboard(then action: () -> Void) {
+        hideKeyboard()
+        action()
+    }
+
+    private func hideKeyboard() {
+        composerFocused = false
+        todoFocused = false
+    }
+
+    private func panelContent(_ destination: Panel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if destination == .history {
+                    Text("Chat history").font(.headline).accessibilityAddTraits(.isHeader)
+                } else {
+                    Button {
+                        closePanel()
+                        settingsOpen = true
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Spacer()
+                Button(action: closePanel) {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Close panel")
+            }
+            if destination == .history {
+                historyPanel
+            } else {
+                workspaceTools
+                .disabled(model.connection != .connected)
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 18)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(card.ignoresSafeArea())
+    }
+
+    private var workspaceTools: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 8) {
+                    section("Knowledge", actionLabel: "Explore", open: showKnowledge) {
+                        if let graph = model.knowledge {
+                            HubKnowledgeGraphView(graph: graph, height: 90, overview: true, showsControls: false, select: selectKnowledgeNode)
+                            let chats = graph.nodes.filter { $0.kind == "conversation" }.count
+                            Text("\(graph.nodes.count - chats) brain notes · \(chats) chats")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    VStack(spacing: 8) {
+                        toolTile("Activity", icon: "clock.arrow.circlepath") {
+                            closePanel()
+                            knowledgeActivityOpen = true
+                        }
+                        toolTile("Usage", icon: "chart.bar.xaxis") {
+                            closePanel()
+                            usageOpen = true
+                        }
+                    }
+                    .frame(width: 78)
+                    .disabled(model.connection != .connected)
+                }
+                Button {
+                    closePanel()
+                    tasksOpen = true
+                } label: {
+                    section("Tasks") {
+                        Text("Goals, schedules & conditions").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(model.connection != .connected)
+            }
+        }
+    }
+
+    private func toolTile(_ title: LocalizedStringKey, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: icon).font(.title3)
+                Text(title).font(.caption)
+            }
+            .frame(maxWidth: .infinity, minHeight: 72)
+            .background(card, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var historyPanel: some View {
+        let query = String(historyQuery.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        return VStack(alignment: .leading, spacing: 8) {
+            TextField("Search chats", text: $historyQuery)
+                .textFieldStyle(.roundedBorder)
+                .submitLabel(.search)
+                .disabled(model.connection != .connected)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if query.isEmpty {
+                        pinnedHistory
+                        Text("Recents").font(.subheadline.bold()).foregroundStyle(.secondary).padding(.vertical, 10)
+                    }
+                    if let results = query.isEmpty ? model.conversations : historyResults?.conversations {
+                        let conversations = results.filter { !archivedSessions.contains($0.sessionId) }
+                        if conversations.isEmpty {
+                            Text(query.isEmpty ? "No conversations yet" : "No matching conversations")
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(conversations, id: \.sessionId) { chat in
+                            historyRow(chat)
+                        }
+                        if !query.isEmpty, historyResults?.hasMore == true {
+                            Text("Narrow your search to see more matches.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    } else if model.connection != .connected || (query.isEmpty && model.incomplete) {
+                        connectionRow
+                    } else if historyFailed {
+                        Button("Retry search") { historyAttempt += 1 }.frame(minHeight: 44)
+                    } else {
+                        ProgressView(query.isEmpty ? "Loading conversations…" : "Searching…").padding(.vertical, 8)
+                    }
+                    if query.isEmpty { workspaceHistory }
+                }
+            }
+            Button { workspaceDirectoryOpen = true } label: {
+                Label("New workspace", systemImage: "folder.badge.plus").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.connection != .connected)
+            Button { Task { await newChat() } } label: {
+                Label("New Session", systemImage: "plus.square").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .disabled(creatingChat || model.connection != .connected)
+            Button {
+                closePanel()
+                voiceHistoryOpen = true
+            } label: {
+                Label("Voice History", systemImage: "waveform").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(model.connection != .connected)
+        }
+        .task(id: model.connection == .connected) { await loadBookmarks() }
+        .task(id: WorkspaceRequest(connected: model.connection == .connected, attempt: workspaceAttempt)) {
+            if model.connection == .connected { await loadWorkspaces() }
+        }
+        .task(id: HistoryRequest(query: query, attempt: historyAttempt, connected: model.connection == .connected)) {
+            historyResults = nil
+            historyFailed = false
+            guard !query.isEmpty, let api = chatAPI() else { return }
+            do {
+                try await Task.sleep(nanoseconds: 250_000_000)
+                let result = try await api.list(search: query)
+                if !Task.isCancelled { historyResults = result }
+            } catch {
+                if !Task.isCancelled { historyFailed = true }
+            }
+        }
+    }
+
+    private struct WorkspaceRequest: Equatable {
+        let connected: Bool
+        let attempt: Int
+    }
+
+    private var workspaceHistory: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Workspaces").font(.subheadline.bold()).foregroundStyle(.secondary).padding(.vertical, 10)
+            if let workspaceError {
+                Text(workspaceError).font(.footnote).foregroundStyle(.secondary)
+                Button("Refresh workspaces") { workspaceAttempt += 1 }.frame(minHeight: 44)
+            }
+            if let workspaces {
+                if workspaces.isEmpty { Text("No workspaces").font(.footnote).foregroundStyle(.secondary) }
+                ForEach(workspaces) { item in
+                    DisclosureGroup(isExpanded: Binding(
+                        get: { expandedWorkspaces.contains(item.id) },
+                        set: { if $0 { expandedWorkspaces.insert(item.id) } else { expandedWorkspaces.remove(item.id) } }
+                    )) {
+                        ForEach(item.sessionIds.filter { !archivedSessions.contains($0) }, id: \.self) { id in
+                            historyRow(workspaceChats[id] ?? HubConversationChoice(sessionId: id,
+                                title: "Untitled conversation", updatedAt: 0), workspace: item)
+                        }
+                        Button {
+                            Task { await newChat(workspaceID: item.id) }
+                        } label: {
+                            Label("New chat in workspace", systemImage: "plus").frame(minHeight: 44)
+                        }
+                        .disabled(creatingChat || workspaceBusy)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Label(item.title, systemImage: "folder").lineLimit(1)
+                            Spacer()
+                            Menu {
+                                workspacePlacement(item, in: workspaces)
+                                Button("Rename") { workspaceTitle = item.title; workspaceToRename = item }
+                                Button("Remove workspace", role: .destructive) { workspaceToRemove = item }
+                            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                            .disabled(workspaceBusy)
+                            .accessibilityLabel("Options for \(item.title)")
+                        }
+                        .frame(minHeight: 44)
+                    }
+                }
+            } else if workspaceError == nil && model.connection == .connected {
+                ProgressView("Loading workspaces…")
+            }
+            if workspaces != nil && workspaceError == nil {
+                Button { workspaceAttempt += 1 } label: {
+                    Label("Refresh workspaces", systemImage: "arrow.clockwise").font(.footnote).frame(minHeight: 44)
+                }
+            }
+        }
+        .disabled(model.connection != .connected)
+    }
+
+    private func loadWorkspaces() async {
+        guard let api = chatAPI() else { return }
+        workspaceError = nil
+        do {
+            let snapshot = try await api.workspaces()
+            let items = snapshot.items
+            guard !Task.isCancelled, chatAPI() === api, !workspaceBusy else { return }
+            workspaces = items
+            archivedSessions = Set(snapshot.archivedSessionIds)
+            if items.contains(where: { !$0.sessionIds.isEmpty }) {
+                let titles = try await api.workspaceChatTitles()
+                guard !Task.isCancelled, chatAPI() === api else { return }
+                workspaceChats = titles
+            }
+        } catch {
+            if !Task.isCancelled && chatAPI() === api { workspaceError = "Could not refresh workspaces." }
+        }
+    }
+
+    @ViewBuilder private func workspacePlacement(_ item: HubWorkspaceItem, in items: [HubWorkspaceItem]) -> some View {
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            if index > 0 {
+                Button("Move workspace up") { Task { await moveWorkspace(item.id, before: items[index - 1].id) } }
+            }
+            if index + 1 < items.count {
+                let next = items.dropFirst(index + 2).first?.id
+                Button("Move workspace down") { Task { await moveWorkspace(item.id, before: next) } }
+            }
+        }
+    }
+
+    private func moveWorkspace(_ id: String, before anchor: String?) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false; workspaceAttempt += 1 }
+        do {
+            let order = try await api.moveWorkspace(id, before: anchor)
+            guard chatAPI() === api, let workspaces else { return }
+            let byID = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0) })
+            if Set(order) == Set(byID.keys) { self.workspaces = order.compactMap { byID[$0] } }
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the workspace order." }
+        }
+    }
+
+    private func moveSession(_ id: String, in workspace: HubWorkspaceItem, before anchor: String?) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false; workspaceAttempt += 1 }
+        do {
+            let updated = try await api.moveWorkspaceSession(id, in: workspace.id, before: anchor)
+            guard chatAPI() === api else { return }
+            workspaces = workspaces?.map { $0.id == updated.id ? updated : $0 }
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the conversation order." }
+        }
+    }
+
+    private func archiveSession(_ id: String) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false }
+        do {
+            let archived = try await api.archiveWorkspaceSession(id)
+            guard chatAPI() === api else { return }
+            archivedSessions = archived
+            workspaceAttempt += 1
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the archive. Refresh workspaces to check." }
+        }
+    }
+
+    private func renameWorkspace(_ item: HubWorkspaceItem, title: String) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false }
+        do {
+            let updated = try await api.renameWorkspace(id: item.id, title: title)
+            guard chatAPI() === api else { return }
+            workspaces = workspaces?.map { $0.id == updated.id ? updated : $0 }
+            workspaceAttempt += 1
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm the new workspace name. Refresh to check." }
+        }
+    }
+
+    private func removeWorkspace(_ item: HubWorkspaceItem) async {
+        guard !workspaceBusy, let api = chatAPI() else { return }
+        workspaceBusy = true
+        defer { workspaceBusy = false }
+        do {
+            try await api.removeWorkspace(id: item.id)
+            guard chatAPI() === api else { return }
+            workspaces?.removeAll { $0.id == item.id }
+            expandedWorkspaces.remove(item.id)
+            workspaceAttempt += 1
+        } catch {
+            if chatAPI() === api { workspaceError = "Could not confirm removal. Refresh to check." }
+        }
+    }
+
+    private var pinnedHistory: some View {
+        DisclosureGroup(isExpanded: $pinnedExpanded) {
+            if let bookmarks {
+                let byID = Dictionary(uniqueKeysWithValues: (model.conversations ?? []).map { ($0.sessionId, $0) })
+                let visible = bookmarks.sessionIds.filter { !archivedSessions.contains($0) }
+                if visible.isEmpty {
+                    Text("No pinned conversations").font(.footnote).foregroundStyle(.secondary).padding(.vertical, 8)
+                }
+                ForEach(visible, id: \.self) { id in
+                    historyRow(byID[id] ?? HubConversationChoice(sessionId: id, title: "Pinned conversation", updatedAt: 0))
+                }
+            }
+            if bookmarksError { Button("Retry loading pinned chats") { Task { await loadBookmarks() } } }
+        } label: {
+            HStack {
+                Text("Pinned").font(.headline)
+                Spacer()
+                if let bookmarks { Text("\(bookmarks.sessionIds.filter { !archivedSessions.contains($0) }.count)").foregroundStyle(.secondary) }
+                Image(systemName: "star")
+            }
+            .frame(minHeight: 44)
+        }
+    }
+
+    private func historyRow(_ chat: HubConversationChoice, workspace: HubWorkspaceItem? = nil) -> some View {
+        HStack(spacing: 6) {
+            Button { showChat(chat) } label: {
+                Text(chat.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("hub.history.\(chat.sessionId)")
+            .contextMenu {
+                if let workspace {
+                    let ids = workspace.sessionIds.filter { !archivedSessions.contains($0) }
+                    if let index = ids.firstIndex(of: chat.sessionId) {
+                        if index > 0 {
+                            Button("Move conversation up") { Task { await moveSession(chat.sessionId, in: workspace, before: ids[index - 1]) } }
+                                .disabled(workspaceBusy)
+                        }
+                        if index + 1 < ids.count {
+                            let next = ids.dropFirst(index + 2).first
+                            Button("Move conversation down") { Task { await moveSession(chat.sessionId, in: workspace, before: next) } }
+                                .disabled(workspaceBusy)
+                        }
+                    }
+                }
+                Button("Archive conversation", role: .destructive) { sessionToArchive = chat }.disabled(workspaceBusy)
+            }
+            if let bookmarks {
+                let pinned = bookmarks.sessionIds.contains(chat.sessionId)
+                Button { Task { await setPinned(chat.sessionId, pinned: !pinned) } } label: {
+                    Image(systemName: pinned ? "star.fill" : "star").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(pinned ? "Unpin \(chat.title)" : "Pin \(chat.title)")
+                .disabled(bookmarksBusy)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(model.connection != .connected)
+    }
+
+    private func loadBookmarks() async {
+        guard !bookmarksBusy, let api = chatAPI() else { return }
+        bookmarksBusy = true
+        defer { bookmarksBusy = false }
+        do {
+            let value = try await api.chatBookmarks()
+            if !Task.isCancelled { bookmarks = value; bookmarksError = false }
+        } catch {
+            if !Task.isCancelled { bookmarksError = true }
+        }
+    }
+
+    private func setPinned(_ id: String, pinned: Bool) async {
+        guard !bookmarksBusy, let api = chatAPI() else { return }
+        bookmarksBusy = true
+        defer { bookmarksBusy = false }
+        do {
+            let value = try await api.setChatPinned(sessionID: id, pinned: pinned)
+            guard chatAPI() === api else { return }
+            bookmarks = value
+            bookmarksError = false
+        } catch {
+            if chatAPI() === api { bookmarksError = true }
+        }
+    }
+
+    private func newChat(workspaceID: String? = nil, action: HubNativeChatRequest.ComposerAction? = nil) async {
+        guard selectedChat == nil, !model.sending, !creatingChat, let api = chatAPI() else { return }
+        creatingChat = true
+        let initialDraft = action == nil ? "" : model.draft
+        defer { creatingChat = false }
+        do {
+            let id = try await api.createChat(workspaceID: workspaceID)
+            guard chatAPI() === api else { return }
+            guard selectedChat == nil else { return }
+            if action != nil, model.draft == initialDraft { model.draft = "" }
+            showChat(HubNativeChatRequest(choice: HubConversationChoice(sessionId: id, title: "New chat", updatedAt: 0),
+                                          initialDraft: initialDraft, composerAction: action))
+        } catch {
+            if chatAPI() === api {
+                if workspaceID != nil { workspaceError = "Could not open a chat in this workspace." }
+                else { model.sendError = "Could not open a new conversation. Try again when connected." }
+            }
+        }
+    }
+
+    private func updateChatTitle(_ id: String, name: String) {
+        let choice = HubConversationChoice(sessionId: id, title: name, updatedAt: Date().timeIntervalSince1970 * 1_000)
+        if let recent = model.conversations, recent.contains(where: { $0.sessionId == id }) {
+            model.conversations = recent.map { $0.sessionId == id ? choice : $0 }
+        }
+        workspaceChats[id] = choice
+    }
+
+    private struct HistoryRequest: Equatable {
+        let query: String
+        let attempt: Int
+        let connected: Bool
+    }
+
+    private func showKnowledge() {
+        dismissKeyboard {
+            closePanel()
+            knowledgeOpen = true
+        }
+    }
+
+    private enum ActivityDestination {
+        case record(String)
+        case conversation(String)
+    }
+
+    private func openActivityDestination() {
+        let destination = activityDestination
+        activityDestination = nil
+        switch destination {
+        case .record(let id): selectKnowledgeNode(id)
+        case .conversation(let id): openChat(id)
+        case nil: break
+        }
+    }
+
+    private func showChat(_ chat: HubConversationChoice) {
+        showChat(HubNativeChatRequest(choice: chat))
+    }
+
+    private func showChat(_ request: HubNativeChatRequest) {
+        guard let api = chatAPI() else { return }
+        dismissKeyboard {
+            closePanel()
+            knowledgeOpen = false
+            tasksOpen = false
+            usageOpen = false
+            settingsOpen = false
+            voiceHistoryOpen = false
+            plannerOpen = false
+            plannerEditor = nil
+            knowledgeActivityOpen = false
+            selectedChat = (request, api)
+        }
+    }
+
+    private func clearKnowledgeSelection() {
+        selectedNoteID = nil
+        selectedNote = nil
+        selectedKnowledgeSource = nil
+        knowledgeForgetOpen = false
+        noteLoadFailed = false
+        noteEditing = false
+        noteDraft = ""
+        noteSaveFailed = false
+    }
+
+    private func selectKnowledgeNode(_ id: String) {
+        showKnowledge()
+        selectedNoteID = id
+        selectedNote = nil
+        noteLoadFailed = false
+        noteAttempt += 1
+    }
+
+    private var knowledgeScreen: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                if selectedNoteID != nil {
+                    Button(action: clearKnowledgeSelection) { Label("Knowledge", systemImage: "chevron.left") }
+                        .disabled(noteSaving || noteEditing)
+                } else {
+                    Text("Knowledge").font(.headline).accessibilityAddTraits(.isHeader)
+                    Menu {
+                        Button("Domains") { knowledgeDomainsOpen = true }
+                        Button("Backups") { knowledgeBackupsOpen = true }
+                        Button("Conversation archives") { knowledgeArchivesOpen = true }
+                        Button("Skills") { knowledgeSkillsOpen = true }
+                        Button("Attachments") { knowledgeAssetsOpen = true }
+                    } label: {
+                        Image(systemName: "ellipsis").frame(width: 44, height: 36)
+                    }
+                    .accessibilityLabel("Manage Knowledge")
+                    .disabled(model.connection != .connected)
+                }
+                Spacer()
+                Button("Done") { knowledgeOpen = false }.disabled(noteSaving || noteEditing)
+            }
+            if let id = selectedNoteID {
+                Group {
+                    if let note = selectedNote {
+                        knowledgeNote(note)
+                    } else if noteLoadFailed {
+                        Button("Retry loading note") { noteLoadFailed = false; noteAttempt += 1 }
+                    } else {
+                        ProgressView("Loading note…")
+                    }
+                }
+                .task(id: noteAttempt) {
+                    do {
+                        let note = try await readKnowledgeNote(id)
+                        if !Task.isCancelled, selectedNoteID == id { selectedNote = note }
+                    } catch {
+                        if !Task.isCancelled, selectedNoteID == id { noteLoadFailed = true }
+                    }
+                }
+            } else if let graph = model.knowledge {
+                knowledgeOverview(graph)
+            } else {
+                connectionRow
+                if model.connection == .connected && !model.refreshing && !model.incomplete {
+                    Button("Load Knowledge", action: connect)
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(.primary)
         .tint(accent)
         .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        .interactiveDismissDisabled(noteSaving || noteEditing)
+        .sheet(isPresented: $knowledgeDomainsOpen) {
+            if let api = chatAPI() {
+                HubKnowledgeDomainsView(api: api, changed: refreshKnowledgeGraph, openNote: { id in
+                    knowledgeDomainsOpen = false
+                    selectKnowledgeNode(id)
+                })
+            }
+        }
+        .sheet(isPresented: $knowledgeBackupsOpen) {
+            if let api = chatAPI() { HubKnowledgeBackupsView(api: api) }
+        }
+        .sheet(isPresented: $knowledgeArchivesOpen) {
+            if let api = chatAPI() { HubKnowledgeArchivesView(api: api, changed: refreshKnowledgeGraph) }
+        }
+        .sheet(isPresented: $knowledgeSkillsOpen) {
+            if let api = chatAPI() { HubKnowledgeSkillsView(api: api, changed: refreshKnowledgeGraph) }
+        }
+        .sheet(isPresented: $knowledgeAssetsOpen) {
+            if let api = chatAPI() {
+                HubKnowledgeAssetsView(api: api, note: selectedNote) { updated in
+                    if let updated, selectedNoteID == updated.id { selectedNote = updated }
+                    await refreshKnowledgeGraph()
+                }
+            }
+        }
+        .sheet(isPresented: $knowledgeConnectionsOpen) {
+            if let api = chatAPI(), let note = selectedNote {
+                HubKnowledgeConnectionsView(api: api, note: note) { id in
+                    knowledgeConnectionsOpen = false
+                    selectKnowledgeNode(id)
+                }
+            }
+        }
+        .sheet(item: $selectedKnowledgeSource) { source in
+            if let api = chatAPI() { HubKnowledgeOriginalSourceView(api: api, source: source) }
+        }
+        .sheet(isPresented: $knowledgeForgetOpen) {
+            if let api = chatAPI(), let note = selectedNote {
+                HubKnowledgeForgetView(api: api, note: note) { updated in
+                    if selectedNoteID == updated.id, chatAPI() === api { selectedNote = updated }
+                    await refreshKnowledgeGraph()
+                }
+            }
+        }
+    }
+
+    private func refreshKnowledgeGraph() async {
+        guard let api = chatAPI() else { return }
+        do {
+            let graph = try await api.knowledge()
+            guard chatAPI() === api else { return }
+            model.knowledge = graph
+            knowledgeRefreshError = false
+        } catch {
+            if chatAPI() === api { knowledgeRefreshError = true }
+        }
+    }
+
+    private func knowledgeNote(_ note: HubKnowledgeNote) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(note.title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                Spacer()
+                if noteEditing {
+                    Button("Cancel") { noteEditing = false; noteSaveFailed = false }.disabled(noteSaving)
+                    Button("Save") { Task { await saveNote(note) } }.disabled(noteSaving || noteDraft == note.content || noteSaveFailed)
+                } else if note.kind != "conversation", note.protected != true, note.hash != nil {
+                    Button("Edit") { noteDraft = note.content; noteEditing = true }
+                    Button { knowledgeAssetsOpen = true } label: { Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44) }
+                        .accessibilityLabel("Attach file to note")
+                        .disabled(model.connection != .connected)
+                    Menu {
+                        Button("Forget a passage", role: .destructive) { knowledgeForgetOpen = true }
+                    } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
+                    .accessibilityLabel("Note actions")
+                    .disabled(model.connection != .connected)
+                }
+            }
+            if noteEditing {
+                TextEditor(text: $noteDraft).disabled(noteSaving).accessibilityLabel("Note content")
+                if noteSaving { ProgressView("Saving…") }
+                if noteSaveFailed {
+                    Text("Could not confirm the save. Copy your draft before reopening this note to check the saved version.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HubMarkdownText(source: note.content)
+                        Button {
+                            knowledgeConnectionsOpen = true
+                        } label: {
+                            Label("Connections and sources", systemImage: "point.3.connected.trianglepath.dotted")
+                        }
+                        .frame(minHeight: 44)
+                        if model.knowledge?.nodes.contains(where: { $0.id == note.id }) == true {
+                            Button {
+                                knowledgeLocalCenter = note.id
+                                knowledgeFocusedDomain = nil
+                                knowledgeTab = .graph
+                                clearKnowledgeSelection()
+                            } label: { Label("Local graph", systemImage: "point.3.connected.trianglepath.dotted") }
+                            .frame(minHeight: 44)
+                        }
+                        knowledgeLinks("Links", nodes: note.links ?? [])
+                        knowledgeLinks("Backlinks", nodes: note.backlinks ?? [])
+                        knowledgeSources(note.sources ?? [])
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func knowledgeLinks(_ title: String, nodes: [HubHomeKnowledge.Node]) -> some View {
+        if !nodes.isEmpty {
+            DisclosureGroup(title) {
+                ForEach(nodes, id: \.id) { node in
+                    Button(node.title ?? "Knowledge record") { selectKnowledgeNode(node.id) }
+                        .frame(minHeight: 44)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func knowledgeSources(_ sources: [HubKnowledgeNote.Source]) -> some View {
+        if !sources.isEmpty {
+            DisclosureGroup("Sources") {
+                ForEach(sources.indices, id: \.self) { index in
+                    let source = sources[index]
+                    VStack(alignment: .leading, spacing: 5) {
+                        Button {
+                            if let id = source.conversationId { selectKnowledgeNode(id) }
+                            else { selectedKnowledgeSource = source }
+                        } label: {
+                            Label(source.channel.capitalized, systemImage: "doc.text.magnifyingglass").frame(minHeight: 44)
+                        }
+                        let time = source.evidence?.occurredAt ?? source.completedAt
+                        if time.isFinite, time > 0 {
+                            Text(Date(timeIntervalSince1970: time / 1000).formatted()).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let reason = source.reason { Text(reason).font(.footnote) }
+                        if let quote = source.evidence?.quote { Text(quote).italic().font(.footnote).textSelection(.enabled) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func saveNote(_ note: HubKnowledgeNote) async {
+        guard !noteSaving, let api = chatAPI() else { return }
+        noteSaving = true
+        defer { noteSaving = false }
+        do {
+            let saved = try await api.saveKnowledgeNote(note, content: noteDraft)
+            guard selectedNoteID == note.id else { return }
+            selectedNote = saved
+            noteEditing = false
+            noteSaveFailed = false
+        } catch {
+            if selectedNoteID == note.id { noteSaveFailed = true }
+        }
+    }
+
+    private func knowledgeOverview(_ graph: HubHomeKnowledge) -> some View {
+        let query = knowledgeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let api = chatAPI()
+        let neighborhood = knowledgeLocalCenter.flatMap { graph.neighborhood(of: $0) }
+        let domainGraph = knowledgeFocusedDomain.flatMap { graph.graphForDomain($0) }
+        let graphToShow = neighborhood ?? domainGraph ?? graph
+        let graphScope: HubKnowledgeGraphView.Scope = knowledgeFocusedDomain == HubKnowledgeLayout.archiveID && domainGraph != nil
+            ? .archive : neighborhood != nil || domainGraph != nil ? .all : knowledgeScope
+        let search = KnowledgeSearch(query: query, scope: knowledgeScope, retry: knowledgeSearchRetry, apiID: api.map { ObjectIdentifier($0) })
+        let response = knowledgeSearchResponse.flatMap { $0.request == search ? $0 : nil }
+        let records = (query.isEmpty ? (knowledgeTab == .graph ? graphToShow.nodes : graph.nodes) : response?.nodes ?? [])
+            .filter { (query.isEmpty && knowledgeTab == .graph ? graphScope : knowledgeScope).includes($0) }
+        return ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if knowledgeRefreshError {
+                    Button("Retry refreshing Knowledge") { Task { await refreshKnowledgeGraph() } }
+                        .font(.footnote).frame(minHeight: 44)
+                }
+                Picker("Knowledge view", selection: $knowledgeTab) {
+                    Text("Graph").tag(KnowledgeTab.graph)
+                    Text("Records").tag(KnowledgeTab.records)
+                }
+                .pickerStyle(.segmented)
+                Picker("Knowledge scope", selection: $knowledgeScope) {
+                    ForEach(HubKnowledgeGraphView.Scope.allCases) { scope in Text(scope.rawValue).tag(scope) }
+                }
+                .pickerStyle(.segmented)
+                if knowledgeTab == .graph {
+                    knowledgeGraphSection(graph, displayed: graphToShow, neighborhood: neighborhood,
+                                          domainGraph: domainGraph, scope: graphScope)
+                }
+                TextField("Find records", text: $knowledgeQuery).textFieldStyle(.roundedBorder).submitLabel(.search)
+                if query.utf16.count > 200 {
+                    Text("Use 200 characters or fewer.").foregroundStyle(.secondary)
+                } else if !query.isEmpty, let response, response.nodes == nil {
+                    Button("Retry searching Knowledge") { knowledgeSearchRetry += 1 }
+                } else if response == nil && !query.isEmpty {
+                    ProgressView("Searching Knowledge…")
+                } else if records.isEmpty {
+                    Text("No matching records").foregroundStyle(.secondary)
+                }
+                ForEach(records, id: \.id) { node in
+                    Button { selectKnowledgeNode(node.id) } label: {
+                        HStack {
+                            Text(node.title ?? "Untitled").lineLimit(2)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption)
+                        }
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("hub.knowledge.record.\(node.id)")
+                    Divider()
+                }
+            }
+        }
+        .task(id: search) { await searchKnowledge(search, api: api) }
+    }
+
+    private func knowledgeGraphSection(
+        _ graph: HubHomeKnowledge, displayed: HubHomeKnowledge, neighborhood: HubHomeKnowledge?,
+        domainGraph: HubHomeKnowledge?, scope: HubKnowledgeGraphView.Scope
+    ) -> some View {
+        let canFocus = neighborhood == nil && domainGraph == nil
+        let domains = canFocus ? (graph.domains ?? []).filter { $0.status != "merged" } : []
+        let onDomain: ((String) -> Void)? = canFocus ? { id in self.focusKnowledgeDomain(id) } : nil
+        let canvas = HubKnowledgeGraphView(graph: displayed, height: 330, scope: scope, spatial: knowledgeSpatial,
+                                           focusID: neighborhood == nil ? nil : knowledgeLocalCenter,
+                                           selectDomain: onDomain, select: selectKnowledgeNode)
+        let identity = [scope.rawValue, String(knowledgeSpatial), knowledgeLocalCenter ?? "",
+                        knowledgeFocusedDomain ?? "", String(knowledgeGraphReset)].joined(separator: "/")
+        return VStack(alignment: .leading, spacing: 8) {
+            knowledgeGraphHeader(graph, neighborhood: neighborhood, domainGraph: domainGraph)
+            canvas.id(identity).overlay(alignment: .topTrailing) {
+                knowledgeGraphMenu(domains: domains, canFocus: canFocus)
+            }
+        }
+    }
+
+    @ViewBuilder private func knowledgeGraphHeader(_ graph: HubHomeKnowledge, neighborhood: HubHomeKnowledge?,
+                                                  domainGraph: HubHomeKnowledge?) -> some View {
+        if let center = knowledgeLocalCenter, let neighborhood {
+            let title = neighborhood.nodes.first { $0.id == center }?.title ?? "Local graph"
+            knowledgeScopeHeader(title: title, identifier: "hub.knowledge.leave-local-graph") { knowledgeLocalCenter = nil }
+            if neighborhood.edges.isEmpty {
+                Text("This record has no connections yet.").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        if let domain = knowledgeFocusedDomain, let domainGraph {
+            knowledgeScopeHeader(title: domainTitle(domain, in: graph), identifier: "hub.knowledge.leave-domain") { knowledgeFocusedDomain = nil }
+            if domainGraph.nodes.isEmpty {
+                Text("No records in this domain.").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func knowledgeScopeHeader(title: String, identifier: String, close: @escaping () -> Void) -> some View {
+        HStack {
+            Button(action: close) { Label("All knowledge", systemImage: "chevron.left") }
+                .accessibilityIdentifier(identifier)
+            Spacer()
+            Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+
+    private func knowledgeGraphMenu(domains: [HubHomeKnowledge.Domain], canFocus: Bool) -> some View {
+        Menu {
+            Button("2D") { knowledgeSpatial = false }
+            Button("3D") { knowledgeSpatial = true }
+            Button("Reset view") { knowledgeGraphReset += 1 }
+            Button("Refresh graph") { Task { await refreshKnowledgeGraph() } }
+            if canFocus {
+                Section("Focus domain") {
+                    ForEach(domains) { domain in Button(domain.title) { focusKnowledgeDomain(domain.id) } }
+                    Button("Chat archive") { focusKnowledgeDomain(HubKnowledgeLayout.archiveID) }
+                }
+            }
+        } label: {
+            Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("Graph view")
+        .accessibilityValue(knowledgeSpatial ? "3D" : "2D")
+    }
+
+    private func domainTitle(_ id: String, in graph: HubHomeKnowledge) -> String {
+        if id == HubKnowledgeLayout.archiveID { return "Chat archive" }
+        return graph.domains?.first { $0.id == id }?.title ?? "Domain"
+    }
+
+    private func focusKnowledgeDomain(_ id: String) {
+        knowledgeLocalCenter = nil
+        knowledgeFocusedDomain = id
+    }
+
+    private enum KnowledgeTab { case graph, records }
+
+    private struct KnowledgeSearch: Equatable {
+        let query: String
+        let scope: HubKnowledgeGraphView.Scope
+        let retry: Int
+        let apiID: ObjectIdentifier?
+    }
+
+    private struct KnowledgeSearchResponse {
+        let request: KnowledgeSearch
+        let nodes: [HubHomeKnowledge.Node]?
+    }
+
+    private func searchKnowledge(_ search: KnowledgeSearch, api: HubConversationAPI?) async {
+        guard !Task.isCancelled, !search.query.isEmpty, search.query.utf16.count <= 200 else { return }
+        guard let api else {
+            knowledgeSearchResponse = KnowledgeSearchResponse(request: search, nodes: nil)
+            return
+        }
+        let scope: HubHomeKnowledge.SearchScope = search.scope == .all ? .all : search.scope == .notes ? .brain : .archive
+        do {
+            try await Task.sleep(nanoseconds: 250_000_000)
+            let records = try await api.searchKnowledge(search.query, scope: scope)
+            if !Task.isCancelled, chatAPI() === api {
+                knowledgeSearchResponse = KnowledgeSearchResponse(request: search, nodes: records)
+            }
+        } catch {
+            if !Task.isCancelled, chatAPI() === api {
+                knowledgeSearchResponse = KnowledgeSearchResponse(request: search, nodes: nil)
+            }
+        }
     }
 
     @ViewBuilder private var connectionRow: some View {
@@ -135,26 +1442,36 @@ struct HubHomeView: View {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
             }
             if let id = model.uncertainChat {
-                Button("Open conversation to check") { openChat(id) }
+                Button("Open conversation to check") { dismissKeyboard { openChat(id) } }
                     .font(.footnote)
                     .disabled(model.connection != .connected)
             }
             HStack(spacing: 3) {
                 TextField("Chat…", text: $model.draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
+                    .focused($composerFocused)
                     .accessibilityIdentifier("hub.home.draft")
                     .submitLabel(.send)
-                    .onSubmit(send)
-                    .disabled(model.sending)
+                    .onSubmit { if canSend { dismissKeyboard(then: send) } }
+                    .disabled(model.sending || creatingChat)
                     .padding(.leading, 12)
-                Button(action: options) {
+                Menu {
+                    startChatAction("Commands & skills", icon: "terminal", action: .commands)
+                    startChatAction("Files", icon: "paperclip", action: .files)
+                    startChatAction("Photos", icon: "photo", action: .photos)
+                    startChatAction("Choose character", icon: "person.crop.circle", action: .characters)
+                    startChatAction("Research…", icon: "magnifyingglass", action: .research)
+                    startChatAction("Research tasks", icon: "list.bullet.rectangle", action: .researchTasks)
+                    startChatAction("Instructions", icon: "doc.text", action: .instructions)
+                } label: {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("More actions")
-                Button(action: voice) {
+                .disabled(model.connection != .connected || model.sending || creatingChat || model.uncertainChat != nil)
+                Button { dismissKeyboard(then: voice) } label: {
                     Image(systemName: "waveform").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(model.hasActiveVoice ? "Open voice controls" : "Speak")
-                Button(action: send) {
+                Button { dismissKeyboard(then: send) } label: {
                     Image(systemName: "arrow.up")
                         .font(.body.weight(.semibold))
                         .frame(width: 44, height: 44)
@@ -167,54 +1484,644 @@ struct HubHomeView: View {
             .buttonStyle(.plain)
             .padding(5)
             .background(card, in: RoundedRectangle(cornerRadius: 25))
-            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(.white.opacity(0.09)))
+            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(HubWorkspacePalette.border.opacity(0.09)))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
+    private func startChatAction(_ title: LocalizedStringKey, icon: String, action: HubNativeChatRequest.ComposerAction) -> some View {
+        Button {
+            hideKeyboard()
+            Task { await newChat(action: action) }
+        } label: { Label(title, systemImage: icon) }
+    }
+
     private var canSend: Bool {
-        model.connection == .connected && !model.sending && model.uncertainChat == nil
+        model.connection == .connected && !model.sending && !creatingChat && model.uncertainChat == nil
             && !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func section<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+    private var canEditPlanner: Bool {
+        model.connection == .connected && !model.plannerSaving
+    }
+
+    private func plannerEditorView(_ selection: PlannerEdit) -> some View {
+        HubPlannerEditor(item: selection.item, kind: selection.kind, day: agendaDate, horizon: todoHorizon,
+                         save: savePlannerItem, remove: removePlannerItem, openSource: { id in
+                             plannerEditor = nil
+                             plannerOpen = false
+                             openChat(id)
+                         })
+    }
+
+    private func personalPlanner(_ planner: HubHomePlanner) -> some View {
+        let openTodos = planner.items.filter { !$0.deleted && $0.state == "open" && $0.kind == "todo" }
+        let nearCount = openTodos.filter { ($0.horizon ?? "near") == "near" }.count
+        let laterCount = openTodos.filter { $0.horizon == "later" }.count
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 18) {
+                ForEach(PlannerTab.allCases, id: \.self) { tab in
+                    Button {
+                        hideKeyboard()
+                        plannerTab = tab
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(tab.title).font(.subheadline.weight(.medium))
+                            if tab == .todos, !openTodos.isEmpty {
+                                Text(openTodos.count.formatted()).font(.caption.monospacedDigit())
+                                    .foregroundStyle(HubWorkspacePalette.muted)
+                            }
+                        }
+                            .foregroundStyle(plannerTab == tab ? Color.primary : HubWorkspacePalette.muted)
+                            .frame(minHeight: 44)
+                            .padding(.horizontal, 2)
+                            .overlay(alignment: .bottom) {
+                                if plannerTab == tab { Capsule().fill(accent).frame(height: 2) }
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(tab == .agenda ? "hub.planner.agenda" : "hub.planner.todos")
+                    .accessibilityAddTraits(plannerTab == tab ? .isSelected : [])
+                }
+                Spacer(minLength: 0)
+            }
+            .background(alignment: .bottom) { Rectangle().fill(HubWorkspacePalette.border.opacity(0.12)).frame(height: 1) }
+            if plannerTab == .agenda {
+                HStack {
+                    Button {
+                        calendarExpanded.toggle()
+                    } label: {
+                        Label(agendaDate.formatted(date: .abbreviated, time: .omitted),
+                              systemImage: calendarExpanded ? "chevron.up" : "chevron.down")
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityLabel(calendarExpanded ? "Collapse calendar" : "Expand calendar")
+                    Spacer()
+                    Button {
+                        plannerEditor = PlannerEdit(item: nil, kind: .event)
+                    } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Add event")
+                    .disabled(!canEditPlanner)
+                }
+                if calendarExpanded {
+                    DatePicker("Choose a day", selection: $agendaDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical).labelsHidden()
+                } else {
+                    agendaWeek
+                }
+                let events = planner.items.filter {
+                    !$0.deleted && $0.state == "open" && $0.kind == "event" && $0.occurs(on: agendaDate)
+                }.sorted { ($0.start ?? "") < ($1.start ?? "") }
+                if events.isEmpty { Text("No plans for this day.").foregroundStyle(.secondary) }
+                ForEach(events) { item in
+                    Button {
+                        plannerEditor = PlannerEdit(item: item, kind: .event)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title).lineLimit(2)
+                            if let instant = HubPlannerDraft.parseInstant(item.start) {
+                                Text(instant, style: .time).font(.caption).foregroundStyle(.secondary)
+                                    .environment(\.timeZone, item.timeZone.flatMap(TimeZone.init(identifier:)) ?? .current)
+                            } else {
+                                Text("All day").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canEditPlanner || item.version == nil)
+                }
+            } else {
+                todoList(planner, nearCount: nearCount, laterCount: laterCount)
+            }
+            if model.plannerSaving { ProgressView().accessibilityLabel("Saving to planner") }
+            if let error = model.plannerError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+        }
+    }
+
+    private var agendaWeek: some View {
+        let calendar = Calendar.current
+        let offset = ((calendar.dateComponents([.weekday], from: agendaDate).weekday ?? 2) + 5) % 7
+        let first = calendar.date(byAdding: .day, value: -offset, to: agendaDate) ?? agendaDate
+        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: first) }
+        return HStack(spacing: 2) {
+            ForEach(days, id: \.self) { day in
+                let selected = calendar.isDate(day, inSameDayAs: agendaDate)
+                Button {
+                    agendaDate = day
+                } label: {
+                    VStack(spacing: 4) {
+                        Text(day.formatted(.dateTime.weekday(.narrow))).font(.caption2).foregroundStyle(.secondary)
+                        Text(day.formatted(.dateTime.day())).font(.callout.weight(selected ? .semibold : .regular))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(selected ? accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+    }
+
+    private func todoList(_ planner: HubHomePlanner, nearCount: Int, laterCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: symbol)
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
+            HStack {
+                let count = todoHorizon == .near ? nearCount : laterCount
+                Text("Your list").font(.footnote).foregroundStyle(HubWorkspacePalette.muted)
+                Spacer()
+                Menu {
+                    Picker("Your list", selection: $todoHorizon) {
+                        todoHorizonLabel(.near, count: nearCount).tag(HubHomePlanner.Horizon.near)
+                        todoHorizonLabel(.later, count: laterCount).tag(HubHomePlanner.Horizon.later)
+                    }
+                } label: {
+                    Label { todoHorizonLabel(todoHorizon, count: count) } icon: { Image(systemName: "chevron.up.chevron.down") }
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                        .frame(minHeight: 44)
+                }
+                .disabled(model.plannerSaving)
+                .accessibilityLabel("To-do list")
+                .accessibilityValue(todoHorizon == .near ? "Soon" : "Later")
+            }
+            .onChange(of: todoHorizon) { _ in todoDraftID = UUID() }
+            quickTodo
+            let items = planner.items.filter {
+                !$0.deleted && $0.state == "open" && $0.kind == "todo" && ($0.horizon ?? "near") == todoHorizon.rawValue
+            }.sorted { ($0.date ?? "9999") < ($1.date ?? "9999") }
+            ForEach(items) { item in
+                HStack {
+                    Button { completeTodo(item) } label: {
+                        Image(systemName: "square").foregroundStyle(HubWorkspacePalette.muted)
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Complete \(item.title)")
+                    Button {
+                        plannerEditor = PlannerEdit(item: item, kind: .todo)
+                    } label: {
+                        Text(item.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .accessibilityIdentifier("hub.planner.todo.\(item.id)")
+                }
+                .buttonStyle(.plain)
+                .disabled(!canEditPlanner || item.version == nil)
+            }
+            if items.isEmpty {
+                Text(todoHorizon == .near ? "Add something you want to get done." : "Keep your longer-term plans here.")
+                    .foregroundStyle(.secondary)
+            }
+            let past = planner.items.filter { $0.deleted || $0.state == "done" }
+                .sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
+            if !past.isEmpty {
+                DisclosureGroup("Completed & removed") {
+                    ForEach(past.prefix(50)) { item in
+                        HStack {
+                            Text(item.title).lineLimit(2)
+                            Spacer()
+                            Button(item.deleted ? "Restore" : "Reopen") { restorePlannerItem(item) }
+                                .disabled(!canEditPlanner || item.version == nil)
+                                .frame(minHeight: 44)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func todoHorizonLabel(_ horizon: HubHomePlanner.Horizon, count: Int) -> Text {
+        if count == 0 { return Text(horizon == .near ? "Soon" : "Later") }
+        return horizon == .near ? Text("Soon (\(count))") : Text("Later (\(count))")
+    }
+
+    private var quickTodo: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                TextField("What needs doing?", text: $todoDraft,
+                          prompt: Text("What needs doing?").foregroundColor(HubWorkspacePalette.muted))
+                    .focused($todoFocused)
+                    .frame(minHeight: 44)
+                    .submitLabel(.done)
+                    .onSubmit(submitTodo)
+                    .onChange(of: todoDraft) { _ in todoDraftID = UUID() }
+                Button {
+                    if todoDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        hideKeyboard()
+                        plannerEditor = PlannerEdit(item: nil, kind: .todo)
+                    } else { submitTodo() }
+                } label: {
+                    Text("Add")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(HubWorkspacePalette.onAccent)
+                        .padding(.horizontal, 13)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(accent, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(6)
+            .padding(.leading, 6)
+            .background(Color(uiColor: Self.backgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(HubWorkspacePalette.border.opacity(0.10)))
+            .disabled(!canEditPlanner)
+        }
+    }
+
+    private func submitTodo() {
+        let title = todoDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canEditPlanner, !title.isEmpty else { return }
+        let id = todoDraftID
+        let horizon = todoHorizon
+        todoFocused = false
+        Task {
+            if await addTodo(id, title, horizon), id == todoDraftID { todoDraft = "" }
+        }
+    }
+
+    private func section<Content: View>(_ title: LocalizedStringKey, actionLabel: LocalizedStringKey = "Open", open: (() -> Void)? = nil,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                if let open {
+                    Spacer()
+                    Button(action: open) { Text(actionLabel).font(.footnote).foregroundStyle(accent).frame(minHeight: 40) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text(actionLabel))
+                }
+            }
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(card, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
     }
 
-    private func knowledgeMap(_ graph: HubHomeKnowledge, nodes: [HubHomeKnowledge.Node]) -> some View {
-        Canvas { context, size in
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            var positions: [String: CGPoint] = [:]
-            for (index, node) in nodes.enumerated() {
-                let angle = CGFloat(index) * 2.399963
-                let distance = sqrt(CGFloat(index + 1) / CGFloat(nodes.count))
-                positions[node.id] = CGPoint(
-                    x: center.x + cos(angle) * distance * (center.x - 10),
-                    y: center.y + sin(angle) * distance * (center.y - 10)
-                )
+}
+
+@MainActor
+private struct HubVoiceHistoryView: View {
+    let api: HubConversationAPI
+    let recent: [HubConversationChoice]
+    let open: (HubConversationChoice) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [HubVoiceHistoryItem]?
+    @State private var busy = false
+    @State private var failed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Voice History").font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }
             }
-            for edge in graph.edges {
-                guard let start = positions[edge.source], let end = positions[edge.target] else { continue }
-                var line = Path()
-                line.move(to: start)
-                line.addLine(to: end)
-                context.stroke(line, with: .color(accent.opacity(0.30)), lineWidth: 1)
+            .padding(.horizontal, 16)
+            if failed {
+                Button("Retry voice history") { Task { await load() } }.padding(.horizontal, 16)
             }
-            for point in positions.values {
-                let dot = Path(ellipseIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6))
-                context.fill(dot, with: .color(accent))
+            if let items {
+                if items.isEmpty {
+                    Text("No voice conversations yet.").foregroundStyle(.secondary).padding(.horizontal, 16)
+                    Spacer()
+                } else {
+                    List(items) { item in
+                        row(item)
+                    }
+                    .listStyle(.plain)
+                }
+            } else if !failed {
+                ProgressView("Loading voice conversations…").padding(.horizontal, 16)
+                Spacer()
             }
         }
-        .frame(height: 100)
-        .accessibilityHidden(true)
+        .padding(.top, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .task { await load() }
     }
+
+    private func row(_ item: HubVoiceHistoryItem) -> some View {
+        let choice = recent.first(where: { $0.sessionId == item.sessionId })
+            ?? HubConversationChoice(sessionId: item.sessionId, title: "Voice conversation", updatedAt: item.createdAt)
+        return HStack {
+            Button {
+                open(choice)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(choice.title).lineLimit(2)
+                    Text(Date(timeIntervalSince1970: item.createdAt / 1000).formatted()).font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            if !item.saved {
+                Button("Save") { Task { await save(item.sessionId) } }
+                    .buttonStyle(.borderless)
+                    .disabled(busy)
+            }
+        }
+    }
+
+    private func load() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do { items = try await api.voiceHistory(); failed = false }
+        catch { if !Task.isCancelled { failed = true } }
+    }
+
+    private func save(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await api.saveVoiceConversation(sessionID: id)
+            items = try await api.voiceHistory()
+            failed = false
+        } catch { failed = true }
+    }
+}
+
+@MainActor
+private struct HubTasksView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var tasks: HubWorkspaceTasks?
+    @State private var failed = false
+    @State private var attempt = 0
+    @State private var changing = false
+    @State private var changeError = false
+    @State private var pending: PendingAction?
+    @State private var taskEditor: TaskEdit?
+    @State private var exportingOutput = false
+    @State private var output: HubWorkspaceTask.OutputFile?
+    @State private var outputError: String?
+    @State private var loadingOutput: String?
+    var load: () async throws -> HubWorkspaceTasks
+    let api: HubConversationAPI
+    let openChat: (HubConversationChoice) -> Void
+
+    private struct PendingAction {
+        let action: HubWorkspaceTaskAction
+        let label: String
+        let task: HubWorkspaceTask
+        let routine: Bool
+        var approvalID: String?
+        var approvalDescription: String?
+    }
+
+    private struct TaskEdit: Identifiable {
+        let id = UUID()
+        let taskID: String?
+        let routine: Bool
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Tasks").font(.headline).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            if let tasks {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        taskSection("Goals", tasks.goals, routine: false)
+                        taskSection("Routines", tasks.routines, routine: true)
+                    }
+                }
+                Button("Refresh") { attempt += 1 }
+                if let outputError { Text(outputError).font(.footnote).foregroundStyle(.secondary) }
+                if changeError { Text("Could not confirm the change. Refresh the task before trying again.").font(.footnote) }
+            } else if failed {
+                Button("Retry loading tasks") { failed = false; attempt += 1 }
+            } else {
+                ProgressView("Loading tasks…")
+            }
+        }
+        .task(id: attempt) {
+            do {
+                let result = try await load()
+                if !Task.isCancelled { tasks = result; failed = false }
+            } catch {
+                if !Task.isCancelled { tasks = nil; failed = true }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(.primary)
+        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .sheet(item: $taskEditor) { edit in
+            if edit.routine {
+                HubRoutineEditorView(api: api, id: edit.taskID, goals: tasks?.goals ?? []) { attempt += 1 }
+            } else {
+                HubGoalEditorView(api: api, id: edit.taskID) { attempt += 1 }
+            }
+        }
+        .fileExporter(isPresented: $exportingOutput, document: output.map { HubFileDocument(bytes: $0.data) },
+                      contentType: output.flatMap { UTType(filenameExtension: ($0.name as NSString).pathExtension) } ?? .data,
+                      defaultFilename: output?.name, onCompletion: { result in
+            output = nil
+            if case .failure = result { outputError = "Could not save the file to the chosen location." }
+        })
+        .confirmationDialog(pending?.label ?? "Confirm task action",
+                            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                            titleVisibility: .visible, presenting: pending) { command in
+            Button(command.label, role: destructive(command.action) ? .destructive : nil) {
+                Task { await change(command) }
+            }
+        } message: { command in
+            Text(command.approvalDescription ?? command.task.title)
+        }
+    }
+
+    private func taskSection(_ title: String, _ items: [HubWorkspaceTask], routine: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button { taskEditor = TaskEdit(taskID: nil, routine: routine) } label: {
+                    Label(routine ? "New routine" : "New goal", systemImage: "plus").frame(minHeight: 44)
+                }
+            }
+            let visible = items.filter { $0.state != "archived" }.sorted { $0.updatedAt > $1.updatedAt }
+            if visible.isEmpty { Text("No \(title.lowercased())").foregroundStyle(.secondary) }
+            ForEach(visible) { task in
+                DisclosureGroup {
+                    if let detail = task.objective ?? task.prompt { Text(detail).textSelection(.enabled) }
+                    if let reason = task.reason ?? task.lastError { Text(reason).font(.footnote).foregroundStyle(.secondary) }
+                    if let nextAt = task.nextAt, task.state == "active" {
+                        Text(Date(timeIntervalSince1970: nextAt / 1_000).formatted()).foregroundStyle(.secondary)
+                    }
+                    taskDetails(task, routine: routine)
+                    taskActions(task, routine: routine)
+                    if (routine ? !["running", "checking"].contains(task.status) : !["stopped", "archived"].contains(task.state)) {
+                        Button(routine ? "Edit routine" : "Edit goal") {
+                            taskEditor = TaskEdit(taskID: task.id, routine: routine)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(task.title).font(.body.weight(.medium))
+                        Text(task.status.replacingOccurrences(of: "-", with: " ")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(minHeight: 44, alignment: .leading)
+                }
+                Divider()
+            }
+        }
+    }
+
+    @ViewBuilder private func taskDetails(_ task: HubWorkspaceTask, routine: Bool) -> some View {
+        if let checkpoint = task.checkpoint {
+            DisclosureGroup("Checkpoint") {
+                Text(checkpoint.summary).textSelection(.enabled)
+                Text(checkpoint.nextAction).font(.footnote)
+                if let result = checkpoint.result { Text(result).textSelection(.enabled) }
+            }
+        }
+        if let plan = task.plan, !plan.isEmpty {
+            DisclosureGroup("Milestones") {
+                ForEach(plan) { step in
+                    Label(step.title, systemImage: step.status == "done" ? "checkmark.circle" : "circle")
+                }
+            }
+        }
+        if let evidence = task.evidence, !evidence.isEmpty {
+            DisclosureGroup("Evidence & output") {
+                ForEach(evidence.reversed()) { entry in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(entry.label).font(.subheadline.weight(.semibold))
+                        Text(Date(timeIntervalSince1970: entry.at / 1_000).formatted()).font(.caption).foregroundStyle(.secondary)
+                        Text(entry.detail).textSelection(.enabled)
+                        if entry.kind == "file", entry.sha256 != nil {
+                            Button(loadingOutput == entry.id ? "Preparing file…" : "Save to Files") {
+                                Task { await saveOutput(task, evidence: entry) }
+                            }
+                            .disabled(loadingOutput != nil || exportingOutput)
+                        }
+                    }
+                    .padding(.vertical, 5)
+                }
+            }
+        }
+        if let runs = task.runs ?? task.rounds, !runs.isEmpty {
+            DisclosureGroup("Runs") {
+                ForEach(Array(runs.suffix(20).reversed())) { run in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(run.status.capitalized).font(.subheadline.bold())
+                        Text(Date(timeIntervalSince1970: run.at / 1000).formatted()).font(.caption)
+                        Text("Estimated cost $\(run.estimatedCost, specifier: "%.4f")").font(.caption)
+                        if let detail = run.result ?? run.summary ?? run.error {
+                            Text(detail).lineLimit(4)
+                        }
+                        Button("Open work session") {
+                            openChat(HubConversationChoice(sessionId: run.sessionId, title: task.title, updatedAt: run.at))
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        if !routine, let approvals = task.approvals?.filter({ $0.status == "pending" }), !approvals.isEmpty {
+            DisclosureGroup("Pending approvals") {
+                ForEach(approvals) { approval in
+                    Text(approval.description)
+                    Text(approval.tool).font(.caption)
+                    if let arguments = approval.arguments, !arguments.displayText.isEmpty {
+                        Text(arguments.displayText).font(.footnote.monospaced()).textSelection(.enabled)
+                        taskAction("Approve once", action: .approve, task: task, routine: false, approval: approval)
+                    }
+                    taskAction("Deny request", action: .deny, task: task, routine: false, approval: approval)
+                }
+            }
+        }
+    }
+
+    private func saveOutput(_ task: HubWorkspaceTask, evidence: HubWorkspaceTask.Evidence) async {
+        guard loadingOutput == nil, !exportingOutput else { return }
+        output = nil
+        loadingOutput = evidence.id
+        outputError = nil
+        defer { loadingOutput = nil }
+        do {
+            output = try await api.workspaceTaskOutput(goalID: task.id, evidence: evidence)
+            exportingOutput = true
+        } catch {
+            outputError = "Could not retrieve the verified file. Refresh the goal and try again."
+        }
+    }
+
+    @ViewBuilder private func taskActions(_ task: HubWorkspaceTask, routine: Bool) -> some View {
+        if task.state == "active" { taskAction("Pause", action: .pause, task: task, routine: routine) }
+        if task.state == "paused" { taskAction("Resume", action: .resume, task: task, routine: routine) }
+        if task.status == "waiting-credit" {
+            taskAction("Credits restored", action: .resumeCredit, task: task, routine: routine)
+        }
+        if routine {
+            if task.state != "cancelled" {
+                taskAction("Run once", action: .runOnce, task: task, routine: true)
+                taskAction("Cancel routine", action: .cancel, task: task, routine: true)
+            }
+        } else {
+            if task.state == "draft" { taskAction("Start goal", action: .start, task: task, routine: false) }
+            if ["active", "paused", "draft"].contains(task.state) {
+                taskAction("Stop goal", action: .stop, task: task, routine: false)
+            }
+            if ["completed", "stopped"].contains(task.state) {
+                taskAction("Archive goal", action: .archive, task: task, routine: false)
+            }
+            if task.status == "needs-approval", task.approvals?.contains(where: { $0.status == "pending" }) != true {
+                taskAction("Accept result", action: .acceptResult, task: task, routine: false)
+            }
+        }
+    }
+
+    private func taskAction(_ label: String, action: HubWorkspaceTaskAction, task: HubWorkspaceTask,
+                            routine: Bool, approval: HubWorkspaceTask.Approval? = nil) -> some View {
+        Button(label) {
+            let command = PendingAction(action: action, label: label, task: task, routine: routine,
+                                        approvalID: approval?.id, approvalDescription: approval?.description)
+            if action == .pause { Task { await change(command) } }
+            else { pending = command }
+        }
+        .disabled(changing || (routine ? tasks?.routinesRevision : task.revision) == nil)
+    }
+
+    private func destructive(_ action: HubWorkspaceTaskAction) -> Bool {
+        [.stop, .archive, .cancel, .deny].contains(action)
+    }
+
+    private func change(_ command: PendingAction) async {
+        guard !changing, let revision = command.routine ? tasks?.routinesRevision : command.task.revision else { return }
+        changing = true
+        changeError = false
+        defer { changing = false }
+        do {
+            try await api.changeWorkspaceTask(command.action, id: command.task.id, revision: revision,
+                                              routine: command.routine, approvalID: command.approvalID)
+        }
+        catch { changeError = true }
+        attempt += 1
+    }
+}
+
+struct HubFileDocument: FileDocument {
+    static let readableContentTypes: [UTType] = [.data]
+    let bytes: Data
+
+    init(bytes: Data) { self.bytes = bytes }
+    init(configuration: ReadConfiguration) throws {
+        guard let bytes = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
+        self.bytes = bytes
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: bytes) }
 }

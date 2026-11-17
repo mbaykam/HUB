@@ -1,0 +1,60 @@
+name: Native iPhone workspace development check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/ios-native-workspace]
+    paths: ["mobile/**", ".github/workflows/ios-native-workspace-check.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-native-workspace-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  simulator:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/codex/ios-native-workspace'
+    runs-on: xcode-27
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm ios:prepare
+      - run: pnpm check
+      - run: swift test --package-path native
+      - run: pnpm ios:build:simulator
+        env:
+          HUB_NATIVE_WORKSPACE_UI_TEST: '1'
+      - name: Launch the simulator build on an isolated iPhone
+        working-directory: .
+        env:
+          HUB_NATIVE_WORKSPACE_SIMULATOR: '1'
+          HUB_NATIVE_WORKSPACE_UI_TEST: '1'
+        run: node mobile/scripts/launch-simulator.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: HUB-native-workspace-launch-${{ github.sha }}
+          path: |
+            mobile/build/simulator-launch/*.json
+            mobile/build/simulator-launch/*.png
+            mobile/build/simulator-launch/*.txt
+            mobile/build/simulator-launch/workspace-ui.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

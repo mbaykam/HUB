@@ -44,6 +44,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private var inputPaused = false
     private var wakePhrase = "your wake phrase"
     var canChangeAttention: Bool { isActive && ready && !ending && !changingAttention }
+    var hasOwnedActiveCall: Bool { isActive && lease != nil && !ending }
     private var listeningStatus: String { changingAttention ? "Changing listening mode…" : listeningInBackground ? "Background listening · say “\(wakePhrase)”" : inputPaused ? "Resuming listening…" : "Listening" }
 
     init(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, resume: HubVoiceCheckpoint? = nil, pendingAdmission: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false) {
@@ -64,11 +65,15 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
         return try? HubNotificationDestination(data: data)
     }
+    func conversationAPI() -> HubConversationAPI {
+        HubConversationAPI(server: server) { [deviceState] in (try? deviceState.cookies()) ?? [] }
+    }
+
     func attachmentContext() -> HubVoiceAttachmentContext? {
-        guard isActive, let owned = lease else { return nil }
+        guard hasOwnedActiveCall, let owned = lease else { return nil }
         return HubVoiceAttachmentContext(server: server, sessionID: owned.sessionId, callID: owned.callId, voiceAPI: api,
             uploadAPI: HubAttachmentAPI(server: server) { [deviceState] in (try? deviceState.cookies()) ?? [] },
-            stillOwned: { [weak self] in self?.isActive == true && self?.lease?.callId == owned.callId && self?.lease?.sessionId == owned.sessionId })
+            stillOwned: { [weak self] in self?.hasOwnedActiveCall == true && self?.lease?.callId == owned.callId && self?.lease?.sessionId == owned.sessionId })
     }
 
     func start() {

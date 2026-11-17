@@ -49,6 +49,51 @@ final class HubVoiceAPITests: XCTestCase {
              HTTPCookie(properties: [.name: "foreign", .value: "do-not-send", .domain: "elsewhere.test", .path: "/"])!]
         }
     }
+    func testPhotoShareKeepsItsOwnerInstructionAndRetryReceipt() async throws {
+        let api = try client()
+        defer { api.invalidate() }
+        let uploadID = UUID()
+        let requestID = UUID()
+        let question = "Fotoğraftaki etiketi okur musun?"
+        VoiceFixture.respond = { request, _ in
+            XCTAssertEqual(request.url?.path, "/api/hub/voice/share")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-voice-share"), "1")
+            return (200, "application/json", #"{"accepted":true}"#)
+        }
+        for _ in 0..<2 {
+            try await api.share(callId: "owned-call", uploadID: uploadID, requestID: requestID, instruction: question)
+        }
+        XCTAssertEqual(VoiceFixture.bodies.count, 2)
+        for body in VoiceFixture.bodies {
+            let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(decoded["callId"] as? String, "owned-call")
+            XCTAssertEqual(decoded["requestId"] as? String, requestID.uuidString.lowercased())
+            XCTAssertEqual(decoded["uploads"] as? [String], [uploadID.uuidString.lowercased()])
+            XCTAssertEqual(decoded["instruction"] as? String, question)
+        }
+    }
+
+    func testVoiceCanvasPinsTheActiveCallAndPresentation() async throws {
+        let api = try client(); defer { api.invalidate() }
+        let id = try XCTUnwrap(UUID(uuidString: "12345678-1234-1234-1234-123456789abc"))
+        VoiceFixture.respond = { request, count in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture-only")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-voice-call"), "owned-call")
+            if count == 1 {
+                XCTAssertEqual(request.url?.path, "/api/hub/voice/presentation")
+                return (200, "application/json", #"{"presentation":{"id":"12345678-1234-1234-1234-123456789abc","title":"Example","kind":"html","createdAt":1}}"#)
+            }
+            XCTAssertEqual(request.url?.path, "/api/hub/voice/presentation-document")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-presentation"), id.uuidString.lowercased())
+            return (200, "application/json", #"{"document":"<!doctype html><html><head></head><body>Example</body></html>"}"#)
+        }
+        let presentation = try await api.presentation(callID: "owned-call")
+        XCTAssertEqual(presentation?.id, id)
+        let document = try await api.presentationDocument(callID: "owned-call", id: id)
+        XCTAssertTrue(document.contains("Example"))
+    }
     func testScreenTransportPinsOriginCallConsentAndBinaryBody() async throws {
         let api = try client(); defer { api.invalidate() }
         let id = UUID(), bytes = Data([1,2,3]) // HTTP-only fixture; not an ImageIO test.

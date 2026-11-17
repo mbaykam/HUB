@@ -7,6 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1E000000000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000002; };
+		A1D000000000000000000001 /* HubWorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000002; };
+		A1C000000000000000000011 /* HubSpeechSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000012 /* HubSpeechSettingsView.swift */; };
+		A1C000000000000000000013 /* HubBrowserPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000014 /* HubBrowserPreviewView.swift */; };
+		A1C000000000000000000015 /* HubWorkspaceDirectoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000016 /* HubWorkspaceDirectoryView.swift */; };
+		A1C000000000000000000017 /* HubKnowledgeDomainsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000018 /* HubKnowledgeDomainsView.swift */; };
+		A1C000000000000000000019 /* HubGoalEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000001A /* HubGoalEditorView.swift */; };
+		A1C00000000000000000001B /* HubRoutineEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000001C /* HubRoutineEditorView.swift */; };
+		A1C00000000000000000001D /* HubMarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000001E /* HubMarkdownText.swift */; };
+		A1C00000000000000000000F /* HubConversationAppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000010 /* HubConversationAppsView.swift */; };
+		A1C00000000000000000000D /* HubPlannerEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000000E /* HubPlannerEditor.swift */; };
+		A1C00000000000000000000B /* HubCharactersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000000C /* HubCharactersSettingsView.swift */; };
+		A1C000000000000000000009 /* HubWorkspaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000000A /* HubWorkspaceSettingsView.swift */; };
+		A1C000000000000000000007 /* HubResearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000008 /* HubResearchView.swift */; };
+		A1C000000000000000000005 /* HubUsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000006 /* HubUsageView.swift */; };
+		A1C000000000000000000003 /* HubLiveChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000004 /* HubLiveChatView.swift */; };
+		A1C000000000000000000001 /* HubKnowledgeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000002 /* HubKnowledgeViews.swift */; };
 		A1B000000000000000000001 /* HubHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B000000000000000000002 /* HubHomeView.swift */; };
  A1A000000000000000000001 = {isa = PBXBuildFile; fileRef = A1A000000000000000000002; };
  A19000000000000000000001 = {isa = PBXBuildFile; fileRef = A19000000000000000000002; };
@@ -42,6 +59,24 @@ A17000000000000000000007 = {isa = PBXBuildFile; fileRef = A170000000000000000000
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A1E000000000000000000003 /* zh */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh; path = zh.lproj/Localizable.strings; sourceTree = "<group>"; };
+		A1D000000000000000000002 /* HubWorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubWorkspaceUITests/HubWorkspaceUITests.swift; sourceTree = "<group>"; };
+		A1D000000000000000000003 /* HubWorkspaceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = HubWorkspaceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1C000000000000000000012 /* HubSpeechSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubSpeechSettingsView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000014 /* HubBrowserPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubBrowserPreviewView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000016 /* HubWorkspaceDirectoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubWorkspaceDirectoryView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000018 /* HubKnowledgeDomainsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubKnowledgeDomainsView.swift; sourceTree = "<group>"; };
+		A1C00000000000000000001A /* HubGoalEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubGoalEditorView.swift; sourceTree = "<group>"; };
+		A1C00000000000000000001C /* HubRoutineEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubRoutineEditorView.swift; sourceTree = "<group>"; };
+		A1C00000000000000000001E /* HubMarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubMarkdownText.swift; sourceTree = "<group>"; };
+		A1C000000000000000000010 /* HubConversationAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubConversationAppsView.swift; sourceTree = "<group>"; };
+		A1C00000000000000000000E /* HubPlannerEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubPlannerEditor.swift; sourceTree = "<group>"; };
+		A1C00000000000000000000C /* HubCharactersSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubCharactersSettingsView.swift; sourceTree = "<group>"; };
+		A1C00000000000000000000A /* HubWorkspaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubWorkspaceSettingsView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000008 /* HubResearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubResearchView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000006 /* HubUsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubUsageView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000004 /* HubLiveChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubLiveChatView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000002 /* HubKnowledgeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubKnowledgeViews.swift; sourceTree = "<group>"; };
 		A1B000000000000000000002 /* HubHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubHomeView.swift; sourceTree = "<group>"; };
  A1A000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubSharedFilesViewController.swift; sourceTree = "<group>"; };
  A19000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubScreenViewController.swift; sourceTree = "<group>"; };
@@ -97,6 +132,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				A1D000000000000000000002 /* HubWorkspaceUITests.swift */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -106,6 +142,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 			children = (
 				A1300000000000000000000D,
 				504EC3041FED79650016851F /* App.app */,
+				A1D000000000000000000003 /* HubWorkspaceUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -123,6 +160,21 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 				A11000000000000000000006 /* HubVoiceAPI.swift */,
 				A11000000000000000000002 /* HubServer.swift */,
 				A11000000000000000000004 /* HubConnectionViewController.swift */,
+				A1C000000000000000000002 /* HubKnowledgeViews.swift */,
+				A1C000000000000000000008 /* HubResearchView.swift */,
+				A1C00000000000000000000A /* HubWorkspaceSettingsView.swift */,
+				A1C00000000000000000000C /* HubCharactersSettingsView.swift */,
+				A1C00000000000000000000E /* HubPlannerEditor.swift */,
+				A1C000000000000000000010 /* HubConversationAppsView.swift */,
+				A1C000000000000000000012 /* HubSpeechSettingsView.swift */,
+				A1C000000000000000000014 /* HubBrowserPreviewView.swift */,
+				A1C000000000000000000016 /* HubWorkspaceDirectoryView.swift */,
+				A1C000000000000000000018 /* HubKnowledgeDomainsView.swift */,
+				A1C00000000000000000001A /* HubGoalEditorView.swift */,
+				A1C00000000000000000001C /* HubRoutineEditorView.swift */,
+				A1C00000000000000000001E /* HubMarkdownText.swift */,
+				A1C000000000000000000004 /* HubLiveChatView.swift */,
+				A1C000000000000000000006 /* HubUsageView.swift */,
 				A1B000000000000000000002 /* HubHomeView.swift */,
 				A14000000000000000000002,
 				A15000000000000000000002, A18000000000000000000002, A19000000000000000000002, A1A000000000000000000002,
@@ -131,6 +183,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
+				A1E000000000000000000002 /* Localizable.strings */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
  A17000000000000000000002,
@@ -145,6 +198,17 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A1D000000000000000000004 /* HubWorkspaceUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1D000000000000000000008;
+			buildPhases = (A1D000000000000000000005, );
+			buildRules = ();
+			dependencies = (A1D000000000000000000006, );
+			name = HubWorkspaceUITests;
+			productName = HubWorkspaceUITests;
+			productReference = A1D000000000000000000003;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 A17000000000000000000010 = {isa = PBXNativeTarget; buildConfigurationList = A17000000000000000000014; buildPhases = (A17000000000000000000011, A17000000000000000000012, A17000000000000000000013, ); buildRules = (); dependencies = (); name = HubShareExtension; productName = HubShareExtension; productReference = A17000000000000000000006; productType = "com.apple.product-type.app-extension"; packageProductDependencies = (A17000000000000000000004, ); };
 		A13000000000000000000010 /* HubVoiceWidget */ = {
 			isa = PBXNativeTarget;
@@ -190,6 +254,7 @@ A17000000000000000000010 = {isa = PBXNativeTarget; buildConfigurationList = A170
 				LastSwiftUpdateCheck = 0920;
 				LastUpgradeCheck = 0920;
 				TargetAttributes = {
+					A1D000000000000000000004 = {TestTargetID = 504EC3031FED79650016851F; };
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
 						LastSwiftMigration = 1100;
@@ -203,6 +268,7 @@ A17000000000000000000010 = {isa = PBXNativeTarget; buildConfigurationList = A170
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				zh,
 				Base,
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
@@ -216,6 +282,7 @@ A17000000000000000000010 = {isa = PBXNativeTarget; buildConfigurationList = A170
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				A1D000000000000000000004 /* HubWorkspaceUITests */,
 				A13000000000000000000010 /* HubVoiceWidget */,
  A17000000000000000000010,
 			);
@@ -230,6 +297,7 @@ A17000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147
 			buildActionMask = 2147483647;
 			files = (
 				504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */,
+				A1E000000000000000000001 /* Localizable.strings in Resources */,
 				A16000000000000000000001,
 				50B271D11FEDC1A000F3C39B /* public in Resources */,
 				504EC30F1FED79650016851F /* Assets.xcassets in Resources */,
@@ -242,6 +310,7 @@ A17000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A1D000000000000000000005 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A1D000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
 A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A17000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
 		A13000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A13000000000000000000009, A1300000000000000000000A, ); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3001FED79650016851F /* Sources */ = {
@@ -255,6 +324,21 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				A12000000000000000000007 /* HubNativeVoice.swift in Sources */,
 				A12000000000000000000009 /* HubVoiceViewController.swift in Sources */,
 				A11000000000000000000003 /* HubConnectionViewController.swift in Sources */,
+				A1C000000000000000000001 /* HubKnowledgeViews.swift in Sources */,
+				A1C000000000000000000007 /* HubResearchView.swift in Sources */,
+				A1C000000000000000000009 /* HubWorkspaceSettingsView.swift in Sources */,
+				A1C00000000000000000000B /* HubCharactersSettingsView.swift in Sources */,
+				A1C00000000000000000000D /* HubPlannerEditor.swift in Sources */,
+				A1C00000000000000000000F /* HubConversationAppsView.swift in Sources */,
+				A1C000000000000000000011 /* HubSpeechSettingsView.swift in Sources */,
+				A1C000000000000000000013 /* HubBrowserPreviewView.swift in Sources */,
+				A1C000000000000000000015 /* HubWorkspaceDirectoryView.swift in Sources */,
+				A1C000000000000000000017 /* HubKnowledgeDomainsView.swift in Sources */,
+				A1C000000000000000000019 /* HubGoalEditorView.swift in Sources */,
+				A1C00000000000000000001B /* HubRoutineEditorView.swift in Sources */,
+				A1C00000000000000000001D /* HubMarkdownText.swift in Sources */,
+				A1C000000000000000000003 /* HubLiveChatView.swift in Sources */,
+				A1C000000000000000000005 /* HubUsageView.swift in Sources */,
 				A1B000000000000000000001 /* HubHomeView.swift in Sources */,
 				A14000000000000000000001,
 				A15000000000000000000001, A18000000000000000000001, A19000000000000000000001, A1A000000000000000000001,
@@ -266,6 +350,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXVariantGroup section */
+		A1E000000000000000000002 /* Localizable.strings */ = {isa = PBXVariantGroup; children = (A1E000000000000000000003, ); name = Localizable.strings; sourceTree = "<group>"; };
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
 			isa = PBXVariantGroup;
 			children = (
@@ -285,6 +370,20 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		A1D000000000000000000009 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub.workspaceUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = App;
+			};
+			name = Debug;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
@@ -473,6 +572,7 @@ A17000000000000000000016 = {isa = XCBuildConfiguration; buildSettings = {APPLICA
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A1D000000000000000000008 = {isa = XCConfigurationList; buildConfigurations = (A1D000000000000000000009, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
 A17000000000000000000014 = {isa = XCConfigurationList; buildConfigurations = (A17000000000000000000015, A17000000000000000000016, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		A13000000000000000000014 = {isa = XCConfigurationList; buildConfigurations = (A13000000000000000000015, A13000000000000000000016, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
@@ -526,10 +626,12 @@ A17000000000000000000004 = {isa = XCSwiftPackageProductDependency; package = A12
 /* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXContainerItemProxy section */
+		A1D000000000000000000007 = {isa = PBXContainerItemProxy; containerPortal = 504EC2FC1FED79650016851F; proxyType = 1; remoteGlobalIDString = 504EC3031FED79650016851F; remoteInfo = App; };
 A17000000000000000000019 = {isa = PBXContainerItemProxy; containerPortal = 504EC2FC1FED79650016851F; proxyType = 1; remoteGlobalIDString = A17000000000000000000010; remoteInfo = HubShareExtension; };
 		A13000000000000000000019 = {isa = PBXContainerItemProxy; containerPortal = 504EC2FC1FED79650016851F; proxyType = 1; remoteGlobalIDString = A13000000000000000000010; remoteInfo = HubVoiceWidget; };
 /* End PBXContainerItemProxy section */
 /* Begin PBXTargetDependency section */
+		A1D000000000000000000006 = {isa = PBXTargetDependency; target = 504EC3031FED79650016851F; targetProxy = A1D000000000000000000007; };
 A17000000000000000000018 = {isa = PBXTargetDependency; target = A17000000000000000000010; targetProxy = A17000000000000000000019; };
 		A13000000000000000000018 = {isa = PBXTargetDependency; target = A13000000000000000000010; targetProxy = A13000000000000000000019; };
 /* End PBXTargetDependency section */

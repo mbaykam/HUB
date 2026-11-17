@@ -1,13 +1,25 @@
 import {execFileSync} from 'node:child_process';
-import {mkdir,readFile,writeFile,lstat,realpath} from 'node:fs/promises';
+import {copyFile,mkdir,readFile,readdir,writeFile,lstat,realpath} from 'node:fs/promises';
 import {resolve,sep} from 'node:path';
 import {selectSimulatorSeed} from './simulator-source.mjs';
 
 if(process.platform!=='darwin')throw Error('Native simulator launch requires macOS/Xcode.');
 const run=(command,args,timeout=60000)=>execFileSync(command,args,{encoding:'utf8',timeout,killSignal:'SIGKILL',maxBuffer:10_000_000,stdio:['ignore','pipe','pipe']}).trim();
 const sim=(...args)=>run('xcrun',['simctl',...args]);
-const source=JSON.parse(await readFile('mobile/build/simulator-launch/source-run.json','utf8'));
-if(source.repository!=='mbaykam/HUB'||source.sha!==process.env.SOURCE_SHA||source.runId!==process.env.SOURCE_RUN_ID)throw Error('Simulator source proof does not match the requested build.');
+const nativeDevelopment=process.env.HUB_NATIVE_WORKSPACE_SIMULATOR==='1';
+const workspaceUITest=nativeDevelopment && process.env.HUB_NATIVE_WORKSPACE_UI_TEST==='1';
+let source;
+if(nativeDevelopment){
+  const {GITHUB_REPOSITORY:repository,GITHUB_REF:ref,GITHUB_SHA:sha,GITHUB_RUN_ID:runId}=process.env;
+  if(repository!=='mbaykam/HUB'||ref!=='refs/heads/codex/ios-native-workspace'||!/^[a-f0-9]{40}$/.test(sha??'')||
+      !/^\d{1,15}$/.test(runId??'')||run('git',['rev-parse','HEAD'])!==sha)throw Error('Unexpected development build source.');
+  source={repository,sha,runId,source:'same-run unsigned development build'};
+  await mkdir('mobile/build/simulator-download',{recursive:true});
+  await copyFile('mobile/build/HUB-ios-simulator.zip','mobile/build/simulator-download/HUB-ios-simulator.zip');
+}else{
+  source=JSON.parse(await readFile('mobile/build/simulator-launch/source-run.json','utf8'));
+  if(source.repository!=='mbaykam/HUB'||source.sha!==process.env.SOURCE_SHA||source.runId!==process.env.SOURCE_RUN_ID)throw Error('Simulator source proof does not match the requested build.');
+}
 const folder=resolve('mobile/build/simulator-launch'),extracted=resolve(folder,'extracted'),zip=resolve('mobile/build/simulator-download/HUB-ios-simulator.zip');
 await mkdir(extracted,{recursive:true});
 const entries=run('/usr/bin/unzip',['-Z1',zip]).split('\n');
@@ -18,11 +30,42 @@ if((await lstat(app)).isSymbolicLink()||!(await realpath(app)).startsWith(extrac
 const info=JSON.parse(run('/usr/bin/plutil',['-convert','json','-o','-',resolve(app,'Info.plist')]));
 if(info.CFBundleIdentifier!=='com.mbaykam.hub'||!info.CFBundleSupportedPlatforms?.includes('iPhoneSimulator')||info.CFBundleExecutable!=='App')throw Error('Not the expected HUB simulator app.');
 const available=JSON.parse(sim('list','devices','available','-j')).devices;
-const selected=selectSimulatorSeed(available),baselineMode='cloned-runner-seed';
-let device,stage='clone',displayMode='headless';
+// Prefer the ordinary iOS runtime used for the phone-sized acceptance
+// fixture. A model-specific Duo runtime booted but hung installing App.app.
+const ordinary=Object.fromEntries(Object.entries(available).filter(([runtime]) => /\.iOS-\d+(?:-\d+)*$/.test(runtime)));
+const selected=selectSimulatorSeed(nativeDevelopment && Object.keys(ordinary).length ? ordinary : available);
+const baselineMode=nativeDevelopment?'fresh-isolated-device':'cloned-runner-seed';
+let device,stage='create-device',displayMode='headless';
 try{
-  console.log('Cloning an isolated simulator without modifying its runner seed: '+JSON.stringify(selected));
-  device=sim('clone',selected.seed,'HUB isolated launch '+process.env.GITHUB_RUN_ID);
+  if(nativeDevelopment){
+    // Sign only the extracted simulator fixture. Embedded extensions are code
+    // in their own right, so sign them before sealing the containing app.
+    stage='ad-hoc-sign';
+    const plugins=await readdir(resolve(app,'PlugIns'),{withFileTypes:true}).catch(error=>{
+      if(error.code==='ENOENT')return [];
+      throw error;
+    });
+    for(const plugin of plugins){
+      if(plugin.isDirectory()&&plugin.name.endsWith('.appex')){
+        run('/usr/bin/codesign',['--force','--sign','-',resolve(app,'PlugIns',plugin.name)]);
+      }
+    }
+    run('/usr/bin/codesign',['--force','--sign','-',app]);
+    run('/usr/bin/codesign',['--verify','--deep','--strict',app]);
+    stage='create-device';
+  }
+  const name='HUB isolated launch '+process.env.GITHUB_RUN_ID;
+  if(nativeDevelopment){
+    // Clones of the hosted seed have repeatedly stalled in Data Migration.
+    const seed=available[selected.runtime].find(device=>device.udid===selected.seed);
+    const type=seed.deviceTypeIdentifier??JSON.parse(sim('list','devicetypes','-j')).devicetypes.find(type=>type.name===seed.name)?.identifier;
+    if(!/^com\.apple\.CoreSimulator\.SimDeviceType\.iPhone-[A-Za-z0-9-]+$/.test(type??''))throw Error('No device type for the isolated iPhone.');
+    console.log('Creating an isolated '+type+' for '+selected.runtime);
+    device=sim('create',name,type,selected.runtime);
+  }else{
+    console.log('Cloning an isolated simulator without modifying its runner seed: '+JSON.stringify(selected));
+    device=sim('clone',selected.seed,name);
+  }
   if(!/^[A-F0-9-]{36}$/i.test(device))throw Error('Invalid new simulator identity.');
   stage='boot';console.log('Booting '+device);sim('boot',device);
   // Hosted Xcode installations may not register Simulator with Launch Services.
@@ -30,15 +73,33 @@ try{
   const simulatorApp=resolve(run('/usr/bin/xcode-select',['-p']),'Applications/Simulator.app');
   // Some hosted toolchains ship CoreSimulator without Simulator.app. simctl
   // can still install, launch and capture the isolated device headlessly.
-  if((await lstat(simulatorApp).catch(error=>{if(error.code==='ENOENT')return undefined;throw error;}))?.isDirectory()){
+  if(!nativeDevelopment&&(await lstat(simulatorApp).catch(error=>{if(error.code==='ENOENT')return undefined;throw error;}))?.isDirectory()){
     run('/usr/bin/open',['-a',simulatorApp,'--args','-CurrentDeviceUDID',device]);
     displayMode='simulator-app';
   }
   stage='bootstatus';console.log('Waiting for native simulator startup');
   run('xcrun',['simctl','bootstatus',device,'-b'],480000);
-  stage='install';console.log('Installing the verified existing bundle');
-  try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
-  sim('install',device,app);
+  if(workspaceUITest){
+    stage='xctest';
+    console.log('Exercising the HUB workspace with XCUITest');
+    const result=resolve(folder,'workspace-ui.xcresult');
+    run('xcodebuild',['test-without-building','-project','mobile/ios/App/App.xcodeproj','-scheme','App',
+      '-destination','platform=iOS Simulator,id='+device,'-derivedDataPath','mobile/build/DerivedData',
+      '-parallel-testing-enabled','NO','-only-testing:HubWorkspaceUITests',
+      // Five UI tests run serially; slow hosted runners need more than 10 minutes.
+      '-resultBundlePath',result,'CODE_SIGNING_ALLOWED=NO'],1200000);
+    await writeFile(resolve(folder,'workspace-ui-proof.json'),JSON.stringify({...source,runtime:selected.runtime,
+      isolatedSimulator:true,nativeHomeFixture:true,physicalAcceptance:false,drawersPlannerComposerKeyboardPassed:true,
+      knowledgeNoteAndReviewPassed:true,generalPreferencesPassed:true,chatStopAndDraftPassed:true,
+      knowledgeSkillsPassed:true,chatFileOutputPassed:true,voiceProfileEditorPassed:true,usageLimitsPassed:true},null,2));
+    try{sim('terminate',device,'com.mbaykam.hub');}catch{}
+  }else{
+    stage='install';console.log('Installing the verified existing bundle');
+    if(!nativeDevelopment){
+      try{sim('uninstall',device,'com.mbaykam.hub');}catch{} // Only the new isolated clone, never its seed.
+    }
+    run('xcrun',['simctl','install',device,app],120000);
+  }
   const testInstalledUI=process.env.TEST_INSTALLED_UI==='1';
   const launchArguments = [];
   if(testInstalledUI){
@@ -48,20 +109,60 @@ try{
     // Writing the preferences plist on the host can race the simulator's cfprefsd.
     launchArguments.push('-hub.ios.server-origin.v1', 'https://installed-ui-simulator.invalid/');
   }
+  if(nativeDevelopment)launchArguments.push('--hub-native-home-fixture');
   stage='launch';console.log('Launching HUB');
   const launch=sim('launch',device,'com.mbaykam.hub',...launchArguments),pid=Number(launch.match(/:\s*(\d+)$/)?.[1]);
   if(!pid)throw Error('The app did not report a process ID.');
-  // Allow the initial window + queued native Connect sheet to render.
+  // A process can exist before SwiftUI replaces the launch screen.
   await new Promise(resolve=>setTimeout(resolve,4000));
   stage='process';const processName=run('/bin/ps',['-ww','-p',String(pid),'-o','comm=']);
   if(processName!=='App'&&!processName.endsWith('/App.app/App'))throw Error('HUB did not stay running after first launch.');
   // Newer iPhone runtime seeds can expose multiple displays. Capture the
   // primary phone display explicitly rather than relying on simctl's default.
-  stage='screenshot';sim('io',device,'screenshot','--display=1',resolve(folder,'native-first-launch.png'));
-  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:false,serverSetupAttempted:testInstalledUI,syntheticOfflineOrigin:testInstalledUI,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
+  stage='screenshot';
+  const screenshot=resolve(folder,'native-first-launch.png');
+  if(nativeDevelopment){
+    const candidate=resolve(folder,'native-launch-candidate.png');
+    const checker=resolve('mobile/scripts/check-native-home-image.mjs');
+    let visible=false;
+    for(let attempt=0;attempt<6&&!visible;attempt++){
+      if(attempt>0)await new Promise(resolve=>setTimeout(resolve,3500));
+      for(const display of ['default','1','0']){
+        try{
+          const displayArgs=display==='default'?[]:['--display='+display];
+          sim('io',device,'screenshot',...displayArgs,candidate);
+          run(process.execPath,[checker,candidate]);
+          await copyFile(candidate,screenshot);
+          visible=true;
+          break;
+        }catch(error){
+          console.warn('Native Home not visible on display '+display+': '+String(error.stderr??error.message).trim().slice(-400));
+        }
+      }
+    }
+    if(!visible){
+      let logs='';
+      try{logs=run('xcrun',['simctl','spawn',device,'log','show','--last','2m','--info','--predicate','process == "App" OR subsystem == "com.mbaykam.hub"'],20_000).slice(-20_000);}
+      catch(error){logs=String(error.message).slice(0,1000);}
+      await writeFile(resolve(folder,'native-launch-diagnostics.json'),JSON.stringify({logs},null,2));
+      throw Error('Native workspace did not appear on a simulator display.');
+    }
+  }else{
+    sim('io',device,'screenshot','--display=1',screenshot);
+  }
+  await writeFile(resolve(folder,'launch-proof.json'),JSON.stringify({...source,runtime:selected.runtime,baselineMode,displayMode,hostArchitecture:process.arch,bundleId:info.CFBundleIdentifier,appProcessAlive:true,screenshot:'native-first-launch.png',isolatedSimulator:true,freshOS:nativeDevelopment,serverSetupAttempted:testInstalledUI,syntheticOfflineOrigin:testInstalledUI,nativeHomeFixture:nativeDevelopment,physicalAcceptance:false,signedIPhoneDelivery:false},null,2));
   console.log('Isolated native simulator launched HUB and captured its initial UI; no account/server/microphone setup was attempted.');
 }catch(error){
   await writeFile(resolve(folder,'launch-failure.json'),JSON.stringify({...source,stage,runtime:selected.runtime,baselineMode,code:error.code??null,signal:error.signal??null,message:String(error.message).slice(0,4000),stdout:String(error.stdout??'').slice(-12000),stderr:String(error.stderr??'').slice(-12000)},null,2));
+  if(stage==='xctest'){
+    // Keep the whole XCUITest transcript and the per-test failure summary; the
+    // JSON above only holds the tail, which hides the failing step.
+    await writeFile(resolve(folder,'xctest-output.txt'),String(error.stdout??'')+'\n--- stderr ---\n'+String(error.stderr??'')).catch(()=>{});
+    try{
+      const summary=run('xcrun',['xcresulttool','get','test-results','tests','--path',resolve(folder,'workspace-ui.xcresult')],60000);
+      await writeFile(resolve(folder,'xctest-results.json'),summary);
+    }catch(summaryError){console.warn('No xcresult summary: '+String(summaryError.message).slice(0,400));}
+  }
   throw error;
 }finally{
   if(device&&/^[A-F0-9-]{36}$/i.test(device)){

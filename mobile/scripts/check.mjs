@@ -20,7 +20,8 @@ if(!/<key>aps-environment<\/key>\s*<string>\$\(HUB_PUSH_ENVIRONMENT\)<\/string>/
 const spm=await readFile(join(root,'ios/App/CapApp-SPM/Package.swift'),'utf8');
 if(!spm.includes('platforms: [.iOS(.v15)]'))throw Error('Keep the app iOS15 baseline when syncing the newer voice widget.');
 const identifiers=[...project.matchAll(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g)].map(m=>m[1]);
-if(!identifiers.length||identifiers.some(id=>id!==config.appId&&id!==config.appId+'.voice-widget'&&id!==config.appId+'.share')||!identifiers.includes(config.appId+'.voice-widget'))throw Error('Match the app and voice-widget identifiers in both Xcode build configurations.');
+const bundleIdentifiers=new Set([config.appId,config.appId+'.voice-widget',config.appId+'.share',config.appId+'.workspaceUITests']);
+if(!identifiers.length||identifiers.some(id=>!bundleIdentifiers.has(id))||!identifiers.includes(config.appId+'.voice-widget'))throw Error('Match the app and voice-widget identifiers in both Xcode build configurations.');
 const icon=await sharp(join(root,'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png')).metadata();
 if(icon.width!==1024||icon.height!==1024||icon.hasAlpha)throw Error('Prepare the opaque 1024-pixel HUB app icon.');
 console.log(JSON.stringify({bundleId:config.appId,platform:process.platform,foundationChecksPassed:true,appleTeamSelected:/DEVELOPMENT_TEAM = [A-Z0-9]{10};/.test(project),stage:'development-foundation'}));
