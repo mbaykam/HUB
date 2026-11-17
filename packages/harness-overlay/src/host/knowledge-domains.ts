@@ -41,16 +41,17 @@ export function domainAncestors(state:Pick<KnowledgeDomainState,"domains">,id:st
 
 /** Work on a copy. The caller commits this together with the organization plan
  * once; validation errors cannot leave half a hierarchy or relation behind. */
-export function changeKnowledgeDomains(current:KnowledgeDomainState|undefined,operations:DomainOperation[],context:{expectedRevision:number;actor:"user"|"curator";source?:KnowledgeSource;knownNodeIds:string[];revisionId:string;maxActiveDomains?:number;now?:number}){
+export function changeKnowledgeDomains(current:KnowledgeDomainState|undefined,operations:DomainOperation[],context:{expectedRevision:number;actor:"user"|"curator";source?:KnowledgeSource;knownNodeIds:string[];revisionId:string;maxActiveDomains?:number;now?:number;steward?:boolean}){
   const state=structuredClone(current??emptyKnowledgeDomains());validateDomainState(state);
   if(context.expectedRevision!==state.revision)throw Object.assign(Error("Domains changed; refresh and replan before saving"),{code:"DOMAIN_REVISION_CONFLICT"});
   if(!Array.isArray(operations)||operations.length>(context.actor==="curator"?8:100))throw Error("Too many domain operations");
-  if(context.actor==="curator"&&(operations.filter(o=>o.type==="create").length>2||operations.filter(o=>o.type==="assign").length>4||operations.filter(o=>o.type==="propose").length>2||context.maxActiveDomains!==undefined))throw Error("Curator domain allowance exceeded");
+  if(context.steward&&(context.actor!=="curator"||operations.length>4||operations.some(o=>!["rename","reparent","status","merge"].includes(o.type))))throw Error("The domain review may only rename, nest, retire or merge domains");
+  if(context.actor==="curator"&&!context.steward&&(operations.filter(o=>o.type==="create").length>2||operations.filter(o=>o.type==="assign").length>4||operations.filter(o=>o.type==="propose").length>2||context.maxActiveDomains!==undefined))throw Error("Curator domain allowance exceeded");
   const before=structuredClone(state),refs=new Map<string,string>(),now=context.now??Date.now(),known=new Set(context.knownNodeIds);
   const domain=(id:string)=>{const d=state.domains.find(d=>d.id===(refs.get(id)??id));if(!d||d.status==="merged")throw Error("Domain target missing or merged");return d;};
   for(const op of operations){validateDomainOperation(op);
-    if(context.actor==="curator"&&!['create','assign','propose'].includes(op.type))throw Error("Domain lifecycle changes require human review");
-    if(context.actor==="curator"){
+    if(context.actor==="curator"&&!context.steward&&!['create','assign','propose'].includes(op.type))throw Error("Domain lifecycle changes require human review");
+    if(context.actor==="curator"&&!context.steward){
       const quote=(op as any).evidence,source=context.source;if(!source||typeof quote!=="string"||quote.trim().length<4||!sourceContains(source,quote))throw Error("Domain changes require exact source evidence");
     }
     if(op.type==="create"){

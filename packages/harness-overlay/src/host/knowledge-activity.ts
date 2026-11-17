@@ -44,6 +44,26 @@ export async function knowledgeActivity(curator:KnowledgeCurator,offset=0):Promi
     if(!job.startedAt)warnings.push("This older or unstarted job has no recorded model start/end; only its saved job state is available.");
     entries.push({id:job.id,status:job.status,outcome:job.outcome,queuedAt:job.queuedAt,updatedAt:job.updatedAt,startedAt:job.startedAt,finishedAt:job.finishedAt,retryAt:job.retryAt,attempts:job.attempts,reason:job.reason?redactKnowledgeSecrets(job.reason):undefined,error:job.error?{...job.error,message:redactKnowledgeSecrets(job.error.message)}:undefined,previousAttempts:(job.previousAttempts??[]).map(attempt=>({...attempt,reason:attempt.reason?redactKnowledgeSecrets(attempt.reason):undefined,error:attempt.error?{...attempt.error,message:redactKnowledgeSecrets(attempt.error.message)}:undefined})),changes,warnings,source:{id:job.source.id,channel:job.source.channel,recordId:job.source.conversationId,sessionId,assets:(job.source.assets??[]).map(a=>({id:a.id,name:a.name}))}});
   }
+  // Domain reviews: the librarian's own tidy-ups, newest first on the first page.
+  if(offset===0){
+    const reviews=(await curator.domainReviews()).filter(r=>r.at>cutoff).slice(-5).reverse();
+    const history=organization.domainState.history;
+    for(const review of reviews){
+      const audit=review.revisionId?history.find(h=>h.id===review.revisionId):undefined;
+      const titleBefore=(id:string)=>audit?.beforeDomains.find(d=>d.id===id)?.value?.title??domainTitles.get(id)??"Domain";
+      const changes:KnowledgeActivityChange[]=review.changed?review.operations.map(op=>{
+        if(op.type==="rename")return {kind:"domain",action:"renamed",title:`${titleBefore(op.id)} → ${op.title}`,id:op.id};
+        if(op.type==="merge")return {kind:"domain",action:"merged",title:`${titleBefore(op.id)} → ${domainTitles.get(op.targetId)??"Domain"}`,id:op.targetId};
+        if(op.type==="reparent")return {kind:"domain",action:op.parentId?"nested":"moved to the main level",title:op.parentId?`${titleBefore(op.id)} → ${domainTitles.get(op.parentId)??"Domain"}`:titleBefore(op.id),id:op.id};
+        if(op.type==="status")return {kind:"domain",action:op.status==="inactive"?"retired":"brought back",title:titleBefore(op.id),id:op.id};
+        return {kind:"domain",action:"updated",title:"Domain"};
+      }):[];
+      entries.unshift({id:`domain-review-${review.id}`,status:review.status,outcome:review.changed?"organized":"skipped",queuedAt:review.at,updatedAt:review.at,startedAt:review.at,finishedAt:review.at,attempts:1,
+        reason:redactKnowledgeSecrets(review.note),...(review.error?{error:{phase:"domain review",code:"KNOWLEDGE_DOMAIN_REVIEW",message:redactKnowledgeSecrets(review.error)}}:{}),
+        previousAttempts:[],changes,warnings:audit?.undone?["These domain changes were undone."]:[],source:{id:"domain-review",channel:"domain-review",assets:[]}});
+    }
+    entries.sort((a,b)=>b.updatedAt-a.updatedAt);
+  }
   const starts=jobs.flatMap(j=>[j.startedAt,...(j.previousAttempts??[]).map(a=>a.startedAt)].filter((n):n is number=>n!==undefined)),ends=jobs.flatMap(j=>[j.finishedAt,...(j.previousAttempts??[]).map(a=>a.finishedAt)].filter((n):n is number=>n!==undefined));
   return {version:1,state:jobs.some(j=>j.status==="working")?"working":curator.status==="ready"&&jobs.some(j=>j.status==="failed")?"needs-attention":curator.status,enabled:curator.settings.enabled,lastStartedAt:starts.length?Math.max(...starts):undefined,lastFinishedAt:ends.length?Math.max(...ends):undefined,entries,offset,...(offset+30<jobs.length?{nextOffset:offset+30}:{}),total:jobs.length,historyNotice:"Activity comes from saved job and mutation receipts. Older runs may lack timing or retry history; missing history is not reconstructed from graph counts."};
 }
