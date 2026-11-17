@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.10
+
+- Knowledge AI writes a plain librarian note per source.
+- Daily domain review: rename, nest, merge and retire domains with a note; undoable.
+- Desktop screenshot requests are understood in natural English and Turkish; refusals point to hub_desktop_look instead of looping.
+
 ## 1.10.9
 
 - Computer use on the HUB PC: hub_desktop_look (screen, cursor, windows) and hub_desktop_act (click, type, keys, scroll, drag, focus).
