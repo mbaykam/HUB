@@ -1220,7 +1220,8 @@ final class HubConversationTests: XCTestCase {
         XCTAssertEqual(sent["capturedAt"] as? Double, 1_794_900_000_000)
         XCTAssertEqual((sent["place"] as? [String: Any])?["city"] as? String, "Istanbul")
         CatalogFixture.reply = #"{"requested":true}"#
-        XCTAssertTrue(try await api.phoneContextRequested())
+        let requested = try await api.phoneContextRequested()
+        XCTAssertTrue(requested)
     }
 
     private func readAll(_ stream: InputStream) -> Data {
