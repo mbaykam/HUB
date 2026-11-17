@@ -679,7 +679,7 @@ struct HubHomeView: View {
             // ignored for a moment after focus.
             .onPreferenceChange(HomeScrollOffset.self) { offset in
                 defer { homeScrollOffset = offset }
-                guard composerFocused || todoFocused, let last = homeScrollOffset, abs(offset - last) > 4,
+                guard composerFocused || todoFocused, let offset, let last = homeScrollOffset, abs(offset - last) > 4,
                       Date().timeIntervalSince(keyboardShownAt) > 0.7 else { return }
                 hideKeyboard()
             }
