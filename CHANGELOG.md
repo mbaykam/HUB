@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.6
+
+- Knowledge AI keeps the verified links of a plan when one proposed link is misquoted, and says how many were left out.
+- A Knowledge AI timeout or cut-off answer is retried once automatically.
+
 ## 1.10.5
 
 - List a chat's generated files with their size and checksum for the native iPhone app, and download each one by itself.
