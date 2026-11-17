@@ -313,6 +313,8 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_switch_character"))tools.push({name:"hub_switch_character",description:"Switch the active speaker after an explicit request to speak to that character."});
           if(!tools.some(t=>t.name==="hub_task"))tools.push({name:"hub_task",description:"Start background work with the voice character’s default specialist. Available during a voice call."});
           if(!tools.some(t=>t.name===PHONE_CONTEXT_TOOL))tools.push({name:PHONE_CONTEXT_TOOL,description:"Read the user's iPhone location, nearby places, battery and network when they ask about their surroundings."});
+          if(!tools.some(t=>t.name==="hub_desktop_look"))tools.push({name:"hub_desktop_look",description:"See this Windows PC's screen and its open windows."});
+          if(!tools.some(t=>t.name==="hub_desktop_act"))tools.push({name:"hub_desktop_act",description:"Use this Windows PC: click, type, press keys, scroll, drag and switch windows."});
           if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's diagram, chart, simulation or interactive HTML app; see canvas.md."});
           if(!tools.some(t=>t.name==="hub_view_screen"))tools.push({name:"hub_view_screen",description:"Inspect one fresh phone-screen frame during an authorized voice call or its direct delegated task. Needs an image-capable model; requested analysis snapshots are retained in the conversation."});
           send(200,{...this.store.snapshot(),tools,sharedSpeech:this.speechSettings.snapshot()});return;
