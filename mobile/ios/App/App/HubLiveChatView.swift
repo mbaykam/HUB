@@ -721,13 +721,12 @@ struct HubLiveChatView: View {
                     }
                 }
             }
-            HStack(spacing: 6) {
-                TextField("Chat…", text: $draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
-                    .focused($composerFocused)
-                    .accessibilityIdentifier("hub.chat.draft")
-                    .submitLabel(.send)
-                    .onSubmit { send(fromKeyboard: true) }
-                    .padding(.leading, 12)
+            HStack(alignment: .bottom, spacing: 6) {
+                HubComposerField(text: $draft, focus: $composerFocused, identifier: "hub.chat.draft") {
+                    send(fromKeyboard: true)
+                }
+                .submitLabel(.send)
+                .padding(.leading, 12)
                 Menu {
                     Button {
                         composerFocused = false

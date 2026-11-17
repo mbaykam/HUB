@@ -50,7 +50,7 @@ final class HubWorkspaceUITests: XCTestCase {
         todos.tap()
         XCTAssertTrue(todo.waitForExistence(timeout: 5))
 
-        let composer = app.textFields["hub.home.draft"]
+        let composer = app.descendants(matching: .any)["hub.home.draft"].firstMatch
         composer.tap()
         let hide = app.buttons["Hide keyboard"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5))
@@ -208,7 +208,7 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertLessThanOrEqual(dictate.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, stop.frame.minX)
         capture("Conversation before Stop")
-        let draft = app.textFields["hub.chat.draft"]
+        let draft = app.descendants(matching: .any)["hub.chat.draft"].firstMatch
         draft.tap()
         draft.typeText("Keep this draft")
         let dismissKeyboard = app.buttons["Hide keyboard"]

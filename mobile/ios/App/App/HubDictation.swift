@@ -181,18 +181,20 @@ final class HubDictation: ObservableObject {
     private var take = 0
     private var reader: Task<Void, Never>?
     private var limit: Task<Void, Never>?
-    private var background: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     init() {
-        // The microphone must never keep listening after HUB leaves the screen.
-        background = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
-                                                            object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.cancel() }
+        // The microphone must never keep listening after HUB leaves the screen
+        // or after a phone call or Siri takes the audio away.
+        for name in [UIApplication.didEnterBackgroundNotification, AVAudioSession.interruptionNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.cancel() }
+            })
         }
     }
 
     deinit {
-        if let background { NotificationCenter.default.removeObserver(background) }
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
     }
 
     var isActive: Bool { phase != .idle }
@@ -304,6 +306,49 @@ final class HubDictation: ObservableObject {
         await withCheckedContinuation { continuation in
             AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
         }
+    }
+}
+
+/// The composer's text field. On iOS 16 and later it grows to five lines, so
+/// a dictated or long message stays readable. Return still sends.
+struct HubComposerField: View {
+    @Binding var text: String
+    let focus: FocusState<Bool>.Binding
+    let identifier: String
+    let submit: () -> Void
+    @State private var previous = ""
+    @State private var lastSubmit = Date.distantPast
+
+    var body: some View {
+        let prompt = Text("Chat…").foregroundColor(HubWorkspacePalette.accent.opacity(0.75))
+        Group {
+            if #available(iOS 16.0, *) {
+                TextField("Chat…", text: $text, prompt: prompt, axis: .vertical).lineLimit(1...5)
+            } else {
+                TextField("Chat…", text: $text, prompt: prompt)
+            }
+        }
+        .focused(focus)
+        .accessibilityIdentifier(identifier)
+        .frame(minHeight: 44)
+        .onSubmit(submitOnce)
+        .onChange(of: text) { value in
+            // A growing field can insert a line break for Return instead of
+            // submitting. Treat that one keystroke as Send, like before.
+            if value == previous + "\n" {
+                text = previous
+                submitOnce()
+            } else {
+                previous = value
+            }
+        }
+        .onAppear { previous = text }
+    }
+
+    private func submitOnce() {
+        guard Date().timeIntervalSince(lastSubmit) > 0.4 else { return }
+        lastSubmit = Date()
+        submit()
     }
 }
 

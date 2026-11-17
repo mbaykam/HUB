@@ -1510,19 +1510,16 @@ struct HubHomeView: View {
                     .font(.footnote)
                     .disabled(model.connection != .connected)
             }
-            HStack(spacing: 3) {
-                TextField("Chat…", text: $model.draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
-                    .focused($composerFocused)
-                    .accessibilityIdentifier("hub.home.draft")
-                    .submitLabel(.send)
-                    .onSubmit {
-                        if canSend {
-                            dictation.cancel()
-                            dismissKeyboard(then: send)
-                        }
+            HStack(alignment: .bottom, spacing: 3) {
+                HubComposerField(text: $model.draft, focus: $composerFocused, identifier: "hub.home.draft") {
+                    if canSend {
+                        dictation.cancel()
+                        dismissKeyboard(then: send)
                     }
-                    .disabled(model.sending || creatingChat)
-                    .padding(.leading, 12)
+                }
+                .submitLabel(.send)
+                .disabled(model.sending || creatingChat)
+                .padding(.leading, 12)
                 Menu {
                     startChatAction("Commands & skills", icon: "terminal", action: .commands)
                     startChatAction("Files", icon: "paperclip", action: .files)
