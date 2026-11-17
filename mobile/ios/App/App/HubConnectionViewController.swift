@@ -1037,6 +1037,29 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
                 return Data(#"{"providers":[{"id":"fixture","name":"Fixture Provider"}],"tools":[{"name":"hub_view_screen","description":"Read one consented frame"}],"speech":{"stt":[],"tts":[]}}"#.utf8)
             }
         }
+        if request.httpMethod == "GET", url.path == "/api/hub/characters", url.query == nil,
+           request.value(forHTTPHeaderField: "x-hub-characters") == "1" {
+            return Data(#"""
+            {"revision":7,"mainId":"11111111-1111-4111-8111-111111111111","voiceId":"22222222-2222-4222-8222-222222222222",
+             "characters":[
+                {"id":"11111111-1111-4111-8111-111111111111","name":"Fixture Mira","avatar":"mint",
+                 "description":"Plans the day and keeps work moving","instructions":"Be concise.",
+                 "route":{"provider":"fixture","model":"fixture-model"},"tools":{"mode":"inherit"}},
+                {"id":"22222222-2222-4222-8222-222222222222","name":"Fixture Vera","avatar":"mint",
+                 "description":"Voice companion","instructions":"Use short replies.",
+                 "tools":{"mode":"allow","names":["hub_view_screen"]},"delegateTo":"11111111-1111-4111-8111-111111111111"}],
+             "tools":[{"name":"hub_view_screen","description":"Read one consented frame"}]}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/character-request",
+           url.query == "characterId=11111111-1111-4111-8111-111111111111" {
+            return Data(#"""
+            {"record":{"characterId":"11111111-1111-4111-8111-111111111111","sessionId":"fixture-work","at":1763359200000,"bytes":118,
+                       "json":"{\n  \"model\": \"fixture-model\",\n  \"system\": \"Be concise.\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"Fixture request\"}\n  ]\n}"},
+             "boundary":"Complete HUB request at LLM dispatch, before provider-adapter translation.",
+             "retention":"Latest conversational request per character since this host started; kept in memory only."}
+            """#.utf8)
+        }
         if url.path == "/api/settings/describe", request.httpMethod == "POST" {
             return settingsDescription()
         }

@@ -284,7 +284,7 @@ final class HubWorkspaceUITests: XCTestCase {
         if !general.waitForExistence(timeout: 8), waitUntilHittable(settings, timeout: 3) { settings.tap() }
         guard general.waitForExistence(timeout: 8) else { return }
         capture("Settings")
-        for title in ["Characters", "Models & providers", "Instructions", "Tools", "Speech", "Knowledge AI", "Telegram"] {
+        for title in ["Models & providers", "Instructions", "Tools", "Speech", "Knowledge AI", "Telegram"] {
             let row = app.buttons[title].firstMatch
             guard row.exists, row.isHittable else { continue }
             row.tap()
@@ -295,6 +295,22 @@ final class HubWorkspaceUITests: XCTestCase {
             back.tap()
             guard general.waitForExistence(timeout: 5) else { return }
         }
+        // Characters last: it goes three screens deep.
+        let characters = app.buttons["Characters"].firstMatch
+        guard characters.exists, characters.isHittable else { return }
+        characters.tap()
+        let mira = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Mira")).firstMatch
+        guard mira.waitForExistence(timeout: 6) else { capture("Characters"); return }
+        capture("Characters")
+        mira.tap()
+        sleep(2)
+        capture("Character editor")
+        app.swipeUp()
+        let lastRequest = app.buttons["Last model request"].firstMatch
+        guard lastRequest.waitForExistence(timeout: 4), lastRequest.isHittable else { capture("Character editor end"); return }
+        lastRequest.tap()
+        sleep(3)
+        capture("Last model request")
     }
 
     @MainActor
