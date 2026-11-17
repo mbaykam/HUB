@@ -108,6 +108,7 @@ export interface AgentBrowserBinding {
 }
 
 export interface AgentBrowserRuntimeOptions {
+  readonly captureDesktop?: () => Promise<Buffer>;
   readonly sessionFromPartition: (
     partition: string,
     options: FromPartitionOptions,
@@ -880,6 +881,20 @@ export class AgentBrowserRuntime {
       );
     }
 
+    if (parsed.operation === "desktop-screenshot") {
+      signal.throwIfAborted();
+      try {
+        const capture = this.#options.captureDesktop;
+        if (!capture) throw Error("Desktop capture is unavailable");
+        const data = await capture();
+        signal.throwIfAborted();
+        return {mimeType: "image/png", data: data.toString("base64")};
+      } catch {
+        signal.throwIfAborted();
+        throw new AgentBrowserError("screenshot_failed", "The primary Windows display could not be captured. Check that the desktop is unlocked and try again.");
+      }
+    }
+
     if (parsed.operation === "open") {
       return await this.#open(
         parsed.ownerSessionId,
@@ -1173,6 +1188,7 @@ export class AgentBrowserRuntime {
           };
         case "open":
         case "close":
+        case "desktop-screenshot":
           throw new AgentBrowserError(
             "bad_request",
             "Invalid Agent Browser operation state",

@@ -10,6 +10,7 @@ import {
   type OpenDialogOptions,
 } from "electron";
 import { join } from "node:path";
+import { capturePrimaryDisplay } from "./desktop-screenshot";
 import {
   DEFAULT_REMOTE_SETTINGS,
   discoverRemoteCommands,
@@ -205,6 +206,7 @@ class DesktopApplication {
       sessionFromPartition: (partition, options) =>
         session.fromPartition(partition, options),
       history: browserHistory,
+      ...(process.platform === "win32" ? { captureDesktop: capturePrimaryDisplay } : {}),
     });
     this.#agentBrowser = agentBrowser;
     const windows = new MainWindowRuntime({

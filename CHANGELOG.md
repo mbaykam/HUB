@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.5
+
+- List a chat's generated files with their size and checksum for the native iPhone app, and download each one by itself.
+- Voice typing for the native iPhone app: HUB issues a two-minute Soniox key so the phone can turn mixed English and Turkish speech into text without starting a voice call.
+
+## 1.10.4
+
+- Capture the primary Windows display for a direct screenshot request and show it in the same chat.
+- Reject transparent or invalid screenshots and report Windows capture failures clearly.
+
 ## 1.10.3
 
 - Repair phone composer control placement, Stop focus, and drawer navigation after Home.

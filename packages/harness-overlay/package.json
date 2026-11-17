@@ -1,7 +1,7 @@
 {
   "name": "@lencx/minke-harness-overlay",
   "description": "HUB-owned DeepSeek Harness product extensions",
-  "version": "1.10.3",
+  "version": "1.10.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -60,6 +60,7 @@
     "@pipecat-ai/client-js": "1.13.1",
     "@pipecat-ai/small-webrtc-transport": "1.10.7",
     "dompurify": "3.4.14",
+    "pngjs": "5.0.0",
     "cytoscape": "3.34.2",
     "vega": "6.4.0",
     "vega-interpreter": "2.3.2",

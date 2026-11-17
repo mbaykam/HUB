@@ -280,7 +280,7 @@ interface AgentBrowserToolsContext {
 
 interface BrowserToolSpec {
   readonly name: string;
-  readonly operation: AgentBrowserOperation;
+  readonly operation: Exclude<AgentBrowserOperation, "desktop-screenshot">;
   readonly description: string;
   readonly parameters: Record<string, unknown>;
   readonly outputSchema: Record<string, unknown>;
