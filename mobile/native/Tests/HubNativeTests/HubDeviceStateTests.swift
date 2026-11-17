@@ -61,7 +61,7 @@ final class HubDeviceStateTests: XCTestCase {
         let state = HubDeviceState(server: server, store: store, now: { self.time })
         XCTAssertThrowsError(try HubAccessToken(clientID: "not-a-client-id", clientSecret: String(repeating: "a", count: 64)))
         XCTAssertThrowsError(try HubAccessToken(clientID: "0123456789abcdef.access", clientSecret: "short"))
-        XCTAssertThrowsError(try HubAccessToken(clientID: "0123456789abcdef.access", clientSecret: String(repeating: "a", count: 63) + " "))
+        XCTAssertThrowsError(try HubAccessToken(clientID: "0123456789abcdef.access", clientSecret: String(repeating: "a", count: 32) + " " + String(repeating: "a", count: 32)))
         let token = try HubAccessToken(clientID: " 0123456789abcdef0123456789abcdef.access ", clientSecret: String(repeating: "f", count: 64))
         XCTAssertEqual(token.clientID, "0123456789abcdef0123456789abcdef.access")
         try state.rememberAccessToken(token)
