@@ -4,6 +4,32 @@ public struct HubScreenStatus: Decodable {
     public let sharing: Bool
     public let hasFrame: Bool
     public let maxAgeMs: Int
+    /// Regions an assistant marked on the current share, if any.
+    public let highlight: HubScreenHighlight?
+}
+
+/// Normalized regions (0...1, top-left origin) an assistant marked on the
+/// shared screen, with a one-line note.
+public struct HubScreenHighlight: Decodable, Equatable, Sendable {
+    public struct Region: Decodable, Equatable, Sendable {
+        public let x: Double
+        public let y: Double
+        public let width: Double
+        public let height: Double
+        public let label: String?
+    }
+    public let id: String
+    public let regions: [Region]
+    public let note: String
+    public let sequence: Int
+
+    /// Only sane boxes are drawn.
+    public var drawable: [Region] {
+        regions.prefix(6).filter {
+            (0...1).contains($0.x) && (0...1).contains($0.y) && $0.width > 0 && $0.height > 0
+                && $0.x + $0.width <= 1.0001 && $0.y + $0.height <= 1.0001
+        }
+    }
 }
 
 /// Native consent owns a single ephemeral share. Frames are dropped while a

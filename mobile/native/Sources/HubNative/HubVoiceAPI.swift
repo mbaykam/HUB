@@ -155,11 +155,13 @@ public final class HubVoiceAPI {
         let value = try JSONDecoder().decode(HubScreenStatus.self, from: data)
         guard value.maxAgeMs == 5000, !start || value.sharing else { throw HubVoiceAPIError.invalidResponse }
     }
-    public func screenFrame(callId: String, shareID: UUID, sequence: Int, frame: HubScreenFrame) async throws {
+    @discardableResult
+    public func screenFrame(callId: String, shareID: UUID, sequence: Int, frame: HubScreenFrame) async throws -> HubScreenHighlight? {
         guard Self.validID(callId), sequence >= 0, sequence <= 9_007_199_254_740_991, !frame.jpeg.isEmpty, frame.jpeg.count <= HubScreenFrames.maximumBytes else { throw HubVoiceAPIError.invalidResponse }
         let data = try await request("screen", method: "PUT", callId: callId, jpeg: frame.jpeg, screenHeaders: ["x-hub-screen-share": shareID.uuidString.lowercased(), "x-hub-screen-sequence": String(sequence)], capturedAt: frame.capturedAt)
         let value = try JSONDecoder().decode(HubScreenStatus.self, from: data)
         guard value.sharing, value.hasFrame, value.maxAgeMs == 5000 else { throw HubVoiceAPIError.invalidResponse }
+        return value.highlight
     }
 
     /// A lost response must reuse the original receipt, never create a second

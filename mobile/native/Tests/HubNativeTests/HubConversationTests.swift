@@ -1188,6 +1188,18 @@ final class HubConversationTests: XCTestCase {
         }
     }
 
+    func testScreenStatusCarriesOnlyDrawableHighlights() throws {
+        let data = Data(#"""
+        {"sharing":true,"hasFrame":true,"maxAgeMs":5000,"highlight":{"id":"m1","note":"Tap Wi-Fi","sequence":4,
+         "regions":[{"x":0.1,"y":0.2,"width":0.3,"height":0.1,"label":"Wi-Fi"},{"x":0.9,"y":0.9,"width":0.5,"height":0.5}]}}
+        """#.utf8)
+        let status = try JSONDecoder().decode(HubScreenStatus.self, from: data)
+        XCTAssertEqual(status.highlight?.note, "Tap Wi-Fi")
+        XCTAssertEqual(status.highlight?.drawable.map(\.label), ["Wi-Fi"])
+        let older = try JSONDecoder().decode(HubScreenStatus.self, from: Data(#"{"sharing":true,"hasFrame":true,"maxAgeMs":5000}"#.utf8))
+        XCTAssertNil(older.highlight)
+    }
+
     func testPhoneContextIsSentToHUBAndFreshRequestsAreRead() async throws {
         let api = try client()
         CatalogFixture.reply = #"{"saved":true}"#
