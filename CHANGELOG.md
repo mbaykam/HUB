@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.9
+
+- Computer use on the HUB PC: hub_desktop_look (screen, cursor, windows) and hub_desktop_act (click, type, keys, scroll, drag, focus).
+
 ## 1.10.8
 
 - Voice calls can use hub_phone_context and hub_highlight_screen directly, so a voice character answers "where am I?" itself.
