@@ -25,7 +25,7 @@ import { voiceTranscript } from "./host/voice-transcript.ts";
 import { createPreparedVoiceRuntime } from "./host/voice-runtime.ts";
 import {installVoiceTitles} from "./host/voice-titles.ts";
 import {prepareVoiceShare} from "./host/voice-media.ts";
-import {createSonioxCredentialsHandler,type SpeechCredentials} from "./host/soniox-credentials.ts";
+import {createSonioxCredentialsHandler,createSonioxDictationHandler,type SpeechCredentials} from "./host/soniox-credentials.ts";
 import { installVoiceScreenTools } from "./host/voice-screen-tool.ts";
 
 export const name = "hub-voice";
@@ -268,6 +268,9 @@ export function apply(ctx: Context, config: Config): void {
   off.push(ctx.webServer.register({kind:"exact",path:"/api/hub/voice/soniox",handler:createSonioxCredentialsHandler({
     credentials:ctx.credentials,reject:req=>ctx.connection.requestRejection(req),
     changed(){speechGeneration++;speechCache=undefined;},
+  })}));
+  off.push(ctx.webServer.register({kind:"exact",path:"/api/hub/voice/dictation",handler:createSonioxDictationHandler({
+    credentials:ctx.credentials,reject:req=>ctx.connection.requestRejection(req),
   })}));
   off.push(ctx.webServer.register({ kind: "exact", path: "/api/hub/voice/speech-models",
     handler: createSpeechModelsHandler(downloads, request => ctx.connection.requestRejection(request)),
