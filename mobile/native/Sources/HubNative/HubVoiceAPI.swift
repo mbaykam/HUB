@@ -67,6 +67,7 @@ public final class HubVoiceAPI {
         self.server = server
         self.cookies = cookies
         let config = configuration.copy() as! URLSessionConfiguration
+        HubAccessHeaders.apply(to: config, server: server)
         config.httpShouldSetCookies = false
         config.httpCookieStorage = nil
         config.urlCache = nil

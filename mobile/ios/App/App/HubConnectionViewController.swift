@@ -17,6 +17,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var homeController: UIHostingController<HubHomeView>!
     private let workspaceBar = UIStackView()
     private var conversationAPI: HubConversationAPI?
+    private var lastAccessRenewal: Date?
     private var sendTask: Task<Void, Never>?
     private var showingHome = true
     private var workspaceAppearance = HubChatPreferences.Appearance.dark
@@ -400,6 +401,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
         sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
         sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
+        if server != nil {
+            sheet.addAction(UIAlertAction(title: "Cloudflare access token", style: .default) { [weak self] _ in self?.afterOptions { $0.showAccessToken() } })
+        }
         sheet.addAction(UIAlertAction(title: showingHome ? "Refresh HUB" : "Retry sign-in", style: .default) { [weak self] _ in
             self?.afterOptions { $0.reload() }
         })
@@ -448,6 +452,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         server = value
         let nativeState = HubDeviceState(server: value, store: HubKeychainStore())
         deviceState = nativeState
+        // Set before any API session exists, so every request carries it.
+        HubAccessHeaders.use(try? nativeState.accessToken(), for: value)
+        lastAccessRenewal = nil
         api?.invalidate()
         uiAPI?.invalidate()
         let cookies: () async -> [HTTPCookie] = {
@@ -518,9 +525,106 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 await self.saveWebSession(server)
             } catch {
                 guard let self, !Task.isCancelled, self.showingHome else { return }
+                // With a saved Cloudflare token, an expired session renews
+                // itself instead of showing the sign-in page.
+                if Self.needsSignIn(error), await self.renewSessionWithAccessToken(server),
+                   !Task.isCancelled, self.showingHome {
+                    self.refreshHome()
+                    return
+                }
                 self.homeConnectionFailed(error, attempt: attempt)
             }
         }
+    }
+
+    private static func needsSignIn(_ error: Error) -> Bool {
+        (error as? HubVoiceAPIError) == .signInRequired || (error as? HubAttachmentError) == .signInRequired
+    }
+
+    /// Passes Cloudflare Access with the saved service token and lets HUB issue
+    /// a fresh session cookie. At most once a minute, so a refused token never loops.
+    private func renewSessionWithAccessToken(_ expected: HubServer) async -> Bool {
+        guard let state = deviceState, server == expected, let token = try? state.accessToken() else { return false }
+        if let last = lastAccessRenewal, Date().timeIntervalSince(last) < 60 { return false }
+        lastAccessRenewal = Date()
+        do {
+            let cookies = try await HubAccessSession.issue(server: expected, token: token)
+            guard server == expected else { return false }
+            let store = WKWebsiteDataStore.default().httpCookieStore
+            for cookie in cookies {
+                await withCheckedContinuation { continuation in store.setCookie(cookie) { continuation.resume() } }
+            }
+            try? state.rememberVerifiedSession(cookies)
+            return true
+        } catch HubAccessSessionError.tokenRejected {
+            message.text = "Cloudflare did not accept the saved access token. Check it in Options → Cloudflare access token."
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    private func showAccessToken(error: String? = nil) {
+        guard let server, let state = deviceState else { showConnection(); return }
+        let saved = (try? state.accessToken()) != nil
+        let alert = UIAlertController(
+            title: "Cloudflare access token",
+            message: error ?? (saved
+                ? "A service token is saved. HUB connects without the Cloudflare sign-in page. Enter new values to replace it."
+                : "Paste the Client ID and Client Secret of a Cloudflare Access service token. HUB will then connect without the sign-in page. They are kept in this iPhone's Keychain."),
+            preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "Client ID (ends in .access)"
+            field.autocapitalizationType = .none; field.autocorrectionType = .no
+            field.accessibilityLabel = "Cloudflare Client ID"
+        }
+        alert.addTextField { field in
+            field.placeholder = "Client Secret"
+            field.isSecureTextEntry = true
+            field.autocapitalizationType = .none; field.autocorrectionType = .no
+            field.accessibilityLabel = "Cloudflare Client Secret"
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if saved {
+            alert.addAction(UIAlertAction(title: "Remove token", style: .destructive) { [weak self] _ in
+                try? state.clearAccessToken()
+                HubAccessHeaders.use(nil, for: server)
+                self?.connect(server)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            let id = alert?.textFields?.first?.text ?? "", secret = alert?.textFields?.last?.text ?? ""
+            guard let self else { return }
+            guard let token = try? HubAccessToken(clientID: id, clientSecret: secret) else {
+                DispatchQueue.main.async { self.showAccessToken(error: "That does not look like a Cloudflare service token. The Client ID ends in .access.") }
+                return
+            }
+            do { try state.rememberAccessToken(token) } catch {
+                DispatchQueue.main.async { self.showAccessToken(error: "The token could not be saved. Unlock this iPhone and try again.") }
+                return
+            }
+            Task { @MainActor in
+                HubAccessHeaders.use(token, for: server)
+                self.lastAccessRenewal = nil
+                do {
+                    let cookies = try await HubAccessSession.issue(server: server, token: token)
+                    let store = WKWebsiteDataStore.default().httpCookieStore
+                    for cookie in cookies {
+                        await withCheckedContinuation { continuation in store.setCookie(cookie) { continuation.resume() } }
+                    }
+                    try? state.rememberVerifiedSession(cookies)
+                    self.connect(server)
+                    self.returnHome()
+                    self.showNotice("Saved. HUB now connects without the Cloudflare sign-in page.")
+                } catch HubAccessSessionError.tokenRejected {
+                    self.showNotice("Saved, but Cloudflare refused this token. Check that the HUB application has a Service Auth policy that includes this token.")
+                } catch {
+                    self.connect(server)
+                    self.showNotice("Saved. HUB could not be reached just now; it will use the token when it is back.")
+                }
+            }
+        })
+        present(alert, animated: true)
     }
 
     private func loadHomeKnowledge(_ api: HubConversationAPI, attempt: UInt64) async {
@@ -621,7 +725,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         case .needsSetup: showConnection()
         case .signInRequired:
             if let server {
-                loadSignIn(server)
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.lastAccessRenewal = nil
+                    if await self.renewSessionWithAccessToken(server) { self.refreshHome() }
+                    else { self.loadSignIn(server) }
+                }
             }
         case .unavailable, .connected: refreshHome()
         case .connecting: break
@@ -712,7 +821,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func loadSignIn(_ server: HubServer) {
         showSignIn()
         preparePageLoad()
-        activeNavigation = webView.load(URLRequest(url: server.origin))
+        var request = URLRequest(url: server.origin)
+        if let token = HubAccessHeaders.token(for: server) {
+            request.setValue(token.clientID, forHTTPHeaderField: "CF-Access-Client-Id")
+            request.setValue(token.clientSecret, forHTTPHeaderField: "CF-Access-Client-Secret")
+        }
+        activeNavigation = webView.load(request)
     }
 
     private func reload() {
@@ -734,6 +848,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             HubNotifications.shared.disable()
             do { try self.deviceState?.clear() }
             catch { self.showNotice("Sign-out could not clear saved access. Unlock this iPhone and try again."); return }
+            if let server = self.server { HubAccessHeaders.use(nil, for: server) }
             HubNotifications.shared.forgetConnection()
             self.connected = false
             self.webView?.stopLoading()
