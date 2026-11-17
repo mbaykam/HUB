@@ -91,6 +91,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.cancelPageDeadline() }
         })
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: HubSiriInbox.arrived, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.deliverSiriMessage() }
+        })
         message.font = .preferredFont(forTextStyle: .caption1)
         message.adjustsFontForContentSizeCategory = true
         message.textColor = .secondaryLabel
@@ -519,6 +522,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 self.home.connection = .connected
                 self.home.refreshing = true
                 self.message.text = "Connected"
+                self.deliverSiriMessage()
                 self.openPendingNotification()
                 guard self.showingHome else { return }
                 async let knowledge: Void = self.loadHomeKnowledge(conversationAPI, attempt: attempt)
@@ -759,6 +763,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             home.sendError = nil
         }
         openNotification(destination)
+    }
+
+    /// Sends a message spoken to Siri ("Ask HUB") once HUB is connected.
+    private func deliverSiriMessage() {
+        guard showingHome, home.connection == .connected, !home.sending, home.uncertainChat == nil,
+              let text = HubSiriInbox.shared.take() else { return }
+        home.draft = text
+        sendHomeDraft()
     }
 
     private func sendHomeDraft() {
