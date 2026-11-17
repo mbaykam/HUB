@@ -443,7 +443,9 @@ struct HubHomeView: View {
                     Image(systemName: "sidebar.left").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Chat history")
-                Spacer()
+                Spacer(minLength: 4)
+                greeting
+                Spacer(minLength: 4)
                 if composerFocused || todoFocused {
                     Button(action: hideKeyboard) {
                         Image(systemName: "keyboard.chevron.compact.down").frame(width: 44, height: 44)
@@ -497,6 +499,29 @@ struct HubHomeView: View {
                 .padding(.bottom, 16)
             }
             composer
+        }
+    }
+
+    /// "Good evening" with today's date and a small connection dot.
+    private var greeting: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let hour = Calendar.current.component(.hour, from: context.date)
+            let salutation: LocalizedStringKey = hour < 5 ? "Good night" : hour < 12 ? "Good morning"
+                : hour < 18 ? "Good afternoon" : "Good evening"
+            VStack(spacing: 1) {
+                Text(salutation).font(.subheadline.weight(.semibold))
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(model.connection == .connected ? Color.green
+                              : model.connection == .connecting ? Color.orange : HubWorkspacePalette.muted)
+                        .frame(width: 6, height: 6)
+                    Text(context.date.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(salutation) + Text(model.connection == .connected ? ", connected" : ", not connected"))
         }
     }
 
