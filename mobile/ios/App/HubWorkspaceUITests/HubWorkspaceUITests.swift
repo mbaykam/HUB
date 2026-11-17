@@ -22,14 +22,8 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertLessThanOrEqual(dictate.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, send.frame.minX)
         capture("Home")
-        // The Home graph's zoom buttons change the zoom.
-        let zoomIn = app.buttons["Zoom in"].firstMatch
-        XCTAssertTrue(zoomIn.waitForExistence(timeout: 5))
-        XCTAssertEqual(zoomIn.value as? String, "100%")
-        zoomIn.tap()
-        XCTAssertEqual(zoomIn.value as? String, "125%")
-        app.buttons["Fit graph"].firstMatch.tap()
-        XCTAssertEqual(zoomIn.value as? String, "100%")
+        // Home keeps Knowledge compact: no graph controls, just the domain strip.
+        XCTAssertFalse(app.buttons["Zoom in"].exists)
         add.tap()
         XCTAssertTrue(app.buttons["Choose character"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Research…"].exists)
@@ -83,6 +77,14 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(graph.waitForExistence(timeout: 5))
         XCTAssertEqual(graph.value as? String, "2D")
         capture("Knowledge graph")
+        // The graph's zoom buttons change the zoom.
+        let zoomIn = app.buttons["Zoom in"].firstMatch
+        XCTAssertTrue(zoomIn.waitForExistence(timeout: 5))
+        XCTAssertEqual(zoomIn.value as? String, "100%")
+        zoomIn.tap()
+        XCTAssertEqual(zoomIn.value as? String, "125%")
+        app.buttons["Fit graph"].firstMatch.tap()
+        XCTAssertEqual(zoomIn.value as? String, "100%")
         let search = app.textFields["Find records"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()

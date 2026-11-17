@@ -544,7 +544,16 @@ struct HubHomeView: View {
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
                             knowledgeSummary(value, notes: notes.count)
-                            HubKnowledgeGraphView(graph: value, height: 211, scope: .notes, overview: true, select: selectKnowledgeNode)
+                            let domains = HubKnowledgeLayout.summary(value)
+                            if domains.isEmpty {
+                                Text("Notes appear here as HUB learns from your chats.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                HubKnowledgeDomainStrip(domains: domains) { id in
+                                    showKnowledge()
+                                    focusKnowledgeDomain(id)
+                                }
+                            }
                         }
 
                     }
@@ -1568,7 +1577,7 @@ struct HubHomeView: View {
         let canFocus = neighborhood == nil && domainGraph == nil
         let domains = canFocus ? (graph.domains ?? []).filter { $0.status != "merged" } : []
         let onDomain: ((String) -> Void)? = canFocus ? { id in self.focusKnowledgeDomain(id) } : nil
-        let canvas = HubKnowledgeGraphView(graph: displayed, height: 330, scope: scope, spatial: knowledgeSpatial,
+        let canvas = HubKnowledgeGraphView(graph: displayed, height: 400, scope: scope, spatial: knowledgeSpatial,
                                            focusID: neighborhood == nil ? nil : knowledgeLocalCenter,
                                            selectDomain: onDomain, select: selectKnowledgeNode)
         let identity = [scope.rawValue, String(knowledgeSpatial), knowledgeLocalCenter ?? "",
@@ -1577,6 +1586,13 @@ struct HubHomeView: View {
             knowledgeGraphHeader(graph, neighborhood: neighborhood, domainGraph: domainGraph)
             canvas.id(identity).overlay(alignment: .topTrailing) {
                 knowledgeGraphMenu(domains: domains, canFocus: canFocus)
+            }
+            if canFocus, scope != .archive {
+                // A legend that doubles as navigation: tap a domain to look inside it.
+                let summary = HubKnowledgeLayout.summary(graph)
+                if !summary.isEmpty {
+                    HubKnowledgeDomainStrip(domains: summary, limit: 12) { id in focusKnowledgeDomain(id) }
+                }
             }
         }
     }

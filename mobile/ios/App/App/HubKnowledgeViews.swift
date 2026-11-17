@@ -1418,20 +1418,35 @@ struct HubKnowledgeGraphView: View {
         let byID = Dictionary(graph.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let zoom = min(4, max(0.5, scale * pinch))
         let translation = CGSize(width: offset.width + drag.width, height: offset.height + drag.height)
-        let points = positions(layout.points, zoom: zoom, offset: translation, size: size)
+        let frame = PlaneFrame(layout: layout, size: size, zoom: zoom, offset: translation, overview: overview)
+        let points = Dictionary(layout.points.map { ($0.id, frame.point($0.x, $0.y)) }, uniquingKeysWith: { first, _ in first })
         let visibleGroups = layout.groups.filter { $0.parentID == nil || zoom >= 1.6 }
+        let fewRecords = layout.points.count <= 40
         return ZStack(alignment: .bottomTrailing) {
             Canvas { context, _ in
+                // Each domain is a soft disc; its subdomains show as you zoom in.
+                for group in visibleGroups where group.planeRadius > 0 {
+                    let center = frame.point(group.planeX, group.planeY)
+                    let r = CGFloat(group.planeRadius) * frame.scale
+                    guard r > 4 else { continue }
+                    let disc = Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
+                    let tone = color(group.hue, id: group.id)
+                    let child = group.parentID != nil
+                    context.fill(disc, with: .color(tone.opacity(child ? 0.06 : 0.09)))
+                    context.stroke(disc, with: .color(tone.opacity(child ? 0.22 : 0.3)),
+                                   style: StrokeStyle(lineWidth: 1, dash: group.id == HubKnowledgeLayout.archiveID || child ? [4, 4] : []))
+                }
                 var lines = Path()
                 for edge in graph.edges {
                     guard let a = points[edge.source], let b = points[edge.target] else { continue }
                     lines.move(to: a)
                     lines.addLine(to: b)
                 }
-                context.stroke(lines, with: .color(HubWorkspacePalette.muted.opacity(0.38)), lineWidth: 1)
+                context.stroke(lines, with: .color(HubWorkspacePalette.muted.opacity(0.3)), lineWidth: 0.8)
                 for item in layout.points {
                     guard let point = points[item.id] else { continue }
-                    let radius: CGFloat = item.id == focusID ? 7 : item.groupID == HubKnowledgeLayout.archiveID ? 2.5 : 4.7
+                    let base: CGFloat = item.groupID == HubKnowledgeLayout.archiveID ? 3 : 4.6
+                    let radius: CGFloat = item.id == focusID ? 7.5 : base * min(1.5, max(0.8, sqrt(zoom)))
                     let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
                     context.fill(Path(ellipseIn: dot), with: .color(color(item.hue, id: item.groupID)))
                 }
@@ -1441,7 +1456,7 @@ struct HubKnowledgeGraphView: View {
                 for group in visibleGroups {
                     if overview, group.id == HubKnowledgeLayout.unassignedID || height < 120 { continue }
                     if selectDomain != nil && canSelectDomain(group.id) { continue }
-                    guard let location = groupLabelPosition(group, points: points) else { continue }
+                    guard let location = groupLabelPosition(group, points: points, frame: frame) else { continue }
                     var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
                     label.shading = .color(color(group.hue, id: group.id))
                     let measured = label.measure(in: CGSize(width: 220, height: 40))
@@ -1451,7 +1466,7 @@ struct HubKnowledgeGraphView: View {
                     taken.append(box)
                     context.draw(label, at: location)
                 }
-                if !overview, zoom >= 2.2 {
+                if !overview, zoom >= (fewRecords ? 1 : 2) {
                     let visible = CGRect(origin: .zero, size: size)
                     let ordered = layout.points.sorted { first, second in
                         func rank(_ item: HubKnowledgeLayout.Point) -> Int {
@@ -1492,7 +1507,7 @@ struct HubKnowledgeGraphView: View {
             }
             if let selectDomain {
                 ForEach(visibleGroups.filter { canSelectDomain($0.id) }, id: \.id) { group in
-                    if let location = groupLabelPosition(group, points: points), CGRect(origin: .zero, size: size).contains(location) {
+                    if let location = groupLabelPosition(group, points: points, frame: frame), CGRect(origin: .zero, size: size).contains(location) {
                         Button { selectDomain(group.id) } label: {
                             Text(group.title).font(.caption.weight(.medium)).lineLimit(1)
                                 .foregroundStyle(color(group.hue, id: group.id))
@@ -1538,10 +1553,50 @@ struct HubKnowledgeGraphView: View {
         id == HubKnowledgeLayout.archiveID || graph.domains?.contains(where: { $0.id == id && $0.status != "merged" }) == true
     }
 
-    private func groupLabelPosition(_ group: HubKnowledgeLayout.Group, points: [String: CGPoint]) -> CGPoint? {
+    private func groupLabelPosition(_ group: HubKnowledgeLayout.Group, points: [String: CGPoint], frame: PlaneFrame) -> CGPoint? {
+        if group.planeRadius > 0 {
+            let center = frame.point(group.planeX, group.planeY)
+            let r = CGFloat(group.planeRadius) * frame.scale
+            // A domain's name sits on top of its disc; a subdomain's just inside its own.
+            return CGPoint(x: center.x, y: group.parentID == nil ? center.y - r - 10 : center.y - r + 9)
+        }
         let members = group.members.compactMap { points[$0] }
         guard let top = members.map(\.y).min() else { return nil }
         return CGPoint(x: members.reduce(0) { $0 + $1.x } / CGFloat(members.count), y: top - 19)
+    }
+
+    /// Maps the flat layout onto the view, fitting every domain disc and
+    /// leaving room for the names above them.
+    private struct PlaneFrame {
+        let scale: CGFloat
+        let centerX: Double
+        let centerY: Double
+        let origin: CGPoint
+
+        init(layout: HubKnowledgeLayout.Layout, size: CGSize, zoom: CGFloat, offset: CGSize, overview: Bool) {
+            var minX = Double.infinity, maxX = -Double.infinity, minY = Double.infinity, maxY = -Double.infinity
+            for group in layout.groups where group.parentID == nil && group.planeRadius > 0 {
+                minX = min(minX, group.planeX - group.planeRadius); maxX = max(maxX, group.planeX + group.planeRadius)
+                minY = min(minY, group.planeY - group.planeRadius); maxY = max(maxY, group.planeY + group.planeRadius)
+            }
+            for point in layout.points {
+                minX = min(minX, point.x - 8); maxX = max(maxX, point.x + 8)
+                minY = min(minY, point.y - 8); maxY = max(maxY, point.y + 8)
+            }
+            if !minX.isFinite { minX = -1; maxX = 1; minY = -1; maxY = 1 }
+            let labelRoom: CGFloat = overview ? 12 : 30
+            let width = max(1, size.width - 24), height = max(1, size.height - 24 - labelRoom - (overview ? 0 : 44))
+            let fit = min(width / CGFloat(max(1, maxX - minX)), height / CGFloat(max(1, maxY - minY)))
+            scale = min(fit, overview ? 3 : 2.4) * zoom
+            centerX = (minX + maxX) / 2
+            centerY = (minY + maxY) / 2
+            origin = CGPoint(x: size.width / 2 + offset.width,
+                             y: size.height / 2 + labelRoom / 2 - (overview ? 0 : 18) + offset.height)
+        }
+
+        func point(_ x: Double, _ y: Double) -> CGPoint {
+            CGPoint(x: origin.x + CGFloat(x - centerX) * scale, y: origin.y + CGFloat(y - centerY) * scale)
+        }
     }
 
     private struct LayoutRequest: Equatable {
@@ -1550,27 +1605,83 @@ struct HubKnowledgeGraphView: View {
         let scope: Scope
     }
 
-    private func positions(_ items: [HubKnowledgeLayout.Point], zoom: CGFloat, offset: CGSize, size: CGSize) -> [String: CGPoint] {
-        let x = items.map(\.x), y = items.map(\.y)
-        guard let minX = x.min(), let maxX = x.max(), let minY = y.min(), let maxY = y.max() else { return [:] }
-        let width = max(1, size.width - 40), height = max(1, size.height - (overview ? 40 : 70))
-        let inset: CGFloat = overview ? 34 : 65
-        let fit = min(width / (CGFloat(maxX - minX) + inset), height / (CGFloat(maxY - minY) + inset)) * zoom
-        let centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2
-        return Dictionary(uniqueKeysWithValues: items.map { item in
-            let x = size.width / 2 + CGFloat(item.x - centerX) * fit + offset.width
-            let y = size.height / 2 - 8 + CGFloat(item.y - centerY) * fit + offset.height
-            return (item.id, CGPoint(x: x, y: y))
-        })
-    }
+    private func color(_ hue: Double, id: String) -> Color { Self.tone(hue, id: id) }
 
-    private func color(_ hue: Double, id: String) -> Color {
+    /// One color per domain, shared by the graph, legends and Home.
+    static func tone(_ hue: Double, id: String) -> Color {
         if id == HubKnowledgeLayout.archiveID { return Color(red: 0.54, green: 0.76, blue: 0.84) }
-        if id == HubKnowledgeLayout.unassignedID && !overview { return Color(red: 0.62, green: 0.65, blue: 0.7) }
-        let saturation = id == HubKnowledgeLayout.unassignedID ? 0.35 : 0.53
-        let light = id == HubKnowledgeLayout.unassignedID ? 0.68 : 0.72
+        if id == HubKnowledgeLayout.unassignedID { return Color(red: 0.62, green: 0.65, blue: 0.7) }
+        let saturation = 0.53, light = 0.72
         let brightness = light + saturation * min(light, 1 - light)
         return Color(hue: hue, saturation: 2 * (1 - light / brightness), brightness: brightness)
+    }
+}
+
+/// A compact picture of Knowledge: one bar split by domain, and the largest
+/// domains as tappable chips.
+struct HubKnowledgeDomainStrip: View {
+    let domains: [HubKnowledgeLayout.DomainSummary]
+    var limit = 4
+    var select: ((String) -> Void)? = nil
+
+    var body: some View {
+        let total = max(1, domains.reduce(0) { $0 + $1.count })
+        VStack(alignment: .leading, spacing: 10) {
+            GeometryReader { geometry in
+                HStack(spacing: 2) {
+                    ForEach(domains) { domain in
+                        Capsule()
+                            .fill(HubKnowledgeGraphView.tone(domain.hue, id: domain.id))
+                            .frame(width: max(4, (geometry.size.width - CGFloat(domains.count - 1) * 2) * CGFloat(domain.count) / CGFloat(total)))
+                    }
+                }
+            }
+            .frame(height: 8)
+            .accessibilityHidden(true)
+            HubChipRow(items: Array(domains.prefix(limit)), extra: max(0, domains.count - limit)) { domain in
+                chip(domain)
+            }
+        }
+    }
+
+    @ViewBuilder private func chip(_ domain: HubKnowledgeLayout.DomainSummary) -> some View {
+        let label = HStack(spacing: 6) {
+            Circle().fill(HubKnowledgeGraphView.tone(domain.hue, id: domain.id)).frame(width: 8, height: 8)
+            Text(domain.title).font(.caption).lineLimit(1)
+            Text(domain.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 30)
+        .background(HubWorkspacePalette.border.opacity(0.06), in: Capsule())
+        if let select, domain.id != HubKnowledgeLayout.unassignedID {
+            Button { select(domain.id) } label: { label }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(domain.title), \(domain.count) notes")
+                .accessibilityIdentifier("hub.knowledge.chip.\(domain.id)")
+        } else {
+            label
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(domain.title), \(domain.count) notes")
+        }
+    }
+}
+
+/// Lays chips out in a horizontal scroll row, with a "+N" at the end when
+/// some are left out.
+struct HubChipRow<Item: Identifiable, Content: View>: View {
+    let items: [Item]
+    let extra: Int
+    @ViewBuilder let content: (Item) -> Content
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(items) { content($0) }
+                if extra > 0 {
+                    Text("+\(extra)").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 6)
+                }
+            }
+        }
     }
 }
 
