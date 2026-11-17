@@ -1347,6 +1347,25 @@ private struct HubChatModelPicker: View {
         }
     }
 
+    private enum ModelFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case reasoning = "Reasoning"
+        case images = "Sees images"
+        case longContext = "Long context"
+        var id: Self { self }
+
+        func includes(_ model: HubChatModels.Provider.Model) -> Bool {
+            switch self {
+            case .all: return true
+            case .reasoning: return model.canReason
+            case .images: return model.acceptsImages
+            case .longContext: return (model.contextWindow ?? 0) >= 200_000
+            }
+        }
+    }
+
+    @State private var filter = ModelFilter.all
+
     private var catalogue: some View {
         HubList {
             if loading { ProgressView("Loading models…") }
@@ -1356,35 +1375,45 @@ private struct HubChatModelPicker: View {
             }
             if let catalog {
                 let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let current, let now = lookup(current, in: catalog) {
+                    Section("In this chat") {
+                        modelRow(now.model, provider: now.provider, catalog: catalog, showProvider: true)
+                    }
+                }
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(ModelFilter.allCases) { option in
+                                Button { filter = option } label: {
+                                    Text(option.rawValue)
+                                        .font(.caption.weight(filter == option ? .semibold : .regular))
+                                        .padding(.horizontal, 12)
+                                        .frame(minHeight: 32)
+                                        .background(filter == option ? HubWorkspacePalette.accent.opacity(0.2) : HubWorkspacePalette.border.opacity(0.06),
+                                                    in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(filter == option ? .isSelected : [])
+                            }
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                }
                 let groups = catalog.groups.compactMap { group -> FilteredGroup? in
-                    let models = group.models.filter { search.isEmpty ||
-                        "\($0.name) \($0.id) \(group.name)".localizedCaseInsensitiveContains(search) }
+                    let models = group.models.filter { filter.includes($0) && (search.isEmpty ||
+                        "\($0.name) \($0.id) \(group.name) \($0.description ?? "")".localizedCaseInsensitiveContains(search)) }
                     return models.isEmpty ? nil : FilteredGroup(id: group.id, name: group.name, models: models)
                 }
                 if groups.isEmpty {
-                    Text(search.isEmpty ? "No configured models" : "No matching models").foregroundStyle(.secondary)
+                    Text(search.isEmpty && filter == .all ? "No configured models" : "No matching models").foregroundStyle(.secondary)
                 }
                 ForEach(groups) { group in
-                    Section(group.name) {
+                    Section {
                         ForEach(group.models) { choice in
-                            Button {
-                                model = choice
-                                provider = group.id
-                                effort = current?.provider == group.id && current?.model == choice.id ? (current?.reasoningEffort ?? "") : ""
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(choice.name)
-                                        Text(choice.id).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if current?.provider == group.id, current?.model == choice.id {
-                                        Image(systemName: "checkmark").accessibilityLabel("Current model")
-                                    }
-                                }
-                                .frame(minHeight: 44)
-                            }
+                            modelRow(choice, provider: group.id, catalog: catalog, showProvider: false)
                         }
+                    } header: {
+                        Text("\(group.name) · \(group.models.count)")
                     }
                 }
                 if !catalog.failures.isEmpty {
@@ -1396,6 +1425,62 @@ private struct HubChatModelPicker: View {
         .searchable(text: $query, prompt: "Find a model…")
     }
 
+    private func lookup(_ selection: HubChatModelSelection, in catalog: HubChatModels) -> (model: HubChatModels.Provider.Model, provider: String)? {
+        guard let group = catalog.groups.first(where: { $0.id == selection.provider }),
+              let model = group.models.first(where: { $0.id == selection.model }) else { return nil }
+        return (model, group.id)
+    }
+
+    private func modelRow(_ choice: HubChatModels.Provider.Model, provider: String, catalog: HubChatModels, showProvider: Bool) -> some View {
+        let isCurrent = current?.provider == provider && current?.model == choice.id
+        let isDefault = catalog.defaultSelection?.provider == provider && catalog.defaultSelection?.model == choice.id
+        return Button {
+            model = choice
+            self.provider = provider
+            effort = isCurrent ? (current?.reasoningEffort ?? "") : ""
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(choice.name).font(.body.weight(isCurrent ? .semibold : .regular)).lineLimit(1)
+                        if isDefault { badge("Default", tint: .green) }
+                    }
+                    if let description = choice.description, !description.isEmpty {
+                        Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    HStack(spacing: 5) {
+                        if let window = choice.contextWindow { badge(HubChatModels.tokens(window) + " context") }
+                        if choice.canReason { badge("Reasoning") }
+                        if choice.acceptsImages { badge("Images") }
+                        if showProvider { badge(catalog.groups.first(where: { $0.id == provider })?.name ?? provider) }
+                    }
+                }
+                Spacer(minLength: 4)
+                if isCurrent {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(HubWorkspacePalette.accent)
+                        .accessibilityLabel("Current model")
+                } else {
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hub.model.\(provider).\(choice.id)")
+    }
+
+    private func badge(_ text: String, tint: Color = HubWorkspacePalette.accent) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(tint.opacity(0.12), in: Capsule())
+            .lineLimit(1)
+    }
+
     private struct FilteredGroup: Identifiable {
         let id: String
         let name: String
@@ -1403,25 +1488,84 @@ private struct HubChatModelPicker: View {
     }
 
     private func options(_ choice: HubChatModels.Provider.Model, provider: String) -> some View {
-        HubForm {
+        let providerName = catalog?.groups.first(where: { $0.id == provider })?.name ?? provider
+        return HubForm {
             Section {
-                Text(choice.name).font(.headline)
-                if let description = choice.description { Text(description).font(.footnote) }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(choice.name).font(.title3.bold())
+                    Text(providerName).font(.subheadline).foregroundStyle(.secondary)
+                    if let description = choice.description { Text(description).font(.footnote).padding(.top, 2) }
+                }
+                .padding(.vertical, 4)
+            }
+            Section("Details") {
+                detail("Model ID", choice.id, monospaced: true)
+                detail("Context window", choice.contextWindow.map { HubChatModels.tokens($0) + " tokens" } ?? "Not reported")
+                if let output = choice.defaultMaxTokens { detail("Reply length cap", HubChatModels.tokens(output) + " tokens") }
+                detail("Reads images", choice.inputModalities == nil ? "Not reported" : (choice.acceptsImages ? "Yes" : "No"))
+                detail("Reasoning", choice.canReason ? "\(choice.reasoning?.efforts.count ?? 0) levels" : "No")
             }
             if let efforts = choice.reasoning?.efforts, !efforts.isEmpty {
-                Picker("Reasoning effort", selection: $effort) {
-                    Text("Provider default").tag("")
-                    if !effort.isEmpty && !efforts.contains(where: { $0.id == effort }) { Text(effort).tag(effort) }
-                    ForEach(efforts) { Text($0.name).tag($0.id) }
+                Section {
+                    effortRow(id: "", name: "Provider default",
+                              description: choice.reasoning?.defaultEffort.map { "Uses \($0)" } ?? "Let the provider decide")
+                    if !effort.isEmpty && !efforts.contains(where: { $0.id == effort }) {
+                        effortRow(id: effort, name: effort, description: nil)
+                    }
+                    ForEach(efforts) { level in effortRow(id: level.id, name: level.name, description: level.description) }
+                } header: {
+                    Text("Reasoning effort")
+                } footer: {
+                    Text("More effort thinks longer and costs more tokens; lower effort answers faster.")
                 }
             }
-            if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
-            if saving { ProgressView() }
-            Button("Use in this chat") {
-                Task { await select(choice, provider: provider) }
+            Section {
+                if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                Button {
+                    Task { await select(choice, provider: provider) }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if saving { ProgressView() } else { Text("Use in this chat").fontWeight(.semibold) }
+                        Spacer()
+                    }
+                    .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("hub.model.use")
             }
         }
         .disabled(saving)
+    }
+
+    private func detail(_ title: String, _ value: String, monospaced: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(monospaced ? .footnote.monospaced() : .body)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func effortRow(id: String, name: String, description: String?) -> some View {
+        Button { effort = id } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                    if let description, !description.isEmpty {
+                        Text(description).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if effort == id { Image(systemName: "checkmark").foregroundStyle(HubWorkspacePalette.accent) }
+            }
+            .frame(minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(effort == id ? .isSelected : [])
     }
 
     private func select(_ choice: HubChatModels.Provider.Model, provider: String) async {

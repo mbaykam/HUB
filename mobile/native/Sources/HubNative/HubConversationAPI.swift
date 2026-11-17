@@ -789,6 +789,13 @@ public struct HubChatModels: Decodable {
             public let name: String
             public let description: String?
             public let reasoning: Reasoning?
+            /// Combined request and response tokens, when the provider says.
+            public let contextWindow: Int?
+            public let defaultMaxTokens: Int?
+            public let inputModalities: [String]?
+
+            public var acceptsImages: Bool { inputModalities?.contains("image") == true }
+            public var canReason: Bool { reasoning?.efforts.contains { $0.id != "off" && $0.id != "none" } == true }
         }
         public let id: String
         public let name: String
@@ -800,6 +807,30 @@ public struct HubChatModels: Decodable {
     }
     public let groups: [Provider]
     public let failures: [Failure]
+    /// The model a chat uses when nothing else was picked.
+    public let defaultSelection: HubChatModelSelection?
+
+    private enum CodingKeys: String, CodingKey {
+        case groups, failures
+        case defaultSelection = "default"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        groups = try values.decode([Provider].self, forKey: .groups)
+        failures = try values.decodeIfPresent([Failure].self, forKey: .failures) ?? []
+        defaultSelection = try? values.decodeIfPresent(HubChatModelSelection.self, forKey: .defaultSelection)
+    }
+
+    /// "200K" style token counts for compact labels.
+    public static func tokens(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            let millions = Double(value) / 1_000_000
+            return (millions.rounded() == millions ? String(Int(millions)) : String(format: "%.1f", millions)) + "M"
+        }
+        if value >= 1_000 { return String(Int((Double(value) / 1_000).rounded())) + "K" }
+        return String(value)
+    }
 }
 
 public struct HubChatHistoryPage {
