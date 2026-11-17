@@ -61,6 +61,94 @@ struct HubKnowledgeForgetView: View {
     }
 }
 
+/// A note's link to one of its saved files, like
+/// `[Original snake.html](../Attachments/snake%20%280531b1c55da4%29.html)`.
+/// The vault file name carries the start of the file's SHA-256 in brackets.
+struct HubKnowledgeAttachmentLink: Identifiable, Equatable {
+    let title: String
+    let fileName: String
+    let hashPrefix: String?
+    var id: String { fileName }
+    var isHTML: Bool { HubKnowledgeFilePreview.isHTML(name: fileName, mediaType: "") }
+
+    static func find(in content: String) -> [HubKnowledgeAttachmentLink] {
+        guard let pattern = try? NSRegularExpression(pattern: #"\[([^\]\n]{1,200})\]\((?:\.\./)*Attachments/([^)\n]{1,400})\)"#) else { return [] }
+        var seen = Set<String>(), found: [HubKnowledgeAttachmentLink] = []
+        for match in pattern.matches(in: content, range: NSRange(content.startIndex..., in: content)) {
+            guard let titleRange = Range(match.range(at: 1), in: content), let fileRange = Range(match.range(at: 2), in: content) else { continue }
+            let raw = String(content[fileRange])
+            let file = raw.removingPercentEncoding ?? raw
+            guard seen.insert(file).inserted else { continue }
+            var hash: String?
+            if let marker = file.range(of: #"\(([0-9a-f]{8,64})\)\.[A-Za-z0-9]+$"#, options: .regularExpression) {
+                hash = String(file[marker]).trimmingCharacters(in: CharacterSet(charactersIn: "()")).components(separatedBy: ")").first
+            }
+            found.append(HubKnowledgeAttachmentLink(title: String(content[titleRange]), fileName: file, hashPrefix: hash))
+        }
+        return found
+    }
+
+    /// The saved asset this link points at.
+    func asset(in assets: [HubKnowledgeAsset]) -> HubKnowledgeAsset? {
+        if let hashPrefix, let match = assets.first(where: { $0.id.hasPrefix(hashPrefix) }) { return match }
+        let plain = fileName.replacingOccurrences(of: #" \([0-9a-f]{8,64}\)(?=\.[A-Za-z0-9]+$)"#, with: "", options: .regularExpression)
+        return assets.first { $0.name == plain || $0.name == fileName }
+    }
+}
+
+struct HubOpenedKnowledgeFile: Identifiable {
+    let asset: HubKnowledgeAsset
+    let data: Data
+    var id: String { asset.id }
+}
+
+/// Shows a saved Knowledge file inside the app: HTML runs in a sealed web
+/// view (with its source one tap away), images zoom, PDFs and text read.
+struct HubKnowledgeFilePreview: View {
+    let name: String
+    let mediaType: String
+    let data: Data
+    @State private var showSource = false
+
+    static func isHTML(name: String, mediaType: String) -> Bool {
+        mediaType == "text/html" || mediaType == "application/xhtml+xml" || name.lowercased().hasSuffix(".html") || name.lowercased().hasSuffix(".htm")
+    }
+
+    var body: some View {
+        if Self.isHTML(name: name, mediaType: mediaType), let html = String(data: data, encoding: .utf8) {
+            VStack(spacing: 0) {
+                Picker("View", selection: $showSource) {
+                    Text("Run").tag(false)
+                    Text("Source").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                if showSource {
+                    ScrollView([.vertical, .horizontal]) {
+                        Text(html).font(.footnote.monospaced()).textSelection(.enabled).padding()
+                    }
+                } else {
+                    HubContainedDocumentView(document: HubContainedDocumentView.normalized(html))
+                        .accessibilityLabel(name)
+                }
+            }
+        } else if mediaType.hasPrefix("image/"), let image = UIImage(data: data) {
+            HubZoomableImage(image: image).accessibilityLabel(name)
+        } else if mediaType == "application/pdf", let document = PDFDocument(data: data) {
+            HubKnowledgePDFView(document: document)
+        } else if data.count <= 400_000, mediaType.hasPrefix("text/") || mediaType == "application/json",
+                  let text = String(data: data, encoding: .utf8) {
+            ScrollView { Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding() }
+        } else {
+            VStack(alignment: .leading) {
+                Text("This file type can't be shown here. Use Save to Files to open it in another app.").foregroundStyle(.secondary).padding()
+                Spacer()
+            }
+        }
+    }
+}
+
 @MainActor
 struct HubKnowledgeOriginalSourceView: View {
     let api: HubConversationAPI
@@ -74,6 +162,7 @@ struct HubKnowledgeOriginalSourceView: View {
     @State private var export = false
     @State private var fileFailed = false
     @State private var downloading = false
+    @State private var previewing = false
 
     var body: some View {
         NavigationView {
@@ -83,7 +172,10 @@ struct HubKnowledgeOriginalSourceView: View {
                     if let files = original.assets, !files.isEmpty {
                         Section("Source attachments") {
                             ForEach(files) { file in
-                                Button(file.name) { Task { await fetch(file) } }.disabled(downloading || export)
+                                Button { Task { await fetch(file) } } label: {
+                                    Label(file.name, systemImage: HubKnowledgeFilePreview.isHTML(name: file.name, mediaType: file.mediaType) ? "play.rectangle" : "doc")
+                                }
+                                .disabled(downloading || export)
                             }
                             if downloading, let selected { ProgressView(selected.name) }
                             if fileFailed { Text("Could not verify or save the attachment.").font(.footnote) }
@@ -113,6 +205,20 @@ struct HubKnowledgeOriginalSourceView: View {
             do { original = try await api.knowledgeOriginalSource(id: source.id) }
             catch { if !Task.isCancelled { failed = true } }
         }
+        .sheet(isPresented: $previewing) {
+            if let selected, let originalFile {
+                NavigationView {
+                    HubKnowledgeFilePreview(name: selected.name, mediaType: selected.mediaType, data: originalFile)
+                        .navigationTitle(selected.name)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Done") { previewing = false } }
+                            ToolbarItem(placement: .primaryAction) { HubShareFileButton(bytes: originalFile, name: selected.name, label: "Share or save file") }
+                        }
+                }
+                .navigationViewStyle(.stack)
+            }
+        }
         .fileExporter(isPresented: $export, document: originalFile.map { HubFileDocument(bytes: $0) },
                       contentType: selected.flatMap { UTType(mimeType: $0.mediaType) } ?? .data, defaultFilename: selected?.name) { result in
             if case .failure = result { fileFailed = true }
@@ -130,7 +236,7 @@ struct HubKnowledgeOriginalSourceView: View {
         fileFailed = false
         do {
             originalFile = try await api.knowledgeAssetBytes(asset)
-            export = true
+            previewing = true
         } catch {
             selected = nil
             fileFailed = true
@@ -229,18 +335,7 @@ struct HubKnowledgeAssetsView: View {
     private func attachment(_ preview: Preview) -> some View {
         VStack(alignment: .leading) {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary).padding() }
-            if preview.asset.mediaType.hasPrefix("image/"), let image = UIImage(data: preview.data) {
-                ScrollView { Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(preview.asset.name) }
-            } else if preview.asset.mediaType == "application/pdf", let document = PDFDocument(data: preview.data) {
-                HubKnowledgePDFView(document: document)
-            } else if preview.data.count <= 400_000,
-                      preview.asset.mediaType.hasPrefix("text/") || preview.asset.mediaType == "application/json",
-                      let text = String(data: preview.data, encoding: .utf8) {
-                ScrollView { Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding() }
-            } else {
-                Text("Use Save to Files to open this attachment in another app.").foregroundStyle(.secondary).padding()
-                Spacer()
-            }
+            HubKnowledgeFilePreview(name: preview.asset.name, mediaType: preview.asset.mediaType, data: preview.data)
         }
     }
 

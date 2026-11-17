@@ -1723,6 +1723,7 @@ private struct HubChatImageView: View {
     @State private var exportFailed = false
     @State private var failed = false
     @State private var attempt = 0
+    @State private var fullScreen = false
 
     private struct SavedFile {
         let bytes: Data
@@ -1734,7 +1735,15 @@ private struct HubChatImageView: View {
         Group {
             if let image {
                 VStack(alignment: .leading, spacing: 4) {
-                    Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 12)).accessibilityLabel(name)
+                    Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 12))
+                        .contentShape(Rectangle())
+                        .onTapGesture { fullScreen = true }
+                        .accessibilityLabel(name)
+                        .accessibilityHint("Opens the image full screen")
+                        .accessibilityAction { fullScreen = true }
+                    .fullScreenCover(isPresented: $fullScreen) {
+                        HubImageViewer(image: image, name: name)
+                    }
                     if let savedFile {
                         HStack {
                             Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -1898,6 +1907,103 @@ private struct HubChatPhotoPicker: UIViewControllerRepresentable {
 }
 
 /// Three softly pulsing dots while the assistant works, instead of a spinner.
+/// A photo on a black full screen: pinch or double-tap to zoom, swipe down
+/// or Close to go back, Share to send it on.
+struct HubImageViewer: View {
+    let image: UIImage
+    let name: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var drag: CGFloat = 0
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+            HubZoomableImage(image: image)
+                .ignoresSafeArea()
+                .offset(y: drag)
+                .simultaneousGesture(DragGesture(minimumDistance: 20).onChanged { value in
+                    if value.translation.height > 0 && abs(value.translation.width) < value.translation.height { drag = value.translation.height }
+                }.onEnded { value in
+                    if value.translation.height > 140 { dismiss() } else { withAnimation(.spring()) { drag = 0 } }
+                })
+                .accessibilityLabel(name)
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.headline).foregroundStyle(.white)
+                        .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Close image")
+                Spacer()
+                if let data = image.pngData() {
+                    HubShareFileButton(bytes: data, name: ((name as NSString).deletingPathExtension.isEmpty ? "Image" : (name as NSString).deletingPathExtension) + ".png", label: "Share image")
+                        .foregroundStyle(.white)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .opacity(drag > 0 ? 0 : 1)
+        }
+        .background(Color.black)
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// UIKit zooming: pinch, pan, and double-tap to toggle 2.5x.
+struct HubZoomableImage: UIViewRepresentable {
+    let image: UIImage
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scroll = UIScrollView()
+        scroll.delegate = context.coordinator
+        scroll.minimumZoomScale = 1
+        scroll.maximumZoomScale = 6
+        scroll.showsVerticalScrollIndicator = false
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.backgroundColor = .clear
+        scroll.contentInsetAdjustmentBehavior = .never
+        let view = UIImageView(image: image)
+        view.contentMode = .scaleAspectFit
+        view.isUserInteractionEnabled = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            view.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+            view.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            view.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            view.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+        ])
+        context.coordinator.imageView = view
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.toggleZoom(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scroll.addGestureRecognizer(doubleTap)
+        return scroll
+    }
+
+    func updateUIView(_ view: UIScrollView, context: Context) {
+        context.coordinator.imageView?.image = image
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var imageView: UIImageView?
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+        @objc func toggleZoom(_ gesture: UITapGestureRecognizer) {
+            guard let scroll = gesture.view as? UIScrollView else { return }
+            if scroll.zoomScale > 1.01 {
+                scroll.setZoomScale(1, animated: true)
+            } else {
+                let point = gesture.location(in: imageView)
+                let size = CGSize(width: scroll.bounds.width / 2.5, height: scroll.bounds.height / 2.5)
+                scroll.zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height), animated: true)
+            }
+        }
+    }
+}
+
 /// Plain-language steps for the turn that is still running.
 enum HubLiveSteps {
     struct Step: Identifiable {

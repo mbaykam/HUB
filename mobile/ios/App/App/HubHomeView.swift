@@ -253,6 +253,9 @@ struct HubHomeView: View {
     @State private var knowledgeArchivesOpen = false
     @State private var knowledgeSkillsOpen = false
     @State private var knowledgeAssetsOpen = false
+    @State private var openedNoteFile: HubOpenedKnowledgeFile?
+    @State private var noteFileBusy: String?
+    @State private var noteFileFailed = false
     @State private var knowledgeConnectionsOpen = false
     @State private var knowledgeRefreshError = false
     @State private var selectedNoteID: String?
@@ -1441,6 +1444,7 @@ struct HubHomeView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         HubMarkdownText(source: note.content)
+                        noteFiles(note.content)
                         Button {
                             knowledgeConnectionsOpen = true
                         } label: {
@@ -1463,6 +1467,67 @@ struct HubHomeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        }
+    }
+
+    /// Files a note links to (an HTML game, a document, an image), opened inside HUB.
+    @ViewBuilder private func noteFiles(_ content: String) -> some View {
+        let files = HubKnowledgeAttachmentLink.find(in: content)
+        if !files.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Files").font(.subheadline.bold()).foregroundStyle(.secondary)
+                ForEach(files) { file in
+                    Button { Task { await openNoteFile(file) } } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: file.isHTML ? "play.rectangle.fill" : "doc.fill")
+                                .font(.title3).foregroundStyle(accent)
+                                .frame(width: 40, height: 40)
+                                .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(file.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                Text(file.isHTML ? "Open and run in HUB" : "Open in HUB").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 4)
+                            if noteFileBusy == file.id { ProgressView() } else { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
+                        }
+                        .padding(10)
+                        .background(card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(noteFileBusy != nil || model.connection != .connected)
+                    .accessibilityIdentifier("hub.knowledge.file.\(file.fileName)")
+                }
+                if noteFileFailed {
+                    Text("Could not open this file. Check the connection and try again.").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .sheet(item: $openedNoteFile) { file in
+                NavigationView {
+                    HubKnowledgeFilePreview(name: file.asset.name, mediaType: file.asset.mediaType, data: file.data)
+                        .navigationTitle(file.asset.name)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Done") { openedNoteFile = nil } }
+                            ToolbarItem(placement: .primaryAction) { HubShareFileButton(bytes: file.data, name: file.asset.name, label: "Share or save file") }
+                        }
+                }
+                .navigationViewStyle(.stack)
+            }
+        }
+    }
+
+    private func openNoteFile(_ file: HubKnowledgeAttachmentLink) async {
+        guard noteFileBusy == nil, let api = chatAPI() else { return }
+        noteFileBusy = file.id
+        noteFileFailed = false
+        defer { noteFileBusy = nil }
+        do {
+            guard let asset = file.asset(in: try await api.knowledgeAssets()) else { throw HubAttachmentError.invalidResponse }
+            let data = try await api.knowledgeAssetBytes(asset)
+            openedNoteFile = HubOpenedKnowledgeFile(asset: asset, data: data)
+        } catch {
+            noteFileFailed = true
         }
     }
 
