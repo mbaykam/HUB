@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.8
+
+- Voice calls can use hub_phone_context and hub_highlight_screen directly, so a voice character answers "where am I?" itself.
+- Delegated helper agents get hub_phone_context as well.
+
 ## 1.10.7
 
 - Assistants can read the iPhone's location, place, nearby places and battery with hub_phone_context when the HUB app shares them.
