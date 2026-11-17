@@ -1188,6 +1188,26 @@ final class HubConversationTests: XCTestCase {
         }
     }
 
+    func testRestoredKnowledgeWorkStaysPausedUntilTheOwnerResumesIt() async throws {
+        let api = try client()
+        CatalogFixture.reply = #"{"items":[],"total":0,"storage":"C:/HUB/backups","restoreHold":{"version":1,"state":"needs-review","queued":3,"mode":"review","provider":"fixture","model":"fixture-model"}}"#
+        let page = try await api.knowledgeBackups()
+        XCTAssertEqual(page.restoreHold, HubKnowledgeBackups.RestoreHold(queued: 3, mode: "review", provider: "fixture", model: "fixture-model"))
+        CatalogFixture.reply = #"{"items":[],"total":0,"storage":"C:/HUB/backups"}"#
+        let ordinary = try await api.knowledgeBackups()
+        XCTAssertNil(ordinary.restoreHold)
+
+        CatalogFixture.reply = #"{"resumed":true}"#
+        try await api.resumeRestoredKnowledgeWork()
+        let request = try XCTUnwrap(CatalogFixture.request)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-memory"), "1")
+        CatalogFixture.reply = #"{"resumed":false}"#
+        do { try await api.resumeRestoredKnowledgeWork(); XCTFail("An unconfirmed resume must not look successful") } catch {
+            XCTAssertEqual(error as? HubAttachmentError, .invalidResponse)
+        }
+    }
+
     func testQueueingEarlierConversationsForKnowledgeReportsWhatHUBDid() async throws {
         let api = try client()
         CatalogFixture.reply = #"{"queued":4,"duplicates":12,"skipped":1}"#

@@ -1063,6 +1063,20 @@ struct HubKnowledgeBackupsView: View {
     @State private var notice: String?
     @State private var restored: HubKnowledgeRestoredCopy?
     @State private var restoreCandidate: HubKnowledgeBackups.Copy?
+    @State private var confirmResume = false
+
+    private func resumeRestoredWork() async {
+        busy = true
+        do {
+            try await api.resumeRestoredKnowledgeWork()
+            busy = false
+            await refresh()
+            notice = "Saved Knowledge work can run again."
+        } catch {
+            busy = false
+            notice = "HUB could not confirm that saved work resumed. Refresh backups before trying again."
+        }
+    }
 
     var body: some View {
         NavigationView {
@@ -1074,6 +1088,13 @@ struct HubKnowledgeBackupsView: View {
                     if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 } footer: {
                     Text("Copies are saved on the HUB computer. Keep each backup folder with its snapshot.json.")
+                }
+                if let hold = page?.restoreHold {
+                    Section("Restored work is paused") {
+                        Text("\(hold.queued) saved organization jobs · \(hold.mode) · \(hold.provider)/\(hold.model). Review your Knowledge AI settings before resuming.")
+                            .font(.footnote)
+                        Button("Resume saved Knowledge work") { confirmResume = true }
+                    }
                 }
                 if let restored {
                     Section("Restored copy") {
@@ -1106,6 +1127,12 @@ struct HubKnowledgeBackupsView: View {
         .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy)
         .task { await refresh() }
+        .alert("Resume saved Knowledge work?", isPresented: $confirmResume) {
+            Button("Resume") { Task { await resumeRestoredWork() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Saved work may resume under your existing Knowledge AI settings and budget.")
+        }
         .confirmationDialog("Restore a separate copy?", isPresented: Binding(
             get: { restoreCandidate != nil }, set: { if !$0 { restoreCandidate = nil } }),
             presenting: restoreCandidate) { copy in

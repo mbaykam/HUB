@@ -272,11 +272,20 @@ public struct HubKnowledgeBackups: Decodable {
         public let bytes: Int64
         public let path: String
     }
+    /// Present while organization work saved in a restored copy is paused
+    /// until the owner has reviewed the Knowledge AI settings.
+    public struct RestoreHold: Decodable, Equatable {
+        public let queued: Int
+        public let mode: String
+        public let provider: String
+        public let model: String
+    }
     public let items: [Copy]
     public let total: Int
     public let nextOffset: Int?
     public let storage: String
     public let incompleteCopies: Int?
+    public let restoreHold: RestoreHold?
 }
 
 public struct HubKnowledgeRestoredCopy: Decodable {
@@ -1969,6 +1978,15 @@ public final class HubConversationAPI {
     public func characterSettings() async throws -> HubCharacterSettings {
         let data = try await requestData("api/hub/characters", headers: ["x-hub-characters": "1"])
         return try JSONDecoder().decode(HubCharacterSettings.self, from: data)
+    }
+
+    /// Lets organization work saved in a restored Knowledge copy run again
+    /// under the current Knowledge AI settings.
+    public func resumeRestoredKnowledgeWork() async throws {
+        struct Receipt: Decodable { let resumed: Bool }
+        let body = try JSONEncoder().encode(["action": "resume-restored-work"])
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, operationTimeout: 60)
+        guard try JSONDecoder().decode(Receipt.self, from: data).resumed else { throw HubAttachmentError.invalidResponse }
     }
 
     /// Adds earlier HUB conversations to the Knowledge queue. Conversations
