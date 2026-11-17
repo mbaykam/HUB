@@ -223,8 +223,10 @@ private struct HubCharacterEditor: View {
 
     private var profile: some View {
         Section("Profile") {
-            TextField("Name", text: $character.name)
-            TextField("About this character", text: $character.description)
+            HubLabeledField(title: "Name") { TextField("Name", text: $character.name) }
+            HubLabeledField(title: "About this character") {
+                TextField("About this character", text: $character.description)
+            }
             Picker("Portrait", selection: $character.avatar) {
                 ForEach(["hub", "voice", "devil", "mint", "rose", "amber"], id: \.self) {
                     Text($0 == "devil" ? "Horns" : $0.capitalized).tag($0)

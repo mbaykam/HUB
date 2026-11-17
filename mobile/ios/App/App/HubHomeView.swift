@@ -72,6 +72,23 @@ struct HubList<Content: View>: View {
     }
 }
 
+/// "needs-approval" from HUB reads as "Needs approval".
+func hubTaskStatusLabel(_ status: String) -> String {
+    let words = status.replacingOccurrences(of: "-", with: " ")
+    return words.prefix(1).uppercased() + words.dropFirst()
+}
+
+/// A small status color: working, waiting on the owner, failed, finished.
+func hubTaskStatusColor(_ status: String) -> Color {
+    switch status {
+    case "working", "running", "checking": return HubWorkspacePalette.accent
+    case "needs-approval", "waiting-credit", "blocked": return .orange
+    case "failed", "error": return .red
+    case "completed", "done": return .green
+    default: return HubWorkspacePalette.muted
+    }
+}
+
 /// A form field with its name shown above the value, so a filled field
 /// still says what it is.
 struct HubLabeledField<Content: View>: View {
@@ -2052,7 +2069,10 @@ private struct HubTasksView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(task.title).font(.body.weight(.medium))
-                        Text(task.status.replacingOccurrences(of: "-", with: " ")).font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Circle().fill(hubTaskStatusColor(task.status)).frame(width: 7, height: 7).accessibilityHidden(true)
+                            Text(hubTaskStatusLabel(task.status)).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     .frame(minHeight: 44, alignment: .leading)
                 }
