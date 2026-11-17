@@ -9,7 +9,7 @@ import {EventEmitter} from "node:events";
 import test from "node:test";
 import {JSDOM} from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
 import {installDailyUseWeb} from "../packages/harness-overlay/src/host/daily-use-web.ts";
-import {conversationScreenshots, installScreenshotDelivery} from "../packages/harness-overlay/src/host/screenshot-delivery.ts";
+import {conversationScreenshots, installScreenshotDelivery, isDesktopScreenshotRequest} from "../packages/harness-overlay/src/host/screenshot-delivery.ts";
 import {agentBrowserSuccessResponse} from "../packages/harness-overlay/src/agent-browser-contract.ts";
 import {createScreenshotPreviews} from "../packages/harness-overlay/src/client/host/screenshot-previews.ts";
 
@@ -45,9 +45,10 @@ test("desktop capture requires a current explicit request and publishes only a c
   for (const events of [[message("Masaüstü ekran görüntüsünü alma")], [message("Tekrar dene")],
     [message("Explain how to take a screenshot of my desktop")], [message("Take a screenshot of my desktop", "tool")],
     [message("Take a screenshot of my desktop"), {type: "turn/end"}]]) {
-    await assert.rejects(execute(...events), /explicitly/);
+    await assert.rejects(execute(...events), /own request/);
   }
   assert.equal(requests.length, 0);
+  for (const text of ["Masaustunun bir ekran goruntusunu al", "Ekran görüntüsü alır mısın?", "Can you grab a screenshot of my screen", "ss at"]) assert.ok(isDesktopScreenshotRequest(text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/ı/gu, "i")), text);
   const result = await execute(message("Tüm masaüstünün ekran görüntüsünü al"));
   assert.equal(requests[0].operation, "desktop-screenshot");
   assert.deepEqual(requests[0].payload, {});

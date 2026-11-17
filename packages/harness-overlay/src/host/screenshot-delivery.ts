@@ -37,6 +37,22 @@ function requireVisiblePNG(data: Buffer): void {
   }
 }
 
+/**
+ * A plain request to capture the screen, in English or Turkish, in the user's
+ * own words: it names a screenshot and asks for one, and is not a question
+ * about how to take one or a request not to. Text is already lowercased and
+ * stripped of accents.
+ */
+export function isDesktopScreenshotRequest(text: string): boolean {
+  const words = text.replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim();
+  if (!words || words.length > 300) return false;
+  const names = /\b(?:screenshot|screen ?shot|screen ?capture|screengrab|ekran ?goruntu\w*|ekran ?resm\w*|ss)\b/u.test(words);
+  const asks = /\b(?:take|capture|show|send|grab|get|make|al|alir|alabilir|cek|ceker|cekebilir|goster|gosterebilir|gonder|gonderebilir|at|atar|atabilir|istiyorum)\w*/u.test(words);
+  const declines = /\b(?:dont|do not|don t|never|alma|cekme|gosterme|gonderme|atma|almayin|cekmeyin)\b/u.test(words);
+  const explains = /\b(?:how|explain|why|nasil|neden|niye|anlat)\w*/u.test(words);
+  return names && asks && !declines && !explains;
+}
+
 function desktopCaptureRequested(agent: any): boolean {
   const events = agent.session.snapshotEvents();
   for (let index = events.length - 1; index >= 0; index--) {
@@ -47,8 +63,7 @@ function desktopCaptureRequested(agent: any): boolean {
     if (!Array.isArray(content)) return false;
     const text = content.filter(block => block.type === "text" && typeof block.text === "string")
       .map(block => block.text).join(" ").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/ı/gu, "i");
-    return /^(?:please\s+|(?:can|could|would) you\s+)?(?:take|capture|show|send) (?:me )?(?:a |the )?(?:screenshot|screen ?capture) of (?:my |the |your )?(?:(?:windows |entire |whole )?desktop|entire screen|whole screen)\b[.?! ]*$/u.test(text.trim()) ||
-      /^(?:lutfen )?(?:tum |butun )?(?:windows )?(?:masaustu\w*|ekranin) ekran goruntu\w* (?:al|cek|goster|gonder|alabilir misin|cekebilir misin|gosterebilir misin|gonderebilir misin)(?: ve (?:burada )?(?:goster|gonder))?[.?! ]*$/u.test(text.trim());
+    return isDesktopScreenshotRequest(text);
   }
   return false;
 }
@@ -127,7 +142,7 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
     async execute(_args: unknown, exec: any) {
       const agent = exec.agent;
       if (exec.parent || !agent?.session?.header?.id || agent.session.header.origin === "subagent" || !desktopCaptureRequested(agent)) {
-        throw Error("Ask explicitly for a desktop screenshot in the current message.");
+        throw Error("This capture needs the user's own request for a screenshot in the current turn. Do not retry or ask how to phrase it; use hub_desktop_look to see the screen, or tell the user the screenshot was not taken.");
       }
       const result = await desktop.request(agent.session.header.id, "desktop-screenshot", {}, exec.signal) as AgentDesktopScreenshotResult;
       const data = Buffer.from(result.data, "base64");
@@ -159,7 +174,7 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
   const offGuide = ctx.systemPrompt?.section({
     name: "hub:screenshot-delivery",
     order: 92,
-    text: "Use browser_screenshot for a requested web page capture. For a Windows desktop screenshot, use hub_capture_desktop when available. It captures and displays the primary screen in one call. If the request is ambiguous, ask the user to state the target in a direct request, for example 'Masaüstünün ekran görüntüsünü al.' If Windows cannot capture, report that result and do not retry through PowerShell, CopyFromScreen, or a different target. Use hub_show_screenshot for an existing workspace PNG; a local path does not display it.",
+    text: "Use browser_screenshot for a requested web page capture. For a Windows desktop screenshot, use hub_capture_desktop when available. It captures and displays the primary screen in one call. If the capture tool refuses, do not retry it or ask the user to rephrase: use hub_desktop_look to see the screen yourself, or say plainly that the screenshot was not taken. If Windows cannot capture, report that result and do not retry through PowerShell or CopyFromScreen. Use hub_show_screenshot for an existing workspace PNG; a local path does not display it.",
   });
   return () => { offGuide?.(); offControl?.(); offDesktop?.(); desktop?.dispose(); offTool(); };
 }
