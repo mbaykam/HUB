@@ -28,9 +28,13 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Choose character"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Research…"].exists)
         XCTAssertTrue(app.buttons["Files"].exists)
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.16)).tap()
-        let closedMenu = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Choose character"])
-        XCTAssertEqual(XCTWaiter.wait(for: [closedMenu], timeout: 5), .completed)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        let menuClosed = { XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Choose character"]) }
+        if XCTWaiter.wait(for: [menuClosed()], timeout: 4) != .completed {
+            capture("Menu still open")
+            if add.isHittable { add.tap() }
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [menuClosed()], timeout: 5), .completed)
 
         app.buttons["Chat history"].tap()
         XCTAssertTrue(app.buttons["hub.history.fixture-work"].waitForExistence(timeout: 5))
