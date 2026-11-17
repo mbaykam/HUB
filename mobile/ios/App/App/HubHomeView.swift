@@ -462,7 +462,7 @@ struct HubHomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     connectionRow
-                    section("Knowledge", actionLabel: "Explore knowledge", open: showKnowledge) {
+                    section("Knowledge", icon: "brain.head.profile", actionLabel: "Explore knowledge", open: showKnowledge) {
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
                             knowledgeSummary(value, notes: notes.count)
@@ -470,7 +470,7 @@ struct HubHomeView: View {
                         }
 
                     }
-                    section("Your day", actionLabel: "Open ↗", open: {
+                    section("Your day", icon: "calendar", actionLabel: "Open ↗", open: {
                         hideKeyboard()
                         plannerOpen = true
                     }) {
@@ -480,7 +480,7 @@ struct HubHomeView: View {
 
                     }
                     if let work = model.work {
-                        section("Your work") { workSummary(work) }
+                        section("Your work", icon: "bolt.fill") { workSummary(work) }
                     } else if model.workUnavailable {
                         section("Your work") {
                             Button("Retry loading work", action: connect)
@@ -1868,10 +1868,18 @@ struct HubHomeView: View {
         }
     }
 
-    private func section<Content: View>(_ title: LocalizedStringKey, actionLabel: LocalizedStringKey = "Open", open: (() -> Void)? = nil,
+    private func section<Content: View>(_ title: LocalizedStringKey, icon: String? = nil, actionLabel: LocalizedStringKey = "Open", open: (() -> Void)? = nil,
                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 8) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 26, height: 26)
+                        .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .accessibilityHidden(true)
+                }
                 Text(title)
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
@@ -1886,8 +1894,12 @@ struct HubHomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(card, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous).fill(card)
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(LinearGradient(colors: [HubWorkspacePalette.border.opacity(0.035), .clear], startPoint: .top, endPoint: .center)))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
     }
 
 }
