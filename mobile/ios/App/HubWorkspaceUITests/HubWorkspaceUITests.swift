@@ -15,8 +15,11 @@ final class HubWorkspaceUITests: XCTestCase {
         let add = app.buttons["More actions"]
         let voice = app.buttons["Speak"]
         let send = app.buttons["hub.home.send"]
-        XCTAssertTrue(add.exists && voice.exists && send.exists)
-        XCTAssertLessThanOrEqual(add.frame.maxX, voice.frame.minX)
+        let dictate = app.buttons["hub.home.dictate"]
+        XCTAssertTrue(add.exists && dictate.exists && voice.exists && send.exists)
+        XCTAssertEqual(dictate.label, "Type with your voice")
+        XCTAssertLessThanOrEqual(add.frame.maxX, dictate.frame.minX)
+        XCTAssertLessThanOrEqual(dictate.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, send.frame.minX)
         capture("Home")
         add.tap()
@@ -199,8 +202,10 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Save screenshot to Files"].exists)
 
         let more = app.buttons["hub.chat.more"], voice = app.buttons["hub.chat.voice"], stop = app.buttons["hub.chat.stop"]
-        XCTAssertTrue(more.exists && voice.exists && stop.exists)
-        XCTAssertLessThanOrEqual(more.frame.maxX, voice.frame.minX)
+        let dictate = app.buttons["hub.chat.dictate"]
+        XCTAssertTrue(more.exists && dictate.exists && voice.exists && stop.exists)
+        XCTAssertLessThanOrEqual(more.frame.maxX, dictate.frame.minX)
+        XCTAssertLessThanOrEqual(dictate.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, stop.frame.minX)
         capture("Conversation before Stop")
         let draft = app.textFields["hub.chat.draft"]

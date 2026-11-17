@@ -1135,6 +1135,62 @@ final class HubConversationTests: XCTestCase {
             [HTTPCookie(properties: [.name:"session",.value:"fixture",.domain:"hub.example.com",.path:"/"])!,HTTPCookie(properties: [.name:"foreign",.value:"never-send",.domain:"other.test",.path:"/"])!]
         }
     }
+    func testVoiceTypingAsksHUBForAShortLivedKeyAndRejectsAnyOtherEndpoint() async throws {
+        let api = try client()
+        CatalogFixture.reply = #"""
+        {"url":"wss://stt-rt.soniox.com/transcribe-websocket","expiresAt":"2026-11-17T06:00:00Z",
+         "config":{"api_key":"temp:fixture-short-lived","model":"stt-rt-v5","audio_format":"pcm_s16le","sample_rate":16000,
+                   "num_channels":1,"enable_language_identification":true,"language_hints":["en","tr"],"language_hints_strict":true}}
+        """#
+        let session = try await api.dictationSession()
+        XCTAssertEqual(session.url.absoluteString, "wss://stt-rt.soniox.com/transcribe-websocket")
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(session.configuration.utf8)) as? [String: Any])
+        XCTAssertEqual(sent["api_key"] as? String, "temp:fixture-short-lived")
+        XCTAssertEqual(sent["language_hints"] as? [String], ["en", "tr"])
+        let request = try XCTUnwrap(CatalogFixture.request)
+        XCTAssertEqual(request.url?.absoluteString, "https://hub.example.com/api/hub/voice/dictation")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-dictation"), "1")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=fixture")
+
+        for reply in [#"{"url":"wss://other.test/socket","config":{"api_key":"temp:fixture-short-lived","model":"m","audio_format":"pcm_s16le","sample_rate":16000,"num_channels":1}}"#,
+                      #"{"url":"wss://stt-rt.soniox.com/transcribe-websocket","config":{"api_key":"temp:fixture-short-lived","model":"m","audio_format":"pcm_s16le","sample_rate":44100,"num_channels":1}}"#,
+                      #"{"url":"wss://stt-rt.soniox.com/transcribe-websocket","config":{"model":"m","audio_format":"pcm_s16le","sample_rate":16000,"num_channels":1}}"#] {
+            XCTAssertThrowsError(try HubDictationSession(data: Data(reply.utf8)))
+        }
+        CatalogFixture.code = 409
+        do { _ = try await api.dictationSession(); XCTFail("A HUB without Soniox must not start voice typing") } catch {
+            XCTAssertEqual(error as? HubAttachmentError, .unavailable)
+        }
+    }
+
+    func testVoiceTypingKeepsConfirmedWordsAndReplacesWordsStillBeingRecognized() throws {
+        var transcript = HubDictationTranscript()
+        try transcript.receive(Data(#"{"tokens":[{"text":"Bugün","is_final":true},{"text":" hava","is_final":false}]}"#.utf8))
+        XCTAssertEqual(transcript.text, "Bugün hava")
+        try transcript.receive(Data(#"{"tokens":[{"text":" hava","is_final":true},{"text":" really","is_final":false},{"text":" nais","is_final":false}]}"#.utf8))
+        XCTAssertEqual(transcript.text, "Bugün hava really nais")
+        try transcript.receive(Data(#"{"tokens":[{"text":" really","is_final":true},{"text":" nice","is_final":true},{"text":"<end>","is_final":true},{"text":" ignored","is_final":true,"translation_status":"translation"}]}"#.utf8))
+        XCTAssertEqual(transcript.text, "Bugün hava really nice")
+        XCTAssertFalse(transcript.finished)
+        try transcript.receive(Data(#"{"tokens":[{"text":" left","is_final":false}],"finished":true}"#.utf8))
+        XCTAssertTrue(transcript.finished)
+        XCTAssertEqual(transcript.text, "Bugün hava really nice")
+
+        var refused = HubDictationTranscript()
+        XCTAssertThrowsError(try refused.receive(Data(#"{"error_code":402,"error_message":"balance"}"#.utf8))) {
+            XCTAssertEqual($0 as? HubDictationTranscript.Failure, .service)
+        }
+        XCTAssertThrowsError(try refused.receive(Data("not json".utf8))) {
+            XCTAssertEqual($0 as? HubDictationTranscript.Failure, .malformed)
+        }
+
+        XCTAssertEqual(HubDictationTranscript.join("", " merhaba "), "merhaba")
+        XCTAssertEqual(HubDictationTranscript.join("Not:", "merhaba"), "Not: merhaba")
+        XCTAssertEqual(HubDictationTranscript.join("Not: ", "merhaba"), "Not: merhaba")
+        XCTAssertEqual(HubDictationTranscript.join("kept", "  "), "kept")
+    }
+
     func testCatalogIsReadOnlyOriginScopedAndSearchesWithoutPuttingTitlesInURLs() async throws {
         let api = try client()
         CatalogFixture.reply = #"{"conversations":[{"sessionId":"old-chat","title":"Eski Türkçe sohbet","updatedAt":1}],"hasMore":false}"#

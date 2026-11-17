@@ -90,6 +90,8 @@ struct HubHomeView: View {
     }
 
     @State private var panel: Panel?
+    @StateObject private var dictation = HubDictation()
+    @State private var dictationBase = ""
     @State private var knowledgeOpen = false
     @State private var knowledgeDomainsOpen = false
     @State private var knowledgeBackupsOpen = false
@@ -1441,6 +1443,10 @@ struct HubHomeView: View {
             if let error = model.sendError {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
             }
+            if let notice = dictation.notice {
+                Text(notice).font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("hub.home.dictation.notice")
+            }
             if let id = model.uncertainChat {
                 Button("Open conversation to check") { dismissKeyboard { openChat(id) } }
                     .font(.footnote)
@@ -1451,7 +1457,12 @@ struct HubHomeView: View {
                     .focused($composerFocused)
                     .accessibilityIdentifier("hub.home.draft")
                     .submitLabel(.send)
-                    .onSubmit { if canSend { dismissKeyboard(then: send) } }
+                    .onSubmit {
+                        if canSend {
+                            dictation.cancel()
+                            dismissKeyboard(then: send)
+                        }
+                    }
                     .disabled(model.sending || creatingChat)
                     .padding(.leading, 12)
                 Menu {
@@ -1467,11 +1478,22 @@ struct HubHomeView: View {
                 }
                 .accessibilityLabel("More actions")
                 .disabled(model.connection != .connected || model.sending || creatingChat || model.uncertainChat != nil)
-                Button { dismissKeyboard(then: voice) } label: {
+                HubDictationButton(dictation: dictation, identifier: "hub.home.dictate") {
+                    if !dictation.isActive { dictationBase = model.draft }
+                    dictation.toggle(api: chatAPI())
+                }
+                .disabled(!dictation.isActive && (model.sending || creatingChat || model.hasActiveVoice))
+                Button {
+                    dictation.cancel()
+                    dismissKeyboard(then: voice)
+                } label: {
                     Image(systemName: "waveform").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(model.hasActiveVoice ? "Open voice controls" : "Speak")
-                Button { dismissKeyboard(then: send) } label: {
+                Button {
+                    dictation.cancel()
+                    dismissKeyboard(then: send)
+                } label: {
                     Image(systemName: "arrow.up")
                         .font(.body.weight(.semibold))
                         .frame(width: 44, height: 44)
@@ -1488,6 +1510,10 @@ struct HubHomeView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .onReceive(dictation.$text) { spoken in
+            if dictation.isActive { model.draft = HubDictationTranscript.join(dictationBase, spoken) }
+        }
+        .onDisappear { dictation.cancel() }
     }
 
     private func startChatAction(_ title: LocalizedStringKey, icon: String, action: HubNativeChatRequest.ComposerAction) -> some View {

@@ -26,6 +26,8 @@ struct HubLiveChatView: View {
     let renamed: (String) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var composerFocused: Bool
+    @StateObject private var dictation = HubDictation()
+    @State private var dictationBase = ""
     @State private var snapshot: HubChatSnapshot?
     @State private var screenshots: [HubChatScreenshot] = []
     @State private var screenshotListFailed = false
@@ -685,6 +687,9 @@ struct HubLiveChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if let notice = dictation.notice {
+                Text(notice).font(.footnote).foregroundStyle(.secondary)
+            }
             if stopRequest != nil {
                 ProgressView("Stopping…").font(.footnote)
             } else if !connectionLost && snapshot?.lastTurnWasStopped == true {
@@ -765,7 +770,13 @@ struct HubLiveChatView: View {
                 }
                 .accessibilityLabel("More actions")
                 .accessibilityIdentifier("hub.chat.more")
+                HubDictationButton(dictation: dictation, identifier: "hub.chat.dictate") {
+                    if !dictation.isActive { dictationBase = draft }
+                    dictation.toggle(api: api)
+                }
+                .disabled(!dictation.isActive && connectionLost)
                 Button {
+                    dictation.cancel()
                     composerFocused = false
                     voice()
                 } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
@@ -803,6 +814,10 @@ struct HubLiveChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .onReceive(dictation.$text) { spoken in
+            if dictation.isActive { draft = HubDictationTranscript.join(dictationBase, spoken) }
+        }
+        .onDisappear { dictation.cancel() }
     }
 
     private func queuedMessagesView(_ items: [HubQueuedChatMessage]) -> some View {
@@ -1033,6 +1048,7 @@ struct HubLiveChatView: View {
 
     private func send(fromKeyboard: Bool = false) {
         guard (fromKeyboard ? canSubmit : canSend) else { return }
+        dictation.cancel()
         let delivery = snapshot?.running == true ? preferences.busyEnter : .queue
         let text = draft
         let files = fileDrafts

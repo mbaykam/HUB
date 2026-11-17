@@ -1876,6 +1876,14 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(Connection.self, from: data).configured
     }
 
+    /// Starts one voice-typing take. HUB answers with a short-lived key; no
+    /// voice call or chat turn is created.
+    public func dictationSession() async throws -> HubDictationSession {
+        let data = try await requestData("api/hub/voice/dictation", headers: ["x-hub-dictation": "1"],
+                                         body: Data("{}".utf8), maxBytes: 8_192, operationTimeout: 15)
+        return try HubDictationSession(data: data)
+    }
+
     public func setModelFavorite(_ model: HubModelCatalog.Model, selected: Bool) async throws -> HubModelCatalog {
         try await modelRequest(["action": "favorite", "provider": model.provider, "model": model.modelID, "selected": selected])
     }
