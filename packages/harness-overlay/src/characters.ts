@@ -91,7 +91,15 @@ export class HubCharacters extends Service {
         return {revision:0,mainId,voiceId:voices.selectedId,characters,bindings:{}};
       }finally{await legacy.close();}
     }).then(()=>this.speechSettings.load(()=>{const s=this.store.snapshot();return s.characters.find(c=>c.id===s.voiceId)!.speech!;}));
+    const phoneWorkers=new Set<string>();
     const attach=(agent:CharacterAgent)=>{
+      // A delegated worker (for example HUB asked by the voice assistant) can
+      // read the phone too; it carries no character allowlist of its own.
+      if(agent.session.header.origin==="subagent"&&!phoneWorkers.has(agent.id)&&!agent.id.startsWith("hub-memory-")&&!agent.id.startsWith("hub-goal-")){
+        phoneWorkers.add(agent.id);
+        agent.ctx.effect(()=>{const off=attachPhoneContextTool(agent,this.phoneContext,()=>true);return()=>{off();phoneWorkers.delete(agent.id);};},"HUB phone context");
+        return;
+      }
       if(agent.session.header.origin==="subagent" || agent.id.startsWith("hub-automation-") || agent.id.startsWith("hub-memory-") || agent.id.startsWith("hub-goal-") || agent.id.startsWith("hub-character-eval-") || this.mounts.has(agent.id))return;
       const mount:Mount={revision:-1,fibers:[],names:new Map()};this.mounts.set(agent.id,mount);
       agent.ctx.effect(()=>this.presentations.attach(agent),"HUB conversation canvas");
