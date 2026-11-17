@@ -5,7 +5,7 @@ import { KnowledgeStore, atomicJson, digest, validatePlan, memoryExcerpt } from 
 import type { KnowledgeJob, KnowledgePlan, KnowledgeSettings, KnowledgeSource, KnowledgeStatus, KnowledgeRecall, KnowledgeCuration } from "../knowledge-contract.ts";
 import { defaultKnowledgeSettings } from "../knowledge-contract.ts";
 import {cleanKnowledgeSource,maskKnowledgeFileData} from "./knowledge-evidence.ts";
-import {organizationPrompt,validateCuration,normalizeCurationReferences} from "./knowledge-organization.ts";
+import {organizationPrompt,validateCuration,normalizeCurationReferences,dropUnsupportedRelations,transientKnowledgeFailure} from "./knowledge-organization.ts";
 import {changeKnowledgeDomains} from "./knowledge-domains.ts";
 import {isQuotaFailure} from "./operation-failure.ts";
 import type {ProviderGate} from "./provider-gate.ts";
@@ -184,6 +184,9 @@ export class KnowledgeCurator {
       // A legacy no-op is harmless; legacy note-authoring proposals are refused.
       if(!raw.version&&["skip","archive-only"].includes(raw.decision)&&!raw.changes?.length)raw={...raw,version:1,tags:[],relations:[],reflections:[],profileSuggestions:[]};
       raw=normalizeCurationReferences(raw,[...graph.nodes.map(n=>n.id),...registry.domains.map(d=>d.id)]);
+      // One misquoted link must not discard the verified rest of the plan.
+      const dropped=dropUnsupportedRelations(raw,job.source,graph.nodes.map(n=>n.id),candidates);
+      job.droppedRelations=dropped||undefined;
       validateCuration(raw,job.source,graph.nodes.map(n=>n.id));
       if(raw.version===2)for(const relation of raw.relations){const target=candidates.find(n=>n.id===relation.targetId);if(!target||!target.body.includes(relation.targetEvidence!))throw Error("Relation target was not read or its quote was invented");relation.targetHash=target.contentHash;}
       const plan=proposed=raw as KnowledgeCuration;
@@ -211,6 +214,13 @@ export class KnowledgeCurator {
         this.blockedRoute={key:JSON.stringify([settings.provider,settings.model,settings.reasoningEffort]),message:job.error.message,quota,...(quota?{retryAt:Date.now()+quotaRetryDelay,failures:0}:{})};await atomicJson(join(this.store.root,"model-health.json"),this.blockedRoute);
       }
       if(e.code==="KNOWLEDGE_SOURCE_NOT_ADMITTED"){job.status="done";job.outcome="skipped";job.error=undefined;job.reason="Source admission was withdrawn during processing; the response was not saved.";this.status="ready";}
+      // A timeout or cut-off answer gets one automatic retry after the idle
+      // delay instead of leaving the conversation unlinked until a manual retry.
+      if(job.status==="failed"&&transientKnowledgeFailure(phase,e)&&(job.autoRetries??0)<1){
+        job.previousAttempts=[...(job.previousAttempts??[]),{attempt:job.attempts,startedAt:job.startedAt,finishedAt:job.finishedAt,status:"failed" as const,reason:job.reason,error:job.error}].slice(-30);
+        job.autoRetries=(job.autoRetries??0)+1;job.status="queued";job.queuedAt=Date.now();job.retryAt=Date.now();
+        job.reason="Retrying once automatically after a model timeout or incomplete answer.";job.error=undefined;this.status="ready";
+      }
     }
     job.updatedAt=Date.now();await this.saveJob(job);
   }

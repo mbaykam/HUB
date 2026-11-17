@@ -113,6 +113,35 @@ export function normalizeCurationReferences(value:any,knownIds:string[]){
   const remap=(operation:any):any=>{if(!operation||typeof operation!=="object"||Array.isArray(operation))return operation;const op={...operation};for(const key of ["ref","parentId","domainId","id","targetId"])if(typeof op[key]==="string"&&replacements.has(op[key]))op[key]=replacements.get(op[key]);if(op.type==="propose")op.operation=remap(op.operation);return op;};
   return {...value,domainOps:value.domainOps.map(remap)};
 }
+/** A cheap model sometimes misquotes one link. Remove only the links whose
+ * target or quotes cannot be verified, so the rest of a valid plan (tags,
+ * other links, reflections) is still saved. Unverified links are never kept.
+ * Returns how many links were removed. */
+export function dropUnsupportedRelations(value:any,source:KnowledgeSource,known:string[],candidates:{id:string;body:string}[]):number{
+  if(!Array.isArray(value?.relations))return 0;
+  const evidence=(s:any)=>typeof s==="string"&&s.trim().length>=4&&s.length<=1200&&sourceContains(source,s);
+  const kept=value.relations.filter((r:any)=>{
+    if(!r||typeof r!=="object"||!known.includes(r.targetId)||r.targetId===source.conversationId||typeof r.label!=="string"||!r.label.trim()||r.label.length>120||!evidence(r.evidence))return false;
+    if(r.predicate!==undefined&&(typeof r.predicate!=="string"||!r.predicate.trim()||r.predicate.length>120))return false;
+    if(r.direction!==undefined&&!["directed","undirected"].includes(r.direction))return false;
+    if(value.version!==2)return true;
+    if(typeof r.targetEvidence!=="string"||r.targetEvidence.trim().length<4||r.targetEvidence.length>1200)return false;
+    const target=candidates.find(n=>n.id===r.targetId);
+    return !!target&&target.body.includes(r.targetEvidence);
+  });
+  const dropped=value.relations.length-kept.length;
+  value.relations=kept;
+  return dropped;
+}
+
+/** Model failures worth one automatic retry: the request timed out or the
+ * answer was cut off. Validation, permission and credit failures are not. */
+export function transientKnowledgeFailure(phase:string,error:{code?:unknown;message?:unknown}):boolean{
+  if(phase!=="model response")return false;
+  const text=`${String(error.code??"")} ${String(error.message??"")}`;
+  return /^23\b|timed? ?out|aborted due to timeout|REFLECTION_INCOMPLETE|did not complete|ECONNRESET|socket hang up|overloaded/i.test(text);
+}
+
 export function validateCuration(value:any,source:KnowledgeSource,known:string[]):asserts value is KnowledgeCuration {
   validateMemories(value?.memories,source);
   if(![1,2].includes(value?.version)||!["skip","archive-only","organize"].includes(value.decision)||typeof value.reason!=="string"||value.reason.length>600||!Array.isArray(value.tags)||value.tags.length>12||value.tags.some((t:any)=>typeof t!=="string"||!t.trim()||t.length>60))throw Error("Invalid organization plan");
