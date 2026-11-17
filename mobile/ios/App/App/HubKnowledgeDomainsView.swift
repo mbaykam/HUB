@@ -88,7 +88,7 @@ struct HubKnowledgeDomainsView: View {
 
     var body: some View {
         NavigationView {
-            Form {
+            HubForm {
                 if loading || saving { ProgressView() }
                 if let notice {
                     Text(notice).font(.footnote).foregroundStyle(.secondary)
@@ -457,7 +457,7 @@ private struct HubKnowledgeSuggestedGroupsView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let failure { Text(failure).foregroundStyle(.secondary) }
                 if busy { ProgressView() }
                 if let selected {
@@ -576,7 +576,7 @@ private struct HubKnowledgeOrganizeView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 if busy { ProgressView() }
                 if let source { sourceSection(source) }

@@ -24,7 +24,7 @@ struct HubWorkspaceDirectoryView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
                 if loading || saving { ProgressView() }
                 if let listing {

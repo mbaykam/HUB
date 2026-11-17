@@ -17,7 +17,7 @@ struct HubKnowledgeForgetView: View {
 
     var body: some View {
         NavigationView {
-            Form {
+            HubForm {
                 Section("Passage to forget") {
                     TextEditor(text: $passage).frame(minHeight: 85).accessibilityLabel("Passage to forget")
                     Text("Copy an exact passage from the note below and paste it here.").font(.footnote)
@@ -77,7 +77,7 @@ struct HubKnowledgeOriginalSourceView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let original {
                     Text(original.content).textSelection(.enabled)
                     if let files = original.assets, !files.isEmpty {
@@ -202,7 +202,7 @@ struct HubKnowledgeAssetsView: View {
     }
 
     private var library: some View {
-        List {
+        HubList {
             if let note { Label(note.title, systemImage: "note.text") }
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView("Working…") }
@@ -369,7 +369,7 @@ struct HubKnowledgeSkillsView: View {
     }
 
     private var library: some View {
-        List {
+        HubList {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView("Loading skills…") }
             if let catalog {
@@ -403,7 +403,7 @@ struct HubKnowledgeSkillsView: View {
     }
 
     private func editor(_ value: HubKnowledgeSkillDraft) -> some View {
-        Form {
+        HubForm {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView("Saving skill…") }
             Section("Details") {
@@ -538,7 +538,7 @@ struct HubKnowledgeConnectionsView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 Section(note.title) {
                     if let total {
                         Text(total > 0 ? "\(items.count) of \(total) sourced connections" : "No sourced connections yet.")
@@ -585,7 +585,7 @@ struct HubKnowledgeConnectionsView: View {
         }
         .sheet(item: $selectedEvidence) { selection in
             NavigationView {
-                List {
+                HubList {
                     if let evidence {
                         Section(evidence.sourceTitle) {
                             Text(evidence.citation.quote).textSelection(.enabled)
@@ -754,7 +754,7 @@ struct HubKnowledgeArchivesView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if busy { ProgressView("Working with the archive on HUB…") }
                 if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 if let record { originalMessages(record) }
@@ -1038,7 +1038,7 @@ struct HubKnowledgeBackupsView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 Section {
                     Button("Create verified backup") { Task { await createBackup() } }
                     Button("Refresh backups") { Task { await refresh() } }
@@ -1380,7 +1380,7 @@ struct HubKnowledgeGraphView: View {
                     context.fill(Path(ellipseIn: dot), with: .color(color(item.hue, id: item.groupID)))
                 }
                 for group in visibleGroups {
-                    if overview, group.id == HubKnowledgeLayout.unassignedID { continue }
+                    if overview, group.id == HubKnowledgeLayout.unassignedID || height < 120 { continue }
                     if selectDomain != nil && canSelectDomain(group.id) { continue }
                     guard let location = groupLabelPosition(group, points: points) else { continue }
                     var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
@@ -1705,7 +1705,7 @@ private struct HubKnowledgeCurationReviewView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let error {
                     Text(error).foregroundStyle(.secondary)
                     Button("Reload review") { attempt += 1 }

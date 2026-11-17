@@ -225,7 +225,7 @@ struct HubLiveChatView: View {
         }
         .sheet(item: $queueEdit) { item in
             NavigationView {
-                Form {
+                HubForm {
                     TextEditor(text: $queueDraft).frame(minHeight: 140)
                         .accessibilityLabel("Queued message")
                     if queuedMessages?.contains(item) != true {
@@ -1177,7 +1177,7 @@ private struct HubChatCommandsView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if loading { ProgressView("Loading commands and skills…") }
                 if let commands {
                     Section("Commands") {
@@ -1295,7 +1295,7 @@ private struct HubChatModelPicker: View {
     }
 
     private var catalogue: some View {
-        List {
+        HubList {
             if loading { ProgressView("Loading models…") }
             if let error {
                 Text(error).foregroundStyle(.secondary)
@@ -1350,7 +1350,7 @@ private struct HubChatModelPicker: View {
     }
 
     private func options(_ choice: HubChatModels.Provider.Model, provider: String) -> some View {
-        Form {
+        HubForm {
             Section {
                 Text(choice.name).font(.headline)
                 if let description = choice.description { Text(description).font(.footnote) }
@@ -1499,7 +1499,7 @@ private struct HubChatImageView: View {
         Group {
             if let image {
                 VStack(alignment: .leading, spacing: 4) {
-                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(name)
+                    Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 12)).accessibilityLabel(name)
                     if let savedFile {
                         HStack {
                             Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(2)

@@ -258,6 +258,45 @@ final class HubWorkspaceUITests: XCTestCase {
         capture("Knowledge Skills")
     }
 
+    /// Screenshots of the task and settings screens for visual review. A
+    /// screen that cannot be reached is skipped; the tour asserts nothing.
+    @MainActor
+    func testNativeScreenTourForVisualReview() {
+        let app = readFixtureApp()
+        let tools = app.buttons["Workspace tools"]
+        guard tools.waitForExistence(timeout: 20) else { return }
+        tools.tap()
+        let tasks = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tasks")).firstMatch
+        if waitUntilHittable(tasks, timeout: 6) {
+            tasks.tap()
+            sleep(3)
+            capture("Tasks")
+            let done = app.buttons["Done"].firstMatch
+            guard done.exists, done.isHittable else { return }
+            done.tap()
+            guard waitUntilHittable(tools, timeout: 6) else { return }
+            tools.tap()
+        }
+        let settings = app.buttons["Settings"].firstMatch
+        let general = app.descendants(matching: .any)["hub.settings.general"].firstMatch
+        guard waitUntilHittable(settings, timeout: 8) else { return }
+        settings.tap()
+        if !general.waitForExistence(timeout: 8), waitUntilHittable(settings, timeout: 3) { settings.tap() }
+        guard general.waitForExistence(timeout: 8) else { return }
+        capture("Settings")
+        for title in ["Characters", "Models & providers", "Instructions", "Tools", "Speech", "Knowledge AI", "Telegram"] {
+            let row = app.buttons[title].firstMatch
+            guard row.exists, row.isHittable else { continue }
+            row.tap()
+            sleep(3)
+            capture(title)
+            let back = app.navigationBars.buttons["Settings"].firstMatch
+            guard back.exists, back.isHittable else { return }
+            back.tap()
+            guard general.waitForExistence(timeout: 5) else { return }
+        }
+    }
+
     @MainActor
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

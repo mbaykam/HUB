@@ -37,7 +37,8 @@ struct HubNativeChatRequest: Equatable {
 enum HubWorkspacePalette {
     static let background = dynamic(light: 0xF4F6FB, dark: 0x0B101B)
     static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x161B2A))
-    static let accent = Color(uiColor: dynamic(light: 0x3F51A5, dark: 0xBFCBFF))
+    static let accentUIColor = dynamic(light: 0x3F51A5, dark: 0xBFCBFF)
+    static let accent = Color(uiColor: accentUIColor)
     static let onAccent = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x141B35))
     static let muted = Color(uiColor: dynamic(light: 0x4E5970, dark: 0xA8B3CC))
     static let border = Color(uiColor: dynamic(light: 0x172233, dark: 0xFFFFFF))
@@ -48,6 +49,49 @@ enum HubWorkspacePalette {
             return UIColor(red: CGFloat((rgb >> 16) & 255) / 255,
                            green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
         }
+    }
+}
+
+/// System forms and lists drawn in the HUB workspace colors, so settings and
+/// editors match Home instead of the neutral system gray.
+struct HubForm<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        Form { Group(content: content).listRowBackground(HubWorkspacePalette.panel) }
+            .hubGroupedBackground()
+    }
+}
+
+struct HubList<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        List { Group(content: content).listRowBackground(HubWorkspacePalette.panel) }
+            .hubGroupedBackground()
+    }
+}
+
+extension View {
+    @ViewBuilder func hubGroupedBackground() -> some View {
+        if #available(iOS 16.0, *) {
+            scrollContentBackground(.hidden)
+                .background(Color(uiColor: HubWorkspacePalette.background).ignoresSafeArea())
+        } else {
+            self
+        }
+    }
+
+    /// A quiet filled search field. The system bordered style turns pure
+    /// black in the dark workspace.
+    func hubSearchField() -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
+            textFieldStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -617,7 +661,7 @@ struct HubHomeView: View {
         let query = String(historyQuery.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
         return VStack(alignment: .leading, spacing: 8) {
             TextField("Search chats", text: $historyQuery)
-                .textFieldStyle(.roundedBorder)
+                .hubSearchField()
                 .submitLabel(.search)
                 .disabled(model.connection != .connected)
             ScrollView {
@@ -1275,7 +1319,7 @@ struct HubHomeView: View {
                     knowledgeGraphSection(graph, displayed: graphToShow, neighborhood: neighborhood,
                                           domainGraph: domainGraph, scope: graphScope)
                 }
-                TextField("Find records", text: $knowledgeQuery).textFieldStyle(.roundedBorder).submitLabel(.search)
+                TextField("Find records", text: $knowledgeQuery).hubSearchField().submitLabel(.search)
                 if query.utf16.count > 200 {
                     Text("Use 200 characters or fewer.").foregroundStyle(.secondary)
                 } else if !query.isEmpty, let response, response.nodes == nil {

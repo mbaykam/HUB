@@ -13,6 +13,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
+        // Links, toggles and progress bars use the HUB accent instead of system blue.
+        window?.tintColor = HubWorkspacePalette.accentUIColor
         window?.rootViewController = HubWorkspaceNavigationController(rootViewController: HubConnectionViewController())
         window?.makeKeyAndVisible()
 

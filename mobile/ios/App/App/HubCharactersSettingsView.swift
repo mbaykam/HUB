@@ -9,7 +9,7 @@ struct HubCharactersSettingsView: View {
     @State private var attempt = 0
 
     var body: some View {
-        List {
+        HubList {
             if let settings {
                 if let warning = settings.warning { Text(warning).foregroundStyle(.secondary) }
                 ForEach(settings.characters) { character in
@@ -98,7 +98,7 @@ private struct HubCharacterEditor: View {
     }
 
     var body: some View {
-        Form {
+        HubForm {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             Picker("Character settings", selection: $tab) {
                 ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
