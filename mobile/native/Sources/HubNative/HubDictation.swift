@@ -1,5 +1,23 @@
 import Foundation
 
+/// The last conversational request HUB sent to a model for one character,
+/// exactly as dispatched. HUB keeps it in memory only.
+public struct HubCharacterRequest: Decodable, Equatable, Sendable {
+    public struct Record: Decodable, Equatable, Sendable {
+        public let characterId: String
+        public let sessionId: String
+        /// Milliseconds since 1970.
+        public let at: Double
+        public let json: String?
+        public let unavailable: String?
+    }
+
+    public let record: Record?
+    /// What the request contains and what providers do not expose.
+    public let boundary: String
+    public let retention: String
+}
+
 /// What HUB hands the phone for one voice-typing take: the fixed recognition
 /// endpoint and the first socket message, which carries a key that expires in
 /// minutes. The stored Soniox key never reaches the phone.

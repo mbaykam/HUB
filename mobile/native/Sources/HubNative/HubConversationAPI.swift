@@ -1971,6 +1971,20 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubCharacterSettings.self, from: data)
     }
 
+    /// The complete request HUB last sent to a model for this character.
+    /// Reading it never calls a model.
+    public func characterRequest(id: String) async throws -> HubCharacterRequest {
+        guard UUID(uuidString: id) != nil else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/character-request", headers: ["x-hub-characters": "1"],
+                                         query: [URLQueryItem(name: "characterId", value: id)],
+                                         maxBytes: 80 * 1_048_576, operationTimeout: 30)
+        let value = try JSONDecoder().decode(HubCharacterRequest.self, from: data)
+        if let record = value.record {
+            guard record.characterId == id, record.at.isFinite, record.at >= 0 else { throw HubAttachmentError.invalidResponse }
+        }
+        return value
+    }
+
     public func saveCharacter(_ character: HubCharacterSettings.Character, revision: Int, creating: Bool) async throws -> HubCharacterSettings {
         guard UUID(uuidString: character.id) != nil, revision >= 0 else { throw HubAttachmentError.invalidResponse }
         let encoded = try JSONEncoder().encode(character)

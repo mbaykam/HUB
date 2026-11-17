@@ -1164,6 +1164,30 @@ final class HubConversationTests: XCTestCase {
         }
     }
 
+    func testCharacterRequestInspectorReadsTheLastDispatchedRequestForThatCharacter() async throws {
+        let api = try client(), id = "11111111-1111-4111-8111-111111111111"
+        CatalogFixture.reply = #"{"record":{"characterId":"\#(id)","sessionId":"chat-1","at":1763359200000,"bytes":17,"json":"{\"model\":\"m\"}"},"boundary":"Complete request.","retention":"Memory only."}"#
+        let value = try await api.characterRequest(id: id)
+        XCTAssertEqual(value.record?.json, #"{"model":"m"}"#)
+        XCTAssertEqual(value.record?.sessionId, "chat-1")
+        XCTAssertEqual(value.boundary, "Complete request.")
+        let request = try XCTUnwrap(CatalogFixture.request)
+        XCTAssertEqual(request.url?.absoluteString, "https://hub.example.com/api/hub/character-request?characterId=\(id)")
+        XCTAssertEqual(request.httpMethod ?? "GET", "GET")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-hub-characters"), "1")
+
+        CatalogFixture.reply = #"{"record":null,"boundary":"b","retention":"r"}"#
+        let empty = try await api.characterRequest(id: id)
+        XCTAssertNil(empty.record)
+        CatalogFixture.reply = #"{"record":{"characterId":"22222222-2222-4222-8222-222222222222","sessionId":"chat-1","at":1,"json":"{}"},"boundary":"b","retention":"r"}"#
+        do { _ = try await api.characterRequest(id: id); XCTFail("A different character's request must be rejected") } catch {
+            XCTAssertEqual(error as? HubAttachmentError, .invalidResponse)
+        }
+        do { _ = try await api.characterRequest(id: "not-a-character"); XCTFail("Only saved character ids are sent") } catch {
+            XCTAssertEqual(error as? HubAttachmentError, .invalidResponse)
+        }
+    }
+
     func testVoiceTypingKeepsConfirmedWordsAndReplacesWordsStillBeingRecognized() throws {
         var transcript = HubDictationTranscript()
         try transcript.receive(Data(#"{"tokens":[{"text":"Bugün","is_final":true},{"text":" hava","is_final":false}]}"#.utf8))
