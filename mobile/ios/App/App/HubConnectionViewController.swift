@@ -1051,6 +1051,26 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
              "tools":[{"name":"hub_view_screen","description":"Read one consented frame"}]}
             """#.utf8)
         }
+        if request.httpMethod == "GET", url.path == "/api/hub/goals",
+           request.value(forHTTPHeaderField: "x-hub-goals") == "1" {
+            return Data(#"""
+            {"characters":[],"goals":[
+                {"id":"hub-goal-fixture","title":"Plan the autumn release","state":"active","status":"working",
+                 "updatedAt":1763359200000,"objective":"Ship the release notes and the checklist.","revision":2,
+                 "plan":[{"id":"m1","title":"Collect changes","status":"done"},
+                         {"id":"m2","title":"Draft release notes","status":"working"},
+                         {"id":"m3","title":"Review with the team","status":"pending"}],
+                 "checkpoint":{"summary":"Changes from the last three weeks are collected.","nextAction":"Draft the release notes."}}]}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/automations",
+           request.value(forHTTPHeaderField: "x-hub-automations") == "1" {
+            return Data(#"""
+            {"revision":1,"automations":[
+                {"id":"routine-fixture","title":"Morning brief","state":"active","status":"scheduled",
+                 "updatedAt":1763359200000,"nextAt":1763445600000,"prompt":"Summarize today's agenda and open to-dos."}]}
+            """#.utf8)
+        }
         if request.httpMethod == "GET", url.path == "/api/hub/character-request",
            url.query == "characterId=11111111-1111-4111-8111-111111111111" {
             return Data(#"""
