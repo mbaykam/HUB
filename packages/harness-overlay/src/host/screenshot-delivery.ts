@@ -1,7 +1,9 @@
 import {createHash} from "node:crypto";
 import {constants} from "node:fs";
 import {lstat, open, realpath} from "node:fs/promises";
-import {basename, isAbsolute, relative, resolve, sep} from "node:path";
+import {homedir} from "node:os";
+import {basename, isAbsolute, join, relative, resolve, sep} from "node:path";
+import {installDesktopControl, WindowsDesktopInput} from "./desktop-control.ts";
 // pngjs ships without TypeScript declarations.
 // @ts-expect-error No declarations are published by pngjs.
 import pngjs from "pngjs";
@@ -137,12 +139,29 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
       return {kind: "hub-screenshot", name, attachment};
     },
   });
+  // Computer use on this PC shares the same desktop capture.
+  const offControl = desktop ? installDesktopControl(ctx, {
+    async capture(sessionId, signal) {
+      const result = await desktop.request(sessionId, "desktop-screenshot", {}, signal) as AgentDesktopScreenshotResult;
+      const data = Buffer.from(result.data, "base64");
+      requireVisiblePNG(data);
+      return data;
+    },
+    input: new WindowsDesktopInput(join(process.env.DSH_HOME ?? join(homedir(), ".dsh"), "hub-desktop")),
+    async vision(agent, signal) {
+      const route = agent?.session?.requestHeader?.()?.config;
+      if (!route?.provider || !route.model || !ctx.llm?.resolveModelInfo) return false;
+      const info = await ctx.llm.resolveModelInfo(route.provider, route.model, signal);
+      return info?.inputModalities?.includes("image") === true;
+    },
+    save: data => ctx.attachments.saveImage({data, mediaType: "image/png", name: "Desktop look.png"}),
+  }) : undefined;
   const offGuide = ctx.systemPrompt?.section({
     name: "hub:screenshot-delivery",
     order: 92,
     text: "Use browser_screenshot for a requested web page capture. For a Windows desktop screenshot, use hub_capture_desktop when available. It captures and displays the primary screen in one call. If the request is ambiguous, ask the user to state the target in a direct request, for example 'Masaüstünün ekran görüntüsünü al.' If Windows cannot capture, report that result and do not retry through PowerShell, CopyFromScreen, or a different target. Use hub_show_screenshot for an existing workspace PNG; a local path does not display it.",
   });
-  return () => { offGuide?.(); offDesktop?.(); desktop?.dispose(); offTool(); };
+  return () => { offGuide?.(); offControl?.(); offDesktop?.(); desktop?.dispose(); offTool(); };
 }
 
 function windowsDesktopPort(): AgentBrowserProcessPort | undefined {
