@@ -38,6 +38,7 @@ button.pill.primary{background:var(--accent);color:#0a0d1f}button.pill.danger{co
 input.text{width:100%;height:44px;border-radius:12px;border:.6px solid var(--line);background:rgba(255,255,255,.06);color:var(--text);padding:0 12px;font:inherit}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translateX(-50%);padding:10px 16px;border-radius:999px;font-weight:600;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.on{opacity:1}
+button:focus:not(:focus-visible){outline:none}
 </style></head><body><main>
 <header><h1>Apps</h1><span class="count" id="count"></span></header>
 <label class="search glass"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" placeholder="Search apps" autocomplete="off"></label>
