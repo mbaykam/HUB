@@ -21,7 +21,7 @@ import {installInstructionFiles,InstructionFiles} from "./host/instruction-files
 import {installToolCatalog} from "./host/tool-catalog.ts";
 import {installAutomations} from "./host/automations.ts";
 import {providerGate,type ProviderGate} from "./host/provider-gate.ts";
-import {BackgroundAdmission} from "./host/background-admission.ts";
+import {BackgroundAdmission,recentlyActive} from "./host/background-admission.ts";
 import {installGoals} from "./host/goals.ts";
 import type {GoalsStore} from "./host/goals-store.ts";
 import { PresentationRuntime } from "./host/presentation.ts";
@@ -79,7 +79,11 @@ export class HubCharacters extends Service {
   constructor(ctx:CharacterHost,root=join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-characters"),camoRuntime?:CamofoxRuntime){
     super(ctx,"hubCharacters");this.host=ctx;this.store=new CharacterStore(root);this.speechSettings=new SharedSpeechSettings(root);this.instructions=new InstructionFiles(join(root,"instructions"));this.quota=providerGate(join(root,"..","hub-provider-health"));
     ctx.effect(()=>installCharacterRequests(ctx,this),"HUB full request inspector");
-    this.background=new BackgroundAdmission(()=>ctx.agents.list().some((a:any)=>a.status!=="idle"&&!/^hub-(goal|automation|memory)-/.test(a.id)&&!/^hub-(goal|automation|memory)-/.test(a.session.header.parentSession??"")));
+    // Foreground chats keep priority over Goals, Automations and Knowledge,
+    // but only while they are actually moving: a chat that has produced no
+    // event for ten minutes (waiting on the user, or stuck) no longer holds
+    // all background work, which once froze learning for hours.
+    this.background=new BackgroundAdmission(()=>ctx.agents.list().some((a:any)=>a.status!=="idle"&&!/^hub-(goal|automation|memory)-/.test(a.id)&&!/^hub-(goal|automation|memory)-/.test(a.session.header.parentSession??"")&&recentlyActive(a)));
     ctx.effect(()=>installCharacterActivity(ctx,root),"HUB observed specialist activity");
     ctx.effect(()=>installPlanner(ctx,this),"HUB personal agenda and conversation work plans");
     const lifetime=new AbortController();const camofox=camoRuntime??new CamofoxRuntime(ctx.subprocess,lifetime.signal);
