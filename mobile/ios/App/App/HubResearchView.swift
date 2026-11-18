@@ -46,7 +46,7 @@ struct HubResearchView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .disabled(busy)
             }
-            .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+            .hubBackdrop()
             .navigationTitle(job != nil ? "Research progress" : (showJobs ? "Research tasks" : "Research"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -3366,7 +3366,9 @@ public final class HubConversationAPI {
                 }
             }
         }
-        let result = try await rpc("session/list", request: [:], maxBytes: 8_388_608)
+        // The host's descriptor names this argument `_request` (an unused,
+        // reserved list request); sending `request` is rejected.
+        let result = try await rpc("session/list", arguments: ["_request": [String: Any]()], maxBytes: 16_777_216)
         let catalog = try JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: result))
         return catalog.items.reduce(into: [:]) { byID, item in
             guard HubVoiceAPI.validID(item.sessionId), item.updatedAt.isFinite, item.updatedAt >= 0 else { return }

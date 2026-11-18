@@ -134,7 +134,7 @@ struct HubUsageView: View {
         .foregroundStyle(.primary)
         .navigationTitle("Usage limits")
         .navigationBarTitleDisplayMode(.inline)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
     }
 
     private func provider<Content: View>(_ title: String, _ provider: HubUsageSnapshot.Provider, @ViewBuilder content: () -> Content) -> some View {

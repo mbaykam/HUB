@@ -102,7 +102,7 @@ private struct HubCharacterRequestView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color(uiColor: HubWorkspacePalette.background).ignoresSafeArea())
+        .hubBackdrop()
         .navigationTitle("Last model request")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

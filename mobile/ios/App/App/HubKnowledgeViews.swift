@@ -1703,7 +1703,7 @@ struct HubKnowledgeGraphView: View {
     private func color(_ hue: Double, id: String) -> Color { Self.tone(hue, id: id) }
 
     /// One color per domain, shared by the graph, legends and Home.
-    static func tone(_ hue: Double, id: String) -> Color {
+    nonisolated static func tone(_ hue: Double, id: String) -> Color {
         if id == HubKnowledgeLayout.archiveID { return Color(red: 0.54, green: 0.76, blue: 0.84) }
         if id == HubKnowledgeLayout.unassignedID { return Color(red: 0.62, green: 0.65, blue: 0.7) }
         let saturation = 0.53, light = 0.72
@@ -1840,7 +1840,7 @@ struct HubKnowledgeActivityView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .sheet(item: $reviewEntry, onDismiss: { Task { await load(0) } }) { entry in
             HubKnowledgeCurationReviewView(api: api, entry: entry)
         }

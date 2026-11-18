@@ -79,7 +79,7 @@ struct HubConversationAppsView: View {
             }
         }
         .padding(.top, 12)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .task(id: LoadRequest(appID: selected?.id, fileID: selectedFile?.id, attempt: attempt)) {
             if let selectedFile {
                 fileError = false

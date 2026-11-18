@@ -79,11 +79,12 @@ struct HubVoiceCallBar: View {
             .accessibilityLabel("End voice call")
         }
         .buttonStyle(.plain)
-        .padding(.leading, 14)
-        .padding(.trailing, 8)
-        .padding(.vertical, 6)
-        .background(Color.green.opacity(0.12))
-        .overlay(alignment: .bottom) { Divider() }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .padding(.vertical, 4)
+        .hubGlass(Capsule(), tint: Color.green.opacity(0.35))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 }
 
@@ -99,19 +100,25 @@ struct HubNativeChatRequest: Equatable {
 }
 
 enum HubWorkspacePalette {
-    static let background = dynamic(light: 0xF4F6FB, dark: 0x0B101B)
-    static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x161B2A))
-    static let accentUIColor = dynamic(light: 0x3F51A5, dark: 0xBFCBFF)
+    /// Near-black in dark mode, a cool off-white in light mode.
+    static let background = dynamic(light: 0xF2F3F8, dark: 0x030407)
+    /// Solid surfaces: list rows, sheets, chips.
+    static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x111319))
+    /// Home cards: slightly see-through so the backdrop's glow shows.
+    static let card = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x0F1117, lightAlpha: 0.86, darkAlpha: 0.78))
+    static let accentUIColor = dynamic(light: 0x3D4FD6, dark: 0xA3B1FF)
     static let accent = Color(uiColor: accentUIColor)
-    static let onAccent = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x141B35))
-    static let muted = Color(uiColor: dynamic(light: 0x4E5970, dark: 0xA8B3CC))
+    static let onAccent = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x0A0D1F))
+    static let muted = Color(uiColor: dynamic(light: 0x5A6275, dark: 0x8D94A7))
     static let border = Color(uiColor: dynamic(light: 0x172233, dark: 0xFFFFFF))
 
-    private static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
+    private static func dynamic(light: UInt32, dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> UIColor {
         UIColor { traits in
-            let rgb = traits.userInterfaceStyle == .dark ? dark : light
+            let isDark = traits.userInterfaceStyle == .dark
+            let rgb = isDark ? dark : light
             return UIColor(red: CGFloat((rgb >> 16) & 255) / 255,
-                           green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+                           green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255,
+                           alpha: isDark ? darkAlpha : lightAlpha)
         }
     }
 }
@@ -171,7 +178,7 @@ extension View {
     @ViewBuilder func hubGroupedBackground() -> some View {
         if #available(iOS 16.0, *) {
             scrollContentBackground(.hidden)
-                .background(Color(uiColor: HubWorkspacePalette.background).ignoresSafeArea())
+                .hubBackdrop()
         } else {
             self
         }
@@ -281,6 +288,7 @@ struct HubHomeView: View {
     @State private var noteSaveFailed = false
     @State private var knowledgeScope = HubKnowledgeGraphView.Scope.all
     @State private var knowledgeSpatial = false
+    @State private var knowledgeLiving = true
     @State private var knowledgeLocalCenter: String?
     @State private var knowledgeFocusedDomain: String?
     @State private var knowledgeGraphReset = 0
@@ -324,6 +332,12 @@ struct HubHomeView: View {
     @State private var plannerOpen = false
     @State private var calendarExpanded = false
     @State private var plannerEditor: PlannerEdit?
+    @State private var knowledgeApps: [HubKnowledgeAsset]?
+    @State private var knowledgeAppsOpen = false
+    @State private var openingApp: String?
+    @State private var runningApp: HubOpenedKnowledgeFile?
+    @State private var completingTodos: Set<String> = []
+    @Namespace private var plannerNamespace
     @FocusState private var composerFocused: Bool
     @FocusState private var todoFocused: Bool
     private let card = HubWorkspacePalette.panel
@@ -386,7 +400,7 @@ struct HubHomeView: View {
         .animation(.easeInOut(duration: 0.2), value: model.voiceCall == nil)
         .foregroundStyle(.primary)
         .tint(accent)
-        .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .preferredColorScheme(chatPreferences.appearance.colorScheme)
         .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
         .sheet(isPresented: $knowledgeOpen, onDismiss: {
@@ -400,9 +414,9 @@ struct HubHomeView: View {
         .sheet(isPresented: $plannerOpen) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Agenda & to-dos").font(.headline)
+                    Text("Your day").font(.title2.bold())
                     Spacer()
-                    Button("Done") { plannerOpen = false }
+                    Button("Done") { plannerOpen = false }.hubGlassButton()
                 }
                 ScrollView {
                     if let planner = model.planner { personalPlanner(planner) }
@@ -411,7 +425,7 @@ struct HubHomeView: View {
             }
             .padding(18)
             .foregroundStyle(.primary)
-            .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
+            .hubBackdrop()
             .sheet(item: $plannerEditor, content: plannerEditorView)
         }
         .sheet(item: Binding(get: { plannerOpen ? nil : plannerEditor }, set: { plannerEditor = $0 }), content: plannerEditorView)
@@ -445,6 +459,13 @@ struct HubHomeView: View {
                     knowledgeActivityOpen = false
                 })
             }
+        }
+        .sheet(isPresented: $knowledgeAppsOpen) {
+            if let api = chatAPI() { HubKnowledgeAppsView(api: api) }
+        }
+        .fullScreenCover(item: $runningApp) { HubKnowledgeAppRunner(file: $0) }
+        .task(id: KnowledgeAppsRequest(connected: model.connection == .connected, notes: model.knowledge?.nodes.count ?? -1)) {
+            await loadKnowledgeApps()
         }
         .sheet(isPresented: $voiceHistoryOpen) {
             if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
@@ -520,6 +541,9 @@ struct HubHomeView: View {
                 workspaceDirectoryOpen = false
                 workspaceToRename = nil
                 workspaceToRemove = nil
+                knowledgeApps = nil
+                knowledgeAppsOpen = false
+                runningApp = nil
             }
         }
     }
@@ -606,40 +630,73 @@ struct HubHomeView: View {
 
     private var homeContent: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button { showPanel(.history) } label: {
-                    Image(systemName: "sidebar.left").frame(width: 44, height: 44)
+            HubGlassGroup(spacing: 20) {
+                HStack {
+                    Button { showPanel(.history) } label: {
+                        Image(systemName: "sidebar.left").font(.body.weight(.medium))
+                            .frame(width: 44, height: 44)
+                            .hubGlassCircle()
+                    }
+                    .accessibilityLabel("Chat history")
+                    Spacer(minLength: 4)
+                    greeting
+                    Spacer(minLength: 4)
+                    Button { showPanel(.tools) } label: {
+                        Image(systemName: "square.grid.2x2").font(.body.weight(.medium))
+                            .frame(width: 44, height: 44)
+                            .hubGlassCircle()
+                    }
+                    .accessibilityLabel("Workspace tools")
                 }
-                .accessibilityLabel("Chat history")
-                Spacer(minLength: 4)
-                greeting
-                Spacer(minLength: 4)
-                Button { showPanel(.tools) } label: {
-                    Image(systemName: "sidebar.right").frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("Workspace tools")
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 4)
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     connectionRow
                     section("Knowledge", icon: "brain.head.profile", actionLabel: "Explore knowledge", open: showKnowledge) {
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
-                            knowledgeSummary(value, notes: notes.count)
-                            let domains = HubKnowledgeLayout.summary(value)
-                            if domains.isEmpty {
+                            if value.nodes.isEmpty {
                                 Text("Notes appear here as HUB learns from your chats.")
                                     .font(.caption).foregroundStyle(.secondary)
                             } else {
-                                HubKnowledgeDomainStrip(domains: domains) { id in
-                                    showKnowledge()
-                                    focusKnowledgeDomain(id)
+                                HubLivingBrainView(graph: value, height: 300, active: homeVisible, openRecord: selectKnowledgeNode,
+                                                   openDomain: { id in
+                                                       showKnowledge()
+                                                       focusKnowledgeDomain(id)
+                                                   }, openExplorer: showKnowledge)
+                                    .background(Color(uiColor: HubWorkspacePalette.background).opacity(0.7), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    .padding(.horizontal, -6)
+                                    .accessibilityIdentifier("hub.home.brain")
+                            }
+                            knowledgeSummary(value, notes: notes.count)
+                            let domains = HubKnowledgeLayout.summary(value)
+                            if !domains.isEmpty {
+                                HubChipRow(items: Array(domains.prefix(8)), extra: max(0, domains.count - 8)) { domain in
+                                    Button {
+                                        showKnowledge()
+                                        focusKnowledgeDomain(domain.id)
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Circle().fill(HubKnowledgeGraphView.tone(domain.hue, id: domain.id)).frame(width: 8, height: 8)
+                                            Text(domain.title).font(.caption).lineLimit(1)
+                                            Text(domain.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .frame(minHeight: 32)
+                                        .background(HubWorkspacePalette.border.opacity(0.07), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(domain.id == HubKnowledgeLayout.unassignedID)
+                                    .accessibilityLabel("\(domain.title), \(domain.count) notes")
+                                    .accessibilityIdentifier("hub.knowledge.chip.\(domain.id)")
                                 }
                             }
+                            knowledgeAppsRow
                         }
-
                     }
                     section("Your day", icon: "calendar", actionLabel: "Open ↗", open: {
                         hideKeyboard()
@@ -658,10 +715,7 @@ struct HubHomeView: View {
                         }
                     }
                     if model.connection == .connected, let api = chatAPI() {
-                        HubBrowserPreviewView(api: api, conversations: model.conversations ?? [],
-                                              visible: selectedChat == nil && panel == nil &&
-                                                !knowledgeOpen && !plannerOpen && !tasksOpen &&
-                                                !settingsOpen && !usageOpen && !knowledgeActivityOpen)
+                        HubBrowserPreviewView(api: api, conversations: model.conversations ?? [], visible: homeVisible)
                             .id(ObjectIdentifier(api))
                     }
                 }
@@ -698,7 +752,7 @@ struct HubHomeView: View {
             let salutation: LocalizedStringKey = hour < 5 ? "Good night" : hour < 12 ? "Good morning"
                 : hour < 18 ? "Good afternoon" : "Good evening"
             VStack(spacing: 1) {
-                Text(salutation).font(.subheadline.weight(.semibold))
+                Text(salutation).font(.headline.weight(.semibold))
                 HStack(spacing: 5) {
                     Circle()
                         .fill(model.connection == .connected ? Color.green
@@ -712,6 +766,62 @@ struct HubHomeView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(salutation) + Text(model.connection == .connected ? ", connected" : ", not connected"))
         }
+    }
+
+    /// Home is on screen with nothing covering it.
+    private var homeVisible: Bool {
+        selectedChat == nil && panel == nil && !knowledgeOpen && !plannerOpen && !tasksOpen &&
+            !settingsOpen && !usageOpen && !knowledgeActivityOpen && !knowledgeAppsOpen && runningApp == nil
+    }
+
+    /// The web apps Knowledge has saved, one tap from running.
+    @ViewBuilder private var knowledgeAppsRow: some View {
+        if let apps = knowledgeApps, !apps.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Apps").font(.subheadline.weight(.semibold))
+                    Text(apps.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("See all") { knowledgeAppsOpen = true }
+                        .font(.footnote).buttonStyle(.plain).foregroundStyle(accent).frame(minHeight: 36)
+                        .accessibilityIdentifier("hub.home.apps.all")
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(apps.prefix(12)) { app in
+                            Button { Task { await runApp(app) } } label: {
+                                VStack(spacing: 6) {
+                                    ZStack {
+                                        HubKnowledgeAppIcon(asset: app, size: 52)
+                                        if openingApp == app.id { ProgressView().tint(.white) }
+                                    }
+                                    Text(HubKnowledgeApps.title(app)).font(.caption2).lineLimit(1).frame(width: 64)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(openingApp != nil)
+                            .accessibilityLabel("Run \(HubKnowledgeApps.title(app))")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func loadKnowledgeApps() async {
+        guard model.connection == .connected, let api = chatAPI() else { return }
+        if let assets = try? await api.knowledgeAssets(), !Task.isCancelled, chatAPI() === api {
+            knowledgeApps = HubKnowledgeApps.apps(in: assets)
+        }
+    }
+
+    private func runApp(_ app: HubKnowledgeAsset) async {
+        guard openingApp == nil, let api = chatAPI() else { return }
+        openingApp = app.id
+        defer { openingApp = nil }
+        if let data = try? await api.knowledgeAssetBytes(app) { runningApp = HubOpenedKnowledgeFile(asset: app, data: data) }
     }
 
     private func knowledgeSummary(_ graph: HubHomeKnowledge, notes: Int) -> some View {
@@ -826,13 +936,16 @@ struct HubHomeView: View {
                         settingsOpen = true
                     } label: {
                         Label("Settings", systemImage: "gearshape")
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
+                    .hubGlassButton()
                 }
                 Spacer()
                 Button(action: closePanel) {
-                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                    Image(systemName: "xmark").font(.subheadline.weight(.semibold))
+                        .frame(width: 40, height: 40)
+                        .hubGlassCircle()
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Close panel")
             }
@@ -845,9 +958,15 @@ struct HubHomeView: View {
             }
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(card.ignoresSafeArea())
+        // A floating glass sheet, inset from the screen edges like the
+        // system's own sidebars, darkened enough to read long lists on.
+        .background(RoundedRectangle(cornerRadius: 34, style: .continuous).fill(HubWorkspacePalette.panel.opacity(0.62)))
+        .hubGlass(RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
     }
 
     private var workspaceTools: some View {
@@ -856,7 +975,8 @@ struct HubHomeView: View {
                 HStack(alignment: .top, spacing: 8) {
                     section("Knowledge", actionLabel: "Explore", open: showKnowledge) {
                         if let graph = model.knowledge {
-                            HubKnowledgeGraphView(graph: graph, height: 90, overview: true, showsControls: false, select: selectKnowledgeNode)
+                            HubLivingBrainView(graph: graph, height: 130, active: panel == .tools, openRecord: selectKnowledgeNode,
+                                               openExplorer: showKnowledge)
                             let chats = graph.nodes.filter { $0.kind == "conversation" }.count
                             Text("\(graph.nodes.count - chats) brain notes · \(chats) chats")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -870,6 +990,10 @@ struct HubHomeView: View {
                         toolTile("Usage", icon: "chart.bar.xaxis") {
                             closePanel()
                             usageOpen = true
+                        }
+                        toolTile("Apps", icon: "square.grid.2x2") {
+                            closePanel()
+                            knowledgeAppsOpen = true
                         }
                     }
                     .frame(width: 78)
@@ -912,10 +1036,9 @@ struct HubHomeView: View {
             Button { Task { await newChat() } } label: {
                 Label("New chat", systemImage: "square.and.pencil")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color(uiColor: .systemBackground))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .frame(maxWidth: .infinity, minHeight: 36)
             }
+            .hubGlassButton(prominent: true)
             .disabled(creatingChat || model.connection != .connected)
             .opacity(creatingChat || model.connection != .connected ? 0.5 : 1)
             ScrollView(showsIndicators: false) {
@@ -984,6 +1107,11 @@ struct HubHomeView: View {
         }
     }
 
+    private struct KnowledgeAppsRequest: Equatable {
+        let connected: Bool
+        let notes: Int
+    }
+
     private struct WorkspaceRequest: Equatable {
         let connected: Bool
         let attempt: Int
@@ -1049,8 +1177,12 @@ struct HubHomeView: View {
             guard !Task.isCancelled, chatAPI() === api, !workspaceBusy else { return }
             workspaces = items
             archivedSessions = Set(snapshot.archivedSessionIds)
-            if items.contains(where: { !$0.sessionIds.isEmpty }) {
-                let titles = try await api.workspaceChatTitles()
+            // Titles are a nicety: the workspaces stay listed if they fail.
+            var known = Dictionary(model.conversations?.map { ($0.sessionId, $0) } ?? [], uniquingKeysWith: { a, _ in a })
+            known.merge(workspaceChats) { _, cached in cached }
+            workspaceChats = known
+            if items.contains(where: { $0.sessionIds.contains { known[$0] == nil } }),
+               let titles = try? await api.workspaceChatTitles() {
                 guard !Task.isCancelled, chatAPI() === api else { return }
                 workspaceChats = titles
             }
@@ -1446,7 +1578,7 @@ struct HubHomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
         .tint(accent)
-        .background(Color(uiColor: Self.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .interactiveDismissDisabled(noteSaving || noteEditing)
         .sheet(isPresented: $knowledgeDomainsOpen) {
             if let api = chatAPI() {
@@ -1744,11 +1876,22 @@ struct HubHomeView: View {
         let canvas = HubKnowledgeGraphView(graph: displayed, height: 400, scope: scope, spatial: knowledgeSpatial,
                                            focusID: neighborhood == nil ? nil : knowledgeLocalCenter,
                                            selectDomain: onDomain, select: selectKnowledgeNode)
-        let identity = [scope.rawValue, String(knowledgeSpatial), knowledgeLocalCenter ?? "",
+        let identity = [scope.rawValue, String(knowledgeSpatial), String(knowledgeLiving), knowledgeLocalCenter ?? "",
                         knowledgeFocusedDomain ?? "", String(knowledgeGraphReset)].joined(separator: "/")
         return VStack(alignment: .leading, spacing: 8) {
             knowledgeGraphHeader(graph, neighborhood: neighborhood, domainGraph: domainGraph)
-            canvas.id(identity).overlay(alignment: .topTrailing) {
+            Group {
+                if knowledgeLiving {
+                    HubLivingBrainView(graph: displayed, height: 460, interactive: true, scope: scope,
+                                       active: knowledgeOpen && !knowledgeDomainsOpen,
+                                       openRecord: selectKnowledgeNode, openDomain: onDomain)
+                        .background(Color(uiColor: HubWorkspacePalette.background).opacity(0.7), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                } else {
+                    canvas
+                }
+            }
+            .id(identity).overlay(alignment: .topTrailing) {
                 knowledgeGraphMenu(domains: domains, canFocus: canFocus)
             }
             if canFocus, scope != .archive {
@@ -1787,10 +1930,15 @@ struct HubHomeView: View {
         }
     }
 
+    private var knowledgeGraphModeName: String {
+        knowledgeLiving ? "Brain" : knowledgeSpatial ? "3D" : "2D"
+    }
+
     private func knowledgeGraphMenu(domains: [HubHomeKnowledge.Domain], canFocus: Bool) -> some View {
         Menu {
-            Button("2D") { knowledgeSpatial = false }
-            Button("3D") { knowledgeSpatial = true }
+            Button("Brain") { knowledgeLiving = true }
+            Button("2D") { knowledgeLiving = false; knowledgeSpatial = false }
+            Button("3D") { knowledgeLiving = false; knowledgeSpatial = true }
             Button("Reset view") { knowledgeGraphReset += 1 }
             Button("Refresh graph") { Task { await refreshKnowledgeGraph() } }
             if canFocus {
@@ -1800,11 +1948,15 @@ struct HubHomeView: View {
                 }
             }
         } label: {
-            Text(knowledgeSpatial ? "3D" : "2D").font(.caption.weight(.semibold))
-                .frame(minWidth: 44, minHeight: 44)
+            Text(knowledgeGraphModeName).font(.caption.weight(.semibold))
+                .padding(.horizontal, 12)
+                .frame(minWidth: 44, minHeight: 36)
+                .hubGlass(Capsule(), interactive: true)
+                .frame(minHeight: 44)
         }
+        .padding(6)
         .accessibilityLabel("Graph view")
-        .accessibilityValue(knowledgeSpatial ? "3D" : "2D")
+        .accessibilityValue(knowledgeGraphModeName)
     }
 
     private func domainTitle(_ id: String, in graph: HubHomeKnowledge) -> String {
@@ -1942,8 +2094,7 @@ struct HubHomeView: View {
             }
             .buttonStyle(.plain)
             .padding(5)
-            .background(card, in: RoundedRectangle(cornerRadius: 25))
-            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(HubWorkspacePalette.border.opacity(0.09)))
+            .hubGlass(RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -1982,216 +2133,400 @@ struct HubHomeView: View {
         let openTodos = planner.items.filter { !$0.deleted && $0.state == "open" && $0.kind == "todo" }
         let nearCount = openTodos.filter { ($0.horizon ?? "near") == "near" }.count
         let laterCount = openTodos.filter { $0.horizon == "later" }.count
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 18) {
-                ForEach(PlannerTab.allCases, id: \.self) { tab in
-                    Button {
-                        hideKeyboard()
-                        plannerTab = tab
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(tab.title).font(.subheadline.weight(.medium))
-                            if tab == .todos, !openTodos.isEmpty {
-                                Text(openTodos.count.formatted()).font(.caption.monospacedDigit())
-                                    .foregroundStyle(HubWorkspacePalette.muted)
-                            }
-                        }
-                            .foregroundStyle(plannerTab == tab ? Color.primary : HubWorkspacePalette.muted)
-                            .frame(minHeight: 44)
-                            .padding(.horizontal, 2)
-                            .overlay(alignment: .bottom) {
-                                if plannerTab == tab { Capsule().fill(accent).frame(height: 2) }
-                            }
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier(tab == .agenda ? "hub.planner.agenda" : "hub.planner.todos")
-                    .accessibilityAddTraits(plannerTab == tab ? .isSelected : [])
-                }
+        let todayEvents = planner.items.filter { !$0.deleted && $0.state == "open" && $0.kind == "event" && $0.occurs(on: Date()) }.count
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                plannerSwitcher(todos: openTodos.count, events: todayEvents)
                 Spacer(minLength: 0)
+                Button {
+                    hideKeyboard()
+                    plannerEditor = PlannerEdit(item: nil, kind: plannerTab == .agenda ? .event : .todo)
+                } label: {
+                    Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 40, height: 40)
+                        .hubGlassCircle()
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(plannerTab == .agenda ? "Add event" : "Add to-do with details")
+                .disabled(!canEditPlanner)
             }
-            .background(alignment: .bottom) { Rectangle().fill(HubWorkspacePalette.border.opacity(0.12)).frame(height: 1) }
             if plannerTab == .agenda {
-                HStack {
-                    Button {
-                        calendarExpanded.toggle()
-                    } label: {
-                        Label(agendaDate.formatted(date: .abbreviated, time: .omitted),
-                              systemImage: calendarExpanded ? "chevron.up" : "chevron.down")
-                            .frame(minHeight: 44)
-                    }
-                    .accessibilityLabel(calendarExpanded ? "Collapse calendar" : "Expand calendar")
-                    Spacer()
-                    Button {
-                        plannerEditor = PlannerEdit(item: nil, kind: .event)
-                    } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Add event")
-                    .disabled(!canEditPlanner)
-                }
-                if calendarExpanded {
-                    DatePicker("Choose a day", selection: $agendaDate, displayedComponents: .date)
-                        .datePickerStyle(.graphical).labelsHidden()
-                } else {
-                    agendaWeek
-                }
-                let events = planner.items.filter {
-                    !$0.deleted && $0.state == "open" && $0.kind == "event" && $0.occurs(on: agendaDate)
-                }.sorted { ($0.start ?? "") < ($1.start ?? "") }
-                if events.isEmpty { Text("No plans for this day.").foregroundStyle(.secondary) }
-                ForEach(events) { item in
-                    Button {
-                        plannerEditor = PlannerEdit(item: item, kind: .event)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title).lineLimit(2)
-                            if let instant = HubPlannerDraft.parseInstant(item.start) {
-                                Text(instant, style: .time).font(.caption).foregroundStyle(.secondary)
-                                    .environment(\.timeZone, item.timeZone.flatMap(TimeZone.init(identifier:)) ?? .current)
-                            } else {
-                                Text("All day").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canEditPlanner || item.version == nil)
-                }
+                agendaView(planner)
             } else {
                 todoList(planner, nearCount: nearCount, laterCount: laterCount)
             }
             if model.plannerSaving { ProgressView().accessibilityLabel("Saving to planner") }
-            if let error = model.plannerError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if let error = model.plannerError {
+                Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
+            }
         }
     }
 
-    private var agendaWeek: some View {
+    /// Agenda | To-dos as a pill switcher, with what each holds today.
+    private func plannerSwitcher(todos: Int, events: Int) -> some View {
+        HStack(spacing: 2) {
+            ForEach(PlannerTab.allCases, id: \.self) { tab in
+                let selected = plannerTab == tab
+                Button {
+                    hideKeyboard()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { plannerTab = tab }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab == .agenda ? "calendar" : "checklist").font(.footnote.weight(.semibold))
+                        Text(tab.title).font(.subheadline.weight(.semibold))
+                        let count = tab == .agenda ? events : todos
+                        if count > 0 {
+                            Text(count.formatted()).font(.caption2.weight(.bold).monospacedDigit())
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Capsule().fill(selected ? HubWorkspacePalette.onAccent.opacity(0.18) : HubWorkspacePalette.border.opacity(0.1)))
+                        }
+                    }
+                    .foregroundStyle(selected ? HubWorkspacePalette.onAccent : Color.primary.opacity(0.75))
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 40)
+                    .background {
+                        if selected {
+                            Capsule().fill(accent).matchedGeometryEffect(id: "plannerTab", in: plannerNamespace)
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(tab == .agenda ? "hub.planner.agenda" : "hub.planner.todos")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(HubWorkspacePalette.border.opacity(0.07)))
+        .frame(minHeight: 44)
+    }
+
+    private func agendaView(_ planner: HubHomePlanner) -> some View {
+        let calendar = Calendar.current
+        let open = planner.items.filter { !$0.deleted && $0.state == "open" && $0.kind == "event" }
+        let events = open.filter { $0.occurs(on: agendaDate) }.sorted { ($0.start ?? "") < ($1.start ?? "") }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 4) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { calendarExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(agendaDate.formatted(.dateTime.month(.wide).year())).font(.headline)
+                        Image(systemName: "chevron.down").font(.caption.weight(.bold))
+                            .rotationEffect(.degrees(calendarExpanded ? 180 : 0))
+                            .foregroundStyle(accent)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(calendarExpanded ? "Collapse calendar" : "Expand calendar")
+                Spacer()
+                if !calendar.isDateInToday(agendaDate) {
+                    Button("Today") { withAnimation { agendaDate = Date() } }
+                        .font(.footnote.weight(.semibold)).buttonStyle(.plain).foregroundStyle(accent)
+                        .padding(.horizontal, 8).frame(minHeight: 44)
+                }
+                if !calendarExpanded {
+                    weekStep(-7, icon: "chevron.left", label: "Previous week")
+                    weekStep(7, icon: "chevron.right", label: "Next week")
+                }
+            }
+            if calendarExpanded {
+                DatePicker("Choose a day", selection: $agendaDate, displayedComponents: .date)
+                    .datePickerStyle(.graphical).labelsHidden()
+            } else {
+                agendaWeek(busyDays: open)
+            }
+            Text(agendaDate.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                .padding(.top, 2)
+            if events.isEmpty {
+                HStack(spacing: 12) {
+                    Image(systemName: "sun.max").font(.title3).foregroundStyle(accent.opacity(0.8))
+                        .frame(width: 40, height: 40).background(Circle().fill(accent.opacity(0.12)))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No plans for this day.").font(.subheadline)
+                        Text("Tap + to add an event.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(events) { item in eventRow(item) }
+                }
+            }
+        }
+    }
+
+    private func weekStep(_ days: Int, icon: String, label: LocalizedStringKey) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                agendaDate = Calendar.current.date(byAdding: .day, value: days, to: agendaDate) ?? agendaDate
+            }
+        } label: {
+            Image(systemName: icon).font(.footnote.weight(.semibold)).frame(width: 34, height: 34)
+                .hubGlassCircle().frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func eventRow(_ item: HubHomePlanner.Item) -> some View {
+        let zone = item.timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
+        let start = HubPlannerDraft.parseInstant(item.start)
+        let end = HubPlannerDraft.parseInstant(item.end)
+        let tone = Color(hue: HubBrainSimulation.unit(item.id) * 0.25 + 0.55, saturation: 0.55, brightness: 0.95)
+        return Button {
+            plannerEditor = PlannerEdit(item: item, kind: .event)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let start {
+                        Text(start, style: .time).font(.subheadline.weight(.semibold).monospacedDigit())
+                        if let end { Text(end, style: .time).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                    } else {
+                        Text("All day").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                }
+                .environment(\.timeZone, zone)
+                .frame(width: 58, alignment: .trailing)
+                Capsule().fill(tone).frame(width: 4).frame(minHeight: 34)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title).font(.subheadline.weight(.medium)).lineLimit(2).multilineTextAlignment(.leading)
+                    if let details = item.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
+                        Text(details).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(minHeight: 44)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(tone.opacity(0.08)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canEditPlanner || item.version == nil)
+    }
+
+    private func agendaWeek(busyDays events: [HubHomePlanner.Item]) -> some View {
         let calendar = Calendar.current
         let offset = ((calendar.dateComponents([.weekday], from: agendaDate).weekday ?? 2) + 5) % 7
         let first = calendar.date(byAdding: .day, value: -offset, to: agendaDate) ?? agendaDate
         let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: first) }
-        return HStack(spacing: 2) {
+        return HStack(spacing: 4) {
             ForEach(days, id: \.self) { day in
                 let selected = calendar.isDate(day, inSameDayAs: agendaDate)
+                let today = calendar.isDateInToday(day)
+                let busy = events.contains { $0.occurs(on: day) }
                 Button {
-                    agendaDate = day
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { agendaDate = day }
                 } label: {
-                    VStack(spacing: 4) {
-                        Text(day.formatted(.dateTime.weekday(.narrow))).font(.caption2).foregroundStyle(.secondary)
-                        Text(day.formatted(.dateTime.day())).font(.callout.weight(selected ? .semibold : .regular))
+                    VStack(spacing: 5) {
+                        Text(day.formatted(.dateTime.weekday(.narrow))).font(.caption2.weight(.medium))
+                            .foregroundStyle(selected ? HubWorkspacePalette.onAccent.opacity(0.8) : .secondary)
+                        Text(day.formatted(.dateTime.day())).font(.callout.weight(selected || today ? .bold : .regular).monospacedDigit())
+                            .foregroundStyle(selected ? HubWorkspacePalette.onAccent : today ? accent : .primary)
+                        Circle().fill(selected ? HubWorkspacePalette.onAccent : accent).frame(width: 4, height: 4).opacity(busy ? 1 : 0)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(selected ? accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .background {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(accent)
+                                .matchedGeometryEffect(id: "agendaDay", in: plannerNamespace)
+                        } else if today {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(accent.opacity(0.5), lineWidth: 1)
+                        }
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+                .accessibilityLabel(day.formatted(date: .complete, time: .omitted) + (busy ? ", has plans" : ""))
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
     }
 
     private func todoList(_ planner: HubHomePlanner, nearCount: Int, laterCount: Int) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                let count = todoHorizon == .near ? nearCount : laterCount
-                Text("Your list").font(.footnote).foregroundStyle(HubWorkspacePalette.muted)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                horizonChip(.near, count: nearCount)
+                horizonChip(.later, count: laterCount)
                 Spacer()
-                Menu {
-                    Picker("Your list", selection: $todoHorizon) {
-                        todoHorizonLabel(.near, count: nearCount).tag(HubHomePlanner.Horizon.near)
-                        todoHorizonLabel(.later, count: laterCount).tag(HubHomePlanner.Horizon.later)
-                    }
-                } label: {
-                    Label { todoHorizonLabel(todoHorizon, count: count) } icon: { Image(systemName: "chevron.up.chevron.down") }
-                        .font(.footnote.weight(.medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-                        .frame(minHeight: 44)
-                }
-                .disabled(model.plannerSaving)
-                .accessibilityLabel("To-do list")
-                .accessibilityValue(todoHorizon == .near ? "Soon" : "Later")
             }
             .onChange(of: todoHorizon) { _ in todoDraftID = UUID() }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("To-do list")
             quickTodo
             let items = planner.items.filter {
                 !$0.deleted && $0.state == "open" && $0.kind == "todo" && ($0.horizon ?? "near") == todoHorizon.rawValue
             }.sorted { ($0.date ?? "9999") < ($1.date ?? "9999") }
-            ForEach(items) { item in
-                HStack {
-                    Button { completeTodo(item) } label: {
-                        Image(systemName: "square").foregroundStyle(HubWorkspacePalette.muted)
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Complete \(item.title)")
-                    Button {
-                        plannerEditor = PlannerEdit(item: item, kind: .todo)
-                    } label: {
-                        Text(item.title).lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    }
-                    .accessibilityIdentifier("hub.planner.todo.\(item.id)")
-                }
-                .buttonStyle(.plain)
-                .disabled(!canEditPlanner || item.version == nil)
-            }
             if items.isEmpty {
-                Text(todoHorizon == .near ? "Add something you want to get done." : "Keep your longer-term plans here.")
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Image(systemName: todoHorizon == .near ? "checkmark.seal" : "sparkles").font(.title3)
+                        .foregroundStyle(accent.opacity(0.8))
+                        .frame(width: 40, height: 40).background(Circle().fill(accent.opacity(0.12)))
+                    Text(todoHorizon == .near ? "All clear. Add something you want to get done." : "Keep your longer-term plans here.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { Divider().padding(.leading, 48) }
+                        todoRow(item)
+                    }
+                }
             }
             let past = planner.items.filter { $0.deleted || $0.state == "done" }
                 .sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
             if !past.isEmpty {
-                DisclosureGroup("Completed & removed") {
+                DisclosureGroup {
                     ForEach(past.prefix(50)) { item in
-                        HStack {
-                            Text(item.title).lineLimit(2)
+                        HStack(spacing: 10) {
+                            Image(systemName: item.deleted ? "trash" : "checkmark.circle.fill")
+                                .foregroundStyle(item.deleted ? Color.secondary : Color.green.opacity(0.8))
+                            Text(item.title).lineLimit(2).strikethrough(!item.deleted).foregroundStyle(.secondary)
                             Spacer()
                             Button(item.deleted ? "Restore" : "Reopen") { restorePlannerItem(item) }
+                                .font(.footnote.weight(.semibold))
                                 .disabled(!canEditPlanner || item.version == nil)
                                 .frame(minHeight: 44)
                         }
                     }
+                } label: {
+                    Text("Completed & removed · \(past.count)").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    private func todoHorizonLabel(_ horizon: HubHomePlanner.Horizon, count: Int) -> Text {
-        if count == 0 { return Text(horizon == .near ? "Soon" : "Later") }
-        return horizon == .near ? Text("Soon (\(count))") : Text("Later (\(count))")
+    private func horizonChip(_ horizon: HubHomePlanner.Horizon, count: Int) -> some View {
+        let selected = todoHorizon == horizon
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) { todoHorizon = horizon }
+        } label: {
+            HStack(spacing: 5) {
+                Text(horizon == .near ? "Soon" : "Later").font(.footnote.weight(.semibold))
+                if count > 0 { Text(count.formatted()).font(.caption2.weight(.bold).monospacedDigit()).opacity(0.7) }
+            }
+            .foregroundStyle(selected ? accent : Color.secondary)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 32)
+            .background(Capsule().fill(selected ? accent.opacity(0.16) : HubWorkspacePalette.border.opacity(0.05)))
+            .overlay(Capsule().strokeBorder(selected ? accent.opacity(0.35) : .clear, lineWidth: 0.8))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.plannerSaving)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func todoRow(_ item: HubHomePlanner.Item) -> some View {
+        let done = completingTodos.contains(item.id)
+        return HStack(spacing: 6) {
+            Button {
+                guard !done else { return }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { _ = completingTodos.insert(item.id) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    completeTodo(item)
+                    completingTodos.remove(item.id)
+                }
+            } label: {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(done ? Color.green : HubWorkspacePalette.muted)
+                    .scaleEffect(done ? 1.12 : 1)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Complete \(item.title)")
+            Button {
+                plannerEditor = PlannerEdit(item: item, kind: .todo)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(item.title).font(.subheadline).lineLimit(2).multilineTextAlignment(.leading)
+                        .strikethrough(done).foregroundStyle(done ? Color.secondary : Color.primary)
+                    Spacer(minLength: 4)
+                    if let due = item.date { dueChip(due) }
+                    if item.sourceSessionId != nil {
+                        Image(systemName: "bubble.left").font(.caption2).foregroundStyle(.secondary)
+                            .accessibilityLabel("From a chat")
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("hub.planner.todo.\(item.id)")
+        }
+        .buttonStyle(.plain)
+        .disabled(!canEditPlanner || item.version == nil)
+        .contextMenu {
+            Button { plannerEditor = PlannerEdit(item: item, kind: .todo) } label: { Label("Edit", systemImage: "pencil") }
+            Button { completeTodo(item) } label: { Label("Mark done", systemImage: "checkmark.circle") }
+            Button(role: .destructive) { Task { _ = await removePlannerItem(item) } } label: { Label("Delete", systemImage: "trash") }
+        }
+    }
+
+    /// "Today", "Tomorrow", "Overdue" or a short date for a to-do's day.
+    private func dueChip(_ day: String) -> some View {
+        let parser = DateFormatter()
+        parser.calendar = Calendar(identifier: .gregorian)
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        let date = parser.date(from: day)
+        let calendar = Calendar.current
+        let label: String, tone: Color
+        if let date {
+            if calendar.isDateInToday(date) { label = NSLocalizedString("Today", comment: "To-do due today"); tone = accent }
+            else if calendar.isDateInTomorrow(date) { label = NSLocalizedString("Tomorrow", comment: "To-do due tomorrow"); tone = .secondary }
+            else if date < calendar.startOfDay(for: Date()) { label = NSLocalizedString("Overdue", comment: "To-do past its day"); tone = .red }
+            else { label = date.formatted(.dateTime.day().month(.abbreviated)); tone = .secondary }
+        } else {
+            label = day; tone = .secondary
+        }
+        return Text(label).font(.caption2.weight(.semibold)).foregroundStyle(tone)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(Capsule().fill(tone.opacity(0.12)))
     }
 
     private var quickTodo: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                TextField("What needs doing?", text: $todoDraft,
-                          prompt: Text("What needs doing?").foregroundColor(HubWorkspacePalette.muted))
-                    .focused($todoFocused)
-                    .frame(minHeight: 44)
-                    .submitLabel(.done)
-                    .onSubmit(submitTodo)
-                    .onChange(of: todoDraft) { _ in todoDraftID = UUID() }
-                Button {
-                    if todoDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        hideKeyboard()
-                        plannerEditor = PlannerEdit(item: nil, kind: .todo)
-                    } else { submitTodo() }
-                } label: {
-                    Text("Add")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(HubWorkspacePalette.onAccent)
-                        .padding(.horizontal, 13)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .background(accent, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
+        let empty = todoDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack(spacing: 8) {
+            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(accent.opacity(0.85))
+                .accessibilityHidden(true)
+            TextField("What needs doing?", text: $todoDraft,
+                      prompt: Text(todoHorizon == .near ? "Add a to-do" : "Add something for later").foregroundColor(HubWorkspacePalette.muted))
+                .focused($todoFocused)
+                .frame(minHeight: 44)
+                .submitLabel(.done)
+                .onSubmit(submitTodo)
+                .onChange(of: todoDraft) { _ in todoDraftID = UUID() }
+                .accessibilityLabel("What needs doing?")
+            Button {
+                if empty {
+                    hideKeyboard()
+                    plannerEditor = PlannerEdit(item: nil, kind: .todo)
+                } else { submitTodo() }
+            } label: {
+                Image(systemName: empty ? "slider.horizontal.3" : "arrow.up")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(empty ? HubWorkspacePalette.muted : HubWorkspacePalette.onAccent)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(empty ? HubWorkspacePalette.border.opacity(0.08) : accent))
+                    .frame(width: 44, height: 44)
+                    .animation(.easeOut(duration: 0.15), value: empty)
             }
-            .padding(6)
-            .padding(.leading, 6)
-            .background(Color(uiColor: Self.backgroundColor), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(HubWorkspacePalette.border.opacity(0.10)))
-            .disabled(!canEditPlanner)
+            .buttonStyle(.plain)
+            .accessibilityLabel(empty ? "Add with details" : "Add")
         }
+        .padding(.leading, 12)
+        .padding(.trailing, 2)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(HubWorkspacePalette.border.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(
+            todoFocused ? accent.opacity(0.5) : HubWorkspacePalette.border.opacity(0.08), lineWidth: 0.8))
+        .disabled(!canEditPlanner)
     }
 
     private func submitTodo() {
@@ -2230,13 +2565,7 @@ struct HubHomeView: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous).fill(card)
-                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(LinearGradient(colors: [HubWorkspacePalette.border.opacity(0.035), .clear], startPoint: .top, endPoint: .center)))
-        )
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
+        .hubCard()
     }
 
 }
@@ -2279,7 +2608,7 @@ private struct HubVoiceHistoryView: View {
         }
         .padding(.top, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .task { await load() }
     }
 
@@ -2392,7 +2721,7 @@ private struct HubTasksView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .sheet(item: $taskEditor) { edit in
             if edit.routine {
                 HubRoutineEditorView(api: api, id: edit.taskID, goals: tasks?.goals ?? []) { attempt += 1 }

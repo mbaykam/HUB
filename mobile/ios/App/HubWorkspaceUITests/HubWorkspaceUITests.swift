@@ -90,6 +90,13 @@ final class HubWorkspaceUITests: XCTestCase {
 
         let graph = app.buttons["Graph view"]
         XCTAssertTrue(graph.waitForExistence(timeout: 5))
+        XCTAssertEqual(graph.value as? String, "Brain")
+        sleep(2)
+        capture("Knowledge brain")
+        graph.tap()
+        let flat = app.buttons["2D"]
+        XCTAssertTrue(flat.waitForExistence(timeout: 5))
+        flat.tap()
         XCTAssertEqual(graph.value as? String, "2D")
         capture("Knowledge graph")
         // The graph's zoom buttons change the zoom.

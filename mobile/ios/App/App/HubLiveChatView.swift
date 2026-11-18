@@ -258,7 +258,7 @@ struct HubLiveChatView: View {
         }
         .foregroundStyle(.primary)
         .tint(accent)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
     }
 
     private func openComposerAction(_ action: HubNativeChatRequest.ComposerAction?) {
@@ -278,8 +278,11 @@ struct HubLiveChatView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Button { composerFocused = false; back(deliveryUncertain || sending ? "" : draft) } label: {
-                    Label("Home", systemImage: "chevron.left").frame(minHeight: 44)
+                    Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
                 }
+                .accessibilityLabel("Home")
                 VStack(alignment: .leading, spacing: 3) {
                     Text(renamedTitle ?? snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
                     if let character { Text(character).font(.caption).foregroundStyle(.secondary) }
@@ -312,7 +315,11 @@ struct HubLiveChatView: View {
                         renameOpen = true
                     } label: { Label("Rename chat", systemImage: "pencil") }
                     .disabled(connectionLost || renaming)
-                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                } label: {
+                    Image(systemName: "ellipsis").font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
+                }
                 .accessibilityLabel("Chat options")
             }
             .buttonStyle(.plain)
@@ -857,7 +864,7 @@ struct HubLiveChatView: View {
             }
             .buttonStyle(.plain)
             .padding(5)
-            .background(panel, in: RoundedRectangle(cornerRadius: 25))
+            .hubGlass(RoundedRectangle(cornerRadius: 26, style: .continuous))
             if deliveryUncertain {
                 Button("I checked the conversation") {
                     deliveryUncertain = false
@@ -1682,7 +1689,7 @@ struct HubChatCharacterView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
     }
 
     private func load() async {

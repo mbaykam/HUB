@@ -106,7 +106,7 @@ struct HubBrowserPreviewView: View {
             }
         }
         .padding(16)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
     }
 
     private struct Polling: Equatable {
