@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.17
+
+- Knowledge learns the people in your life and what you do: new memory categories 'people' and 'life', on by default; small asides count.
+- A Knowledge AI model call gives up after five minutes instead of freezing the queue.
+- A chat with no activity for ten minutes no longer holds back Knowledge, Goals and Automations.
+
 ## 1.10.16
 
 - Delegating to a character with an allowed-tools list works; lists naming conversation-scoped tools (Knowledge) no longer fail every delegation.
