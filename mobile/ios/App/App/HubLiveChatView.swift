@@ -605,8 +605,13 @@ struct HubLiveChatView: View {
                                     }
                                 }
                             }
+                            // A screenshot from a turn with no reply yet (still running) shows
+                            // at the end. One from an earlier turn whose messages are not
+                            // loaded waits for them, instead of appearing out of place here.
+                            let oldestLoadedTurn = messages.filter { $0.role == "assistant" }.compactMap(\.turn).min()
                             ForEach(screenshots.filter { screenshot in
-                                !messages.contains { $0.role == "assistant" && $0.turn == screenshot.turn }
+                                !messages.contains { $0.role == "assistant" && $0.turn == screenshot.turn } &&
+                                    oldestLoadedTurn.map { screenshot.turn > $0 } ?? true
                             }) { screenshot in
                                 screenshotImage(screenshot)
                             }
