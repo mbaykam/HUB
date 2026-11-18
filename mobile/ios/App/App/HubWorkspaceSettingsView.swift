@@ -775,7 +775,8 @@ private struct HubKnowledgeSettingsView: View {
                          ("workers", "Delegated work"), ("imports", "Imports")], key: \.channels)
                 DisclosureGroup("What to remember") {
                     choices([("preferences", "Personal preferences"), ("decisions", "Decisions"),
-                             ("projects", "Projects"), ("learning", "Learning"), ("summaries", "Summaries")], key: \.categories)
+                             ("projects", "Projects"), ("learning", "Learning"), ("people", "People in your life"),
+                             ("life", "Routines and life events"), ("summaries", "Summaries")], key: \.categories)
                 }
                 Picker("Assistant explanations", selection: setting(\.assistantEvidence, fallback: draft.assistantEvidence)) {
                     Text("Confirmed information").tag("confirmed-only")
