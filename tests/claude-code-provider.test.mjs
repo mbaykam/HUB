@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ClaudeCodeAdapter,findClaude,conversationPrompt,trailingToolResults,CLAUDE_CODE_MODELS} from '../packages/harness-overlay/src/host/claude-code-provider.ts';
+import {ClaudeCodeAdapter,findClaude,conversationPrompt,trailingToolResults,CLAUDE_CODE_MODELS,parseClaudeCodeLimits} from '../packages/harness-overlay/src/host/claude-code-provider.ts';
 
 // A stand-in for the claude CLI: reads the prompt, optionally calls one tool on
 // the MCP server it was given, then reports a result, like the real CLI does.
@@ -90,4 +90,18 @@ test('earlier turns become one prompt; trailing tool results are found',()=>{
  assert.match(prompt,/User: a[\s\S]*Assistant: b[\s\S]*Assistant called t\(\{\}\)[\s\S]*Tool result: r[\s\S]*User: c/);
  assert.deepEqual(trailingToolResults([user('q'),{role:'user',source:{kind:'tool'},content:[{type:'tool-result',toolCallId:'1'}]}]).map(r=>r.toolCallId),['1']);
  assert.deepEqual(trailingToolResults([user('q')]),[]);
+});
+
+test('subscription limits come from the CLI rate-limit event and fit the usage contract',async()=>{
+ const {parseClaudeCodeUsage}=await import('../packages/harness-overlay/src/usage-contract.ts');
+ // As printed by Claude Code 2.1 for a Pro account.
+ const info={status:"allowed_warning",resetsAt:1795154400,rateLimitType:"seven_day",utilization:0.86,overageStatus:"rejected",isUsingOverage:false,
+  unifiedWindows:{five_hour:{utilization:0.86,resetsAt:1795010400,status:"allowed"},seven_day:{utilization:0.86,resetsAt:1795154400,status:"allowed_warning",surpassedThreshold:0.75}}};
+ const limits=parseClaudeCodeLimits(info,new Date("2026-11-18T12:00:00Z"));
+ assert.deepEqual(limits.windows,[{id:"five_hour",usedPercent:86,resetsAt:1795010400,status:"allowed"},{id:"seven_day",usedPercent:86,resetsAt:1795154400,status:"allowed_warning"}]);
+ assert.equal(limits.warning,undefined);
+ assert.deepEqual(parseClaudeCodeUsage({state:"ready",...limits}).windows.length,2);
+ assert.match(parseClaudeCodeLimits({unifiedWindows:{five_hour:{utilization:1,status:"rejected"}}}).warning,/reached this limit/);
+ assert.equal(parseClaudeCodeLimits({status:"allowed"}),undefined);
+ assert.deepEqual(parseClaudeCodeUsage({state:"waiting"}),{state:"waiting"});
 });

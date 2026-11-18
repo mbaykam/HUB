@@ -12,6 +12,7 @@ import {
   type OpenRouterUsage,
 } from "../usage-contract.ts";
 import { readSonioxUsage, readUnlidUsage } from "./provider-usage.ts";
+import { readClaudeCodeUsage } from "./claude-code-provider.ts";
 
 const CODEX_STATUS_PATH = "/plugins/dsh-openai-codex/auth/status";
 const OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key";
@@ -301,11 +302,12 @@ export async function readCodexUsage(host: UsageHost): Promise<CodexUsage> {
 export async function readMinkeUsage(
   host: UsageHost,
 ): Promise<MinkeUsageSnapshot> {
-  const [codex, openRouter, unlid, soniox] = await Promise.all([
+  const [codex, openRouter, unlid, soniox, claudeCode] = await Promise.all([
     readCodexUsage(host),
     readOpenRouterUsage(host),
     readUnlidUsage(host),
     readSonioxUsage(host),
+    readClaudeCodeUsage().catch(() => ({ state: "error" as const, message: "Claude Code limits are unavailable" })),
   ]);
   return parseMinkeUsageSnapshot({
     updatedAt: new Date().toISOString(),
@@ -313,6 +315,7 @@ export async function readMinkeUsage(
     openRouter,
     unlid,
     soniox,
+    claudeCode,
   });
 }
 

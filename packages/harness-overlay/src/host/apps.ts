@@ -153,8 +153,9 @@ export function installApps(ctx:any,characters:any,effectiveCharacter:(ctx:any,a
     if(!match){res.writeHead(404,{"content-type":"text/plain"});res.end("Not found");return;}
     try{await ready;const html=await store.html(match[1]!);
       // Each app runs in its own sandbox: scripts work, but it gets no access to
-      // HUB's cookies, storage or API.
-      res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"no-referrer",
+      // HUB's cookies, storage or API. no-transform keeps proxies such as a
+      // Cloudflare tunnel from injecting scripts into the app.
+      res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store, no-transform","x-content-type-options":"nosniff","referrer-policy":"no-referrer",
         "content-security-policy":"sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock"});
       res.end(html);
     }catch{res.writeHead(404,{"content-type":"text/plain"});res.end("This app was removed.");}

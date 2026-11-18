@@ -41,6 +41,41 @@ export function findClaude(env:NodeJS.ProcessEnv=process.env,exists=(path:string
   return candidates.find(path=>exists(path));
 }
 
+/** The Claude subscription's limits as Claude Code last reported them. Every
+ * CLI run emits a rate_limit_event, so these are as fresh as HUB's latest
+ * Claude Code turn; the copy on disk survives a HUB restart. */
+export interface ClaudeCodeLimits {observedAt:string;windows:{id:string;usedPercent:number;resetsAt?:number;status?:string}[];warning?:string}
+let latestLimits:ClaudeCodeLimits|undefined;
+const limitsFile=()=>join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-claude-code","limits.json");
+
+export function parseClaudeCodeLimits(info:any,now=new Date()):ClaudeCodeLimits|undefined{
+  if(!info||typeof info!=="object")return;
+  const used=(value:unknown)=>typeof value==="number"&&Number.isFinite(value)?Math.round(Math.min(1,Math.max(0,value))*1000)/10:undefined;
+  const window=(id:string,value:any)=>{const usedPercent=used(value?.utilization);if(usedPercent===undefined)return;
+    return {id,usedPercent,...(typeof value.resetsAt==="number"&&value.resetsAt>0?{resetsAt:value.resetsAt}:{}),...(typeof value.status==="string"?{status:value.status.slice(0,40)}:{})};};
+  const unified=info.unifiedWindows&&typeof info.unifiedWindows==="object"?info.unifiedWindows:{};
+  let windows=Object.entries(unified).slice(0,6).map(([id,value])=>window(id.slice(0,40),value)).filter((w):w is NonNullable<typeof w>=>!!w);
+  if(!windows.length&&typeof info.rateLimitType==="string"){const only=window(info.rateLimitType.slice(0,40),info);if(only)windows=[only];}
+  if(!windows.length)return;
+  const blocked=windows.find(w=>w.status==="rejected");
+  return {observedAt:now.toISOString(),windows,...(blocked?{warning:"Claude Code has reached this limit; HUB can use it again when it resets."}:{})};
+}
+
+export function noteClaudeCodeLimits(info:unknown){
+  const limits=parseClaudeCodeLimits(info);if(!limits)return;
+  latestLimits=limits;
+  const file=limitsFile();
+  void import("node:fs/promises").then(fs=>fs.mkdir(join(file,".."),{recursive:true}).then(()=>fs.writeFile(file,JSON.stringify(limits),{mode:0o600}))).catch(()=>{});
+}
+
+/** For the Usage page: ready limits, "waiting" until Claude Code has run once, or not configured without the CLI. */
+export async function readClaudeCodeUsage(installed=!!findClaude()){
+  if(!latestLimits){try{const {readFile}=await import("node:fs/promises");const saved=JSON.parse(await readFile(limitsFile(),"utf8"));
+    if(saved&&typeof saved.observedAt==="string"&&Array.isArray(saved.windows))latestLimits=saved;}catch{}}
+  if(latestLimits)return {state:"ready" as const,...latestLimits};
+  return installed?{state:"waiting" as const}:{state:"not-configured" as const};
+}
+
 const textOf=(blocks:any[]|undefined)=>(blocks??[]).map(block=>block?.type==="text"?block.text:block?.type==="image"?"[image]":"").filter(Boolean).join("\n");
 const clip=(text:string,max:number)=>text.length>max?text.slice(0,max)+`\n[… ${text.length-max} more characters]`:text;
 
@@ -182,6 +217,7 @@ export class ClaudeCodeAdapter {
       if(value.type==="stream_event"){const delta=value.event?.delta;
         if(value.event?.type==="content_block_delta"&&delta?.type==="text_delta"&&delta.text)run.events.push({kind:"text",text:delta.text});
         else if(value.event?.type==="content_block_delta"&&delta?.type==="thinking_delta"&&delta.thinking)run.events.push({kind:"thinking",text:delta.thinking});}
+      else if(value.type==="rate_limit_event")noteClaudeCodeLimits(value.rate_limit_info);
       else if(value.type==="result"){result=true;run.events.push({kind:"result",ok:!value.is_error,message:typeof value.result==="string"&&value.is_error?value.result:undefined,usage:value.usage});}
     });
     proc.on("close",code=>{if(!result&&!run.done)run.events.push({kind:"exit",code,stderr});});
