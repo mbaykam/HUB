@@ -43,7 +43,6 @@ struct HubCameraCallView: View {
         }
         .foregroundStyle(.white)
         .preferredColorScheme(.dark)
-        .accessibilityIdentifier("hub.camera.call")
     }
 
     private var topBar: some View {
