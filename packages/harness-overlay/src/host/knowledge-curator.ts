@@ -22,6 +22,14 @@ type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limit
 const defaults=defaultKnowledgeSettings;
 const day=()=>new Date().toISOString().slice(0,10);
 const quotaRetryDelay=15*60*1000;
+/** People and life details were added after the original four categories;
+ * settings that still hold exactly the original four gain them, a choice the
+ * user narrowed on purpose is kept. */
+export function withLifeCategories<T extends {categories?:string[]}>(settings:T):T{
+  const original=["preferences","decisions","projects","learning"];
+  const current=settings.categories??[];
+  return current.length===original.length&&original.every(c=>current.includes(c))?{...settings,categories:[...current,"people","life"]}:settings;
+}
 /** The longest one Knowledge AI model call may take. */
 export const KNOWLEDGE_CALL_TIMEOUT_MS=5*60_000;
 export class KnowledgeCurator {
@@ -40,7 +48,7 @@ export class KnowledgeCurator {
   async initialize(){
     await this.store.initialize();
     await this.store.organization.syncObsidianLinks();
-    try{const settings=JSON.parse(await readFile(join(this.store.root,"settings.json"),"utf8"));this.settings=validateSettings({...defaults,...settings});}catch(e:any){if(e.code!=="ENOENT")throw e;}
+    try{const settings=JSON.parse(await readFile(join(this.store.root,"settings.json"),"utf8"));this.settings=validateSettings(withLifeCategories({...defaults,...settings}));}catch(e:any){if(e.code!=="ENOENT")throw e;}
     try{this.costs=JSON.parse(await readFile(join(this.store.root,"costs.json"),"utf8"));}catch(e:any){if(e.code!=="ENOENT")throw e;}
     try{this.blockedRoute=JSON.parse(await readFile(join(this.store.root,"model-health.json"),"utf8"))??undefined;}catch(e:any){if(e.code!=="ENOENT")throw e;}
     const files=await readdir(join(this.store.root,"jobs")).catch((e:any)=>{if(e.code!=="ENOENT")throw e;return [] as string[];});
@@ -293,7 +301,7 @@ export function bindKnowledgePlan(value:any,candidates:{id:string;hash:string;bo
   const references=new Map<string,string>(),known=new Set(index.map(n=>n.id));
   const changes=value.changes.map((c:any,i:number)=>{
     if(!c||typeof c!=="object")throw new Error("Invalid note change");const ref=typeof c.id==="string"&&c.id?c.id:`new-${i}`;
-    if(c.category!==undefined&&!["preferences","decisions","projects","learning","summaries"].includes(c.category))throw new Error("Invalid knowledge category");
+    if(c.category!==undefined&&!["preferences","decisions","projects","learning","people","life","summaries"].includes(c.category))throw new Error("Invalid knowledge category");
     if(references.has(ref))throw new Error("Duplicate note references");
     const old=candidates.find(n=>n.id===ref);
     if(known.has(ref)&&!old)throw new Error("Existing note was not read before the proposed update");
@@ -318,7 +326,7 @@ export function validateSettings(value:KnowledgeSettings){
   if(!value || typeof value.enabled!=="boolean" || ![value.provider,value.model].every(x=>typeof x==="string"&&x.length>0&&x.length<200&&!/[\u0000-\u0020]/.test(x)) || typeof value.reasoningEffort!=="string" || value.reasoningEffort.length>200 || /[\u0000-\u0020]/.test(value.reasoningEffort) || ![value.dailyBudget,value.monthlyBudget,value.inputPrice,value.outputPrice].every(x=>typeof x==="number"&&Number.isFinite(x)&&x>0&&x<=100) || !Number.isInteger(value.idleSeconds)||value.idleSeconds<10||value.idleSeconds>86400)throw new Error("Invalid Knowledge AI settings");
   const options:[[string,string[]],... [string,string[]][]]=[["mode",["automatic","manual","review"]],["detail",["concise","balanced","detailed"]],["language",["auto","tr","en"]],["assistantEvidence",["confirmed-only","useful-explanations"]],["linking",["inline","off"]],["duplicatePolicy",["merge","new-subjects"]]];
   for(const [key,allowed]of options)if(!allowed.includes((value as any)[key]))throw new Error("Invalid memory policy");
-  for(const [items,allowed]of [[value.channels,["pwa","telegram","voice","workers","imports"]],[value.categories,["preferences","decisions","projects","learning","summaries"]]])if(!Array.isArray(items)||!items.length||items.some(x=>!allowed.includes(x))||new Set(items).size!==items.length)throw new Error("Choose valid memory categories/channels");
+  for(const [items,allowed]of [[value.channels,["pwa","telegram","voice","workers","imports"]],[value.categories,["preferences","decisions","projects","learning","people","life","summaries"]]])if(!Array.isArray(items)||!items.length||items.some(x=>!allowed.includes(x))||new Set(items).size!==items.length)throw new Error("Choose valid memory categories/channels");
   if(!Number.isInteger(value.maxLinks)||value.maxLinks<1||value.maxLinks>12||typeof value.instructions!=="string"||value.instructions.length>4000)throw new Error("Invalid note rules");return {...value};
 }
 export function sourceChannel(source:KnowledgeSource){return source.channel==="telegram"?"telegram":source.channel==="voice"?"voice":source.channel==="hub-worker-result"?"workers":source.channel==="hub"||source.channel==="pwa"?"pwa":"imports";}
