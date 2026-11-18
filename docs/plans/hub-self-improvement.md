@@ -156,6 +156,31 @@ them is refused before it reaches you.
 
 Each step is useful on its own; step 4 depends on 1–3.
 
+## Related: characters working with characters
+
+How it works today (from the code):
+
+- Any top-level conversation's character can call `hub_delegate` to hand a
+  background task to another configured character. The task runs as a native
+  sub-agent with that character's own model and instructions, and its result
+  comes back as a notification in the conversation. Several can run at once.
+- The voice character uses `hub_task` for the same thing, so the call stays
+  responsive.
+- A delegated sub-agent cannot delegate further: character tools are only
+  mounted on top-level conversations. Sub-agents do get the phone-context tool.
+
+What to add (planned, not built):
+
+1. **Nested delegation** with a depth limit (2) and a loop guard (a character
+   cannot delegate back to an ancestor in its own chain), so the main
+   assistant can split work into specialists who can each call one helper.
+2. **Team view**: the conversation shows who is working on what (character,
+   model, status), using the existing activity feed.
+3. **Budget**: each delegation carries a cost/turn cap inherited from its
+   parent, so a fan-out cannot run away.
+4. **The Mechanic** from this plan is one such character, so self-improvement
+   work shows up in the same team view.
+
 ## Risks
 
 - **Model quality.** Self-changes are only as good as the Mechanic's model;

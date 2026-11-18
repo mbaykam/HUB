@@ -162,16 +162,71 @@ enum HubOverlayPalette {
 struct HubCameraOverlayLayer: View {
     let items: [HubProjectedOverlay]
 
+    struct PlacedLabel { let id: String; let text: String; let tint: Color; let center: CGPoint }
+
+    /// Each label's usual spot, beside its own mark; when that would cover
+    /// another label or an edge pointer, the nearest free spot nearby.
+    static func labels(_ items: [HubProjectedOverlay], size: CGSize) -> [PlacedLabel] {
+        func frame(_ text: String, _ center: CGPoint) -> CGRect {
+            let width = CGFloat(text.count) * 8.6 + 40
+            return CGRect(x: center.x - width / 2, y: center.y - 17, width: width, height: 34)
+        }
+        var taken: [CGRect] = items.filter { !$0.visible }.map {
+            CGRect(x: $0.edgePoint.x - 30, y: $0.edgePoint.y - 26, width: 60, height: 76)
+        }
+        var placed: [PlacedLabel] = []
+        for item in items where item.visible {
+            guard let text = item.label else { continue }
+            let preferred = preferredCenter(item, size: size)
+            let candidates = [CGSize.zero] + [1, -1, 2, -2, 3].flatMap { step in
+                [CGSize(width: 0, height: CGFloat(step) * 40), CGSize(width: CGFloat(step) * 70, height: 0)]
+            }
+            let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 8, dy: 60)
+            let choice = candidates.lazy.map { CGPoint(x: preferred.x + $0.width, y: preferred.y + $0.height) }.first { center in
+                let box = frame(text, center)
+                return bounds.contains(box) && !taken.contains { $0.insetBy(dx: -4, dy: -4).intersects(box) }
+            } ?? preferred
+            taken.append(frame(text, choice))
+            placed.append(PlacedLabel(id: item.id, text: text, tint: HubOverlayPalette.tint(for: item.step), center: choice))
+        }
+        return placed
+    }
+
+    /// Where each style puts its label when nothing is in the way.
+    static func preferredCenter(_ item: HubProjectedOverlay, size: CGSize) -> CGPoint {
+        let p = item.point
+        switch item.style {
+        case .circle: return CGPoint(x: p.x, y: p.y + item.radius + 29)
+        case .step:
+            let onRight = p.x < size.width * 0.62
+            return CGPoint(x: p.x + (onRight ? 90 : -90), y: p.y)
+        case .box:
+            if let rect = item.rect, rect.width > 60, rect.height > 60, rect.width / rect.height < 4 {
+                return CGPoint(x: min(max(rect.minX + 60, 70), size.width - 70), y: max(rect.minY - 24, 70))
+            }
+            return CGPoint(x: p.x, y: p.y + item.radius + 29)
+        case .label: return CGPoint(x: p.x, y: p.y - 56)
+        case .arrow:
+            let geometry = HubOverlayArrow.geometry(target: p, size: size)
+            return CGPoint(x: geometry.start.x, y: geometry.start.y + (geometry.below ? 24 : -24))
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 Color.clear
                 ForEach(items) { item in
                     Group {
-                        if item.visible { HubOverlayGlyph(item: item, size: geometry.size) }
+                        if item.visible { HubOverlayGlyph(item: item, size: geometry.size, showLabel: false) }
                         else { HubOffscreenPointer(item: item) }
                     }
                     .transition(.scale(scale: 0.55).combined(with: .opacity))
+                }
+                ForEach(Self.labels(items, size: geometry.size), id: \.id) { label in
+                    HubOverlayTag(text: label.text, tint: label.tint)
+                        .position(label.center)
+                        .transition(.opacity)
                 }
             }
             .animation(.spring(response: 0.45, dampingFraction: 0.68), value: items.map(\.id))
@@ -224,6 +279,8 @@ struct HubPulseRing: View {
 struct HubOverlayGlyph: View {
     let item: HubProjectedOverlay
     let size: CGSize
+    /// Labels are laid out together by the overlay layer so they never overlap.
+    var showLabel = true
 
     private var tint: Color { HubOverlayPalette.tint(for: item.step) }
 
@@ -231,7 +288,7 @@ struct HubOverlayGlyph: View {
         switch item.style {
         case .circle: ring
         case .step: stepBadge
-        case .arrow: HubOverlayArrow(item: item, size: size, tint: tint)
+        case .arrow: HubOverlayArrow(item: item, size: size, tint: tint, showLabel: showLabel)
         // A box only frames something that is clearly an area; small or thin
         // regions (a line of text, a button) read better as a ring.
         case .box: if let rect = item.rect, rect.width > 60, rect.height > 60, rect.width / rect.height < 4 { brackets(rect) } else { ring }
@@ -252,7 +309,7 @@ struct HubOverlayGlyph: View {
         }
         .frame(width: r * 2, height: r * 2)
         .overlay(alignment: .top) {
-            if let label = item.label { HubOverlayTag(text: label, tint: tint).offset(y: r * 2 + 12) }
+            if showLabel, let label = item.label { HubOverlayTag(text: label, tint: tint).offset(y: r * 2 + 12) }
         }
         .position(item.point)
     }
@@ -268,7 +325,7 @@ struct HubOverlayGlyph: View {
         }
         .frame(width: 40, height: 40)
         .overlay(alignment: onRight ? .leading : .trailing) {
-            if let label = item.label { HubOverlayTag(text: label, tint: tint).offset(x: onRight ? 50 : -50) }
+            if showLabel, let label = item.label { HubOverlayTag(text: label, tint: tint).offset(x: onRight ? 50 : -50) }
         }
         .position(item.point)
     }
@@ -282,7 +339,7 @@ struct HubOverlayGlyph: View {
             HubCornerBrackets(rect: rect)
                 .stroke(HubOverlayPalette.gradient(for: item.step), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
                 .shadow(color: tint.opacity(0.85), radius: 8)
-            if let label = item.label {
+            if showLabel, let label = item.label {
                 HubOverlayTag(text: label, tint: tint)
                     .position(x: min(max(rect.minX + 60, 70), size.width - 70), y: max(rect.minY - 24, 70))
             }
@@ -301,7 +358,7 @@ struct HubOverlayGlyph: View {
                 .overlay(Circle().strokeBorder(tint, lineWidth: 2.5))
                 .shadow(color: tint, radius: 6)
                 .position(item.point)
-            if let label = item.label {
+            if showLabel, let label = item.label {
                 HubOverlayTag(text: label, tint: tint).position(x: item.point.x, y: item.point.y - 56)
             }
         }
@@ -334,17 +391,23 @@ struct HubOverlayArrow: View {
     let item: HubProjectedOverlay
     let size: CGSize
     let tint: Color
+    var showLabel = true
     @State private var flow = false
     @State private var bob = false
 
-    var body: some View {
-        let target = item.point
-        // Swoop in from the roomier side, and from below for things high on
-        // screen, so the arrow never runs under the top bar or the note.
+    /// Swoop in from the roomier side, and from below for things high on
+    /// screen, so the arrow never runs under the top bar or the note.
+    static func geometry(target: CGPoint, size: CGSize) -> (start: CGPoint, fromLeft: Bool, below: Bool) {
         let fromLeft = target.x > size.width / 2
         let below = target.y < size.height * 0.45
         let start = CGPoint(x: min(max(target.x + (fromLeft ? -110 : 110), 50), size.width - 50),
                             y: min(max(target.y + (below ? 150 : -150), 230), size.height - 190))
+        return (start, fromLeft, below)
+    }
+
+    var body: some View {
+        let target = item.point
+        let (start, fromLeft, below) = Self.geometry(target: target, size: size)
         let dx = target.x - start.x, dy = target.y - start.y, length = max(1, hypot(dx, dy))
         let end = CGPoint(x: target.x - dx / length * 16, y: target.y - dy / length * 16)
         let control = CGPoint(x: (start.x + end.x) / 2 + (fromLeft ? -1 : 1) * 45, y: (start.y + end.y) / 2)
@@ -358,7 +421,7 @@ struct HubOverlayArrow: View {
                 .stroke(.white.opacity(0.9), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, dash: [1, 14], dashPhase: flow ? -30 : 0))
             HubPulseRing(tint: tint, radius: 14).position(target)
             Circle().fill(.white).frame(width: 8, height: 8).shadow(color: tint, radius: 5).position(target)
-            if let label = item.label {
+            if showLabel, let label = item.label {
                 HubOverlayTag(text: label, tint: tint).position(x: start.x, y: start.y + (below ? 24 : -24))
             }
         }
