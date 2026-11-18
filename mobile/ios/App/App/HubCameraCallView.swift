@@ -196,6 +196,8 @@ struct HubOverlayTag: View {
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 12).padding(.vertical, 7)
+        // A dark layer under the glass keeps white text readable on a white wall.
+        .background(Capsule().fill(Color.black.opacity(0.38)))
         .hubGlass(Capsule(), tint: tint.opacity(0.35))
         .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
         .fixedSize()
@@ -336,12 +338,15 @@ struct HubOverlayArrow: View {
 
     var body: some View {
         let target = item.point
+        // Swoop in from the roomier side, and from below for things high on
+        // screen, so the arrow never runs under the top bar or the note.
         let fromLeft = target.x > size.width / 2
-        let start = CGPoint(x: min(max(target.x + (fromLeft ? -120 : 120), 40), size.width - 40),
-                            y: min(max(target.y - 140, 120), size.height - 160))
+        let below = target.y < size.height * 0.45
+        let start = CGPoint(x: min(max(target.x + (fromLeft ? -110 : 110), 50), size.width - 50),
+                            y: min(max(target.y + (below ? 150 : -150), 230), size.height - 190))
         let dx = target.x - start.x, dy = target.y - start.y, length = max(1, hypot(dx, dy))
         let end = CGPoint(x: target.x - dx / length * 16, y: target.y - dy / length * 16)
-        let control = CGPoint(x: (start.x + end.x) / 2 + (fromLeft ? -1 : 1) * 40, y: min(start.y, end.y) - 10)
+        let control = CGPoint(x: (start.x + end.x) / 2 + (fromLeft ? -1 : 1) * 45, y: (start.y + end.y) / 2)
         return ZStack(alignment: .topLeading) {
             HubArrowShape(start: start, control: control, end: end)
                 .stroke(Color.black.opacity(0.35), style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
@@ -353,7 +358,7 @@ struct HubOverlayArrow: View {
             HubPulseRing(tint: tint, radius: 14).position(target)
             Circle().fill(.white).frame(width: 8, height: 8).shadow(color: tint, radius: 5).position(target)
             if let label = item.label {
-                HubOverlayTag(text: label, tint: tint).position(x: start.x, y: start.y - 24)
+                HubOverlayTag(text: label, tint: tint).position(x: start.x, y: start.y + (below ? 24 : -24))
             }
         }
         .offset(x: bob ? dx / length * 5 : 0, y: bob ? dy / length * 5 : 0)
@@ -433,28 +438,52 @@ struct HubSeenMarksLayer: View {
     }
 }
 
-/// A stand-in room for the simulator preview: a desk, a router and a lamp glow.
+/// A stand-in room for the simulator preview: a router on a desk with its
+/// power light, ports and reset hole, a power adapter, a socket and a note.
 struct HubCameraFixtureScene: View {
     var body: some View {
         GeometryReader { geometry in
-            let size = geometry.size
-            ZStack {
-                LinearGradient(colors: [Color(red: 0.16, green: 0.14, blue: 0.13), Color(red: 0.07, green: 0.07, blue: 0.08)],
+            let w = geometry.size.width, h = geometry.size.height
+            ZStack(alignment: .topLeading) {
+                LinearGradient(colors: [Color(red: 0.17, green: 0.15, blue: 0.13), Color(red: 0.08, green: 0.07, blue: 0.08)],
                                startPoint: .top, endPoint: .bottom)
-                RadialGradient(colors: [Color(red: 1, green: 0.78, blue: 0.5).opacity(0.35), .clear], center: UnitPoint(x: 0.85, y: 0.1), startRadius: 0, endRadius: 360)
-                Rectangle().fill(Color(red: 0.3, green: 0.22, blue: 0.16))
-                    .frame(height: size.height * 0.5)
-                    .position(x: size.width / 2, y: size.height * 0.78)
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(LinearGradient(colors: [Color(white: 0.92), Color(white: 0.75)], startPoint: .top, endPoint: .bottom))
-                    .frame(width: size.width * 0.46, height: size.height * 0.11)
-                    .position(x: size.width * 0.43, y: size.height * 0.31)
-                    .shadow(color: .black.opacity(0.4), radius: 20, y: 12)
-                HStack(spacing: 10) {
-                    ForEach(0..<4) { _ in RoundedRectangle(cornerRadius: 3).fill(Color(white: 0.2)).frame(width: 18, height: 12) }
-                    RoundedRectangle(cornerRadius: 3).fill(Color.yellow).frame(width: 18, height: 12)
+                RadialGradient(colors: [Color(red: 1, green: 0.78, blue: 0.5).opacity(0.38), .clear], center: UnitPoint(x: 0.86, y: 0.08), startRadius: 0, endRadius: 380)
+                LinearGradient(colors: [Color(red: 0.36, green: 0.26, blue: 0.2), Color(red: 0.22, green: 0.16, blue: 0.12)], startPoint: .top, endPoint: .bottom)
+                    .frame(width: w, height: h * 0.448).offset(y: h * 0.552)
+                Path { path in
+                    path.move(to: CGPoint(x: 0.262 * w, y: 0.657 * h))
+                    path.addCurve(to: CGPoint(x: 0.234 * w, y: 0.46 * h), control1: CGPoint(x: 0.28 * w, y: 0.587 * h), control2: CGPoint(x: 0.153 * w, y: 0.516 * h))
                 }
-                .position(x: size.width * 0.5, y: size.height * 0.335)
+                .stroke(Color(white: 0.1), lineWidth: 5)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(white: 0.94), Color(white: 0.74)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 0.56 * w, height: 0.108 * h).offset(x: 0.178 * w, y: 0.352 * h)
+                    .shadow(color: .black.opacity(0.5), radius: 16, y: 12)
+                Circle().fill(Color(red: 0.36, green: 1, blue: 0.54)).frame(width: 8, height: 8)
+                    .shadow(color: Color(red: 0.36, green: 1, blue: 0.54), radius: 5)
+                    .offset(x: 0.249 * w - 4, y: 0.383 * h - 4)
+                Circle().fill(Color(white: 0.13)).frame(width: 8, height: 8).offset(x: 0.219 * w - 4, y: 0.447 * h - 4)
+                ForEach(0..<5) { index in
+                    RoundedRectangle(cornerRadius: 3).fill(index == 4 ? Color(red: 0.96, green: 0.82, blue: 0) : Color(white: 0.2))
+                        .frame(width: 18, height: 12)
+                        .offset(x: (0.328 + 0.0713 * CGFloat(index)) * w - 9, y: 0.437 * h - 6)
+                }
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(white: 0.18), Color(white: 0.08)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 0.168 * w, height: 0.047 * h).offset(x: 0.178 * w, y: 0.657 * h)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(white: 0.94), Color(white: 0.8)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 0.142 * w, height: 0.066 * h).offset(x: 0.758 * w, y: 0.469 * h)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Router setup").font(.system(size: 13, weight: .semibold))
+                    Text("Wi-Fi: HUB-Home").font(.system(size: 13))
+                }
+                .foregroundStyle(Color(white: 0.2))
+                .padding(12)
+                .frame(width: 0.356 * w, height: 0.113 * h, alignment: .topLeading)
+                .background(Color(red: 0.95, green: 0.93, blue: 0.87), in: RoundedRectangle(cornerRadius: 4))
+                .rotationEffect(.degrees(-4))
+                .offset(x: 0.545 * w, y: 0.702 * h)
             }
         }
     }

@@ -493,7 +493,7 @@ final class HubCameraVision: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     /// The frame HUB receives: what the user sees, with each recognised thing
-    /// numbered and a faint 4x4 grid (columns A-D, rows 1-4) for everything else.
+    /// numbered and a faint 5x5 grid (columns A-E, rows 1-5) for everything else.
     nonisolated static func render(_ image: CGImage, marks: [HubVisionScene.Mark]) -> (jpeg: Data, width: Int, height: Int)? {
         let width = CGFloat(image.width), height = CGFloat(image.height)
         let factor = min(1, 1600 / max(width, height))
@@ -508,27 +508,39 @@ final class HubCameraVision: NSObject, ObservableObject, ARSessionDelegate {
             // The grid: faint quarter lines and edge labels.
             context.setStrokeColor(UIColor.white.withAlphaComponent(0.22).cgColor)
             context.setLineWidth(1.5 * unit)
-            for index in 1...3 {
-                let x = size.width * CGFloat(index) / 4, y = size.height * CGFloat(index) / 4
+            for index in 1...4 {
+                let x = size.width * CGFloat(index) / 5, y = size.height * CGFloat(index) / 5
                 context.move(to: CGPoint(x: x, y: 0)); context.addLine(to: CGPoint(x: x, y: size.height))
                 context.move(to: CGPoint(x: 0, y: y)); context.addLine(to: CGPoint(x: size.width, y: y))
             }
             context.strokePath()
             let gridFont = UIFont.systemFont(ofSize: 22 * unit, weight: .bold)
-            for (index, letter) in ["A", "B", "C", "D"].enumerated() {
-                Self.tag(letter, at: CGPoint(x: size.width * (CGFloat(index) + 0.5) / 4, y: 22 * unit), font: gridFont, fill: UIColor.black.withAlphaComponent(0.55))
-                Self.tag("\(index + 1)", at: CGPoint(x: 22 * unit, y: size.height * (CGFloat(index) + 0.5) / 4), font: gridFont, fill: UIColor.black.withAlphaComponent(0.55))
+            for (index, letter) in ["A", "B", "C", "D", "E"].enumerated() {
+                Self.tag(letter, at: CGPoint(x: size.width * (CGFloat(index) + 0.5) / 5, y: 22 * unit), font: gridFont, fill: UIColor.black.withAlphaComponent(0.55))
+                Self.tag("\(index + 1)", at: CGPoint(x: 22 * unit, y: size.height * (CGFloat(index) + 0.5) / 5), font: gridFont, fill: UIColor.black.withAlphaComponent(0.55))
             }
             // Numbered marks: a thin outline and a bright badge.
             let badgeFont = UIFont.systemFont(ofSize: 26 * unit, weight: .heavy)
             for mark in marks {
+                // The outline sits just outside the thing and the number above its
+                // corner, so neither hides the text or detail being marked.
                 let box = CGRect(x: mark.x * size.width, y: mark.y * size.height, width: mark.width * size.width, height: mark.height * size.height)
+                    .insetBy(dx: -4 * unit, dy: -4 * unit)
                 let outline = UIBezierPath(roundedRect: box, cornerRadius: 8 * unit)
                 outline.lineWidth = 3 * unit
                 UIColor.black.withAlphaComponent(0.5).setStroke(); outline.stroke()
                 outline.lineWidth = 1.8 * unit
                 UIColor(red: 1, green: 0.85, blue: 0.2, alpha: 1).setStroke(); outline.stroke()
-                let anchor = CGPoint(x: min(size.width - 24 * unit, max(24 * unit, box.minX + 4 * unit)), y: min(size.height - 24 * unit, max(24 * unit, box.minY + 4 * unit)))
+                let badge = 26 * unit, anchor: CGPoint
+                if box.height < badge * 2 {
+                    // A line of text: the number goes beside it, never on the line above.
+                    let left = box.minX - badge * 0.8
+                    anchor = CGPoint(x: left > badge ? left : min(size.width - badge, box.maxX + badge * 0.8), y: box.midY)
+                } else {
+                    let above = box.minY - 18 * unit
+                    anchor = CGPoint(x: min(size.width - 24 * unit, max(24 * unit, box.minX + 14 * unit)),
+                                     y: above > 24 * unit ? above : min(size.height - 24 * unit, box.maxY + 18 * unit))
+                }
                 Self.tag("\(mark.id)", at: anchor, font: badgeFont, fill: UIColor(red: 1, green: 0.85, blue: 0.2, alpha: 1), color: .black)
             }
         }
@@ -552,28 +564,30 @@ final class HubCameraVision: NSObject, ObservableObject, ARSessionDelegate {
     /// be reviewed without a camera.
     func layoutFixture(size: CGSize) {
         guard fixture, fixtureItems.isEmpty, size.width > 0 else { return }
-        func item(_ id: String, _ style: HubCameraOverlay.Style, _ x: CGFloat, _ y: CGFloat, label: String?, step: Int? = nil, rect: CGRect? = nil, radius: CGFloat = 34) -> HubProjectedOverlay {
-            let point = CGPoint(x: x * size.width, y: y * size.height)
-            return HubProjectedOverlay(id: id, style: style, label: label, step: step, point: point, rect: rect, radius: radius, visible: true,
-                                       edgePoint: point, edgeAngle: 0)
+        func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * size.width, y: y * size.height) }
+        func item(_ id: String, _ style: HubCameraOverlay.Style, _ point: CGPoint, label: String?, step: Int? = nil, rect: CGRect? = nil, radius: CGFloat = 30) -> HubProjectedOverlay {
+            HubProjectedOverlay(id: id, style: style, label: label, step: step, point: point, rect: rect, radius: radius, visible: true,
+                                edgePoint: point, edgeAngle: 0)
         }
-        let box = CGRect(x: size.width * 0.18, y: size.height * 0.24, width: size.width * 0.5, height: size.height * 0.14)
-        let offscreen = Self.edge(toward: CGPoint(x: size.width * 1.4, y: size.height * 0.55), ahead: true, in: size)
+        // Positions match HubCameraFixtureScene: router, power light, WAN port, reset hole.
+        let router = CGRect(x: 0.178 * size.width, y: 0.352 * size.height, width: 0.56 * size.width, height: 0.108 * size.height)
+        let away = CGPoint(x: -0.66 * size.width, y: 0.61 * size.height)
+        let pointer = Self.edge(toward: away, ahead: true, in: size)
         fixtureItems = [
-            item("box", .box, box.midX / size.width, box.midY / size.height, label: "Router", rect: box),
-            item("arrow", .arrow, 0.62, 0.36, label: "WAN port"),
-            item("ring", .circle, 0.3, 0.52, label: "Power light", radius: 30),
-            item("step1", .step, 0.36, 0.66, label: "Unplug", step: 1),
-            item("step2", .step, 0.64, 0.7, label: "Wait 10 s", step: 2),
-            item("label", .label, 0.5, 0.82, label: "Reset button"),
-            HubProjectedOverlay(id: "away", style: .circle, label: "Modem", step: nil, point: CGPoint(x: size.width * 1.4, y: size.height * 0.55),
-                                rect: nil, radius: 30, visible: false, edgePoint: offscreen.point, edgeAngle: offscreen.angle),
+            item("router", .box, CGPoint(x: router.midX, y: router.midY), label: "Router", rect: router.insetBy(dx: -6, dy: -6)),
+            item("wan", .arrow, at(0.613, 0.437), label: "WAN port"),
+            item("light", .label, at(0.249, 0.383), label: "Power light"),
+            item("reset", .circle, at(0.219, 0.447), label: "Reset button", radius: 16),
+            HubProjectedOverlay(id: "modem", style: .circle, label: "Modem", step: nil, point: away, rect: nil, radius: 30, visible: false,
+                                edgePoint: pointer.point, edgeAngle: pointer.angle),
         ]
         overlays = fixtureItems
-        marks = [HubProjectedMark(id: 1, label: "Router", rect: box), HubProjectedMark(id: 2, label: "Text", rect: CGRect(x: size.width * 0.22, y: size.height * 0.45, width: 120, height: 30))]
+        note = "Plug the cable into the yellow WAN port. The power light should turn white."
+        marks = [HubProjectedMark(id: 1, label: "Router", rect: router),
+                 HubProjectedMark(id: 2, label: "Socket", rect: CGRect(x: 0.758 * size.width, y: 0.469 * size.height, width: 0.142 * size.width, height: 0.066 * size.height)),
+                 HubProjectedMark(id: 3, label: "Adapter", rect: CGRect(x: 0.178 * size.width, y: 0.657 * size.height, width: 0.168 * size.width, height: 0.047 * size.height))]
     }
 }
-
 private extension simd_float4x4 {
     var position: simd_float3 { simd_float3(columns.3.x, columns.3.y, columns.3.z) }
 }
