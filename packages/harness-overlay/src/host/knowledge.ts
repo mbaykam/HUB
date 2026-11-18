@@ -237,7 +237,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
           const type=asset?.mediaType??file.mediaType;
           if(view==="app-document"){send(res,200,savedAppDocument({...file,name:asset?.name??file.name,mediaType:type}));return;}
           const inline=/^(image\/(png|jpeg|webp|gif)|application\/pdf|audio\/(mpeg|wav)|video\/mp4)$/.test(type)&&query.get("download")!=="1";
-          res.writeHead(200,{"content-type":type,"content-length":file.bytes.length,"cache-control":"private, no-store","x-content-type-options":"nosniff","content-security-policy":"sandbox; default-src 'none'","content-disposition":`${inline?"inline":"attachment"}; filename*=UTF-8''${encodeURIComponent(asset?.name??file.name)}`});res.end(file.bytes);return;
+          res.writeHead(200,{"content-type":type,"content-length":file.bytes.length,"cache-control":"private, no-store, no-transform","x-content-type-options":"nosniff","content-security-policy":"sandbox; default-src 'none'","content-disposition":`${inline?"inline":"attachment"}; filename*=UTF-8''${encodeURIComponent(asset?.name??file.name)}`});res.end(file.bytes);return;
         }
         if(view==="review"){send(res,200,await curator.review(query.get("id")??""));return;}
         throw new Error("Invalid view");

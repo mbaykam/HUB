@@ -39,6 +39,8 @@ export interface DesktopInputPort {
   info(signal: AbortSignal): Promise<{width: number; height: number; cursorX: number; cursorY: number}>;
   windows(signal: AbortSignal): Promise<DesktopWindow[]>;
   run(command: DesktopCommand, signal: AbortSignal): Promise<void>;
+  /** Closes a running screen saver so the screen can be captured; true when one was closed. */
+  wake?(signal: AbortSignal): Promise<boolean>;
   dispose(): void;
 }
 
@@ -190,6 +192,28 @@ public static class HubDesktop {
     }, IntPtr.Zero);
     return list.ToArray();
   }
+  delegate bool DesktopEnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, ref bool value, uint ini);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr OpenDesktop(string name, uint flags, bool inherit, uint access);
+  [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
+  [DllImport("user32.dll")] static extern bool EnumDesktopWindows(IntPtr desktop, DesktopEnumProc callback, IntPtr l);
+  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
+  static bool ScreenSaverRunning() { bool running = false; SystemParametersInfo(0x0072, 0, ref running, 0); return running; }
+  // While the screen saver runs, it owns its own desktop and every capture of
+  // the screen fails. Closing it is what moving the mouse would do. A screen
+  // saver that locks the PC still ends at the lock screen.
+  public static bool Wake() {
+    if (!ScreenSaverRunning()) return false;
+    var desktop = OpenDesktop("Screen-saver", 0, false, 0x0001 | 0x0040 | 0x0080);
+    if (desktop != IntPtr.Zero) {
+      try { EnumDesktopWindows(desktop, (h, l) => { if (IsWindowVisible(h)) PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero); return true; }, IntPtr.Zero); }
+      finally { CloseDesktop(desktop); }
+    }
+    for (int i = 0; i < 40 && ScreenSaverRunning(); i++) Thread.Sleep(50);
+    if (ScreenSaverRunning()) throw new Exception("The screen saver did not close, so the screen cannot be captured.");
+    Thread.Sleep(250);
+    return true;
+  }
 }
 '@
 [HubDesktop]::Init()
@@ -216,6 +240,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
       'type' { [HubDesktop]::Type([string]$c.text) }
       'keys' { [HubDesktop]::Keys([int[]]$c.keys, [bool[]]$c.extended) }
       'focus' { [HubDesktop]::Focus([long]$c.handle) }
+      'wake' { $value = @{ woke = [HubDesktop]::Wake() } }
       default { throw "Unknown desktop operation" }
     }
     $out = @{ id = $id; ok = $true; value = $value } | ConvertTo-Json -Compress -Depth 6
@@ -293,6 +318,10 @@ export class WindowsDesktopInput implements DesktopInputPort {
   info(signal: AbortSignal) { return this.#call({op: "info"}, signal); }
   async windows(signal: AbortSignal) { return ((await this.#call({op: "windows"}, signal)) ?? []) as DesktopWindow[]; }
   async run(command: DesktopCommand, signal: AbortSignal) { await this.#call(command, signal); }
+  /** Closes a running screen saver, which otherwise makes every screen capture fail. */
+  async wake(signal: AbortSignal): Promise<boolean> {
+    return ((await this.#call({op: "wake"}, signal)) as {woke?: boolean} | null)?.woke === true;
+  }
   dispose() { this.#child?.kill(); this.#child = undefined; this.#ready = undefined; }
 }
 

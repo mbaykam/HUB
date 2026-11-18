@@ -36,7 +36,7 @@ test("desktop capture requires a current explicit request and publishes only a c
       assert.deepEqual(data, png);
       return {attachmentId: "sha256:" + createHash("sha256").update(data).digest("hex"), bytes: data.length, name, mediaType};
     }},
-  }, port);
+  }, port, () => ({info: async () => ({}), windows: async () => [], run: async () => {}, dispose() {}, wake: async () => false}));
   t.after(dispose);
   const tool = tools.get("hub_capture_desktop");
   const execute = (...events) => tool.execute({}, {signal: new AbortController().signal, agent: {
@@ -58,6 +58,35 @@ test("desktop capture requires a current explicit request and publishes only a c
     {type: "tool/call", data: {name: tool.name, callId}},
     {type: "tool/result", data: {turn: 1, meta: result, message: {content: [{type: "tool-result", toolCallId: callId, isError: false}]}}},
   ]).length, 1);
+});
+
+test("a running screen saver is closed before the real screen is captured", async t => {
+  const port = new EventEmitter();
+  const order = [];
+  port.send = (request, callback) => {
+    order.push("capture");
+    callback(null);
+    queueMicrotask(() => port.emit("message", agentBrowserSuccessResponse(request.requestId, "desktop-screenshot", {
+      mimeType: "image/png", data: png.toString("base64"),
+    })));
+    return true;
+  };
+  const tools = new Map();
+  const input = {info: async () => ({}), windows: async () => [], run: async () => {}, dispose() {},
+    async wake() { order.push("wake"); return true; }};
+  const dispose = installScreenshotDelivery({
+    tools: {register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name); }},
+    attachments: {async saveImage({data, name, mediaType}) {
+      return {attachmentId: "sha256:" + createHash("sha256").update(data).digest("hex"), bytes: data.length, name, mediaType};
+    }},
+  }, port, () => input);
+  t.after(dispose);
+  const result = await tools.get("hub_capture_desktop").execute({}, {signal: new AbortController().signal, agent: {
+    session: {header: {id: "s"}, snapshotEvents: () => [{type: "user/message", data: {source: {kind: "user"}, content: [{type: "text", text: "take a screenshot of my desktop"}]}}]},
+  }});
+  assert.deepEqual(order, ["wake", "capture"]);
+  assert.equal(result.kind, "hub-screenshot");
+  assert.equal(result.note, undefined);
 });
 
 test("workspace screenshot persists in the settled chat turn and renders through the authenticated artifact route", async t => {

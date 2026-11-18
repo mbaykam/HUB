@@ -3,7 +3,7 @@ import {constants} from "node:fs";
 import {lstat, open, realpath} from "node:fs/promises";
 import {homedir} from "node:os";
 import {basename, isAbsolute, join, relative, resolve, sep} from "node:path";
-import {installDesktopControl, WindowsDesktopInput} from "./desktop-control.ts";
+import {installDesktopControl, WindowsDesktopInput, type DesktopInputPort} from "./desktop-control.ts";
 // pngjs ships without TypeScript declarations.
 // @ts-expect-error No declarations are published by pngjs.
 import pngjs from "pngjs";
@@ -105,7 +105,8 @@ export async function readWorkspaceScreenshot(cwd: string, input: string, signal
   } finally { await file.close(); }
 }
 
-export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktopPort()): () => void {
+export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktopPort(),
+  desktopInput: () => DesktopInputPort = () => new WindowsDesktopInput(join(process.env.DSH_HOME ?? join(homedir(), ".dsh"), "hub-desktop"))): () => void {
   if (!ctx.tools?.register || !ctx.attachments?.saveImage) return () => {};
   const offTool = ctx.tools.register({
     name: toolName,
@@ -130,6 +131,17 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
     },
   });
   const desktop = desktopPort && new AgentBrowserProcessClient(desktopPort, {requestTimeoutMs: 12_000, cancelGraceMs: 750});
+  const input = desktop ? desktopInput() : undefined;
+  // An idle PC shows its screen saver on a separate desktop, and while it runs
+  // Windows cannot capture the screen at all. Close it first, as moving the
+  // mouse would, then capture the real screen.
+  const captureScreen = async (sessionId: string, signal: AbortSignal) => {
+    await input?.wake?.(signal);
+    const result = await desktop!.request(sessionId, "desktop-screenshot", {}, signal) as AgentDesktopScreenshotResult;
+    const data = Buffer.from(result.data, "base64");
+    requireVisiblePNG(data);
+    return {data};
+  };
   const offDesktop = desktop && ctx.tools.register({
     name: desktopToolName,
     description: "Capture the primary Windows display once and show it in this chat. Use for an explicit desktop screenshot request. The screen must be unlocked.",
@@ -144,9 +156,7 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
       if (exec.parent || !agent?.session?.header?.id || agent.session.header.origin === "subagent" || !desktopCaptureRequested(agent)) {
         throw Error("This capture needs the user's own request for a screenshot in the current turn. Do not retry or ask how to phrase it; use hub_desktop_look to see the screen, or tell the user the screenshot was not taken.");
       }
-      const result = await desktop.request(agent.session.header.id, "desktop-screenshot", {}, exec.signal) as AgentDesktopScreenshotResult;
-      const data = Buffer.from(result.data, "base64");
-      requireVisiblePNG(data);
+      const {data} = await captureScreen(agent.session.header.id, exec.signal);
       exec.signal.throwIfAborted();
       const name = "desktop-screenshot.png";
       const attachment = await ctx.attachments.saveImage({data, mediaType: "image/png", name});
@@ -157,12 +167,9 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
   // Computer use on this PC shares the same desktop capture.
   const offControl = desktop ? installDesktopControl(ctx, {
     async capture(sessionId, signal) {
-      const result = await desktop.request(sessionId, "desktop-screenshot", {}, signal) as AgentDesktopScreenshotResult;
-      const data = Buffer.from(result.data, "base64");
-      requireVisiblePNG(data);
-      return data;
+      return (await captureScreen(sessionId, signal)).data;
     },
-    input: new WindowsDesktopInput(join(process.env.DSH_HOME ?? join(homedir(), ".dsh"), "hub-desktop")),
+    input: input!,
     async vision(agent, signal) {
       const route = agent?.session?.requestHeader?.()?.config;
       if (!route?.provider || !route.model || !ctx.llm?.resolveModelInfo) return false;

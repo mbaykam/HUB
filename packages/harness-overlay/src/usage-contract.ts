@@ -86,12 +86,33 @@ export type SonioxUsage = ProviderUsageUnavailable | {
   readonly models: readonly { readonly id: string; readonly month: SpeechUsagePeriod }[];
 };
 
+/** One Claude subscription limit window, as Claude Code last reported it. */
+export interface ClaudeCodeWindow {
+  readonly id: string;
+  readonly usedPercent: number;
+  /** Epoch seconds. */
+  readonly resetsAt?: number;
+  readonly status?: string;
+}
+
+/**
+ * Claude Code reports the subscription's limits with every run it makes, so
+ * these are as fresh as HUB's last Claude Code turn (observedAt).
+ */
+export type ClaudeCodeUsage = ProviderUsageUnavailable | { readonly state: "waiting" } | {
+  readonly state: "ready";
+  readonly observedAt: string;
+  readonly windows: readonly ClaudeCodeWindow[];
+  readonly warning?: string;
+};
+
 export interface MinkeUsageSnapshot {
   readonly updatedAt: string;
   readonly codex: CodexUsage;
   readonly openRouter: OpenRouterUsage;
   readonly unlid: UnlidUsage;
   readonly soniox: SonioxUsage;
+  readonly claudeCode: ClaudeCodeUsage;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -320,6 +341,29 @@ export function parseSonioxUsage(value: unknown): SonioxUsage {
     models: usage.models.map(value => { const model = record(value, "Soniox model"); return { id: text(model.id, "Soniox model id"), month: speechPeriod(model.month) }; }) };
 }
 
+export function parseClaudeCodeUsage(value: unknown): ClaudeCodeUsage {
+  const usage = record(value, "Claude Code usage");
+  if (usage.state === "waiting") return { state: "waiting" };
+  const unavailable = providerUnavailable(usage);
+  if (unavailable) return unavailable;
+  const observedAt = text(usage.observedAt, "Claude Code observation time");
+  if (!Number.isFinite(Date.parse(observedAt))) throw new TypeError("Claude Code observation time is invalid");
+  if (!Array.isArray(usage.windows) || usage.windows.length > 8) throw new TypeError("Claude Code windows are invalid");
+  return {
+    state: "ready", observedAt,
+    windows: usage.windows.map(entry => {
+      const window = record(entry, "Claude Code window");
+      return {
+        id: text(window.id, "Claude Code window id"),
+        usedPercent: percent(window.usedPercent, "Claude Code used percentage"),
+        ...(window.resetsAt === undefined ? {} : { resetsAt: amount(window.resetsAt, "Claude Code reset time") }),
+        ...(window.status === undefined ? {} : { status: text(window.status, "Claude Code window status") }),
+      };
+    }),
+    ...(usage.warning === undefined ? {} : { warning: text(usage.warning, "Claude Code warning") }),
+  };
+}
+
 /** Validate all data before it reaches either side of the browser boundary. */
 export function parseMinkeUsageSnapshot(value: unknown): MinkeUsageSnapshot {
   const snapshot = record(value, "HUB usage snapshot");
@@ -333,5 +377,6 @@ export function parseMinkeUsageSnapshot(value: unknown): MinkeUsageSnapshot {
     openRouter: parseOpenRouterUsage(snapshot.openRouter),
     unlid: parseUnlidUsage(snapshot.unlid ?? { state: "error", message: "Update your HUB host to see Unlid usage." }),
     soniox: parseSonioxUsage(snapshot.soniox ?? { state: "error", message: "Update your HUB host to see Soniox usage." }),
+    claudeCode: parseClaudeCodeUsage(snapshot.claudeCode ?? { state: "error", message: "Update your HUB host to see Claude Code limits." }),
   };
 }
