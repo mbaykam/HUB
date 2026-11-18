@@ -22,6 +22,8 @@ final class HubHomeModel: ObservableObject {
     @Published var hasActiveVoice = false
     @Published var voiceCall: HubVoiceCallSummary?
     @Published var openNativeChat: HubNativeChatRequest?
+    /// Set by a reminder or the morning brief: show today's agenda.
+    @Published var openAgenda = false
 }
 
 /// What the chat's voice bar shows while a call is running.
@@ -340,6 +342,8 @@ struct HubHomeView: View {
     @State private var calendarExpanded = false
     @State private var plannerEditor: PlannerEdit?
     @State private var knowledgeApps: [HubKnowledgeAsset]?
+    @State private var storeApps: [HubApp] = []
+    @State private var runningStoreApp: HubAppRun?
     @State private var knowledgeAppsOpen = false
     @State private var openingApp: String?
     @State private var runningApp: HubOpenedKnowledgeFile?
@@ -468,9 +472,10 @@ struct HubHomeView: View {
             }
         }
         .sheet(isPresented: $knowledgeAppsOpen) {
-            if let api = chatAPI() { HubKnowledgeAppsView(api: api) }
+            if let api = chatAPI() { HubAppsView(api: api, webPage: attachments()?.server.origin.appendingPathComponent("apps")) }
         }
         .fullScreenCover(item: $runningApp) { HubKnowledgeAppRunner(file: $0) }
+        .fullScreenCover(item: $runningStoreApp) { HubAppRunner(run: $0) }
         .task(id: KnowledgeAppsRequest(connected: model.connection == .connected, notes: model.knowledge?.nodes.count ?? -1)) {
             await loadKnowledgeApps()
         }
@@ -514,6 +519,18 @@ struct HubHomeView: View {
         }
         .onChange(of: model.openNativeChat) { request in
             if let request { showChat(request); model.openNativeChat = nil }
+        }
+        .onChange(of: model.openAgenda) { open in
+            guard open else { return }
+            model.openAgenda = false
+            selectedChat = nil
+            closePanel()
+            agendaDate = Date()
+            plannerTab = .agenda
+            plannerOpen = true
+        }
+        .onChange(of: selectedChat?.request.choice.sessionId) { id in
+            HubNotifications.shared.visibleSessionID = id
         }
         .onChange(of: model.connection) { connection in
             if connection == .needsSetup || connection == .signInRequired {
@@ -783,11 +800,12 @@ struct HubHomeView: View {
 
     /// The web apps Knowledge has saved, one tap from running.
     @ViewBuilder private var knowledgeAppsRow: some View {
-        if let apps = knowledgeApps, !apps.isEmpty {
+        let apps = knowledgeApps ?? []
+        if !apps.isEmpty || !storeApps.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Apps").font(.subheadline.weight(.semibold))
-                    Text(apps.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(apps.count + storeApps.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Spacer()
                     Button("See all") { knowledgeAppsOpen = true }
                         .font(.footnote).buttonStyle(.plain).foregroundStyle(accent).frame(minHeight: 36)
@@ -795,7 +813,21 @@ struct HubHomeView: View {
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 14) {
-                        ForEach(apps.prefix(12)) { app in
+                        ForEach(storeApps.prefix(12)) { app in
+                            Button { Task { await runStoreApp(app) } } label: {
+                                VStack(spacing: 6) {
+                                    ZStack {
+                                        HubAppTile(app: app, size: 52)
+                                        if openingApp == app.id { ProgressView().tint(.white) }
+                                    }
+                                    Text(app.title).font(.caption2).lineLimit(1).frame(width: 64)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(openingApp != nil)
+                            .accessibilityLabel("Open \(app.title)")
+                        }
+                        ForEach(apps.prefix(max(0, 12 - storeApps.count))) { app in
                             Button { Task { await runApp(app) } } label: {
                                 VStack(spacing: 6) {
                                     ZStack {
@@ -822,6 +854,14 @@ struct HubHomeView: View {
         if let assets = try? await api.knowledgeAssets(), !Task.isCancelled, chatAPI() === api {
             knowledgeApps = HubKnowledgeApps.apps(in: assets)
         }
+        if let snapshot = try? await api.apps(), !Task.isCancelled, chatAPI() === api { storeApps = snapshot.apps }
+    }
+
+    private func runStoreApp(_ app: HubApp) async {
+        guard openingApp == nil, let api = chatAPI() else { return }
+        openingApp = app.id
+        defer { openingApp = nil }
+        if let html = try? await api.appHTML(app) { runningStoreApp = HubAppRun(title: app.title, html: html) }
     }
 
     private func runApp(_ app: HubKnowledgeAsset) async {

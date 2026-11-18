@@ -5,6 +5,8 @@ public struct HubPushStatus: Decodable {
     public let configured: Bool
     public let devices: Int
     public let pending: Int
+    /// Older HUBs do not report preferences.
+    public let preferences: HubPushPreferences?
 }
 
 public enum HubPushError: Error { case signInRequired, updateHost, invalidResponse, unavailable }
@@ -33,6 +35,12 @@ public final class HubPushAPI {
         guard !identity.enabled else { throw HubPushError.invalidResponse }
         return try await request(["action": "revoke", "deviceId": identity.id.uuidString.lowercased(), "generation": identity.generation])
     }
+    public func save(_ preferences: HubPushPreferences) async throws -> HubPushStatus {
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences))
+        return try await request(["action": "preferences", "preferences": object])
+    }
+    /// Asks HUB to send this iPhone a sample notification.
+    public func sendTest() async throws -> HubPushStatus { try await request(["action": "test"]) }
     private func request(_ body: [String: Any]?) async throws -> HubPushStatus {
         let url = server.origin.appendingPathComponent("api/hub/notifications")
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
@@ -51,6 +59,7 @@ public final class HubPushAPI {
         case 200: break
         case 300...399, 401, 403: throw HubPushError.signInRequired
         case 404: throw HubPushError.updateHost
+        case 400 where body?["action"] as? String == "preferences": throw HubPushError.invalidResponse
         default: throw HubPushError.unavailable
         }
         guard response.mimeType == "application/json", data.count <= 4096 else { throw HubPushError.invalidResponse }

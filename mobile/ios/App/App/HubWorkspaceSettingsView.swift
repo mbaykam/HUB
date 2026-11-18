@@ -38,6 +38,14 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
                         Label("Knowledge AI", systemImage: "circle.hexagongrid")
                     }
+                    NavigationLink(destination: HubNotificationPreferencesView()) {
+                        Label("Notifications", systemImage: "bell.badge")
+                    }
+                    .accessibilityIdentifier("hub.settings.notifications")
+                    NavigationLink(destination: HubArchivedChatsView(api: api)) {
+                        Label("Archived chats", systemImage: "archivebox")
+                    }
+                    .accessibilityIdentifier("hub.settings.archived")
                     NavigationLink(destination: HubTelegramSettingsView(api: api)) {
                         Label("Telegram", systemImage: "paperplane")
                     }

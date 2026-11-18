@@ -26,6 +26,7 @@
 		A1C000000000000000000023 /* HubPhoneSense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000024 /* HubPhoneSense.swift */; };
 		A1C000000000000000000025 /* HubScreenHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000026 /* HubScreenHighlighter.swift */; };
 		A1C000000000000000000005 /* HubUsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000006 /* HubUsageView.swift */; };
+		A1C000000000000000000031 /* HubReachSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000032 /* HubReachSettingsViews.swift */; };
 		A1C00000000000000000002F /* HubCameraCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000030 /* HubCameraCallView.swift */; };
 		A1C00000000000000000002D /* HubCameraVision.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000002E /* HubCameraVision.swift */; };
 		A1C00000000000000000002B /* HubKnowledgeAppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000002C /* HubKnowledgeAppsView.swift */; };
@@ -88,6 +89,7 @@ A17000000000000000000007 = {isa = PBXBuildFile; fileRef = A170000000000000000000
 		A1C000000000000000000024 /* HubPhoneSense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubPhoneSense.swift; sourceTree = "<group>"; };
 		A1C000000000000000000026 /* HubScreenHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubScreenHighlighter.swift; sourceTree = "<group>"; };
 		A1C000000000000000000006 /* HubUsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubUsageView.swift; sourceTree = "<group>"; };
+		A1C000000000000000000032 /* HubReachSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubReachSettingsViews.swift; sourceTree = "<group>"; };
 		A1C000000000000000000030 /* HubCameraCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubCameraCallView.swift; sourceTree = "<group>"; };
 		A1C00000000000000000002E /* HubCameraVision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubCameraVision.swift; sourceTree = "<group>"; };
 		A1C00000000000000000002C /* HubKnowledgeAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubKnowledgeAppsView.swift; sourceTree = "<group>"; };
@@ -197,6 +199,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 				A1C000000000000000000024 /* HubPhoneSense.swift */,
 				A1C000000000000000000026 /* HubScreenHighlighter.swift */,
 				A1C000000000000000000006 /* HubUsageView.swift */,
+				A1C000000000000000000032 /* HubReachSettingsViews.swift */,
 				A1C000000000000000000030 /* HubCameraCallView.swift */,
 				A1C00000000000000000002E /* HubCameraVision.swift */,
 				A1C00000000000000000002C /* HubKnowledgeAppsView.swift */,
@@ -370,6 +373,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				A1C000000000000000000023 /* HubPhoneSense.swift in Sources */,
 				A1C000000000000000000025 /* HubScreenHighlighter.swift in Sources */,
 				A1C000000000000000000005 /* HubUsageView.swift in Sources */,
+				A1C000000000000000000031 /* HubReachSettingsViews.swift in Sources */,
 				A1C00000000000000000002F /* HubCameraCallView.swift in Sources */,
 				A1C00000000000000000002D /* HubCameraVision.swift in Sources */,
 				A1C00000000000000000002B /* HubKnowledgeAppsView.swift in Sources */,

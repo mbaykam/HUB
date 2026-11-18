@@ -3378,6 +3378,64 @@ public final class HubConversationAPI {
         }
     }
 
+    // MARK: Archived chats
+
+    public func archivedSessionIDs() async throws -> [String] {
+        let data = try await requestData("api/hub/archive", headers: ["x-hub-archive": "1"], maxBytes: 2_097_152)
+        return try Self.archived(data)
+    }
+
+    /// Brings an archived chat back into the lists, in its old place.
+    public func unarchive(_ sessionID: String) async throws -> [String] {
+        guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidFile }
+        let body = try JSONSerialization.data(withJSONObject: ["action": "unarchive", "sessionId": sessionID])
+        let data = try await requestData("api/hub/archive", headers: ["x-hub-archive": "1"], body: body, maxBytes: 2_097_152)
+        let ids = try Self.archived(data)
+        guard !ids.contains(sessionID) else { throw HubAttachmentError.invalidResponse }
+        return ids
+    }
+
+    private static func archived(_ data: Data) throws -> [String] {
+        struct Archive: Decodable { let archivedSessionIds: [String] }
+        let ids = try JSONDecoder().decode(Archive.self, from: data).archivedSessionIds
+        guard ids.allSatisfy(HubVoiceAPI.validID) else { throw HubAttachmentError.invalidResponse }
+        return ids
+    }
+
+    // MARK: Apps page
+
+    public func apps() async throws -> HubAppsSnapshot {
+        let data = try await requestData("api/hub/apps", headers: ["x-hub-apps": "1"], maxBytes: 2_097_152)
+        return try JSONDecoder().decode(HubAppsSnapshot.self, from: data)
+    }
+
+    /// The app's HTML, to run in the app's sealed web view.
+    public func appHTML(_ app: HubApp) async throws -> String {
+        guard UUID(uuidString: app.id) != nil else { throw HubAttachmentError.invalidFile }
+        let data = try await requestData("apps/run/\(app.id.lowercased())", headers: [:], mediaTypes: ["text/html"], maxBytes: 4_200_000)
+        guard let html = String(data: data, encoding: .utf8) else { throw HubAttachmentError.invalidResponse }
+        return html
+    }
+
+    public enum AppAction {
+        case share(hours: Int), unshare, remove, rename(String), accountKey(String)
+    }
+
+    public func change(_ app: HubApp?, _ action: AppAction) async throws -> HubAppsSnapshot {
+        var body: [String: Any] = [:]
+        if let app { body["id"] = app.id }
+        switch action {
+        case .share(let hours): body["action"] = "share"; body["hours"] = min(720, max(1, hours))
+        case .unshare: body["action"] = "unshare"
+        case .remove: body["action"] = "remove"
+        case .rename(let title): body["action"] = "rename"; body["title"] = String(title.prefix(60))
+        case .accountKey(let key): body["action"] = "key"; body["apiKey"] = key
+        }
+        let data = try await requestData("api/hub/apps", headers: ["x-hub-apps": "1"], body: JSONSerialization.data(withJSONObject: body),
+                                         maxBytes: 2_097_152, operationTimeout: 60)
+        return try JSONDecoder().decode(HubAppsSnapshot.self, from: data)
+    }
+
     public func createWorkspace(path: String) async throws -> HubWorkspaceItem {
         guard !path.isEmpty, path.utf8.count <= 32_768, !path.contains("\0") else { throw HubChatSendError.rejected }
         let value = try await rpc("workspace/create", request: ["path": path], maxBytes: 4_194_304)

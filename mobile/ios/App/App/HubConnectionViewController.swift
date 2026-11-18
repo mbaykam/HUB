@@ -209,6 +209,11 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             home.connection = .connecting
         }
         HubNotifications.shared.destinationHandler = { [weak self] destination in self?.openNotification(destination) }
+        HubNotifications.shared.agendaHandler = { [weak self] in
+            guard let self else { return }
+            if self.presentedViewController != nil { self.dismiss(animated: true) { self.home.openAgenda = true } }
+            else { self.home.openAgenda = true }
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {

@@ -105,18 +105,139 @@ import HubNative
         default: return "Could not reach HUB notifications. Check your connection and retry."
         }
     }
+    /// The chat on screen right now; its own replies don't need a banner.
+    var visibleSessionID: String?
+    /// Opens Home's agenda, for reminders and the morning brief.
+    var agendaHandler: (() -> Void)? {
+        didSet { if pendingAgenda, let agendaHandler { pendingAgenda = false; agendaHandler() } }
+    }
+    private var pendingAgenda = false
+
+    /// Turns notifications on from Settings, asking for permission if needed.
+    func turnOn() { enable(requestPermission: true) }
+
+    /// Whether this iPhone opted in to HUB notifications.
+    var isOn: Bool { (try? state?.pushIdentity())?.enabled == true }
+
+    func preferences() async throws -> HubPushPreferences {
+        guard let api else { throw HubPushError.unavailable }
+        return try await api.status().preferences ?? .standard
+    }
+
+    func save(_ preferences: HubPushPreferences) async throws -> HubPushPreferences {
+        guard let api else { throw HubPushError.unavailable }
+        var value = preferences
+        value.timeZone = TimeZone.current.identifier
+        return try await api.save(value).preferences ?? value
+    }
+
+    func sendTest() async throws {
+        guard let api else { throw HubPushError.unavailable }
+        _ = try await api.sendTest()
+    }
+
+    /// The buttons each kind of notification offers on the lock screen.
+    static func registerCategories() {
+        func action(_ id: String, _ title: String, _ icon: String, _ options: UNNotificationActionOptions = []) -> UNNotificationAction {
+            UNNotificationAction(identifier: id, title: title, options: options, icon: UNNotificationActionIcon(systemImageName: icon))
+        }
+        let reply = UNTextInputNotificationAction(identifier: "hub.reply", title: "Reply", options: [.authenticationRequired],
+                                                  icon: UNNotificationActionIcon(systemImageName: "arrowshape.turn.up.left"),
+                                                  textInputButtonTitle: "Send", textInputPlaceholder: "Message HUB")
+        let open = action("hub.open", "Open", "arrow.up.forward.app", [.foreground])
+        let approve = action("hub.approve", "Approve", "checkmark.circle", [.authenticationRequired])
+        let deny = action("hub.deny", "Deny", "xmark.circle", [.authenticationRequired, .destructive])
+        let snooze = action("hub.snooze", "Remind me in 10 min", "clock")
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(identifier: "HUB_REPLY", actions: [reply, open], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "HUB_APPROVAL", actions: [approve, deny, open], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "HUB_REMINDER", actions: [snooze, open], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "HUB_OPEN", actions: [open], intentIdentifiers: []),
+        ])
+    }
+
     func receive(_ info: [AnyHashable: Any]) {
+        if let note = HubPushNote(info["hubNote"]), note.kind == "brief" || note.kind == "reminder" || Self.homeOnly(info) {
+            if let agendaHandler { agendaHandler() } else { pendingAgenda = true }
+            return
+        }
         guard let hub = info["hub"], let data = try? JSONSerialization.data(withJSONObject: hub),
               let destination = try? HubNotificationDestination(data: data) else { return }
         if let destinationHandler { destinationHandler(destination) } else { pending = destination }
     }
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            Task { @MainActor in self.receive(response.notification.request.content.userInfo); completionHandler() }
-        } else { completionHandler() }
+
+    /// Notifications about HUB itself (the agenda, a test) rather than a chat.
+    private static func homeOnly(_ info: [AnyHashable: Any]) -> Bool {
+        let session = (info["hub"] as? [String: Any])?["sessionId"] as? String ?? ""
+        return session == "hub-agenda" || session.hasPrefix("hub-notification-")
     }
+
+    private enum Response { case reply(String), decide(approve: Bool), snooze }
+
+    /// Runs a lock-screen button: send the reply, decide the approval or snooze,
+    /// even when HUB is not open. Failures come back as a notification.
+    private func perform(_ response: Response, notification: UNNotification) async {
+        let info = notification.request.content.userInfo
+        guard let hub = info["hub"] as? [String: Any], let origin = hub["origin"] as? String,
+              let sessionID = hub["sessionId"] as? String, let server = try? HubServer(address: origin) else { return }
+        let state = HubDeviceState(server: server, store: HubKeychainStore())
+        let api = HubConversationAPI(server: server) { (try? state.cookies()) ?? [] }
+        let background = UIApplication.shared.beginBackgroundTask(withName: "HUB notification action")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        do {
+            switch response {
+            case .reply(let text):
+                let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !message.isEmpty else { return }
+                try await api.sendChat(message, sessionID: sessionID)
+            case .decide(let approve):
+                guard let note = HubPushNote(info["hubNote"]), let goal = note.goalID, let approval = note.approvalID,
+                      let revision = note.revision else { throw HubAttachmentError.invalidResponse }
+                try await api.changeWorkspaceTask(approve ? .approve : .deny, id: goal, revision: revision, routine: false, approvalID: approval)
+                await Self.notice(approve ? "Approved" : "Denied", body: notification.request.content.title, thread: sessionID)
+            case .snooze:
+                let content = notification.request.content.mutableCopy() as? UNMutableNotificationContent ?? UNMutableNotificationContent()
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 600, repeats: false)
+                try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "hub.snooze." + UUID().uuidString, content: content, trigger: trigger))
+            }
+        } catch {
+            await Self.notice("Couldn't reach HUB", body: "Open HUB to try again.", thread: sessionID)
+        }
+    }
+
+    private static func notice(_ title: String, body: String, thread: String) async {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.threadIdentifier = thread
+        content.interruptionLevel = .passive
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "hub.notice." + UUID().uuidString, content: content, trigger: nil))
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let notification = response.notification
+        let text = (response as? UNTextInputNotificationResponse)?.userText
+        let action = response.actionIdentifier
+        Task { @MainActor in
+            switch action {
+            case UNNotificationDefaultActionIdentifier, "hub.open": self.receive(notification.request.content.userInfo)
+            case "hub.reply": await self.perform(.reply(text ?? ""), notification: notification)
+            case "hub.approve": await self.perform(.decide(approve: true), notification: notification)
+            case "hub.deny": await self.perform(.decide(approve: false), notification: notification)
+            case "hub.snooze": await self.perform(.snooze, notification: notification)
+            default: break
+            }
+            completionHandler()
+        }
+    }
+
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
+        let session = (notification.request.content.userInfo["hub"] as? [String: Any])?["sessionId"] as? String
+        Task { @MainActor in
+            // A reply to the chat being read is already on screen.
+            let showing = session != nil && session == self.visibleSessionID && UIApplication.shared.applicationState == .active
+            completionHandler(showing ? [.list] : [.banner, .list, .sound])
+        }
     }
 }
 

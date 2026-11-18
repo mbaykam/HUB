@@ -19,7 +19,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.makeKeyAndVisible()
 
         if let response = connectionOptions.notificationResponse,
-           response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+           response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == "hub.open" {
             HubNotifications.shared.receive(response.notification.request.content.userInfo)
         }
 
