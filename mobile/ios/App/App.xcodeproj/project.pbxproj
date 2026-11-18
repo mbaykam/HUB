@@ -549,6 +549,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "$(inherited) -Wl,-stack_size,0x100000";
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = com.mbaykam.hub; PROVISIONING_PROFILE_SPECIFIER = "$(HUB_APP_PROFILE)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
