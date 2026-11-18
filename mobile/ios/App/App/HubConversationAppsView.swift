@@ -79,7 +79,7 @@ struct HubConversationAppsView: View {
             }
         }
         .padding(.top, 12)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .task(id: LoadRequest(appID: selected?.id, fileID: selectedFile?.id, attempt: attempt)) {
             if let selectedFile {
                 fileError = false
@@ -187,6 +187,19 @@ struct HubContainedDocumentView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {}
+
+    /// Any saved HTML file in the shape this view expects: a document that
+    /// starts with the standard head, so the content policy goes first, and
+    /// a phone-width viewport when the file has none.
+    static func normalized(_ raw: String) -> String {
+        let prefix = "<!doctype html><html><head>"
+        let viewport = raw.range(of: "name=\"viewport\"", options: .caseInsensitive) == nil
+            ? "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" : ""
+        if let head = raw.range(of: "<head[^>]*>", options: [.regularExpression, .caseInsensitive]) {
+            return prefix + viewport + raw[head.upperBound...]
+        }
+        return prefix + "<meta charset=\"utf-8\">" + viewport + "</head><body>" + raw + "</body></html>"
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 

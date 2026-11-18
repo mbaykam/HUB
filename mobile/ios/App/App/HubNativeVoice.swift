@@ -44,6 +44,9 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private var inputPaused = false
     private var wakePhrase = "your wake phrase"
     var canChangeAttention: Bool { isActive && ready && !ending && !changingAttention }
+    /// The conversation this call speaks into, once the assistant is listening.
+    var connectedSessionID: String? { isActive && ready && !ending ? lease?.sessionId : nil }
+    var activeSessionID: String? { isActive ? lease?.sessionId : nil }
     var hasOwnedActiveCall: Bool { isActive && lease != nil && !ending }
     private var listeningStatus: String { changingAttention ? "Changing listening mode…" : listeningInBackground ? "Background listening · say “\(wakePhrase)”" : inputPaused ? "Resuming listening…" : "Listening" }
 

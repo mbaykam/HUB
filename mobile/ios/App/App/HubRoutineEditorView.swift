@@ -18,7 +18,7 @@ struct HubRoutineEditorView: View {
 
     var body: some View {
         NavigationView {
-            Form {
+            HubForm {
                 if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
                 if loading || saving { ProgressView() }
                 if let data, let draft {

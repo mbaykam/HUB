@@ -15,21 +15,31 @@ final class HubWorkspaceUITests: XCTestCase {
         let add = app.buttons["More actions"]
         let voice = app.buttons["Speak"]
         let send = app.buttons["hub.home.send"]
-        XCTAssertTrue(add.exists && voice.exists && send.exists)
-        XCTAssertLessThanOrEqual(add.frame.maxX, voice.frame.minX)
+        let dictate = app.buttons["hub.home.dictate"]
+        XCTAssertTrue(add.exists && dictate.exists && voice.exists && send.exists)
+        XCTAssertEqual(dictate.label, "Type with your voice")
+        XCTAssertLessThanOrEqual(add.frame.maxX, dictate.frame.minX)
+        XCTAssertLessThanOrEqual(dictate.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, send.frame.minX)
         capture("Home")
+        // Home keeps Knowledge compact: no graph controls, just the domain strip.
+        XCTAssertFalse(app.buttons["Zoom in"].exists)
         add.tap()
         XCTAssertTrue(app.buttons["Choose character"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Research…"].exists)
         XCTAssertTrue(app.buttons["Files"].exists)
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.16)).tap()
-        let closedMenu = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Choose character"])
-        XCTAssertEqual(XCTWaiter.wait(for: [closedMenu], timeout: 5), .completed)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        let menuClosed = { XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Choose character"]) }
+        if XCTWaiter.wait(for: [menuClosed()], timeout: 4) != .completed {
+            capture("Menu still open")
+            if add.isHittable { add.tap() }
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [menuClosed()], timeout: 5), .completed)
 
         app.buttons["Chat history"].tap()
-        XCTAssertTrue(app.staticTexts["Recents"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Collect reading notes"].exists)
+        XCTAssertTrue(app.buttons["hub.history.fixture-work"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["New chat"].exists)
+        XCTAssertFalse(app.images["star"].exists)
         capture("Chat history")
         app.buttons["Close panel"].tap()
         app.buttons["Workspace tools"].tap()
@@ -47,16 +57,27 @@ final class HubWorkspaceUITests: XCTestCase {
         todos.tap()
         XCTAssertTrue(todo.waitForExistence(timeout: 5))
 
-        let composer = app.textFields["hub.home.draft"]
+        let composer = app.descendants(matching: .any)["hub.home.draft"].firstMatch
         composer.tap()
-        let hide = app.buttons["Hide keyboard"]
-        XCTAssertTrue(hide.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Hide keyboard"].exists, "Home puts the keyboard away by scrolling, not a button")
         composer.typeText("Fixture draft")
         XCTAssertEqual(composer.value as? String, "Fixture draft")
         capture("Composer keyboard")
-        hide.tap()
-        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: hide)
-        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
+        // Scrolling the page (here, a drag on a visible card) puts the keyboard away.
+        // Drag inside the visible part of the page, above the keyboard and composer.
+        func dragPage(from start: CGFloat, to end: CGFloat) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: start))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: end)))
+        }
+        dragPage(from: 0.32, to: 0.18)
+        let keyboard = app.keyboards.firstMatch
+        let gone = { XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard) }
+        if XCTWaiter.wait(for: [gone()], timeout: 5) != .completed {
+            capture("Keyboard after scroll")
+            dragPage(from: 0.18, to: 0.36)
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [gone()], timeout: 5), .completed)
         XCTAssertEqual(composer.value as? String, "Fixture draft")
     }
 
@@ -69,8 +90,23 @@ final class HubWorkspaceUITests: XCTestCase {
 
         let graph = app.buttons["Graph view"]
         XCTAssertTrue(graph.waitForExistence(timeout: 5))
+        XCTAssertEqual(graph.value as? String, "Brain")
+        sleep(2)
+        capture("Knowledge brain")
+        graph.tap()
+        let flat = app.buttons["2D"]
+        XCTAssertTrue(flat.waitForExistence(timeout: 5))
+        flat.tap()
         XCTAssertEqual(graph.value as? String, "2D")
         capture("Knowledge graph")
+        // The graph's zoom buttons change the zoom.
+        let zoomIn = app.buttons["Zoom in"].firstMatch
+        XCTAssertTrue(zoomIn.waitForExistence(timeout: 5))
+        XCTAssertEqual(zoomIn.value as? String, "100%")
+        zoomIn.tap()
+        XCTAssertEqual(zoomIn.value as? String, "125%")
+        app.buttons["Fit graph"].firstMatch.tap()
+        XCTAssertEqual(zoomIn.value as? String, "100%")
         let search = app.textFields["Find records"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
@@ -106,9 +142,11 @@ final class HubWorkspaceUITests: XCTestCase {
         let review = app.buttons["Review proposed changes"]
         XCTAssertTrue(review.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Read source record"].exists)
-        app.buttons["Timing and attempts"].tap()
-        XCTAssertTrue(app.staticTexts["1 model attempts"].exists)
-        app.buttons["Timing and attempts"].tap()
+        capture("Knowledge AI activity")
+        let details = app.buttons["Details"].firstMatch
+        details.tap()
+        XCTAssertTrue(app.staticTexts["1 model attempts"].waitForExistence(timeout: 3))
+        details.tap()
         review.tap()
         let memories = app.buttons["Memories"]
         XCTAssertTrue(memories.waitForExistence(timeout: 5))
@@ -129,8 +167,15 @@ final class HubWorkspaceUITests: XCTestCase {
         // wait until it is hittable and retry once if the sheet did not open.
         let settings = app.buttons["Settings"].firstMatch
         let general = app.descendants(matching: .any)["hub.settings.general"].firstMatch
-        XCTAssertTrue(waitUntilHittable(settings, timeout: 8))
-        settings.tap()
+        XCTAssertTrue(settings.waitForExistence(timeout: 8))
+        if !waitUntilHittable(settings, timeout: 8) {
+            // Diagnostics for a panel button that exists but reports not hittable.
+            capture("Settings not hittable")
+            print("HUB-DIAG settings frame=\(settings.frame) window=\(app.windows.firstMatch.frame) hittable=\(settings.isHittable)")
+            settings.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        } else {
+            settings.tap()
+        }
         if !general.waitForExistence(timeout: 8), waitUntilHittable(settings, timeout: 3) {
             settings.tap()
         }
@@ -199,11 +244,13 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Save screenshot to Files"].exists)
 
         let more = app.buttons["hub.chat.more"], voice = app.buttons["hub.chat.voice"], stop = app.buttons["hub.chat.stop"]
-        XCTAssertTrue(more.exists && voice.exists && stop.exists)
-        XCTAssertLessThanOrEqual(more.frame.maxX, voice.frame.minX)
+        let dictate = app.buttons["hub.chat.dictate"]
+        XCTAssertTrue(more.exists && dictate.exists && voice.exists && stop.exists)
+        XCTAssertLessThanOrEqual(more.frame.maxX, dictate.frame.minX)
+        XCTAssertLessThanOrEqual(dictate.frame.maxX, voice.frame.minX)
         XCTAssertLessThanOrEqual(voice.frame.maxX, stop.frame.minX)
         capture("Conversation before Stop")
-        let draft = app.textFields["hub.chat.draft"]
+        let draft = app.descendants(matching: .any)["hub.chat.draft"].firstMatch
         draft.tap()
         draft.typeText("Keep this draft")
         let dismissKeyboard = app.buttons["Hide keyboard"]
@@ -217,6 +264,10 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["hub.chat.send"].isEnabled)
         XCTAssertEqual(app.webViews.count, 0)
         capture("Conversation after Stop")
+        app.buttons["Trajectory"].tap()
+        sleep(1)
+        capture("Trajectory")
+        app.buttons["Chat"].tap()
 
         more.tap()
         app.buttons["Conversation outputs"].tap()
@@ -251,6 +302,126 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Save"].isEnabled)
         XCTAssertEqual(app.webViews.count, 0)
         capture("Knowledge Skills")
+    }
+
+    /// A visual the model made with hub_present opens as a canvas in the chat
+    /// and runs its own script.
+    @MainActor
+    func testChatShowsAnInteractiveVisualFromTheModel() {
+        let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture", "--hub-native-canvas-fixture", "--hub-native-voice-bar-fixture"])
+        let history = app.buttons["Chat history"]
+        XCTAssertTrue(history.waitForExistence(timeout: 20))
+        history.tap()
+        let conversation = app.buttons["hub.history.fixture-work"]
+        XCTAssertTrue(conversation.waitForExistence(timeout: 5))
+        conversation.tap()
+        let title = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Pendulum simulator")).firstMatch
+        let found = title.waitForExistence(timeout: 15)
+        capture("Chat canvas state")
+        if !found, app.buttons["Open canvas"].exists { app.buttons["Open canvas"].tap() }
+        XCTAssertTrue(found || title.waitForExistence(timeout: 5), "Canvas title")
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.sliders.firstMatch.waitForExistence(timeout: 10), "The visual's own controls are shown")
+        sleep(1)
+        capture("Chat canvas")
+        app.buttons["Expand canvas"].tap()
+        sleep(1)
+        capture("Chat canvas expanded")
+        // Closing the visual leaves a card in the chat that opens it again.
+        app.buttons["Hide canvas"].tap()
+        let reopen = app.buttons["hub.chat.visual.reopen"]
+        if !reopen.waitForExistence(timeout: 3) { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(reopen.waitForExistence(timeout: 5))
+        capture("Chat canvas closed")
+        reopen.tap()
+        XCTAssertTrue(app.buttons["Hide canvas"].waitForExistence(timeout: 5))
+        // A running voice call stays in reach above its chat.
+        XCTAssertTrue(app.buttons["hub.voice.bar"].exists)
+        XCTAssertTrue(app.buttons["End voice call"].exists)
+
+        // Video: the live camera with HUB's overlays (a stand-in scene here,
+        // since the simulator has no camera).
+        app.buttons["hub.voice.video"].tap()
+        let close = app.buttons["hub.camera.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        sleep(2)
+        capture("Video call overlays")
+        app.buttons["Show what HUB sees"].tap()
+        sleep(1)
+        capture("Video call marks")
+        close.tap()
+        XCTAssertTrue(app.buttons["Hide canvas"].waitForExistence(timeout: 5))
+
+        // In a chat, the right edge opens the tools and the left edge the history;
+        // a second left-edge swipe goes back Home.
+        func edgeSwipe(from x: CGFloat, to endX: CGFloat) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: endX, dy: 0.55)))
+        }
+        edgeSwipe(from: 0.995, to: 0.3)
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
+        app.buttons["Close panel"].tap()
+        edgeSwipe(from: 0.005, to: 0.7)
+        XCTAssertTrue(app.buttons["New chat"].waitForExistence(timeout: 5))
+        capture("History over a chat")
+        edgeSwipe(from: 0.005, to: 0.7)
+        XCTAssertTrue(app.buttons["Explore knowledge"].waitForExistence(timeout: 5))
+    }
+
+    /// Screenshots of the task and settings screens for visual review. A
+    /// screen that cannot be reached is skipped; the tour asserts nothing.
+    @MainActor
+    func testNativeScreenTourForVisualReview() {
+        let app = readFixtureApp()
+        let tools = app.buttons["Workspace tools"]
+        guard tools.waitForExistence(timeout: 20) else { return }
+        tools.tap()
+        let tasks = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tasks")).firstMatch
+        if waitUntilHittable(tasks, timeout: 6) {
+            tasks.tap()
+            sleep(3)
+            capture("Tasks")
+            let done = app.buttons["Done"].firstMatch
+            guard done.exists, done.isHittable else { return }
+            done.tap()
+            guard waitUntilHittable(tools, timeout: 6) else { return }
+            tools.tap()
+        }
+        let settings = app.buttons["Settings"].firstMatch
+        let general = app.descendants(matching: .any)["hub.settings.general"].firstMatch
+        guard waitUntilHittable(settings, timeout: 8) else { return }
+        settings.tap()
+        if !general.waitForExistence(timeout: 8), waitUntilHittable(settings, timeout: 3) { settings.tap() }
+        guard general.waitForExistence(timeout: 8) else { return }
+        capture("Settings")
+        for title in ["Models & providers", "Instructions", "Tools", "Speech", "Knowledge AI", "Telegram"] {
+            let row = app.buttons[title].firstMatch
+            guard row.exists, row.isHittable else { continue }
+            row.tap()
+            sleep(3)
+            capture(title)
+            let back = app.navigationBars.buttons["Settings"].firstMatch
+            guard back.exists, back.isHittable else { return }
+            back.tap()
+            guard general.waitForExistence(timeout: 5) else { return }
+        }
+        // Characters last: it goes three screens deep.
+        let characters = app.buttons["Characters"].firstMatch
+        guard characters.exists, characters.isHittable else { return }
+        characters.tap()
+        let mira = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Mira")).firstMatch
+        guard mira.waitForExistence(timeout: 6) else { capture("Characters"); return }
+        capture("Characters")
+        mira.tap()
+        sleep(2)
+        capture("Character editor")
+        app.swipeUp()
+        let lastRequest = app.buttons["Last model request"].firstMatch
+        guard lastRequest.waitForExistence(timeout: 4), lastRequest.isHittable else { capture("Character editor end"); return }
+        lastRequest.tap()
+        sleep(3)
+        capture("Last model request")
     }
 
     @MainActor

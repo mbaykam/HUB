@@ -29,7 +29,7 @@ struct HubSpeechSettingsView: View {
     @State private var previewTask: Task<Void, Never>?
 
     var body: some View {
-        Form {
+        HubForm {
             if loading || busy { ProgressView() }
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if downloadsOnly, let catalog {

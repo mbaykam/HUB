@@ -9,7 +9,7 @@ struct HubCharactersSettingsView: View {
     @State private var attempt = 0
 
     var body: some View {
-        List {
+        HubList {
             if let settings {
                 if let warning = settings.warning { Text(warning).foregroundStyle(.secondary) }
                 ForEach(settings.characters) { character in
@@ -51,6 +51,89 @@ struct HubCharactersSettingsView: View {
         if character.id == settings.mainId { return "Main assistant · Writing and Telegram" }
         if character.id == settings.voiceId { return "Voice assistant" }
         return character.route == nil ? "Model not configured" : "Specialist"
+    }
+}
+
+/// Shows the complete request HUB last sent to a model for one character.
+/// Reading it makes no model call.
+@MainActor
+private struct HubCharacterRequestView: View {
+    let api: HubConversationAPI
+    let characterID: String
+    @State private var request: HubCharacterRequest?
+    @State private var preview = ""
+    @State private var truncated = false
+    @State private var file: Data?
+    @State private var loading = false
+    @State private var failed = false
+    @State private var attempt = 0
+
+    private static let previewLimit = 20_000
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if failed {
+                    Text("Couldn’t load the request. Refresh to retry.").foregroundStyle(.secondary)
+                } else if let request {
+                    if let record = request.record, record.json != nil {
+                        Text("Actual request · \(Date(timeIntervalSince1970: record.at / 1000).formatted(date: .abbreviated, time: .shortened))")
+                            .font(.subheadline.weight(.semibold))
+                        Text(record.sessionId).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        if truncated {
+                            Text("Showing the beginning. Share the file to read the complete request.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Text(preview)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        Text(request.record?.unavailable ?? "No request captured for this character yet. Send this character a message, then refresh. Unsaved character edits are not applied to past requests.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(request.boundary + " " + request.retention).font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ProgressView("Loading the last model request…")
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .hubBackdrop()
+        .navigationTitle("Last model request")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if let file {
+                    HubShareFileButton(bytes: file, name: "hub-model-request.json", label: "Share full request")
+                }
+                Button { attempt += 1 } label: { Image(systemName: "arrow.clockwise") }
+                    .accessibilityLabel("Refresh")
+                    .disabled(loading)
+            }
+        }
+        .task(id: attempt) { await load() }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            let value = try await api.characterRequest(id: characterID)
+            guard !Task.isCancelled else { return }
+            let json = value.record?.json ?? ""
+            let beginning = String(json.prefix(Self.previewLimit))
+            preview = beginning
+            truncated = beginning.utf8.count < json.utf8.count
+            file = json.isEmpty ? nil : Data(json.utf8)
+            request = value
+            failed = false
+        } catch {
+            if !Task.isCancelled { failed = true }
+        }
     }
 }
 
@@ -98,7 +181,7 @@ private struct HubCharacterEditor: View {
     }
 
     var body: some View {
-        Form {
+        HubForm {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             Picker("Character settings", selection: $tab) {
                 ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -112,6 +195,14 @@ private struct HubCharacterEditor: View {
             }
             if needsReload {
                 Button("Reload saved character") { Task { await reload() } }
+            }
+            if !creating {
+                Section {
+                    NavigationLink("Last model request",
+                                   destination: HubCharacterRequestView(api: api, characterID: character.id))
+                } footer: {
+                    Text("See exactly what HUB last sent to the model for this character.")
+                }
             }
         }
         .disabled(busy)
@@ -132,8 +223,10 @@ private struct HubCharacterEditor: View {
 
     private var profile: some View {
         Section("Profile") {
-            TextField("Name", text: $character.name)
-            TextField("About this character", text: $character.description)
+            HubLabeledField(title: "Name") { TextField("Name", text: $character.name) }
+            HubLabeledField(title: "About this character") {
+                TextField("About this character", text: $character.description)
+            }
             Picker("Portrait", selection: $character.avatar) {
                 ForEach(["hub", "voice", "devil", "mint", "rose", "amber"], id: \.self) {
                     Text($0 == "devil" ? "Horns" : $0.capitalized).tag($0)

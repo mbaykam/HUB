@@ -5,6 +5,8 @@ import HubNative
 @MainActor
 struct HubUsageView: View {
     let api: HubConversationAPI
+    /// Pushed inside Settings, where the navigation bar already shows the title and Back.
+    var embedded = false
     @Environment(\.dismiss) private var dismiss
     @State private var usage: HubUsageSnapshot?
     @State private var failed = false
@@ -13,14 +15,16 @@ struct HubUsageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Usage limits").font(.headline).accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button("Done") { dismiss() }
+            if !embedded {
+                HStack {
+                    Text("Usage limits").font(.headline).accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    Button("Done") { dismiss() }
+                }
             }
             if let usage {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 12) {
                         provider("Codex", usage.codex) {
                             if (usage.codex.rateLimits ?? []).isEmpty && usage.codex.credits == nil && usage.codex.individualLimit == nil {
                                 Text("Codex did not report usage limits.").foregroundStyle(.secondary)
@@ -128,7 +132,9 @@ struct HubUsageView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .navigationTitle("Usage limits")
+        .navigationBarTitleDisplayMode(.inline)
+        .hubBackdrop()
     }
 
     private func provider<Content: View>(_ title: String, _ provider: HubUsageSnapshot.Provider, @ViewBuilder content: () -> Content) -> some View {
@@ -138,6 +144,10 @@ struct HubUsageView: View {
             else { Text(provider.message ?? provider.state.replacingOccurrences(of: "-", with: " ").capitalized).foregroundStyle(.secondary) }
             if let warning = provider.warning { Text(warning).font(.footnote).foregroundStyle(.secondary) }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
     }
 
     private func row(_ label: String, _ value: String) -> some View {

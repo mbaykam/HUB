@@ -375,7 +375,7 @@ private struct HubStillCamera: UIViewControllerRepresentable {
 private struct HubVoiceCanvasView: View {
     let context: HubVoiceAttachmentContext
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var activity = HubAppActivity.shared
     @State private var latest: HubChatPresentation?
     @State private var shown: HubChatPresentation?
     @State private var html: String?
@@ -428,8 +428,8 @@ private struct HubVoiceCanvasView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .task(id: Refresh(active: scenePhase == .active, attempt: retry, live: liveUpdates)) {
-            guard scenePhase == .active else { return }
+        .task(id: Refresh(active: activity.isActive, attempt: retry, live: liveUpdates)) {
+            guard activity.isActive else { return }
             await follow()
         }
     }

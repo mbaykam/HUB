@@ -10,7 +10,7 @@ struct HubWorkspaceSettingsView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let api {
                     NavigationLink(destination: HubGeneralSettingsView(api: api, changed: preferencesChanged)) {
                         Label("General", systemImage: "slider.horizontal.3")
@@ -41,7 +41,7 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubTelegramSettingsView(api: api)) {
                         Label("Telegram", systemImage: "paperplane")
                     }
-                    NavigationLink(destination: HubUsageView(api: api)) {
+                    NavigationLink(destination: HubUsageView(api: api, embedded: true)) {
                         Label("Usage limits", systemImage: "chart.bar.xaxis")
                     }
                     .accessibilityIdentifier("hub.settings.usage")
@@ -81,7 +81,7 @@ struct HubVoiceProfilesView: View {
     @State private var showingDelete = false
 
     var body: some View {
-        List {
+        HubList {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if let state {
                 Section {
@@ -206,7 +206,7 @@ private struct HubVoiceProfileEditor: View {
 
     private func editForm(_ draft: Editor) -> some View {
         NavigationView {
-            Form {
+            HubForm {
                 if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 Section("Personality") {
                     TextField("Name", text: Binding(get: { editor?.settings.name ?? "" }, set: { editor?.settings.name = $0 }))
@@ -419,7 +419,7 @@ private struct HubGeneralSettingsView: View {
     @State private var error: String?
 
     var body: some View {
-        Form {
+        HubForm {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
             if let settings {
                 Section("Appearance") {
@@ -521,7 +521,7 @@ private struct HubToolCatalogView: View {
     }
 
     var body: some View {
-        List {
+        HubList {
             if loading { ProgressView("Loading tools…") }
             if failed {
                 Text("Could not load tools.").foregroundStyle(.secondary)
@@ -626,7 +626,7 @@ private struct HubTelegramSettingsView: View {
     @State private var confirmApproval = false
 
     var body: some View {
-        Form {
+        HubForm {
             if busy { ProgressView("Checking Telegram…") }
             if failed { Text("Could not confirm the operation. Refresh Telegram status to check.").foregroundStyle(.secondary) }
             if let status {
@@ -692,7 +692,7 @@ private struct HubKnowledgeSettingsView: View {
     @State private var modelCheckPassed = false
 
     var body: some View {
-        Form {
+        HubForm {
             if let error { Text(error).foregroundStyle(.secondary) }
             if busy { ProgressView("Updating Knowledge AI…") }
             if modelCheckPassed { Label("Model connection verified", systemImage: "checkmark.circle") }
@@ -822,7 +822,7 @@ private struct HubKnowledgeSettingsView: View {
 
     private var modelPicker: some View {
         NavigationView {
-            List {
+            HubList {
                 if let models {
                     ForEach(models.models.filter { $0.available != false }) { model in
                         Button {
@@ -932,7 +932,7 @@ private struct HubKnowledgeRecallsView: View {
     let records: [HubKnowledgeStatus.Recall]
 
     var body: some View {
-        List {
+        HubList {
             if records.isEmpty { Text("No recall activity has been recorded.").foregroundStyle(.secondary) }
             ForEach(records.indices, id: \.self) { index in
                 let record = records[index]
@@ -988,7 +988,7 @@ private struct HubKnowledgeProfileReviewView: View {
     }
 
     var body: some View {
-        List {
+        HubList {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView() }
             if let review {
@@ -1109,7 +1109,7 @@ private struct HubModelsView: View {
     private enum Sort: String, CaseIterable { case name = "Name", recent = "Newest", price = "Lowest price" }
 
     var body: some View {
-        List {
+        HubList {
             if let error { Text(error).foregroundStyle(.secondary) }
             if busy { ProgressView("Updating models…") }
             if let catalog {
@@ -1253,7 +1253,7 @@ struct HubInstructionsView: View {
     @State private var attempt = 0
 
     var body: some View {
-        List {
+        HubList {
             if let catalog {
                 Section("Shared files") {
                     ForEach(catalog.shared) { row($0) }

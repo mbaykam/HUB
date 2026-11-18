@@ -17,6 +17,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var homeController: UIHostingController<HubHomeView>!
     private let workspaceBar = UIStackView()
     private var conversationAPI: HubConversationAPI?
+    private var lastAccessRenewal: Date?
     private var sendTask: Task<Void, Never>?
     private var showingHome = true
     private var workspaceAppearance = HubChatPreferences.Appearance.dark
@@ -45,6 +46,10 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         set { HubAssistantCoordinator.shared.adopt(newValue) }
     }
     private var deviceState: HubDeviceState?
+    private var openChatWhenVoiceConnects = false
+    private var openCameraWhenVoiceConnects = false
+    private var cameraVision: HubCameraVision?
+    private var cameraHost: UIViewController?
     private var keyboardObserver: NSObjectProtocol?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var pageDeadline: Task<Void, Never>?
@@ -89,6 +94,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         })
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.cancelPageDeadline() }
+        })
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: HubSiriInbox.arrived, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.deliverSiriMessage() }
         })
         message.font = .preferredFont(forTextStyle: .caption1)
         message.adjustsFontForContentSizeCategory = true
@@ -176,7 +184,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 let tasks = try await api.workspaceTasks()
                 guard generation == self.connectionGeneration else { throw CancellationError() }
                 return tasks
-            }, appearanceChanged: { [weak self] in self?.applyWorkspaceAppearance($0) })
+            }, appearanceChanged: { [weak self] in self?.applyWorkspaceAppearance($0) },
+            voiceControl: { [weak self] control in self?.controlVoice(control) })
         let controller = UIHostingController(rootView: screen)
         homeController = controller
         addChild(controller)
@@ -205,7 +214,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if showingHome { applyWorkspaceAppearance(workspaceAppearance) }
-        home.hasActiveVoice = voice?.isActive == true
+        syncVoiceSummary()
         if firstAppearance {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - bootstrapStarted) * 1000)
             launchLog.info("Native Home appeared in \(elapsed, privacy: .public) ms")
@@ -250,6 +259,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         home.work = try? decoder.decode(HubHomeWork.self, from: Data(work.utf8))
         home.conversations = [HubConversationChoice(sessionId: "fixture-work", title: "Collect reading notes", updatedAt: 0)]
         home.connection = .connected
+        if Self.voiceBarFixture {
+            home.voiceCall = HubVoiceCallSummary(sessionID: "fixture-work", status: "Listening", muted: false)
+        }
         if ProcessInfo.processInfo.arguments.contains("--hub-native-read-fixture"),
            let fixtureServer = try? HubServer(address: "https://hub-workspace-fixture.invalid") {
             let configuration = URLSessionConfiguration.ephemeral
@@ -376,7 +388,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func validateForegroundPage() {
         guard !firstAppearance else { return }
         if showingHome {
-            home.hasActiveVoice = voice?.isActive == true
+            syncVoiceSummary()
             refreshHome()
             return
         }
@@ -400,6 +412,18 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.afterOptions { $0.showSharedFiles() } })
         sheet.addAction(UIAlertAction(title: "Notifications", style: .default) { [weak self] _ in self?.afterOptions { HubNotifications.shared.show(from: $0) } })
         sheet.addAction(UIAlertAction(title: "Connection", style: .default) { [weak self] _ in self?.afterOptions { $0.showConnection() } })
+        let sense = HubPhoneSense.shared
+        sheet.addAction(UIAlertAction(title: sense.enabled ? "Phone context: On" : "Phone context: Off", style: .default) { [weak self] _ in
+            self?.afterOptions { controller in
+                sense.enabled.toggle()
+                controller.showNotice(sense.enabled
+                    ? "Assistants can ask for this iPhone's location, nearby places and battery while HUB is open."
+                    : "Assistants no longer receive this iPhone's location or surroundings.")
+            }
+        })
+        if server != nil {
+            sheet.addAction(UIAlertAction(title: "Cloudflare access token", style: .default) { [weak self] _ in self?.afterOptions { $0.showAccessToken() } })
+        }
         sheet.addAction(UIAlertAction(title: showingHome ? "Refresh HUB" : "Retry sign-in", style: .default) { [weak self] _ in
             self?.afterOptions { $0.reload() }
         })
@@ -448,6 +472,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         server = value
         let nativeState = HubDeviceState(server: value, store: HubKeychainStore())
         deviceState = nativeState
+        // Set before any API session exists, so every request carries it.
+        HubAccessHeaders.use(try? nativeState.accessToken(), for: value)
+        lastAccessRenewal = nil
         api?.invalidate()
         uiAPI?.invalidate()
         let cookies: () async -> [HTTPCookie] = {
@@ -467,6 +494,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         uiAPI = HubInstalledUIAPI(server: value, cookies: cookies)
         conversationAPI = HubConversationAPI(server: value, cookies: cookies)
         chatAttachmentAPI = HubAttachmentAPI(server: value, cookies: cookies)
+        HubPhoneSense.shared.attach(conversationAPI)
         UserDefaults.standard.set(value.origin.absoluteString, forKey: savedOriginKey)
         home.knowledge = nil
         home.planner = nil
@@ -502,6 +530,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 self.home.connection = .connected
                 self.home.refreshing = true
                 self.message.text = "Connected"
+                self.deliverSiriMessage()
                 self.openPendingNotification()
                 guard self.showingHome else { return }
                 async let knowledge: Void = self.loadHomeKnowledge(conversationAPI, attempt: attempt)
@@ -518,9 +547,106 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 await self.saveWebSession(server)
             } catch {
                 guard let self, !Task.isCancelled, self.showingHome else { return }
+                // With a saved Cloudflare token, an expired session renews
+                // itself instead of showing the sign-in page.
+                if Self.needsSignIn(error), await self.renewSessionWithAccessToken(server),
+                   !Task.isCancelled, self.showingHome {
+                    self.refreshHome()
+                    return
+                }
                 self.homeConnectionFailed(error, attempt: attempt)
             }
         }
+    }
+
+    private static func needsSignIn(_ error: Error) -> Bool {
+        (error as? HubVoiceAPIError) == .signInRequired || (error as? HubAttachmentError) == .signInRequired
+    }
+
+    /// Passes Cloudflare Access with the saved service token and lets HUB issue
+    /// a fresh session cookie. At most once a minute, so a refused token never loops.
+    private func renewSessionWithAccessToken(_ expected: HubServer) async -> Bool {
+        guard let state = deviceState, server == expected, let token = try? state.accessToken() else { return false }
+        if let last = lastAccessRenewal, Date().timeIntervalSince(last) < 60 { return false }
+        lastAccessRenewal = Date()
+        do {
+            let cookies = try await HubAccessSession.issue(server: expected, token: token)
+            guard server == expected else { return false }
+            let store = WKWebsiteDataStore.default().httpCookieStore
+            for cookie in cookies {
+                await withCheckedContinuation { continuation in store.setCookie(cookie) { continuation.resume() } }
+            }
+            try? state.rememberVerifiedSession(cookies)
+            return true
+        } catch HubAccessSessionError.tokenRejected {
+            message.text = "Cloudflare did not accept the saved access token. Check it in Options → Cloudflare access token."
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    private func showAccessToken(error: String? = nil) {
+        guard let server, let state = deviceState else { showConnection(); return }
+        let saved = (try? state.accessToken()) != nil
+        let alert = UIAlertController(
+            title: "Cloudflare access token",
+            message: error ?? (saved
+                ? "A service token is saved. HUB connects without the Cloudflare sign-in page. Enter new values to replace it."
+                : "Paste the Client ID and Client Secret of a Cloudflare Access service token. HUB will then connect without the sign-in page. They are kept in this iPhone's Keychain."),
+            preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "Client ID (ends in .access)"
+            field.autocapitalizationType = .none; field.autocorrectionType = .no
+            field.accessibilityLabel = "Cloudflare Client ID"
+        }
+        alert.addTextField { field in
+            field.placeholder = "Client Secret"
+            field.isSecureTextEntry = true
+            field.autocapitalizationType = .none; field.autocorrectionType = .no
+            field.accessibilityLabel = "Cloudflare Client Secret"
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if saved {
+            alert.addAction(UIAlertAction(title: "Remove token", style: .destructive) { [weak self] _ in
+                try? state.clearAccessToken()
+                HubAccessHeaders.use(nil, for: server)
+                self?.connect(server)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            let id = alert?.textFields?.first?.text ?? "", secret = alert?.textFields?.last?.text ?? ""
+            guard let self else { return }
+            guard let token = try? HubAccessToken(clientID: id, clientSecret: secret) else {
+                DispatchQueue.main.async { self.showAccessToken(error: "That does not look like a Cloudflare service token. The Client ID ends in .access.") }
+                return
+            }
+            do { try state.rememberAccessToken(token) } catch {
+                DispatchQueue.main.async { self.showAccessToken(error: "The token could not be saved. Unlock this iPhone and try again.") }
+                return
+            }
+            Task { @MainActor in
+                HubAccessHeaders.use(token, for: server)
+                self.lastAccessRenewal = nil
+                do {
+                    let cookies = try await HubAccessSession.issue(server: server, token: token)
+                    let store = WKWebsiteDataStore.default().httpCookieStore
+                    for cookie in cookies {
+                        await withCheckedContinuation { continuation in store.setCookie(cookie) { continuation.resume() } }
+                    }
+                    try? state.rememberVerifiedSession(cookies)
+                    self.connect(server)
+                    self.returnHome()
+                    self.showNotice("Saved. HUB now connects without the Cloudflare sign-in page.")
+                } catch HubAccessSessionError.tokenRejected {
+                    self.showNotice("Saved, but Cloudflare refused this token. Check that the HUB application has a Service Auth policy that includes this token.")
+                } catch {
+                    self.connect(server)
+                    self.showNotice("Saved. HUB could not be reached just now; it will use the token when it is back.")
+                }
+            }
+        })
+        present(alert, animated: true)
     }
 
     private func loadHomeKnowledge(_ api: HubConversationAPI, attempt: UInt64) async {
@@ -621,7 +747,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         case .needsSetup: showConnection()
         case .signInRequired:
             if let server {
-                loadSignIn(server)
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.lastAccessRenewal = nil
+                    if await self.renewSessionWithAccessToken(server) { self.refreshHome() }
+                    else { self.loadSignIn(server) }
+                }
             }
         case .unavailable, .connected: refreshHome()
         case .connecting: break
@@ -640,6 +771,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             home.sendError = nil
         }
         openNotification(destination)
+    }
+
+    /// Sends a message spoken to Siri ("Ask HUB") once HUB is connected.
+    private func deliverSiriMessage() {
+        guard showingHome, home.connection == .connected, !home.sending, home.uncertainChat == nil,
+              let text = HubSiriInbox.shared.take() else { return }
+        home.draft = text
+        sendHomeDraft()
     }
 
     private func sendHomeDraft() {
@@ -689,7 +828,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         recovery.isHidden = true
         workspaceBar.isHidden = true
         homeController.view.isHidden = false
-        home.hasActiveVoice = voice?.isActive == true
+        syncVoiceSummary()
         if refresh { refreshHome() }
     }
 
@@ -712,7 +851,12 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func loadSignIn(_ server: HubServer) {
         showSignIn()
         preparePageLoad()
-        activeNavigation = webView.load(URLRequest(url: server.origin))
+        var request = URLRequest(url: server.origin)
+        if let token = HubAccessHeaders.token(for: server) {
+            request.setValue(token.clientID, forHTTPHeaderField: "CF-Access-Client-Id")
+            request.setValue(token.clientSecret, forHTTPHeaderField: "CF-Access-Client-Secret")
+        }
+        activeNavigation = webView.load(request)
     }
 
     private func reload() {
@@ -734,6 +878,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             HubNotifications.shared.disable()
             do { try self.deviceState?.clear() }
             catch { self.showNotice("Sign-out could not clear saved access. Unlock this iPhone and try again."); return }
+            if let server = self.server { HubAccessHeaders.use(nil, for: server) }
             HubNotifications.shared.forgetConnection()
             self.connected = false
             self.webView?.stopLoading()
@@ -764,9 +909,101 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let saved: HubVoiceCheckpoint? = pending == nil && voice?.isActive != true ? (try? deviceState.voice()) : nil
         presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: saved, pending: pending, resumeOnlyIfActive: !resumeLastConversation)
     }
+    /// Mirrors the call into the chat's voice bar and, for a call just started,
+    /// takes the user into its conversation as soon as the assistant listens.
+    private func voiceChanged(_ model: HubNativeVoice, sheet: UIViewController?) {
+        guard voice === model else { return }
+        syncVoiceSummary()
+        if !model.isActive {
+            openChatWhenVoiceConnects = false
+            openCameraWhenVoiceConnects = false
+            if cameraHost != nil { closeCamera() }
+        }
+        guard openChatWhenVoiceConnects, model.connectedSessionID != nil,
+              let destination = model.conversationDestination() else { return }
+        openChatWhenVoiceConnects = false
+        let camera = openCameraWhenVoiceConnects
+        openCameraWhenVoiceConnects = false
+        if let sheet, presentedViewController === sheet, sheet.presentedViewController == nil {
+            dismiss(animated: true) { [weak self] in
+                self?.openNotification(destination)
+                if camera { self?.presentCamera() }
+            }
+        } else if presentedViewController == nil {
+            openNotification(destination)
+            if camera { presentCamera() }
+        }
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private static let voiceBarFixture = ProcessInfo.processInfo.arguments.contains("--hub-native-voice-bar-fixture")
+    #else
+    private static let voiceBarFixture = false
+    #endif
+
+    private func syncVoiceSummary() {
+        guard !Self.voiceBarFixture else { return }
+        let active = voice?.isActive == true
+        if home.hasActiveVoice != active { home.hasActiveVoice = active }
+        let summary = voice.flatMap { model in
+            model.isActive ? HubVoiceCallSummary(sessionID: model.activeSessionID, status: model.status, muted: model.muted) : nil
+        }
+        if home.voiceCall != summary { home.voiceCall = summary }
+        if cameraVision?.voice != summary { cameraVision?.voice = summary }
+    }
+
+    /// The live camera of the current call. Starting it with no call running
+    /// starts the call first and opens the camera once HUB listens.
+    private func presentCamera() {
+        let context = voice?.attachmentContext()
+        guard Self.voiceBarFixture || context != nil else {
+            openCameraWhenVoiceConnects = true
+            showVoice()
+            return
+        }
+        guard cameraHost == nil else { return }
+        let vision = HubCameraVision(context: context, fixture: Self.voiceBarFixture && context == nil)
+        vision.voice = home.voiceCall
+        cameraVision = vision
+        let screen = HubCameraCallView(vision: vision, mute: { [weak self] in self?.voice?.toggleMute() }, endCall: { [weak self] in
+            self?.closeCamera { [weak self] in self?.voice?.end() }
+        }, close: { [weak self] in self?.closeCamera() })
+        let host = UIHostingController(rootView: screen)
+        host.modalPresentationStyle = .fullScreen
+        host.overrideUserInterfaceStyle = .dark
+        cameraHost = host
+        var presenter: UIViewController = self
+        while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+        presenter.present(host, animated: true)
+    }
+
+    private func closeCamera(then finish: (() -> Void)? = nil) {
+        cameraVision?.stop()
+        cameraVision = nil
+        guard let host = cameraHost else { finish?(); return }
+        cameraHost = nil
+        host.dismiss(animated: true, completion: finish)
+    }
+
+    private func controlVoice(_ control: HubVoiceCallControl) {
+        switch control {
+        case .camera: presentCamera()
+        case .open: showVoice()
+        case .mute: voice?.toggleMute()
+        case .end:
+            guard let voice, voice.isActive else { return }
+            let alert = UIAlertController(title: "End the voice call?", message: "The conversation stays in your chats.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Keep talking", style: .cancel))
+            alert.addAction(UIAlertAction(title: "End call", style: .destructive) { _ in voice.end() })
+            present(alert, animated: true)
+        }
+    }
+
     private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false) {
+        let startsNewCall = voice?.isActive != true
         let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending, resumeOnlyIfActive: resumeOnlyIfActive)
         voice = model
+        if startsNewCall { openChatWhenVoiceConnects = true }
         let sheet = HubVoiceViewController(voice: model, restart: { [weak self] in
             self?.dismiss(animated: true) { [weak self] in self?.showVoice(resumeLastConversation: true) }
         }) { [weak self, weak model] in
@@ -779,11 +1016,13 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
         let voiceNavigation = UINavigationController(rootViewController: sheet)
         voiceNavigation.overrideUserInterfaceStyle = overrideUserInterfaceStyle
-        present(voiceNavigation, animated: true) { [weak self, weak sheet] in
-            model.changed = { [weak sheet] in
+        present(voiceNavigation, animated: true) { [weak self, weak sheet, weak voiceNavigation] in
+            model.changed = { [weak self, weak sheet, weak model, weak voiceNavigation] in
                 sheet?.refresh()
+                if let model { self?.voiceChanged(model, sheet: voiceNavigation) }
             }
             if !model.isActive { model.start() }
+            self?.voiceChanged(model, sheet: voiceNavigation)
         }
     }
     private func showEndVoiceFirst() {
@@ -1036,6 +1275,74 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
             if url.query == nil {
                 return Data(#"{"providers":[{"id":"fixture","name":"Fixture Provider"}],"tools":[{"name":"hub_view_screen","description":"Read one consented frame"}],"speech":{"stt":[],"tts":[]}}"#.utf8)
             }
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/characters", url.query == nil,
+           request.value(forHTTPHeaderField: "x-hub-characters") == "1" {
+            return Data(#"""
+            {"revision":7,"mainId":"11111111-1111-4111-8111-111111111111","voiceId":"22222222-2222-4222-8222-222222222222",
+             "characters":[
+                {"id":"11111111-1111-4111-8111-111111111111","name":"Fixture Mira","avatar":"mint",
+                 "description":"Plans the day and keeps work moving","instructions":"Be concise.",
+                 "route":{"provider":"fixture","model":"fixture-model"},"tools":{"mode":"inherit"}},
+                {"id":"22222222-2222-4222-8222-222222222222","name":"Fixture Vera","avatar":"mint",
+                 "description":"Voice companion","instructions":"Use short replies.",
+                 "tools":{"mode":"allow","names":["hub_view_screen"]},"delegateTo":"11111111-1111-4111-8111-111111111111"}],
+             "tools":[{"name":"hub_view_screen","description":"Read one consented frame"}]}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path.hasPrefix("/api/hub/presentation"),
+           request.value(forHTTPHeaderField: "x-hub-session") == "fixture-work",
+           ProcessInfo.processInfo.arguments.contains("--hub-native-canvas-fixture") {
+            let id = "5b1c2a9e-7d3f-4c1a-9e2b-0f6d8a4c3e21"
+            if url.path == "/api/hub/presentation" {
+                return Data("{\"presentation\":{\"id\":\"\(id)\",\"title\":\"Pendulum simulator\",\"kind\":\"app\",\"createdAt\":1763359200000}}".utf8)
+            }
+            guard request.value(forHTTPHeaderField: "x-hub-presentation") == id else { return nil }
+            // A small interactive app like the one HUB made in the voice chat.
+            let html = #"""
+            <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+            body{margin:0;background:#0b101b;color:#bfcbff;font:14px -apple-system,sans-serif}
+            canvas{display:block;width:100%;height:170px}label{display:block;padding:4px 12px}</style></head><body>
+            <canvas id="c" width="600" height="340"></canvas>
+            <label>Length <input id="l" type="range" min="80" max="300" value="220"></label>
+            <script>
+            const c=document.getElementById('c'),x=c.getContext('2d'),l=document.getElementById('l');
+            let a=1.1,v=0;function step(){const L=+l.value;v+=-9.8/L*Math.sin(a)*0.6;v*=0.999;a+=v;
+            x.clearRect(0,0,600,340);const px=300+L*Math.sin(a),py=20+L*Math.cos(a);
+            x.strokeStyle='#a8b3cc';x.lineWidth=3;x.beginPath();x.moveTo(300,20);x.lineTo(px,py);x.stroke();
+            x.fillStyle='#bfcbff';x.beginPath();x.arc(px,py,18,0,7);x.fill();requestAnimationFrame(step)}step();
+            </script></body></html>
+            """#
+            return try? JSONSerialization.data(withJSONObject: ["document": html])
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/goals",
+           request.value(forHTTPHeaderField: "x-hub-goals") == "1" {
+            return Data(#"""
+            {"characters":[],"goals":[
+                {"id":"hub-goal-fixture","title":"Plan the autumn release","state":"active","status":"working",
+                 "updatedAt":1763359200000,"objective":"Ship the release notes and the checklist.","revision":2,
+                 "plan":[{"id":"m1","title":"Collect changes","status":"done"},
+                         {"id":"m2","title":"Draft release notes","status":"working"},
+                         {"id":"m3","title":"Review with the team","status":"pending"}],
+                 "checkpoint":{"summary":"Changes from the last three weeks are collected.","nextAction":"Draft the release notes."}}]}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/automations",
+           request.value(forHTTPHeaderField: "x-hub-automations") == "1" {
+            return Data(#"""
+            {"revision":1,"automations":[
+                {"id":"routine-fixture","title":"Morning brief","state":"active","status":"scheduled",
+                 "updatedAt":1763359200000,"nextAt":1763445600000,"prompt":"Summarize today's agenda and open to-dos."}]}
+            """#.utf8)
+        }
+        if request.httpMethod == "GET", url.path == "/api/hub/character-request",
+           url.query == "characterId=11111111-1111-4111-8111-111111111111" {
+            return Data(#"""
+            {"record":{"characterId":"11111111-1111-4111-8111-111111111111","sessionId":"fixture-work","at":1763359200000,"bytes":118,
+                       "json":"{\n  \"model\": \"fixture-model\",\n  \"system\": \"Be concise.\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"Fixture request\"}\n  ]\n}"},
+             "boundary":"Complete HUB request at LLM dispatch, before provider-adapter translation.",
+             "retention":"Latest conversational request per character since this host started; kept in memory only."}
+            """#.utf8)
         }
         if url.path == "/api/settings/describe", request.httpMethod == "POST" {
             return settingsDescription()

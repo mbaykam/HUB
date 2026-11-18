@@ -17,7 +17,7 @@ struct HubKnowledgeForgetView: View {
 
     var body: some View {
         NavigationView {
-            Form {
+            HubForm {
                 Section("Passage to forget") {
                     TextEditor(text: $passage).frame(minHeight: 85).accessibilityLabel("Passage to forget")
                     Text("Copy an exact passage from the note below and paste it here.").font(.footnote)
@@ -61,6 +61,94 @@ struct HubKnowledgeForgetView: View {
     }
 }
 
+/// A note's link to one of its saved files, like
+/// `[Original snake.html](../Attachments/snake%20%280531b1c55da4%29.html)`.
+/// The vault file name carries the start of the file's SHA-256 in brackets.
+struct HubKnowledgeAttachmentLink: Identifiable, Equatable {
+    let title: String
+    let fileName: String
+    let hashPrefix: String?
+    var id: String { fileName }
+    var isHTML: Bool { HubKnowledgeFilePreview.isHTML(name: fileName, mediaType: "") }
+
+    static func find(in content: String) -> [HubKnowledgeAttachmentLink] {
+        guard let pattern = try? NSRegularExpression(pattern: #"\[([^\]\n]{1,200})\]\((?:\.\./)*Attachments/([^)\n]{1,400})\)"#) else { return [] }
+        var seen = Set<String>(), found: [HubKnowledgeAttachmentLink] = []
+        for match in pattern.matches(in: content, range: NSRange(content.startIndex..., in: content)) {
+            guard let titleRange = Range(match.range(at: 1), in: content), let fileRange = Range(match.range(at: 2), in: content) else { continue }
+            let raw = String(content[fileRange])
+            let file = raw.removingPercentEncoding ?? raw
+            guard seen.insert(file).inserted else { continue }
+            var hash: String?
+            if let marker = file.range(of: #"\(([0-9a-f]{8,64})\)\.[A-Za-z0-9]+$"#, options: .regularExpression) {
+                hash = String(file[marker]).trimmingCharacters(in: CharacterSet(charactersIn: "()")).components(separatedBy: ")").first
+            }
+            found.append(HubKnowledgeAttachmentLink(title: String(content[titleRange]), fileName: file, hashPrefix: hash))
+        }
+        return found
+    }
+
+    /// The saved asset this link points at.
+    func asset(in assets: [HubKnowledgeAsset]) -> HubKnowledgeAsset? {
+        if let hashPrefix, let match = assets.first(where: { $0.id.hasPrefix(hashPrefix) }) { return match }
+        let plain = fileName.replacingOccurrences(of: #" \([0-9a-f]{8,64}\)(?=\.[A-Za-z0-9]+$)"#, with: "", options: .regularExpression)
+        return assets.first { $0.name == plain || $0.name == fileName }
+    }
+}
+
+struct HubOpenedKnowledgeFile: Identifiable {
+    let asset: HubKnowledgeAsset
+    let data: Data
+    var id: String { asset.id }
+}
+
+/// Shows a saved Knowledge file inside the app: HTML runs in a sealed web
+/// view (with its source one tap away), images zoom, PDFs and text read.
+struct HubKnowledgeFilePreview: View {
+    let name: String
+    let mediaType: String
+    let data: Data
+    @State private var showSource = false
+
+    static func isHTML(name: String, mediaType: String) -> Bool {
+        mediaType == "text/html" || mediaType == "application/xhtml+xml" || name.lowercased().hasSuffix(".html") || name.lowercased().hasSuffix(".htm")
+    }
+
+    var body: some View {
+        if Self.isHTML(name: name, mediaType: mediaType), let html = String(data: data, encoding: .utf8) {
+            VStack(spacing: 0) {
+                Picker("View", selection: $showSource) {
+                    Text("Run").tag(false)
+                    Text("Source").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                if showSource {
+                    ScrollView([.vertical, .horizontal]) {
+                        Text(html).font(.footnote.monospaced()).textSelection(.enabled).padding()
+                    }
+                } else {
+                    HubContainedDocumentView(document: HubContainedDocumentView.normalized(html))
+                        .accessibilityLabel(name)
+                }
+            }
+        } else if mediaType.hasPrefix("image/"), let image = UIImage(data: data) {
+            HubZoomableImage(image: image).accessibilityLabel(name)
+        } else if mediaType == "application/pdf", let document = PDFDocument(data: data) {
+            HubKnowledgePDFView(document: document)
+        } else if data.count <= 400_000, mediaType.hasPrefix("text/") || mediaType == "application/json",
+                  let text = String(data: data, encoding: .utf8) {
+            ScrollView { Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding() }
+        } else {
+            VStack(alignment: .leading) {
+                Text("This file type can't be shown here. Use Save to Files to open it in another app.").foregroundStyle(.secondary).padding()
+                Spacer()
+            }
+        }
+    }
+}
+
 @MainActor
 struct HubKnowledgeOriginalSourceView: View {
     let api: HubConversationAPI
@@ -74,16 +162,20 @@ struct HubKnowledgeOriginalSourceView: View {
     @State private var export = false
     @State private var fileFailed = false
     @State private var downloading = false
+    @State private var previewing = false
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let original {
                     Text(original.content).textSelection(.enabled)
                     if let files = original.assets, !files.isEmpty {
                         Section("Source attachments") {
                             ForEach(files) { file in
-                                Button(file.name) { Task { await fetch(file) } }.disabled(downloading || export)
+                                Button { Task { await fetch(file) } } label: {
+                                    Label(file.name, systemImage: HubKnowledgeFilePreview.isHTML(name: file.name, mediaType: file.mediaType) ? "play.rectangle" : "doc")
+                                }
+                                .disabled(downloading || export)
                             }
                             if downloading, let selected { ProgressView(selected.name) }
                             if fileFailed { Text("Could not verify or save the attachment.").font(.footnote) }
@@ -113,6 +205,20 @@ struct HubKnowledgeOriginalSourceView: View {
             do { original = try await api.knowledgeOriginalSource(id: source.id) }
             catch { if !Task.isCancelled { failed = true } }
         }
+        .sheet(isPresented: $previewing) {
+            if let selected, let originalFile {
+                NavigationView {
+                    HubKnowledgeFilePreview(name: selected.name, mediaType: selected.mediaType, data: originalFile)
+                        .navigationTitle(selected.name)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Done") { previewing = false } }
+                            ToolbarItem(placement: .primaryAction) { HubShareFileButton(bytes: originalFile, name: selected.name, label: "Share or save file") }
+                        }
+                }
+                .navigationViewStyle(.stack)
+            }
+        }
         .fileExporter(isPresented: $export, document: originalFile.map { HubFileDocument(bytes: $0) },
                       contentType: selected.flatMap { UTType(mimeType: $0.mediaType) } ?? .data, defaultFilename: selected?.name) { result in
             if case .failure = result { fileFailed = true }
@@ -130,7 +236,7 @@ struct HubKnowledgeOriginalSourceView: View {
         fileFailed = false
         do {
             originalFile = try await api.knowledgeAssetBytes(asset)
-            export = true
+            previewing = true
         } catch {
             selected = nil
             fileFailed = true
@@ -202,7 +308,7 @@ struct HubKnowledgeAssetsView: View {
     }
 
     private var library: some View {
-        List {
+        HubList {
             if let note { Label(note.title, systemImage: "note.text") }
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView("Working…") }
@@ -229,18 +335,7 @@ struct HubKnowledgeAssetsView: View {
     private func attachment(_ preview: Preview) -> some View {
         VStack(alignment: .leading) {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary).padding() }
-            if preview.asset.mediaType.hasPrefix("image/"), let image = UIImage(data: preview.data) {
-                ScrollView { Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(preview.asset.name) }
-            } else if preview.asset.mediaType == "application/pdf", let document = PDFDocument(data: preview.data) {
-                HubKnowledgePDFView(document: document)
-            } else if preview.data.count <= 400_000,
-                      preview.asset.mediaType.hasPrefix("text/") || preview.asset.mediaType == "application/json",
-                      let text = String(data: preview.data, encoding: .utf8) {
-                ScrollView { Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding() }
-            } else {
-                Text("Use Save to Files to open this attachment in another app.").foregroundStyle(.secondary).padding()
-                Spacer()
-            }
+            HubKnowledgeFilePreview(name: preview.asset.name, mediaType: preview.asset.mediaType, data: preview.data)
         }
     }
 
@@ -369,7 +464,7 @@ struct HubKnowledgeSkillsView: View {
     }
 
     private var library: some View {
-        List {
+        HubList {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView("Loading skills…") }
             if let catalog {
@@ -403,32 +498,40 @@ struct HubKnowledgeSkillsView: View {
     }
 
     private func editor(_ value: HubKnowledgeSkillDraft) -> some View {
-        Form {
+        HubForm {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView("Saving skill…") }
             Section("Details") {
-                TextField("Name", text: Binding(get: { draft?.title ?? "" }, set: { title in
-                    draft?.title = title
-                    if baseline?.expectedHash == nil && !customName { draft?.name = Self.slug(title) }
-                }))
-                TextField("When to use this", text: field(\.description))
+                HubLabeledField(title: "Name") {
+                    TextField("Name", text: Binding(get: { draft?.title ?? "" }, set: { title in
+                        draft?.title = title
+                        if baseline?.expectedHash == nil && !customName { draft?.name = Self.slug(title) }
+                    }))
+                }
+                HubLabeledField(title: "When to use this") {
+                    TextField("When to use this", text: field(\.description))
+                }
             }
             Section("Workflow instructions") {
                 TextEditor(text: field(\.content)).frame(minHeight: 175)
                     .accessibilityLabel("Workflow instructions")
             }
             Section("Advanced") {
-                TextField("Stable skill name", text: Binding(get: { draft?.name ?? "" }, set: { name in
-                    customName = true
-                    draft?.name = name
-                }))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .disabled(value.expectedHash != nil)
-                TextField("Required tools, separated by commas", text: Binding(get: { toolsText }, set: { text in
-                    toolsText = text
-                    draft?.requiredTools = text.split { $0 == "," || $0.isWhitespace }.map(String.init)
-                }))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                HubLabeledField(title: "Stable skill name") {
+                    TextField("Stable skill name", text: Binding(get: { draft?.name ?? "" }, set: { name in
+                        customName = true
+                        draft?.name = name
+                    }))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .disabled(value.expectedHash != nil)
+                }
+                HubLabeledField(title: "Required tools") {
+                    TextField("Required tools, separated by commas", text: Binding(get: { toolsText }, set: { text in
+                        toolsText = text
+                        draft?.requiredTools = text.split { $0 == "," || $0.isWhitespace }.map(String.init)
+                    }))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
                 Text("Character permissions control which tools a workflow can use.").font(.footnote).foregroundStyle(.secondary)
             }
         }
@@ -538,7 +641,7 @@ struct HubKnowledgeConnectionsView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 Section(note.title) {
                     if let total {
                         Text(total > 0 ? "\(items.count) of \(total) sourced connections" : "No sourced connections yet.")
@@ -585,7 +688,7 @@ struct HubKnowledgeConnectionsView: View {
         }
         .sheet(item: $selectedEvidence) { selection in
             NavigationView {
-                List {
+                HubList {
                     if let evidence {
                         Section(evidence.sourceTitle) {
                             Text(evidence.citation.quote).textSelection(.enabled)
@@ -745,6 +848,7 @@ struct HubKnowledgeArchivesView: View {
     @State private var pickerOpen = false
     @State private var confirmation: Mutation?
     @State private var stale = false
+    @State private var confirmQueueHistory = false
 
     private enum Mutation: String, Identifiable {
         case admit, withdraw
@@ -754,7 +858,7 @@ struct HubKnowledgeArchivesView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if busy { ProgressView("Working with the archive on HUB…") }
                 if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 if let record { originalMessages(record) }
@@ -796,9 +900,28 @@ struct HubKnowledgeArchivesView: View {
             }
     }
 
+    private func queueHistory() async {
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await api.queueEarlierConversationsForKnowledge()
+            notice = "\(result.queued) queued · \(result.duplicates) already known · \(result.skipped) skipped"
+            await changed()
+        } catch {
+            notice = "HUB could not queue your earlier conversations. Check your connection and try again."
+        }
+    }
+
     private var archiveList: some View {
         Section {
             Button("Add a private archive") { pickerOpen = true }
+            Button("Queue earlier HUB conversations") { confirmQueueHistory = true }
+                .alert("Queue earlier HUB conversations?", isPresented: $confirmQueueHistory) {
+                    Button("Queue conversations") { Task { await queueHistory() } }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("HUB adds your earlier conversations to the Knowledge queue. Organizing them may use your Knowledge AI budget.")
+                }
             Button("Refresh archives") { Task { await loadBatches() } }
             if batches.isEmpty && !busy { Text("No private archives").foregroundStyle(.secondary) }
             ForEach(batches) { batch in
@@ -1035,10 +1158,24 @@ struct HubKnowledgeBackupsView: View {
     @State private var notice: String?
     @State private var restored: HubKnowledgeRestoredCopy?
     @State private var restoreCandidate: HubKnowledgeBackups.Copy?
+    @State private var confirmResume = false
+
+    private func resumeRestoredWork() async {
+        busy = true
+        do {
+            try await api.resumeRestoredKnowledgeWork()
+            busy = false
+            await refresh()
+            notice = "Saved Knowledge work can run again."
+        } catch {
+            busy = false
+            notice = "HUB could not confirm that saved work resumed. Refresh backups before trying again."
+        }
+    }
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 Section {
                     Button("Create verified backup") { Task { await createBackup() } }
                     Button("Refresh backups") { Task { await refresh() } }
@@ -1046,6 +1183,13 @@ struct HubKnowledgeBackupsView: View {
                     if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 } footer: {
                     Text("Copies are saved on the HUB computer. Keep each backup folder with its snapshot.json.")
+                }
+                if let hold = page?.restoreHold {
+                    Section("Restored work is paused") {
+                        Text("\(hold.queued) saved organization jobs · \(hold.mode) · \(hold.provider)/\(hold.model). Review your Knowledge AI settings before resuming.")
+                            .font(.footnote)
+                        Button("Resume saved Knowledge work") { confirmResume = true }
+                    }
                 }
                 if let restored {
                     Section("Restored copy") {
@@ -1078,6 +1222,12 @@ struct HubKnowledgeBackupsView: View {
         .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy)
         .task { await refresh() }
+        .alert("Resume saved Knowledge work?", isPresented: $confirmResume) {
+            Button("Resume") { Task { await resumeRestoredWork() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Saved work may resume under your existing Knowledge AI settings and budget.")
+        }
         .confirmationDialog("Restore a separate copy?", isPresented: Binding(
             get: { restoreCandidate != nil }, set: { if !$0 { restoreCandidate = nil } }),
             presenting: restoreCandidate) { copy in
@@ -1329,6 +1479,7 @@ struct HubKnowledgeGraphView: View {
             .padding(4)
         }
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("3D Knowledge graph")
         .accessibilityHint("Drag to rotate. Use the record list to browse all notes.")
     }
@@ -1362,36 +1513,73 @@ struct HubKnowledgeGraphView: View {
         let byID = Dictionary(graph.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let zoom = min(4, max(0.5, scale * pinch))
         let translation = CGSize(width: offset.width + drag.width, height: offset.height + drag.height)
-        let points = positions(layout.points, zoom: zoom, offset: translation, size: size)
+        let frame = PlaneFrame(layout: layout, size: size, zoom: zoom, offset: translation, overview: overview)
+        let points = Dictionary(layout.points.map { ($0.id, frame.point($0.x, $0.y)) }, uniquingKeysWith: { first, _ in first })
         let visibleGroups = layout.groups.filter { $0.parentID == nil || zoom >= 1.6 }
+        let fewRecords = layout.points.count <= 40
         return ZStack(alignment: .bottomTrailing) {
             Canvas { context, _ in
+                // Each domain is a soft disc; its subdomains show as you zoom in.
+                for group in visibleGroups where group.planeRadius > 0 {
+                    let center = frame.point(group.planeX, group.planeY)
+                    let r = CGFloat(group.planeRadius) * frame.scale
+                    guard r > 4 else { continue }
+                    let disc = Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
+                    let tone = color(group.hue, id: group.id)
+                    let child = group.parentID != nil
+                    context.fill(disc, with: .color(tone.opacity(child ? 0.06 : 0.09)))
+                    context.stroke(disc, with: .color(tone.opacity(child ? 0.22 : 0.3)),
+                                   style: StrokeStyle(lineWidth: 1, dash: group.id == HubKnowledgeLayout.archiveID || child ? [4, 4] : []))
+                }
                 var lines = Path()
                 for edge in graph.edges {
                     guard let a = points[edge.source], let b = points[edge.target] else { continue }
                     lines.move(to: a)
                     lines.addLine(to: b)
                 }
-                context.stroke(lines, with: .color(HubWorkspacePalette.muted.opacity(0.38)), lineWidth: 1)
+                context.stroke(lines, with: .color(HubWorkspacePalette.muted.opacity(0.3)), lineWidth: 0.8)
                 for item in layout.points {
                     guard let point = points[item.id] else { continue }
-                    let radius: CGFloat = item.id == focusID ? 7 : item.groupID == HubKnowledgeLayout.archiveID ? 2.5 : 4.7
+                    let base: CGFloat = item.groupID == HubKnowledgeLayout.archiveID ? 3 : 4.6
+                    let radius: CGFloat = item.id == focusID ? 7.5 : base * min(1.5, max(0.8, sqrt(zoom)))
                     let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
                     context.fill(Path(ellipseIn: dot), with: .color(color(item.hue, id: item.groupID)))
                 }
+                // Labels never overlap: each one claims its space, and a label
+                // that would cover another is left out until you zoom further.
+                var taken: [CGRect] = []
                 for group in visibleGroups {
-                    if overview, group.id == HubKnowledgeLayout.unassignedID { continue }
+                    if overview, group.id == HubKnowledgeLayout.unassignedID || height < 120 { continue }
                     if selectDomain != nil && canSelectDomain(group.id) { continue }
-                    guard let location = groupLabelPosition(group, points: points) else { continue }
+                    guard let location = groupLabelPosition(group, points: points, frame: frame) else { continue }
                     var label = context.resolve(Text(group.title).font(.caption.weight(.medium)))
                     label.shading = .color(color(group.hue, id: group.id))
+                    let measured = label.measure(in: CGSize(width: 220, height: 40))
+                    let box = CGRect(x: location.x - measured.width / 2 - 3, y: location.y - measured.height / 2 - 1,
+                                     width: measured.width + 6, height: measured.height + 2)
+                    if taken.contains(where: { $0.intersects(box) }) { continue }
+                    taken.append(box)
                     context.draw(label, at: location)
                 }
-                if !overview, zoom >= 2.2 {
-                    for item in layout.points {
-                        guard let point = points[item.id], let title = byID[item.id]?.title,
-                              CGRect(origin: .zero, size: size).contains(point) else { continue }
-                        context.draw(Text(String(title.prefix(36))).font(.caption2), at: CGPoint(x: point.x, y: point.y + 11))
+                if !overview, zoom >= (fewRecords ? 1 : 2) {
+                    let visible = CGRect(origin: .zero, size: size)
+                    let ordered = layout.points.sorted { first, second in
+                        func rank(_ item: HubKnowledgeLayout.Point) -> Int {
+                            item.id == focusID ? 0 : item.groupID == HubKnowledgeLayout.archiveID ? 2 : 1
+                        }
+                        return rank(first) < rank(second)
+                    }
+                    for item in ordered {
+                        guard let point = points[item.id], let title = byID[item.id]?.title, visible.contains(point) else { continue }
+                        let short = title.count > 28 ? String(title.prefix(27)) + "…" : title
+                        let label = context.resolve(Text(short).font(.caption2))
+                        let measured = label.measure(in: CGSize(width: 180, height: 30))
+                        let box = CGRect(x: point.x - measured.width / 2 - 3, y: point.y + 5,
+                                         width: measured.width + 6, height: measured.height + 2)
+                        if taken.contains(where: { $0.intersects(box) }) { continue }
+                        taken.append(box)
+                        context.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(HubWorkspacePalette.panel.opacity(0.85)))
+                        context.draw(label, at: CGPoint(x: box.midX, y: box.midY))
                     }
                 }
             }
@@ -1414,7 +1602,7 @@ struct HubKnowledgeGraphView: View {
             }
             if let selectDomain {
                 ForEach(visibleGroups.filter { canSelectDomain($0.id) }, id: \.id) { group in
-                    if let location = groupLabelPosition(group, points: points), CGRect(origin: .zero, size: size).contains(location) {
+                    if let location = groupLabelPosition(group, points: points, frame: frame), CGRect(origin: .zero, size: size).contains(location) {
                         Button { selectDomain(group.id) } label: {
                             Text(group.title).font(.caption.weight(.medium)).lineLimit(1)
                                 .foregroundStyle(color(group.hue, id: group.id))
@@ -1429,11 +1617,20 @@ struct HubKnowledgeGraphView: View {
                 }
             }
             if showsControls { HStack(spacing: 2) {
-                Button { scale = max(0.5, scale / 1.25) } label: { Image(systemName: "minus").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Zoom out")
-                Button("Fit") { scale = 1; offset = .zero }.frame(minWidth: 44, minHeight: 44)
-                Button { scale = min(4, scale * 1.25) } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Zoom in")
+                // The whole 44-point square is tappable, not only the glyph.
+                Button { scale = max(0.5, scale / 1.25) } label: {
+                    Image(systemName: "minus").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Zoom out")
+                Button { scale = 1; offset = .zero } label: {
+                    Text("Fit").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Fit graph")
+                Button { scale = min(4, scale * 1.25) } label: {
+                    Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Zoom in")
+                .accessibilityValue("\(Int((min(4, max(0.5, scale)) * 100).rounded()))%")
             }
             .buttonStyle(.plain)
             .font(.caption)
@@ -1443,6 +1640,7 @@ struct HubKnowledgeGraphView: View {
             }
         }
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Knowledge graph")
     }
 
@@ -1450,10 +1648,50 @@ struct HubKnowledgeGraphView: View {
         id == HubKnowledgeLayout.archiveID || graph.domains?.contains(where: { $0.id == id && $0.status != "merged" }) == true
     }
 
-    private func groupLabelPosition(_ group: HubKnowledgeLayout.Group, points: [String: CGPoint]) -> CGPoint? {
+    private func groupLabelPosition(_ group: HubKnowledgeLayout.Group, points: [String: CGPoint], frame: PlaneFrame) -> CGPoint? {
+        if group.planeRadius > 0 {
+            let center = frame.point(group.planeX, group.planeY)
+            let r = CGFloat(group.planeRadius) * frame.scale
+            // A domain's name sits on top of its disc; a subdomain's just inside its own.
+            return CGPoint(x: center.x, y: group.parentID == nil ? center.y - r - 10 : center.y - r + 9)
+        }
         let members = group.members.compactMap { points[$0] }
         guard let top = members.map(\.y).min() else { return nil }
         return CGPoint(x: members.reduce(0) { $0 + $1.x } / CGFloat(members.count), y: top - 19)
+    }
+
+    /// Maps the flat layout onto the view, fitting every domain disc and
+    /// leaving room for the names above them.
+    private struct PlaneFrame {
+        let scale: CGFloat
+        let centerX: Double
+        let centerY: Double
+        let origin: CGPoint
+
+        init(layout: HubKnowledgeLayout.Layout, size: CGSize, zoom: CGFloat, offset: CGSize, overview: Bool) {
+            var minX = Double.infinity, maxX = -Double.infinity, minY = Double.infinity, maxY = -Double.infinity
+            for group in layout.groups where group.parentID == nil && group.planeRadius > 0 {
+                minX = min(minX, group.planeX - group.planeRadius); maxX = max(maxX, group.planeX + group.planeRadius)
+                minY = min(minY, group.planeY - group.planeRadius); maxY = max(maxY, group.planeY + group.planeRadius)
+            }
+            for point in layout.points {
+                minX = min(minX, point.x - 8); maxX = max(maxX, point.x + 8)
+                minY = min(minY, point.y - 8); maxY = max(maxY, point.y + 8)
+            }
+            if !minX.isFinite { minX = -1; maxX = 1; minY = -1; maxY = 1 }
+            let labelRoom: CGFloat = overview ? 12 : 30
+            let width = max(1, size.width - 24), height = max(1, size.height - 24 - labelRoom - (overview ? 0 : 44))
+            let fit = min(width / CGFloat(max(1, maxX - minX)), height / CGFloat(max(1, maxY - minY)))
+            scale = min(fit, overview ? 3 : 2.4) * zoom
+            centerX = (minX + maxX) / 2
+            centerY = (minY + maxY) / 2
+            origin = CGPoint(x: size.width / 2 + offset.width,
+                             y: size.height / 2 + labelRoom / 2 - (overview ? 0 : 18) + offset.height)
+        }
+
+        func point(_ x: Double, _ y: Double) -> CGPoint {
+            CGPoint(x: origin.x + CGFloat(x - centerX) * scale, y: origin.y + CGFloat(y - centerY) * scale)
+        }
     }
 
     private struct LayoutRequest: Equatable {
@@ -1462,27 +1700,83 @@ struct HubKnowledgeGraphView: View {
         let scope: Scope
     }
 
-    private func positions(_ items: [HubKnowledgeLayout.Point], zoom: CGFloat, offset: CGSize, size: CGSize) -> [String: CGPoint] {
-        let x = items.map(\.x), y = items.map(\.y)
-        guard let minX = x.min(), let maxX = x.max(), let minY = y.min(), let maxY = y.max() else { return [:] }
-        let width = max(1, size.width - 40), height = max(1, size.height - (overview ? 40 : 70))
-        let inset: CGFloat = overview ? 34 : 65
-        let fit = min(width / (CGFloat(maxX - minX) + inset), height / (CGFloat(maxY - minY) + inset)) * zoom
-        let centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2
-        return Dictionary(uniqueKeysWithValues: items.map { item in
-            let x = size.width / 2 + CGFloat(item.x - centerX) * fit + offset.width
-            let y = size.height / 2 - 8 + CGFloat(item.y - centerY) * fit + offset.height
-            return (item.id, CGPoint(x: x, y: y))
-        })
-    }
+    private func color(_ hue: Double, id: String) -> Color { Self.tone(hue, id: id) }
 
-    private func color(_ hue: Double, id: String) -> Color {
+    /// One color per domain, shared by the graph, legends and Home.
+    nonisolated static func tone(_ hue: Double, id: String) -> Color {
         if id == HubKnowledgeLayout.archiveID { return Color(red: 0.54, green: 0.76, blue: 0.84) }
-        if id == HubKnowledgeLayout.unassignedID && !overview { return Color(red: 0.62, green: 0.65, blue: 0.7) }
-        let saturation = id == HubKnowledgeLayout.unassignedID ? 0.35 : 0.53
-        let light = id == HubKnowledgeLayout.unassignedID ? 0.68 : 0.72
+        if id == HubKnowledgeLayout.unassignedID { return Color(red: 0.62, green: 0.65, blue: 0.7) }
+        let saturation = 0.53, light = 0.72
         let brightness = light + saturation * min(light, 1 - light)
         return Color(hue: hue, saturation: 2 * (1 - light / brightness), brightness: brightness)
+    }
+}
+
+/// A compact picture of Knowledge: one bar split by domain, and the largest
+/// domains as tappable chips.
+struct HubKnowledgeDomainStrip: View {
+    let domains: [HubKnowledgeLayout.DomainSummary]
+    var limit = 4
+    var select: ((String) -> Void)? = nil
+
+    var body: some View {
+        let total = max(1, domains.reduce(0) { $0 + $1.count })
+        VStack(alignment: .leading, spacing: 10) {
+            GeometryReader { geometry in
+                HStack(spacing: 2) {
+                    ForEach(domains) { domain in
+                        Capsule()
+                            .fill(HubKnowledgeGraphView.tone(domain.hue, id: domain.id))
+                            .frame(width: max(4, (geometry.size.width - CGFloat(domains.count - 1) * 2) * CGFloat(domain.count) / CGFloat(total)))
+                    }
+                }
+            }
+            .frame(height: 8)
+            .accessibilityHidden(true)
+            HubChipRow(items: Array(domains.prefix(limit)), extra: max(0, domains.count - limit)) { domain in
+                chip(domain)
+            }
+        }
+    }
+
+    @ViewBuilder private func chip(_ domain: HubKnowledgeLayout.DomainSummary) -> some View {
+        let label = HStack(spacing: 6) {
+            Circle().fill(HubKnowledgeGraphView.tone(domain.hue, id: domain.id)).frame(width: 8, height: 8)
+            Text(domain.title).font(.caption).lineLimit(1)
+            Text(domain.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 30)
+        .background(HubWorkspacePalette.border.opacity(0.06), in: Capsule())
+        if let select, domain.id != HubKnowledgeLayout.unassignedID {
+            Button { select(domain.id) } label: { label }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(domain.title), \(domain.count) notes")
+                .accessibilityIdentifier("hub.knowledge.chip.\(domain.id)")
+        } else {
+            label
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(domain.title), \(domain.count) notes")
+        }
+    }
+}
+
+/// Lays chips out in a horizontal scroll row, with a "+N" at the end when
+/// some are left out.
+struct HubChipRow<Item: Identifiable, Content: View>: View {
+    let items: [Item]
+    let extra: Int
+    @ViewBuilder let content: (Item) -> Content
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(items) { content($0) }
+                if extra > 0 {
+                    Text("+\(extra)").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 6)
+                }
+            }
+        }
     }
 }
 
@@ -1546,7 +1840,7 @@ struct HubKnowledgeActivityView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
         .sheet(item: $reviewEntry, onDismiss: { Task { await load(0) } }) { entry in
             HubKnowledgeCurationReviewView(api: api, entry: entry)
         }
@@ -1567,38 +1861,110 @@ struct HubKnowledgeActivityView: View {
         .foregroundStyle(.secondary)
     }
 
+    /// One entry of the librarian's log: what it was, what the librarian did and why.
     private func activityEntry(_ entry: HubKnowledgeActivity.Entry) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(stateLabel(entry.status)).font(.headline)
-            Text([entry.outcome, entry.source?.channel, activityDate(entry.updatedAt)]
-                .compactMap { $0 }.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
-            if let reason = entry.reason { Text(reason) }
-            if let error = entry.error { failure(error) }
-            if let retryAt = entry.retryAt { Text("Last retry: \(activityDate(retryAt))").font(.footnote) }
-            ForEach(entry.changes.indices, id: \.self) { index in
-                changeRow(entry.changes[index])
+        let review = entry.source?.channel == "domain-review"
+        let (symbol, tint) = entryIcon(entry, review: review)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).font(.subheadline).foregroundStyle(tint)
+                    .frame(width: 32, height: 32)
+                    .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(headline(entry, review: review)).font(.subheadline.weight(.semibold))
+                    Text([sourceLabel(entry, review: review), relativeDate(entry.updatedAt)].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            if let source = entry.source { sourceRow(source) }
-            DisclosureGroup("Timing and attempts") {
-                Text("Started: \(activityDate(entry.startedAt))")
-                Text("Finished: \(activityDate(entry.finishedAt))")
-                if let count = entry.attempts { Text("\(count) model attempts") }
-                if let attempts = entry.previousAttempts {
-                    ForEach(attempts.indices, id: \.self) { index in
-                        attemptRow(attempts[index])
+            if let reason = entry.reason, !reason.isEmpty {
+                Text(reason).font(.callout).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            if let error = entry.error, entry.status == "failed" { failure(error).font(.footnote) }
+            if !entry.changes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(entry.changes.indices, id: \.self) { index in
+                        changeRow(entry.changes[index])
                     }
                 }
+                .padding(.leading, 4)
             }
-            .font(.footnote)
             ForEach(entry.warnings.indices, id: \.self) { index in
-                Text(entry.warnings[index]).font(.footnote).foregroundStyle(.secondary)
+                Label(entry.warnings[index], systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
             }
-            if entry.status == "review" {
-                Button("Review proposed changes") { reviewEntry = entry }
+            HStack(spacing: 14) {
+                if let source = entry.source { sourceRow(source).font(.footnote) }
+                if entry.status == "review" {
+                    Button("Review proposed changes") { reviewEntry = entry }.font(.footnote.weight(.semibold))
+                }
             }
-            Divider()
+            DisclosureGroup("Details") {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text([stateLabel(entry.status), entry.outcome].compactMap { $0 }.joined(separator: " · "))
+                    Text("Started: \(activityDate(entry.startedAt))")
+                    Text("Finished: \(activityDate(entry.finishedAt))")
+                    if let retryAt = entry.retryAt { Text("Last retry: \(activityDate(retryAt))") }
+                    if let count = entry.attempts { Text("\(count) model attempts") }
+                    if let attempts = entry.previousAttempts {
+                        ForEach(attempts.indices, id: \.self) { index in attemptRow(attempts[index]) }
+                    }
+                    if let error = entry.error, entry.status != "failed" { failure(error) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
+        .padding(12)
+        .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(HubWorkspacePalette.border.opacity(0.06)))
+    }
+
+    private func entryIcon(_ entry: HubKnowledgeActivity.Entry, review: Bool) -> (String, Color) {
+        switch entry.status {
+        case "failed": return ("exclamationmark.triangle.fill", .orange)
+        case "review": return ("hand.raised.fill", .yellow)
+        case "working", "queued": return ("hourglass", .secondary)
+        default:
+            if review { return ("books.vertical.fill", HubWorkspacePalette.accent) }
+            return entry.outcome == "organized" ? ("tray.and.arrow.down.fill", HubWorkspacePalette.accent) : ("archivebox", .secondary)
+        }
+    }
+
+    private func headline(_ entry: HubKnowledgeActivity.Entry, review: Bool) -> String {
+        switch entry.status {
+        case "failed": return String(localized: "Couldn't finish")
+        case "review": return String(localized: "Waiting for your approval")
+        case "working": return String(localized: "Reading now")
+        case "queued": return String(localized: "Waiting to read")
+        case "waiting-credit": return String(localized: "Waiting for model credit")
+        default:
+            if review { return entry.outcome == "organized" ? String(localized: "Tidied the domains") : String(localized: "Checked the domains") }
+            switch entry.outcome {
+            case "organized": return String(localized: "Filed")
+            case "archive-only": return String(localized: "Archived, nothing new to keep")
+            case "rejected": return String(localized: "Changes rejected")
+            default: return String(localized: "Nothing to keep")
+            }
+        }
+    }
+
+    private func sourceLabel(_ entry: HubKnowledgeActivity.Entry, review: Bool) -> String? {
+        if review { return String(localized: "Domain review") }
+        switch entry.source?.channel {
+        case "web", "native", "pwa", "chat": return String(localized: "From a chat")
+        case "telegram": return String(localized: "From Telegram")
+        case "voice": return String(localized: "From a voice call")
+        case "workers": return String(localized: "From a background task")
+        case "note", "notes": return String(localized: "From a note")
+        case let channel?: return channel.capitalized
+        case nil: return nil
+        }
+    }
+
+    private func relativeDate(_ value: Double?) -> String? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return Date(timeIntervalSince1970: value / 1000).formatted(.relative(presentation: .named))
     }
 
     @ViewBuilder private func sourceRow(_ source: HubKnowledgeActivity.Entry.Source) -> some View {
@@ -1610,17 +1976,31 @@ struct HubKnowledgeActivityView: View {
     }
 
     private func changeRow(_ change: HubKnowledgeActivity.Entry.Change) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(change.action.capitalized) · \(change.title)")
-            if let openRecord {
-                if change.kind == "note", let id = change.id {
-                    Button("Open note") { openRecord(id) }
-                } else if change.kind == "link", let id = change.targetId {
-                    Button("Open linked record") { openRecord(id) }
+        let symbol: String = {
+            switch change.kind {
+            case "note": return "doc.text"
+            case "domain": return "books.vertical"
+            case "assignment": return "folder"
+            case "link": return "link"
+            case "tag": return "tag"
+            case "reflection": return "lightbulb"
+            default: return "circle.fill"
+            }
+        }()
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol).font(.caption).foregroundStyle(.secondary).frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                (Text(change.action.capitalized).foregroundColor(.secondary) + Text("  ") + Text(change.title))
+                    .font(.footnote)
+                if let openRecord {
+                    if change.kind == "note", let id = change.id {
+                        Button("Open note") { openRecord(id) }.font(.caption)
+                    } else if change.kind == "link", let id = change.targetId {
+                        Button("Open linked record") { openRecord(id) }.font(.caption)
+                    }
                 }
             }
         }
-        .font(.footnote)
     }
 
     private func attemptRow(_ attempt: HubKnowledgeActivity.Entry.Attempt) -> some View {
@@ -1705,7 +2085,7 @@ private struct HubKnowledgeCurationReviewView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if let error {
                     Text(error).foregroundStyle(.secondary)
                     Button("Reload review") { attempt += 1 }

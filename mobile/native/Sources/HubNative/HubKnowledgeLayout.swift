@@ -24,6 +24,10 @@ public enum HubKnowledgeLayout {
         public let spatialY: Double
         public let spatialZ: Double
         public let radius: Double
+        /// The group's disc in the flat view (zero radius when not drawn).
+        public let planeX: Double
+        public let planeY: Double
+        public let planeRadius: Double
     }
 
     public struct Layout: Sendable {
@@ -133,8 +137,7 @@ public enum HubKnowledgeLayout {
             guard let id = labels[node.id], let index = cloudIndices[id] else { continue }
             let cloud = clouds[index]
             let offset = vector(node.id, radius: cbrt(unit(node.id + ":radius")) * cloud.radius * 0.88)
-            let tint = id == unassignedID && overview ? hue(node.id, suffix: ":record-tint") : cloud.hue
-            world.append((node.id, id, cloud.center + offset, tint))
+            world.append((node.id, id, cloud.center + offset, cloud.hue))
             clouds[index].members.append(node.id)
         }
         for index in clouds.indices.sorted(by: { clouds[$0].level > clouds[$1].level }) {
@@ -144,38 +147,159 @@ public enum HubKnowledgeLayout {
             }
         }
         let roots = clouds.filter { $0.parentID == nil && !$0.members.isEmpty }
-        let orderedRoots = roots.sorted {
+        let visible = overview ? previewIDs(roots) : Set(nodes.map(\.id))
+
+        // The flat view: every top domain is its own disc, its subdomains are
+        // packed discs inside it, and records sit on a sunflower spiral, so
+        // groups never overlap and each color stays in one place.
+        func ancestor(_ id: String, level target: Int) -> String {
+            var current = id
+            for _ in 0..<6 {
+                guard let index = cloudIndices[current], clouds[index].level > target,
+                      let parent = clouds[index].parentID else { break }
+                current = parent
+            }
+            return current
+        }
+        var rootMembers: [String: [String: [String]]] = [:]
+        for value in world where visible.contains(value.id) {
+            let root = ancestor(value.cloud, level: 0)
+            let sub = ancestor(value.cloud, level: 1)
+            rootMembers[root, default: [:]][sub, default: []].append(value.id)
+        }
+        var local: [String: (x: Double, y: Double)] = [:]
+        var discs: [String: (x: Double, y: Double, r: Double)] = [:]
+        var rootSizes: [(id: String, r: Double)] = []
+        for root in rootMembers.keys.sorted(by: less) {
+            let subs = (rootMembers[root] ?? [:]).sorted {
+                $0.value.count == $1.value.count ? less($0.key, $1.key) : $0.value.count > $1.value.count
+            }
+            let radii = subs.map { discRadius($0.value.count) }
+            let centers = pack(radii, gap: spacing * 0.9, aspect: 1)
+            var extent = 0.0
+            for (index, sub) in subs.enumerated() {
+                let center = centers[index]
+                extent = max(extent, hypot(center.x, center.y) + radii[index])
+                if sub.key != root { discs[sub.key] = (center.x, center.y, radii[index]) }
+                for (order, id) in sub.value.enumerated() {
+                    let distance = spacing * 0.95 * sqrt(Double(order) + 0.5)
+                    let angle = Double(order) * 2.399_963_229_728_653
+                    local[id] = (center.x + cos(angle) * distance, center.y + sin(angle) * distance)
+                }
+            }
+            let radius = subs.count == 1 ? extent : extent + spacing * 0.7
+            rootSizes.append((root, radius))
+        }
+        // Big domains first, the chat archive last so it sits at the edge.
+        let packedRoots = rootSizes.sorted {
             if $0.id == archiveID { return false }
             if $1.id == archiveID { return true }
-            return less($0.id, $1.id)
+            return $0.r == $1.r ? less($0.id, $1.id) : $0.r > $1.r
         }
-        let columns = roots.count < 2 ? 1 : max(2, min(roots.count, Int(sqrt(Double(roots.count) * max(0.45, min(2, aspect))).rounded())))
-        let centers = Dictionary(uniqueKeysWithValues: orderedRoots.enumerated().map {
-            ($0.element.id, Vector(x: Double(($0.offset % columns) * 350), y: Double(($0.offset / columns) * 310)))
-        })
-        let visible = overview ? previewIDs(roots) : Set(nodes.map(\.id))
+        let rootCenters = pack(packedRoots.map(\.r), gap: spacing * 3.2, aspect: max(0.45, min(2.2, aspect)))
+        var rootCenter: [String: (x: Double, y: Double)] = [:]
+        for (index, root) in packedRoots.enumerated() {
+            let center = rootCenters[index]
+            rootCenter[root.id] = center
+            discs[root.id] = (center.x, center.y, root.r)
+        }
+        for (id, disc) in discs where rootCenter[id] == nil {
+            let root = ancestor(id, level: 0)
+            if let center = rootCenter[root] { discs[id] = (center.x + disc.x, center.y + disc.y, disc.r) }
+        }
         let points = world.compactMap { value -> Point? in
-            guard visible.contains(value.id) else { return nil }
-            if overview {
-                return Point(id: value.id, groupID: value.cloud, x: value.position.projectedX, y: value.position.projectedY,
-                             hue: value.hue, spatialX: value.position.x, spatialY: value.position.y, spatialZ: value.position.z)
-            }
-            var root = value.cloud
-            for _ in 0..<5 {
-                guard let index = cloudIndices[root], let parent = clouds[index].parentID else { break }
-                root = parent
-            }
-            guard let rootIndex = cloudIndices[root], let center = centers[root] else { return nil }
-            let relative = value.position - clouds[rootIndex].center
-            return Point(id: value.id, groupID: value.cloud, x: center.x + relative.projectedX,
-                         y: center.y + relative.projectedY, hue: value.hue,
-                         spatialX: value.position.x, spatialY: value.position.y, spatialZ: value.position.z)
+            guard visible.contains(value.id), let offset = local[value.id],
+                  let center = rootCenter[ancestor(value.cloud, level: 0)] else { return nil }
+            return Point(id: value.id, groupID: value.cloud, x: center.x + offset.x, y: center.y + offset.y,
+                         hue: value.hue, spatialX: value.position.x, spatialY: value.position.y, spatialZ: value.position.z)
         }
-        let groups = (overview ? roots : clouds).filter { !$0.members.isEmpty }.map {
-            Group(id: $0.id, title: $0.title, parentID: $0.parentID, members: $0.members, hue: $0.hue,
-                  spatialX: $0.center.x, spatialY: $0.center.y, spatialZ: $0.center.z, radius: $0.radius)
+        let groups = (overview ? roots : clouds).filter { !$0.members.isEmpty }.map { cloud -> Group in
+            let disc = discs[cloud.id]
+            return Group(id: cloud.id, title: cloud.title, parentID: cloud.parentID, members: cloud.members, hue: cloud.hue,
+                         spatialX: cloud.center.x, spatialY: cloud.center.y, spatialZ: cloud.center.z, radius: cloud.radius,
+                         planeX: disc?.x ?? 0, planeY: disc?.y ?? 0, planeRadius: disc?.r ?? 0)
         }
         return Layout(points: points, groups: groups)
+    }
+
+    private static let spacing = 15.0
+
+    private static func discRadius(_ count: Int) -> Double {
+        spacing * 0.95 * sqrt(Double(max(1, count))) + spacing * 0.55
+    }
+
+    /// Places circles one by one along a spiral, each at the first spot where
+    /// it touches nothing already placed. Deterministic for the same input.
+    static func pack(_ radii: [Double], gap: Double, aspect: Double) -> [(x: Double, y: Double)] {
+        var placed: [(x: Double, y: Double, r: Double)] = []
+        let stretch = sqrt(aspect)
+        for radius in radii {
+            if placed.isEmpty { placed.append((0, 0, radius)); continue }
+            var angle = 0.0
+            var spot = (x: 0.0, y: 0.0)
+            for _ in 0..<40_000 {
+                let distance = 2.2 * angle
+                spot = (cos(angle) * distance * stretch, sin(angle) * distance / stretch)
+                if !placed.contains(where: { hypot($0.x - spot.x, $0.y - spot.y) < $0.r + radius + gap }) { break }
+                angle += max(0.02, 6 / max(1, distance))
+            }
+            placed.append((spot.x, spot.y, radius))
+        }
+        return placed.map { ($0.x, $0.y) }
+    }
+
+    /// Calm, well-separated tones handed out to top domains by age, so the
+    /// same domain keeps its color everywhere.
+    static let palette: [Double] = [228, 38, 148, 338, 268, 14, 92, 300, 52, 172].map { $0 / 360 }
+
+    /// One line per top domain for summaries and legends, largest first.
+    public struct DomainSummary: Identifiable, Equatable, Sendable {
+        public let id: String
+        public let title: String
+        public let count: Int
+        public let hue: Double
+    }
+
+    public static func summary(_ graph: HubHomeKnowledge) -> [DomainSummary] {
+        let domains = (graph.domains ?? []).filter { $0.status != "merged" }
+        let byDomain = Dictionary(domains.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func root(_ id: String) -> String {
+            var current = id
+            for _ in 0..<6 {
+                guard let parent = byDomain[current]?.parentId, byDomain[parent] != nil else { break }
+                current = parent
+            }
+            return current
+        }
+        let notes = Set(graph.nodes.filter { $0.kind != "conversation" }.map(\.id))
+        var members: [String: Set<String>] = [:]
+        var assigned: Set<String> = []
+        for membership in graph.memberships ?? [] where notes.contains(membership.nodeId) && byDomain[membership.domainId] != nil {
+            members[root(membership.domainId), default: []].insert(membership.nodeId)
+            assigned.insert(membership.nodeId)
+        }
+        let hues = rootHues(domains)
+        var lines = rootDomainsByAge(domains).compactMap { domain -> DomainSummary? in
+            let count = members[domain.id]?.count ?? 0
+            return count == 0 ? nil : DomainSummary(id: domain.id, title: domain.title, count: count, hue: hues[domain.id] ?? 0)
+        }.sorted { $0.count == $1.count ? less($0.title, $1.title) : $0.count > $1.count }
+        let unassigned = notes.subtracting(assigned).count
+        if unassigned > 0 { lines.append(DomainSummary(id: unassignedID, title: "Unassigned", count: unassigned, hue: 0)) }
+        return lines
+    }
+
+    static func rootDomainsByAge(_ domains: [HubHomeKnowledge.Domain]) -> [HubHomeKnowledge.Domain] {
+        let ids = Set(domains.map(\.id))
+        return domains.filter { $0.parentId == nil || !ids.contains($0.parentId!) }.sorted {
+            let left = $0.createdAt ?? 0, right = $1.createdAt ?? 0
+            return left == right ? less($0.id, $1.id) : left < right
+        }
+    }
+
+    static func rootHues(_ domains: [HubHomeKnowledge.Domain]) -> [String: Double] {
+        Dictionary(uniqueKeysWithValues: rootDomainsByAge(domains).enumerated().map {
+            ($0.element.id, palette[$0.offset % palette.count])
+        })
     }
 
     private static func previewIDs(_ roots: [Cloud]) -> Set<String> {
@@ -220,6 +344,7 @@ public enum HubKnowledgeLayout {
             return left == right ? less(lhs.id, rhs.id) : left < right
         }
         var clouds: [Cloud] = []
+        let hues = rootHues(domains)
         for root in domains.filter({ $0.parentId == nil }).sorted(by: byAge) {
             var center = vector(root.id + ":anchor", radius: 230 + unit(root.id) * 100)
             for attempt in 0..<64 {
@@ -227,7 +352,7 @@ public enum HubKnowledgeLayout {
                 center = vector(root.id + ":anchor:" + String(attempt), radius: Double(260 + attempt * 9))
             }
             clouds.append(Cloud(id: root.id, title: root.title, parentID: nil, level: 0,
-                                hue: hue(root.id), radius: 112, center: center))
+                                hue: hues[root.id] ?? hue(root.id), radius: 112, center: center))
         }
         let children = domains.filter { $0.parentId != nil }.sorted {
             let left = ancestors[$0.id]?.count ?? 0
@@ -244,7 +369,7 @@ public enum HubKnowledgeLayout {
             }
             let root = ancestors[child.id]?.last ?? child.id
             clouds.append(Cloud(id: child.id, title: child.title, parentID: parent.id, level: parent.level + 1,
-                                hue: hue(root), radius: parent.radius * 0.32, center: parent.center + offset))
+                                hue: hues[root] ?? parent.hue, radius: parent.radius * 0.32, center: parent.center + offset))
         }
         return clouds
     }

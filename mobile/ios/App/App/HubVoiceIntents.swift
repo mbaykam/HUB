@@ -41,10 +41,44 @@ struct EndHUBVoiceIntent: AudioRecordingIntent {
     }
 }
 
+/// Holds a message spoken to Siri until HUB is connected and can send it.
+@MainActor
+final class HubSiriInbox {
+    static let shared = HubSiriInbox()
+    static let arrived = Notification.Name("HubSiriInboxArrived")
+    private(set) var pending: String?
+
+    func submit(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pending = String(trimmed.prefix(4_000))
+        NotificationCenter.default.post(name: Self.arrived, object: nil)
+    }
+
+    func take() -> String? {
+        defer { pending = nil }
+        return pending
+    }
+}
+
+@available(iOS 18.0, *)
+struct AskHUBIntent: AppIntent {
+    static var title: LocalizedStringResource = "Ask HUB"
+    static var description = IntentDescription("Send a message to your main HUB assistant and open the conversation.")
+    static var openAppWhenRun = true
+    @Parameter(title: "Message", requestValueDialog: "What should I ask HUB?")
+    var message: String
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        HubSiriInbox.shared.submit(message)
+        return .result()
+    }
+}
 @available(iOS 18.0, *)
 struct HUBVoiceShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: StartHUBVoiceIntent(), phrases: ["Talk to \(.applicationName)", "Start voice in \(.applicationName)"], shortTitle: "Talk to HUB", systemImageName: "waveform")
+        AppShortcut(intent: AskHUBIntent(), phrases: ["Ask \(.applicationName)", "Message \(.applicationName)", "Send a message to \(.applicationName)"], shortTitle: "Ask HUB", systemImageName: "bubble.left.and.text.bubble.right")
         AppShortcut(intent: EndHUBVoiceIntent(), phrases: ["End voice in \(.applicationName)"], shortTitle: "End HUB voice", systemImageName: "stop.circle")
     }
 }

@@ -10,6 +10,7 @@ public final class HubAttachmentAPI {
     public init(server: HubServer, configuration: URLSessionConfiguration = .ephemeral, cookies: @escaping () async -> [HTTPCookie]) {
         self.server = server; self.cookies = cookies
         let config = configuration.copy() as! URLSessionConfiguration
+        HubAccessHeaders.apply(to: config, server: server)
         config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCache = nil
         config.timeoutIntervalForRequest = 60; config.timeoutIntervalForResource = 120
         session = URLSession(configuration: config, delegate: HubNoRedirects(), delegateQueue: nil)

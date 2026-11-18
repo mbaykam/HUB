@@ -19,7 +19,11 @@ import HubNative
     private var timer: Timer?
     init(context: HubVoiceAttachmentContext) throws {
         self.context = context; capture = try HubScreenCaptureSession(context: context)
-        live = HubLiveScreenSharing(consent: { id, start in try await context.voiceAPI.screenConsent(callId: context.callID, shareID: id, start: start) }, upload: { id, sequence, frame in try await context.voiceAPI.screenFrame(callId: context.callID, shareID: id, sequence: sequence, frame: frame) }, owned: context.stillOwned)
+        live = HubLiveScreenSharing(consent: { id, start in try await context.voiceAPI.screenConsent(callId: context.callID, shareID: id, start: start) }, upload: { id, sequence, frame in
+            if let mark = try await context.voiceAPI.screenFrame(callId: context.callID, shareID: id, sequence: sequence, frame: frame) {
+                await HubScreenHighlighter.shared.show(mark, on: frame.jpeg)
+            }
+        }, owned: context.stillOwned)
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("Use init(context:)") }

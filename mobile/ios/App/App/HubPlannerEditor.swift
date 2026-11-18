@@ -39,7 +39,7 @@ struct HubPlannerEditor: View {
 
     var body: some View {
         NavigationView {
-            Form {
+            HubForm {
                 if let error { Text(error).foregroundStyle(.secondary) }
                 TextField("Title", text: $draft.title)
                 if draft.kind == .todo {

@@ -91,9 +91,13 @@ public final class HubDeviceState {
         guard data.count <= 65_536 else { throw StateError.invalidRecord }
         let record = try JSONDecoder().decode(Session.self, from: data)
         guard record.origin == server.origin.absoluteString else { throw StateError.invalidRecord }
+        // Each cookie keeps its own expiry (HUB's lasts 30 days). The record
+        // itself is only discarded well after any cookie inside could be valid.
+        // A browser-session cookie (no expiry) still ends after a day.
         let age = now().timeIntervalSince(record.savedAt)
-        guard age >= -60, age < 86_400 else { return [] }
-        return server.cookies(record.cookies.compactMap(\.cookie), for: server.statusURL, now: now()).filter(isAuthCookie)
+        guard age >= -60, age < 45 * 86_400 else { return [] }
+        let saved = record.cookies.compactMap(\.cookie).filter { $0.expiresDate != nil || age < 86_400 }
+        return server.cookies(saved, for: server.statusURL, now: now()).filter(isAuthCookie)
     }
     public func rememberVoice(_ checkpoint: HubVoiceCheckpoint) throws {
         try validate(checkpoint)
@@ -135,6 +139,6 @@ public final class HubDeviceState {
     }
     public func clear() throws {
         if try pushIdentity() != nil { try advancePush(enabled: false) }
-        try store.remove(authKey); try store.remove(voiceKey); try clearAdmission()
+        try store.remove(authKey); try store.remove(voiceKey); try clearAdmission(); try clearAccessToken()
     }
 }

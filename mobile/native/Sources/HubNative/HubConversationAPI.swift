@@ -272,11 +272,20 @@ public struct HubKnowledgeBackups: Decodable {
         public let bytes: Int64
         public let path: String
     }
+    /// Present while organization work saved in a restored copy is paused
+    /// until the owner has reviewed the Knowledge AI settings.
+    public struct RestoreHold: Decodable, Equatable {
+        public let queued: Int
+        public let mode: String
+        public let provider: String
+        public let model: String
+    }
     public let items: [Copy]
     public let total: Int
     public let nextOffset: Int?
     public let storage: String
     public let incompleteCopies: Int?
+    public let restoreHold: RestoreHold?
 }
 
 public struct HubKnowledgeRestoredCopy: Decodable {
@@ -780,6 +789,13 @@ public struct HubChatModels: Decodable {
             public let name: String
             public let description: String?
             public let reasoning: Reasoning?
+            /// Combined request and response tokens, when the provider says.
+            public let contextWindow: Int?
+            public let defaultMaxTokens: Int?
+            public let inputModalities: [String]?
+
+            public var acceptsImages: Bool { inputModalities?.contains("image") == true }
+            public var canReason: Bool { reasoning?.efforts.contains { $0.id != "off" && $0.id != "none" } == true }
         }
         public let id: String
         public let name: String
@@ -791,6 +807,30 @@ public struct HubChatModels: Decodable {
     }
     public let groups: [Provider]
     public let failures: [Failure]
+    /// The model a chat uses when nothing else was picked.
+    public let defaultSelection: HubChatModelSelection?
+
+    private enum CodingKeys: String, CodingKey {
+        case groups, failures
+        case defaultSelection = "default"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        groups = try values.decode([Provider].self, forKey: .groups)
+        failures = try values.decodeIfPresent([Failure].self, forKey: .failures) ?? []
+        defaultSelection = try? values.decodeIfPresent(HubChatModelSelection.self, forKey: .defaultSelection)
+    }
+
+    /// "200K" style token counts for compact labels.
+    public static func tokens(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            let millions = Double(value) / 1_000_000
+            return (millions.rounded() == millions ? String(Int(millions)) : String(format: "%.1f", millions)) + "M"
+        }
+        if value >= 1_000 { return String(Int((Double(value) / 1_000).rounded())) + "K" }
+        return String(value)
+    }
 }
 
 public struct HubChatHistoryPage {
@@ -1646,6 +1686,7 @@ public final class HubConversationAPI {
     public init(server: HubServer, configuration: URLSessionConfiguration = .ephemeral, cookies: @escaping () async -> [HTTPCookie]) {
         self.server = server; self.cookies = cookies
         let config = configuration.copy() as! URLSessionConfiguration
+        HubAccessHeaders.apply(to: config, server: server)
         config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCache = nil
         config.timeoutIntervalForRequest = 12
         config.timeoutIntervalForResource = 18
@@ -1876,6 +1917,14 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(Connection.self, from: data).configured
     }
 
+    /// Starts one voice-typing take. HUB answers with a short-lived key; no
+    /// voice call or chat turn is created.
+    public func dictationSession() async throws -> HubDictationSession {
+        let data = try await requestData("api/hub/voice/dictation", headers: ["x-hub-dictation": "1"],
+                                         body: Data("{}".utf8), maxBytes: 8_192, operationTimeout: 15)
+        return try HubDictationSession(data: data)
+    }
+
     public func setModelFavorite(_ model: HubModelCatalog.Model, selected: Bool) async throws -> HubModelCatalog {
         try await modelRequest(["action": "favorite", "provider": model.provider, "model": model.modelID, "selected": selected])
     }
@@ -1961,6 +2010,54 @@ public final class HubConversationAPI {
     public func characterSettings() async throws -> HubCharacterSettings {
         let data = try await requestData("api/hub/characters", headers: ["x-hub-characters": "1"])
         return try JSONDecoder().decode(HubCharacterSettings.self, from: data)
+    }
+
+    /// Sends the phone's latest context (location, surroundings, device) so
+    /// assistants can answer "where am I" and "what is around me".
+    public func sendPhoneContext(_ context: HubPhoneContext) async throws {
+        let body = try JSONEncoder().encode(context)
+        guard body.count <= 16_000 else { throw HubAttachmentError.invalidResponse }
+        _ = try await requestData("api/hub/phone/context", headers: ["x-hub-phone-context": "1"], body: body, maxBytes: 4_096)
+    }
+
+    /// True while an assistant is waiting for a fresh phone reading.
+    public func phoneContextRequested() async throws -> Bool {
+        struct State: Decodable { let requested: Bool }
+        let data = try await requestData("api/hub/phone/context", headers: ["x-hub-phone-context": "1"], maxBytes: 1_024)
+        return try JSONDecoder().decode(State.self, from: data).requested
+    }
+
+    /// Lets organization work saved in a restored Knowledge copy run again
+    /// under the current Knowledge AI settings.
+    public func resumeRestoredKnowledgeWork() async throws {
+        struct Receipt: Decodable { let resumed: Bool }
+        let body = try JSONEncoder().encode(["action": "resume-restored-work"])
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, operationTimeout: 60)
+        guard try JSONDecoder().decode(Receipt.self, from: data).resumed else { throw HubAttachmentError.invalidResponse }
+    }
+
+    /// Adds earlier HUB conversations to the Knowledge queue. Conversations
+    /// already queued or organized are counted as duplicates, not repeated.
+    public func queueEarlierConversationsForKnowledge() async throws -> HubKnowledgeHistoryImport {
+        let body = try JSONEncoder().encode(["action": "import-hub"])
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, operationTimeout: 150)
+        let value = try JSONDecoder().decode(HubKnowledgeHistoryImport.self, from: data)
+        guard value.queued >= 0, value.duplicates >= 0, value.skipped >= 0 else { throw HubAttachmentError.invalidResponse }
+        return value
+    }
+
+    /// The complete request HUB last sent to a model for this character.
+    /// Reading it never calls a model.
+    public func characterRequest(id: String) async throws -> HubCharacterRequest {
+        guard UUID(uuidString: id) != nil else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/character-request", headers: ["x-hub-characters": "1"],
+                                         query: [URLQueryItem(name: "characterId", value: id)],
+                                         maxBytes: 80 * 1_048_576, operationTimeout: 30)
+        let value = try JSONDecoder().decode(HubCharacterRequest.self, from: data)
+        if let record = value.record {
+            guard record.characterId == id, record.at.isFinite, record.at >= 0 else { throw HubAttachmentError.invalidResponse }
+        }
+        return value
     }
 
     public func saveCharacter(_ character: HubCharacterSettings.Character, revision: Int, creating: Bool) async throws -> HubCharacterSettings {
@@ -3269,7 +3366,9 @@ public final class HubConversationAPI {
                 }
             }
         }
-        let result = try await rpc("session/list", request: [:], maxBytes: 8_388_608)
+        // The host's descriptor names this argument `_request` (an unused,
+        // reserved list request); sending `request` is rejected.
+        let result = try await rpc("session/list", arguments: ["_request": [String: Any]()], maxBytes: 16_777_216)
         let catalog = try JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: result))
         return catalog.items.reduce(into: [:]) { byID, item in
             guard HubVoiceAPI.validID(item.sessionId), item.updatedAt.isFinite, item.updatedAt >= 0 else { return }

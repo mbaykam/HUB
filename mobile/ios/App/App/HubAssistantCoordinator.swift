@@ -40,6 +40,8 @@ final class HubAssistantCoordinator {
         guard let address = UserDefaults.standard.string(forKey: HubClientConfiguration.serverPreferenceKey),
               let server = try? HubServer(address: address) else { throw ActionError.signIn }
         let state = HubDeviceState(server: server, store: HubKeychainStore())
+        // Siri can start HUB before the main screen connects; carry the token here too.
+        HubAccessHeaders.use(try? state.accessToken(), for: server)
         guard let cookies = try? state.cookies(), !cookies.isEmpty else { throw ActionError.signIn }
         return (server, state, HubVoiceAPI(server: server) { (try? state.cookies()) ?? [] })
     }

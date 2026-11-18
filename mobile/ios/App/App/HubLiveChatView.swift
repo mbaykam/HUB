@@ -17,6 +17,8 @@ struct HubLiveChatView: View {
     let api: HubConversationAPI
     let back: (String) -> Void
     let voice: () -> Void
+    /// Starts a video call in this chat (a voice call with the live camera).
+    let videoCall: () -> Void
     let openChat: (HubConversationChoice) -> Void
     let attachments: () -> HubChatAttachmentContext?
     let requestID: UUID
@@ -24,8 +26,10 @@ struct HubLiveChatView: View {
     let composerAction: HubNativeChatRequest.ComposerAction?
     let preferences: HubChatPreferences
     let renamed: (String) -> Void
-    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var activity = HubAppActivity.shared
     @FocusState private var composerFocused: Bool
+    @StateObject private var dictation = HubDictation()
+    @State private var dictationBase = ""
     @State private var snapshot: HubChatSnapshot?
     @State private var screenshots: [HubChatScreenshot] = []
     @State private var screenshotListFailed = false
@@ -136,17 +140,17 @@ struct HubLiveChatView: View {
             }
             if !visualExpanded { composer }
         }
-        .task(id: scenePhase == .active && tab == .chat) {
-            if scenePhase == .active && tab == .chat { await followPresentations() }
+        .task(id: activity.isActive && tab == .chat) {
+            if activity.isActive && tab == .chat { await followPresentations() }
         }
-        .task(id: VisualLoad(id: scenePhase == .active ? requestedVisual?.id : nil, retry: visualRetry)) {
-            if scenePhase == .active, let requestedVisual, loadedVisual?.summary.id != requestedVisual.id {
+        .task(id: VisualLoad(id: activity.isActive ? requestedVisual?.id : nil, retry: visualRetry)) {
+            if activity.isActive, let requestedVisual, loadedVisual?.summary.id != requestedVisual.id {
                 await loadVisual(requestedVisual)
             }
         }
         .task(id: attempt) { await follow() }
-        .onChange(of: scenePhase) { phase in
-            if phase == .active && connectionLost { reconnect() }
+        .onChange(of: activity.isActive) { active in
+            if active && connectionLost { reconnect() }
         }
         .task(id: historyRequest) {
             if historyRequest != 0 { await loadEarlierMessages() }
@@ -223,7 +227,7 @@ struct HubLiveChatView: View {
         }
         .sheet(item: $queueEdit) { item in
             NavigationView {
-                Form {
+                HubForm {
                     TextEditor(text: $queueDraft).frame(minHeight: 140)
                         .accessibilityLabel("Queued message")
                     if queuedMessages?.contains(item) != true {
@@ -256,7 +260,7 @@ struct HubLiveChatView: View {
         }
         .foregroundStyle(.primary)
         .tint(accent)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
     }
 
     private func openComposerAction(_ action: HubNativeChatRequest.ComposerAction?) {
@@ -276,8 +280,11 @@ struct HubLiveChatView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Button { composerFocused = false; back(deliveryUncertain || sending ? "" : draft) } label: {
-                    Label("Home", systemImage: "chevron.left").frame(minHeight: 44)
+                    Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
                 }
+                .accessibilityLabel("Home")
                 VStack(alignment: .leading, spacing: 3) {
                     Text(renamedTitle ?? snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
                     if let character { Text(character).font(.caption).foregroundStyle(.secondary) }
@@ -298,6 +305,17 @@ struct HubLiveChatView: View {
                     }
                     .accessibilityLabel("Hide keyboard")
                 }
+                Button {
+                    composerFocused = false
+                    videoCall()
+                } label: {
+                    Image(systemName: "video.fill").font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
+                }
+                .accessibilityLabel("Video call")
+                .accessibilityHint("Talk to HUB and show it your camera; it can point at things in the room.")
+                .accessibilityIdentifier("hub.chat.video")
                 Menu {
                     Button {
                         composerFocused = false
@@ -310,7 +328,11 @@ struct HubLiveChatView: View {
                         renameOpen = true
                     } label: { Label("Rename chat", systemImage: "pencil") }
                     .disabled(connectionLost || renaming)
-                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                } label: {
+                    Image(systemName: "ellipsis").font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
+                }
                 .accessibilityLabel("Chat options")
             }
             .buttonStyle(.plain)
@@ -394,6 +416,33 @@ struct HubLiveChatView: View {
         .padding(.vertical, 4)
     }
 
+    /// A closed visual stays one tap away in the conversation.
+    private func visualReopenCard(_ visual: HubChatPresentation) -> some View {
+        Button { composerFocused = false; showVisual(visual) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: visual.kind == .vega ? "chart.xyaxis.line" : visual.kind == .app ? "square.grid.2x2" : "doc.richtext")
+                    .font(.title3)
+                    .foregroundStyle(accent)
+                    .frame(width: 42, height: 42)
+                    .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(visual.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(visual.kind == .app ? "Interactive app · Tap to open" : "Visual · Tap to open")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.up.left.and.arrow.down.right").foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(accent.opacity(0.18)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(visual.title)")
+        .accessibilityIdentifier("hub.chat.visual.reopen")
+    }
+
     private func showVisual(_ visual: HubChatPresentation) {
         seenVisualID = visual.id
         visualLoadFailed = false
@@ -444,10 +493,12 @@ struct HubLiveChatView: View {
                     .disabled(historyLoading || connectionLost)
                 }
                 let entries = olderActivity + (snapshot?.activity ?? [])
-                if entries.isEmpty { Text("No recorded activity").foregroundStyle(.secondary) }
-                ForEach(entries) { item in
-                    activityRow(item)
-                    Divider()
+                let turns = HubTrajectory.turns(messages: olderMessages + (snapshot?.messages ?? []), activity: entries,
+                                                usage: olderUsage.merging(snapshot?.usageByTurn ?? [:]) { $0.combining($1) })
+                if entries.isEmpty && turns.isEmpty { Text("No recorded activity").foregroundStyle(.secondary) }
+                if !turns.isEmpty { HubTrajectorySummary(turns: turns, model: (selectedModel ?? snapshot?.model)?.model) }
+                ForEach(turns) { turn in
+                    HubTrajectoryTurnCard(turn: turn, running: snapshot?.running == true && turn.id == turns.last?.id)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -506,12 +557,20 @@ struct HubLiveChatView: View {
                                     HStack {
                                         Spacer(minLength: 48)
                                         VStack(alignment: .trailing, spacing: 8) {
-                                            if !message.text.isEmpty { Text(message.text) }
+                                            if !message.text.isEmpty { Text(message.text).textSelection(.enabled) }
                                             chatPhotos(message)
-                                            if !message.text.isEmpty { copyMessage(message.text) }
                                         }
-                                        .padding(14)
-                                        .background(panel, in: RoundedRectangle(cornerRadius: 18))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(accent.opacity(0.18)))
+                                        .contextMenu {
+                                            if !message.text.isEmpty {
+                                                Button { UIPasteboard.general.string = message.text } label: {
+                                                    Label("Copy message", systemImage: "doc.on.doc")
+                                                }
+                                            }
+                                        }
                                     }
                                 } else if message.role == "command" || message.role == "command-error" {
                                     Label {
@@ -549,9 +608,20 @@ struct HubLiveChatView: View {
                             if screenshotListFailed && snapshot.latestScreenshotSequence != nil {
                                 Button("Retry loading screenshots") { screenshotRetry += 1 }.font(.footnote)
                             }
+                            if requestedVisual == nil, let latestVisual {
+                                visualReopenCard(latestVisual)
+                            }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
-                            if snapshot.running && snapshot.partial.isEmpty && !connectionLost { ProgressView("Working…") }
+                            if snapshot.running && !connectionLost {
+                                let asked = messages.last(where: { $0.role == "user" }).flatMap { Int($0.id) }
+                                let steps = HubLiveSteps.steps(snapshot.activity.filter { entry in
+                                    if let asked { return entry.sequence > asked }
+                                    return currentTurn != nil && entry.turn == currentTurn
+                                })
+                                if !steps.isEmpty { HubLiveStepsView(steps: steps) }
+                                if snapshot.partial.isEmpty && steps.isEmpty { HubThinkingIndicator() }
+                            }
                         } else if !connectionLost {
                             ProgressView("Loading chat…")
                         }
@@ -685,6 +755,9 @@ struct HubLiveChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+            if let notice = dictation.notice {
+                Text(notice).font(.footnote).foregroundStyle(.secondary)
+            }
             if stopRequest != nil {
                 ProgressView("Stopping…").font(.footnote)
             } else if !connectionLost && snapshot?.lastTurnWasStopped == true {
@@ -716,13 +789,12 @@ struct HubLiveChatView: View {
                     }
                 }
             }
-            HStack(spacing: 6) {
-                TextField("Chat…", text: $draft, prompt: Text("Chat…").foregroundColor(accent.opacity(0.75)))
-                    .focused($composerFocused)
-                    .accessibilityIdentifier("hub.chat.draft")
-                    .submitLabel(.send)
-                    .onSubmit { send(fromKeyboard: true) }
-                    .padding(.leading, 12)
+            HStack(alignment: .bottom, spacing: 6) {
+                HubComposerField(text: $draft, focus: $composerFocused, identifier: "hub.chat.draft") {
+                    send(fromKeyboard: true)
+                }
+                .submitLabel(.send)
+                .padding(.leading, 12)
                 Menu {
                     Button {
                         composerFocused = false
@@ -765,7 +837,13 @@ struct HubLiveChatView: View {
                 }
                 .accessibilityLabel("More actions")
                 .accessibilityIdentifier("hub.chat.more")
+                HubDictationButton(dictation: dictation, identifier: "hub.chat.dictate") {
+                    if !dictation.isActive { dictationBase = draft }
+                    dictation.toggle(api: api)
+                }
+                .disabled(!dictation.isActive && connectionLost)
                 Button {
+                    dictation.cancel()
                     composerFocused = false
                     voice()
                 } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
@@ -773,16 +851,24 @@ struct HubLiveChatView: View {
                 .accessibilityIdentifier("hub.chat.voice")
                 if snapshot?.running == true || awaitingAfter != nil {
                     Button(action: stop) {
-                        Image(systemName: "stop.fill").frame(width: 44, height: 44)
-                            .background(Circle().fill(accent.opacity(0.28)))
+                        Image(systemName: "stop.fill")
+                            .foregroundColor(HubWorkspacePalette.onAccent)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(accent))
+                            .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Stop")
                     .accessibilityIdentifier("hub.chat.stop")
                     .disabled(stopRequest != nil)
                 } else {
                     Button { send() } label: {
-                        Image(systemName: "arrow.up").frame(width: 44, height: 44)
-                            .background(Circle().fill(accent.opacity(canSend ? 0.28 : 0.10)))
+                        Image(systemName: "arrow.up")
+                            .font(.body.weight(.bold))
+                            .foregroundColor(canSend ? HubWorkspacePalette.onAccent : HubWorkspacePalette.muted)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(canSend ? accent : accent.opacity(0.10)))
+                            .frame(width: 44, height: 44)
+                            .animation(.easeOut(duration: 0.15), value: canSend)
                     }
                         .accessibilityLabel("Send")
                         .accessibilityIdentifier("hub.chat.send")
@@ -791,7 +877,7 @@ struct HubLiveChatView: View {
             }
             .buttonStyle(.plain)
             .padding(5)
-            .background(panel, in: RoundedRectangle(cornerRadius: 25))
+            .hubGlass(RoundedRectangle(cornerRadius: 26, style: .continuous))
             if deliveryUncertain {
                 Button("I checked the conversation") {
                     deliveryUncertain = false
@@ -803,6 +889,10 @@ struct HubLiveChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .onReceive(dictation.$text) { spoken in
+            if dictation.isActive { draft = HubDictationTranscript.join(dictationBase, spoken) }
+        }
+        .onDisappear { dictation.cancel() }
     }
 
     private func queuedMessagesView(_ items: [HubQueuedChatMessage]) -> some View {
@@ -1033,6 +1123,7 @@ struct HubLiveChatView: View {
 
     private func send(fromKeyboard: Bool = false) {
         guard (fromKeyboard ? canSubmit : canSend) else { return }
+        dictation.cancel()
         let delivery = snapshot?.running == true ? preferences.busyEnter : .queue
         let text = draft
         let files = fileDrafts
@@ -1161,7 +1252,7 @@ private struct HubChatCommandsView: View {
 
     var body: some View {
         NavigationView {
-            List {
+            HubList {
                 if loading { ProgressView("Loading commands and skills…") }
                 if let commands {
                     Section("Commands") {
@@ -1275,11 +1366,61 @@ private struct HubChatModelPicker: View {
             } catch {
                 if !Task.isCancelled { self.error = "Could not load the available models." }
             }
+            // HUB's own catalogue adds context size, prices and inputs; the
+            // picker still works without it.
+            if let extra = try? await api.modelCatalog(), !Task.isCancelled {
+                details = Dictionary(extra.models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            }
         }
     }
 
+    @State private var details: [String: HubModelCatalog.Model] = [:]
+
+    /// What the picker knows about one model, from both catalogues.
+    private struct Spec {
+        var contextWindow: Int?
+        var maxTokens: Int?
+        var images: Bool?
+        var reasoning: Bool
+        var pricing: HubModelCatalog.Model.Pricing?
+        var favorite: Bool
+    }
+
+    private func spec(_ choice: HubChatModels.Provider.Model, provider: String) -> Spec {
+        let extra = details[provider + "/" + choice.id]
+        return Spec(contextWindow: extra?.contextWindow ?? choice.contextWindow,
+                    maxTokens: choice.defaultMaxTokens ?? extra?.maxTokens,
+                    images: extra.map { $0.input.contains("image") } ?? choice.inputModalities.map { $0.contains("image") },
+                    reasoning: choice.canReason || extra?.reasoning == true,
+                    pricing: extra?.pricing,
+                    favorite: extra?.favorite == true)
+    }
+
+    private static func price(_ value: Double) -> String {
+        value == 0 ? "free" : value < 0.1 ? String(format: "$%.3f", value) : String(format: "$%.2f", value)
+    }
+
+    private enum ModelFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case reasoning = "Reasoning"
+        case images = "Sees images"
+        case longContext = "Long context"
+        var id: Self { self }
+
+        func includes(_ spec: Spec) -> Bool {
+            switch self {
+            case .all: return true
+            case .reasoning: return spec.reasoning
+            case .images: return spec.images == true
+            case .longContext: return (spec.contextWindow ?? 0) >= 200_000
+            }
+        }
+    }
+
+    @State private var filter = ModelFilter.all
+
     private var catalogue: some View {
-        List {
+        HubList {
             if loading { ProgressView("Loading models…") }
             if let error {
                 Text(error).foregroundStyle(.secondary)
@@ -1287,35 +1428,45 @@ private struct HubChatModelPicker: View {
             }
             if let catalog {
                 let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let current, let now = lookup(current, in: catalog) {
+                    Section("In this chat") {
+                        modelRow(now.model, provider: now.provider, catalog: catalog, showProvider: true)
+                    }
+                }
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(ModelFilter.allCases) { option in
+                                Button { filter = option } label: {
+                                    Text(option.rawValue)
+                                        .font(.caption.weight(filter == option ? .semibold : .regular))
+                                        .padding(.horizontal, 12)
+                                        .frame(minHeight: 32)
+                                        .background(filter == option ? HubWorkspacePalette.accent.opacity(0.2) : HubWorkspacePalette.border.opacity(0.06),
+                                                    in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(filter == option ? .isSelected : [])
+                            }
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                }
                 let groups = catalog.groups.compactMap { group -> FilteredGroup? in
-                    let models = group.models.filter { search.isEmpty ||
-                        "\($0.name) \($0.id) \(group.name)".localizedCaseInsensitiveContains(search) }
+                    let models = group.models.filter { filter.includes(spec($0, provider: group.id)) && (search.isEmpty ||
+                        "\($0.name) \($0.id) \(group.name) \($0.description ?? "")".localizedCaseInsensitiveContains(search)) }
                     return models.isEmpty ? nil : FilteredGroup(id: group.id, name: group.name, models: models)
                 }
                 if groups.isEmpty {
-                    Text(search.isEmpty ? "No configured models" : "No matching models").foregroundStyle(.secondary)
+                    Text(search.isEmpty && filter == .all ? "No configured models" : "No matching models").foregroundStyle(.secondary)
                 }
                 ForEach(groups) { group in
-                    Section(group.name) {
+                    Section {
                         ForEach(group.models) { choice in
-                            Button {
-                                model = choice
-                                provider = group.id
-                                effort = current?.provider == group.id && current?.model == choice.id ? (current?.reasoningEffort ?? "") : ""
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(choice.name)
-                                        Text(choice.id).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if current?.provider == group.id, current?.model == choice.id {
-                                        Image(systemName: "checkmark").accessibilityLabel("Current model")
-                                    }
-                                }
-                                .frame(minHeight: 44)
-                            }
+                            modelRow(choice, provider: group.id, catalog: catalog, showProvider: false)
                         }
+                    } header: {
+                        Text("\(group.name) · \(group.models.count)")
                     }
                 }
                 if !catalog.failures.isEmpty {
@@ -1327,6 +1478,65 @@ private struct HubChatModelPicker: View {
         .searchable(text: $query, prompt: "Find a model…")
     }
 
+    private func lookup(_ selection: HubChatModelSelection, in catalog: HubChatModels) -> (model: HubChatModels.Provider.Model, provider: String)? {
+        guard let group = catalog.groups.first(where: { $0.id == selection.provider }),
+              let model = group.models.first(where: { $0.id == selection.model }) else { return nil }
+        return (model, group.id)
+    }
+
+    private func modelRow(_ choice: HubChatModels.Provider.Model, provider: String, catalog: HubChatModels, showProvider: Bool) -> some View {
+        let isCurrent = current?.provider == provider && current?.model == choice.id
+        let isDefault = catalog.defaultSelection?.provider == provider && catalog.defaultSelection?.model == choice.id
+        let info = spec(choice, provider: provider)
+        return Button {
+            model = choice
+            self.provider = provider
+            effort = isCurrent ? (current?.reasoningEffort ?? "") : ""
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(choice.name).font(.body.weight(isCurrent ? .semibold : .regular)).lineLimit(1)
+                        if isDefault { badge("Default", tint: .green) }
+                        if info.favorite { Image(systemName: "heart.fill").font(.caption2).foregroundStyle(.pink).accessibilityLabel("Favorite") }
+                    }
+                    if let description = choice.description, !description.isEmpty {
+                        Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    HStack(spacing: 5) {
+                        if let window = info.contextWindow { badge(HubChatModels.tokens(window) + " context") }
+                        if info.reasoning { badge("Reasoning") }
+                        if info.images == true { badge("Images") }
+                        if let price = info.pricing { badge(Self.price(price.input) + " in", tint: .secondary) }
+                        if showProvider { badge(catalog.groups.first(where: { $0.id == provider })?.name ?? provider) }
+                    }
+                }
+                Spacer(minLength: 4)
+                if isCurrent {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(HubWorkspacePalette.accent)
+                        .accessibilityLabel("Current model")
+                } else {
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hub.model.\(provider).\(choice.id)")
+    }
+
+    private func badge(_ text: String, tint: Color = HubWorkspacePalette.accent) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(tint.opacity(0.12), in: Capsule())
+            .lineLimit(1)
+    }
+
     private struct FilteredGroup: Identifiable {
         let id: String
         let name: String
@@ -1334,25 +1544,88 @@ private struct HubChatModelPicker: View {
     }
 
     private func options(_ choice: HubChatModels.Provider.Model, provider: String) -> some View {
-        Form {
+        let providerName = catalog?.groups.first(where: { $0.id == provider })?.name ?? provider
+        let info = spec(choice, provider: provider)
+        return HubForm {
             Section {
-                Text(choice.name).font(.headline)
-                if let description = choice.description { Text(description).font(.footnote) }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(choice.name).font(.title3.bold())
+                    Text(providerName).font(.subheadline).foregroundStyle(.secondary)
+                    if let description = choice.description { Text(description).font(.footnote).padding(.top, 2) }
+                }
+                .padding(.vertical, 4)
             }
-            if let efforts = choice.reasoning?.efforts, !efforts.isEmpty {
-                Picker("Reasoning effort", selection: $effort) {
-                    Text("Provider default").tag("")
-                    if !effort.isEmpty && !efforts.contains(where: { $0.id == effort }) { Text(effort).tag(effort) }
-                    ForEach(efforts) { Text($0.name).tag($0.id) }
+            Section("Details") {
+                detail("Model ID", choice.id, monospaced: true)
+                detail("Context window", info.contextWindow.map { HubChatModels.tokens($0) + " tokens" } ?? "Not reported")
+                if let output = info.maxTokens { detail("Longest reply", HubChatModels.tokens(output) + " tokens") }
+                detail("Reads images", info.images.map { $0 ? "Yes" : "No" } ?? "Not reported")
+                detail("Reasoning", choice.canReason ? "\(choice.reasoning?.efforts.count ?? 0) levels" : (info.reasoning ? "Yes" : "No"))
+                if let price = info.pricing {
+                    detail("Price per 1M tokens", Self.price(price.input) + " in · " + Self.price(price.output) + " out")
                 }
             }
-            if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
-            if saving { ProgressView() }
-            Button("Use in this chat") {
-                Task { await select(choice, provider: provider) }
+            if let efforts = choice.reasoning?.efforts, !efforts.isEmpty {
+                Section {
+                    effortRow(id: "", name: "Provider default",
+                              description: choice.reasoning?.defaultEffort.map { "Uses \($0)" } ?? "Let the provider decide")
+                    if !effort.isEmpty && !efforts.contains(where: { $0.id == effort }) {
+                        effortRow(id: effort, name: effort, description: nil)
+                    }
+                    ForEach(efforts) { level in effortRow(id: level.id, name: level.name, description: level.description) }
+                } header: {
+                    Text("Reasoning effort")
+                } footer: {
+                    Text("More effort thinks longer and costs more tokens; lower effort answers faster.")
+                }
+            }
+            Section {
+                if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                Button {
+                    Task { await select(choice, provider: provider) }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if saving { ProgressView() } else { Text("Use in this chat").fontWeight(.semibold) }
+                        Spacer()
+                    }
+                    .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("hub.model.use")
             }
         }
         .disabled(saving)
+    }
+
+    private func detail(_ title: String, _ value: String, monospaced: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(monospaced ? .footnote.monospaced() : .body)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func effortRow(id: String, name: String, description: String?) -> some View {
+        Button { effort = id } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                    if let description, !description.isEmpty {
+                        Text(description).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if effort == id { Image(systemName: "checkmark").foregroundStyle(HubWorkspacePalette.accent) }
+            }
+            .frame(minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(effort == id ? .isSelected : [])
     }
 
     private func select(_ choice: HubChatModels.Provider.Model, provider: String) async {
@@ -1429,7 +1702,7 @@ struct HubChatCharacterView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
-        .background(Color(uiColor: HubHomeView.backgroundColor).ignoresSafeArea())
+        .hubBackdrop()
     }
 
     private func load() async {
@@ -1472,6 +1745,7 @@ private struct HubChatImageView: View {
     @State private var exportFailed = false
     @State private var failed = false
     @State private var attempt = 0
+    @State private var fullScreen = false
 
     private struct SavedFile {
         let bytes: Data
@@ -1483,7 +1757,15 @@ private struct HubChatImageView: View {
         Group {
             if let image {
                 VStack(alignment: .leading, spacing: 4) {
-                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel(name)
+                    Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 12))
+                        .contentShape(Rectangle())
+                        .onTapGesture { fullScreen = true }
+                        .accessibilityLabel(name)
+                        .accessibilityAddTraits(.isImage)
+                        .accessibilityAction(named: "Open full screen") { fullScreen = true }
+                    .fullScreenCover(isPresented: $fullScreen) {
+                        HubImageViewer(image: image, name: name)
+                    }
                     if let savedFile {
                         HStack {
                             Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -1643,5 +1925,440 @@ private struct HubChatPhotoPicker: UIViewControllerRepresentable {
                 DispatchQueue.main.async { completion(result) }
             }
         }
+    }
+}
+
+/// Three softly pulsing dots while the assistant works, instead of a spinner.
+/// A photo on a black full screen: pinch or double-tap to zoom, swipe down
+/// or Close to go back, Share to send it on.
+struct HubImageViewer: View {
+    let image: UIImage
+    let name: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var drag: CGFloat = 0
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+            HubZoomableImage(image: image)
+                .ignoresSafeArea()
+                .offset(y: drag)
+                .simultaneousGesture(DragGesture(minimumDistance: 20).onChanged { value in
+                    if value.translation.height > 0 && abs(value.translation.width) < value.translation.height { drag = value.translation.height }
+                }.onEnded { value in
+                    if value.translation.height > 140 { dismiss() } else { withAnimation(.spring()) { drag = 0 } }
+                })
+                .accessibilityLabel(name)
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.headline).foregroundStyle(.white)
+                        .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Close image")
+                Spacer()
+                if let data = image.pngData() {
+                    HubShareFileButton(bytes: data, name: ((name as NSString).deletingPathExtension.isEmpty ? "Image" : (name as NSString).deletingPathExtension) + ".png", label: "Share image")
+                        .foregroundStyle(.white)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .opacity(drag > 0 ? 0 : 1)
+        }
+        .background(Color.black)
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// UIKit zooming: pinch, pan, and double-tap to toggle 2.5x.
+struct HubZoomableImage: UIViewRepresentable {
+    let image: UIImage
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scroll = UIScrollView()
+        scroll.delegate = context.coordinator
+        scroll.minimumZoomScale = 1
+        scroll.maximumZoomScale = 6
+        scroll.showsVerticalScrollIndicator = false
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.backgroundColor = .clear
+        scroll.contentInsetAdjustmentBehavior = .never
+        let view = UIImageView(image: image)
+        view.contentMode = .scaleAspectFit
+        view.isUserInteractionEnabled = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            view.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+            view.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            view.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            view.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+        ])
+        context.coordinator.imageView = view
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.toggleZoom(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scroll.addGestureRecognizer(doubleTap)
+        return scroll
+    }
+
+    func updateUIView(_ view: UIScrollView, context: Context) {
+        context.coordinator.imageView?.image = image
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var imageView: UIImageView?
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+        @objc func toggleZoom(_ gesture: UITapGestureRecognizer) {
+            guard let scroll = gesture.view as? UIScrollView else { return }
+            if scroll.zoomScale > 1.01 {
+                scroll.setZoomScale(1, animated: true)
+            } else {
+                let point = gesture.location(in: imageView)
+                let size = CGSize(width: scroll.bounds.width / 2.5, height: scroll.bounds.height / 2.5)
+                scroll.zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height), animated: true)
+            }
+        }
+    }
+}
+
+/// The Trajectory tab: what happened in each turn, in order.
+enum HubTrajectory {
+    struct Step: Identifiable {
+        enum Kind { case tool, instructions, context, retry, command, failure }
+        let id: Int
+        let kind: Kind
+        let title: String
+        let rawName: String?
+        let detail: String?
+        let result: String?
+        let failed: Bool
+    }
+
+    struct Turn: Identifiable {
+        let id: Int
+        let number: Int
+        let prompt: String?
+        let reply: String?
+        let steps: [Step]
+        let usage: HubChatTurnUsage?
+        var toolCount: Int { steps.filter { $0.kind == .tool }.count }
+        var failures: Int { steps.filter(\.failed).count }
+    }
+
+    static func turns(messages: [HubChatMessage], activity: [HubChatActivity], usage: [Int: HubChatTurnUsage]) -> [Turn] {
+        let asks = messages.compactMap { message -> (seq: Int, message: HubChatMessage)? in
+            guard message.role == "user", let seq = Int(message.id) else { return nil }
+            return (seq, message)
+        }.sorted { $0.seq < $1.seq }
+        guard !asks.isEmpty || !activity.isEmpty else { return [] }
+        let starts = asks.map(\.seq)
+        func owner(_ sequence: Int) -> Int { starts.last { $0 < sequence } ?? 0 }
+        let grouped = Dictionary(grouping: activity.sorted { $0.sequence < $1.sequence }) { owner($0.sequence) }
+        let keys = Set(starts).union(grouped.keys).sorted()
+        return keys.enumerated().map { index, key in
+            let ask = asks.first { $0.seq == key }?.message
+            let next = starts.first { $0 > key } ?? Int.max
+            let reply = messages.last {
+                $0.role == "assistant" && (Int($0.id).map { $0 > key && $0 < next } ?? ($0.turn != nil && $0.turn == ask?.turn))
+            }?.text
+            return Turn(id: key, number: index + 1, prompt: ask?.text, reply: reply, steps: steps(grouped[key] ?? []),
+                        usage: ask?.turn.flatMap { usage[$0] })
+        }
+    }
+
+    /// Pairs each tool call with its result and names it in plain words.
+    static func steps(_ entries: [HubChatActivity]) -> [Step] {
+        var steps: [Step] = []
+        for entry in entries {
+            switch entry.title {
+            case "Tool result", "Tool failed":
+                if let index = steps.lastIndex(where: { $0.kind == .tool && $0.result == nil }) {
+                    let call = steps[index]
+                    steps[index] = Step(id: call.id, kind: .tool, title: call.title, rawName: call.rawName, detail: call.detail,
+                                        result: entry.detail ?? (entry.title == "Tool failed" ? "Failed" : "Done"),
+                                        failed: entry.title == "Tool failed" || entry.failed)
+                }
+            case "System prompt":
+                steps.append(Step(id: entry.sequence, kind: .instructions, title: "Instructions sent to the model", rawName: nil, detail: entry.detail, result: nil, failed: false))
+            case "Context updated":
+                steps.append(Step(id: entry.sequence, kind: .context, title: "Context refreshed", rawName: nil, detail: nil, result: nil, failed: false))
+            case "Waiting to retry model request", "Retrying model request":
+                steps.append(Step(id: entry.sequence, kind: .retry, title: entry.title == "Retrying model request" ? "Retried the model" : "Model busy; waiting to retry", rawName: nil, detail: entry.detail, result: nil, failed: false))
+            case "Command started", "Command finished", "Command failed":
+                steps.append(Step(id: entry.sequence, kind: .command, title: entry.title, rawName: nil, detail: entry.detail, result: nil, failed: entry.failed))
+            case "This turn failed":
+                steps.append(Step(id: entry.sequence, kind: .failure, title: "This turn failed", rawName: nil, detail: entry.detail, result: nil, failed: true))
+            default:
+                steps.append(Step(id: entry.sequence, kind: .tool, title: HubLiveSteps.describe(tool: entry.title), rawName: entry.title, detail: entry.detail, result: nil, failed: entry.failed))
+            }
+        }
+        // Context refreshes are noise once there are real steps.
+        return steps.count > 3 ? steps.filter { $0.kind != .context } : steps
+    }
+}
+
+struct HubTrajectorySummary: View {
+    let turns: [HubTrajectory.Turn]
+    let model: String?
+
+    var body: some View {
+        let tools = turns.reduce(0) { $0 + $1.toolCount }
+        let failures = turns.reduce(0) { $0 + $1.failures }
+        let tokens = turns.reduce(0) { $0 + ($1.usage.map { $0.input + $0.output } ?? 0) }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                stat("\(turns.count)", "turns")
+                stat("\(tools)", "tool calls")
+                stat("\(failures)", failures == 1 ? "failure" : "failures", warn: failures > 0)
+                if tokens > 0 { stat(HubChatModels.tokens(tokens), "tokens") }
+            }
+            if let model { Text(model).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func stat(_ value: String, _ label: String, warn: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.headline).foregroundStyle(warn ? Color.orange : Color.primary)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HubWorkspacePalette.border.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+struct HubTrajectoryTurnCard: View {
+    let turn: HubTrajectory.Turn
+    let running: Bool
+    @State private var expanded: Set<Int> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Turn \(turn.number)").font(.caption.weight(.semibold)).foregroundStyle(HubWorkspacePalette.accent)
+                Spacer()
+                Group {
+                    if running { Text("Working…") }
+                    else {
+                        Text([turn.toolCount > 0 ? "\(turn.toolCount) tools" : nil,
+                              turn.usage.map { HubChatModels.tokens($0.input + $0.output) + " tokens" }]
+                            .compactMap { $0 }.joined(separator: " · "))
+                    }
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let prompt = turn.prompt, !prompt.isEmpty {
+                Text(prompt).font(.subheadline.weight(.medium)).lineLimit(3)
+            }
+            if !turn.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(turn.steps.enumerated()), id: \.element.id) { index, step in
+                        stepRow(step, last: index == turn.steps.count - 1)
+                    }
+                }
+            }
+            if let reply = turn.reply, !reply.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "text.bubble").font(.caption).foregroundStyle(.secondary)
+                    Text(reply).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+        }
+        .padding(12)
+        .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(HubWorkspacePalette.border.opacity(0.06)))
+    }
+
+    private func icon(_ step: HubTrajectory.Step) -> (String, Color) {
+        if step.failed { return ("exclamationmark.circle.fill", .orange) }
+        switch step.kind {
+        case .tool: return (step.result == nil && running ? "circle.dotted" : "checkmark.circle.fill", HubWorkspacePalette.accent)
+        case .instructions: return ("doc.text", .secondary)
+        case .context: return ("arrow.triangle.2.circlepath", .secondary)
+        case .retry: return ("arrow.clockwise", .orange)
+        case .command: return ("terminal", .secondary)
+        case .failure: return ("xmark.octagon.fill", .red)
+        }
+    }
+
+    private func stepRow(_ step: HubTrajectory.Step, last: Bool) -> some View {
+        let open = expanded.contains(step.id)
+        let (symbol, tint) = icon(step)
+        let hasDetail = (step.detail?.isEmpty == false) || (step.result?.isEmpty == false)
+        return HStack(alignment: .top, spacing: 10) {
+            VStack(spacing: 0) {
+                Image(systemName: symbol).font(.footnote).foregroundStyle(tint).frame(width: 18, height: 18)
+                if !last { Rectangle().fill(HubWorkspacePalette.border.opacity(0.12)).frame(width: 1.5).frame(maxHeight: .infinity) }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Button {
+                    guard hasDetail else { return }
+                    if open { expanded.remove(step.id) } else { expanded.insert(step.id) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(step.title).font(.footnote.weight(step.kind == .tool ? .semibold : .regular))
+                            .foregroundStyle(step.failed ? Color.orange : Color.primary)
+                        if let raw = step.rawName, raw != step.title {
+                            Text(raw).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        if hasDetail { Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary) }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if open {
+                    if let detail = step.detail, !detail.isEmpty {
+                        Text(detail.count > 4000 ? String(detail.prefix(4000)) + "…" : detail)
+                            .font(.caption.monospaced()).textSelection(.enabled)
+                            .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(HubWorkspacePalette.border.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    if let result = step.result, !result.isEmpty, result != "Done" {
+                        Text(result).font(.caption.monospaced()).foregroundStyle(step.failed ? Color.orange : Color.secondary).textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(.bottom, last ? 0 : 10)
+        }
+    }
+}
+
+/// Plain-language steps for the turn that is still running.
+enum HubLiveSteps {
+    struct Step: Identifiable {
+        let id: Int
+        let title: String
+        let failed: Bool
+    }
+
+    static func steps(_ entries: [HubChatActivity]) -> [Step] {
+        var result: [Step] = []
+        for entry in entries {
+            switch entry.title {
+            case "System prompt", "Context updated", "Tool result", "Command finished": continue
+            case "Tool failed":
+                if let last = result.popLast() {
+                    result.append(Step(id: last.id, title: last.title, failed: true))
+                }
+            case "Waiting to retry model request", "Retrying model request":
+                result.append(Step(id: entry.sequence, title: "Retrying the model", failed: false))
+            case "Command started":
+                result.append(Step(id: entry.sequence, title: "Running a command", failed: false))
+            case "Command failed":
+                result.append(Step(id: entry.sequence, title: "A command failed", failed: true))
+            case "This turn failed": continue
+            default:
+                result.append(Step(id: entry.sequence, title: describe(tool: entry.title), failed: entry.failed))
+            }
+        }
+        return Array(result.suffix(5))
+    }
+
+    static func describe(tool name: String) -> String {
+        let key = name.lowercased()
+        let known: [(String, String)] = [
+            ("phone_context", "Checking your phone"),
+            ("view_screen", "Looking at your screen"),
+            ("highlight_screen", "Pointing at your screen"),
+            ("present", "Building a visual"),
+            ("research", "Researching"),
+            ("delegate", "Handing work to a helper"),
+            ("send_message", "Messaging another agent"),
+            ("list_agents", "Checking the other agents"),
+            ("interrupt_agent", "Stopping a helper"),
+            ("switch_character", "Switching assistant"),
+            ("planner", "Checking your planner"),
+            ("goals", "Updating goals"),
+            ("automation", "Updating automations"),
+            ("work_plan", "Planning the work"),
+            ("save_conversation", "Saving the conversation"),
+            ("knowledge", "Searching your knowledge"),
+            ("memory", "Checking memory"),
+            ("web_search", "Searching the web"),
+            ("search", "Searching"),
+            ("fetch", "Reading a web page"),
+            ("browser", "Using the browser"),
+            ("screenshot", "Taking a screenshot"),
+            ("read", "Reading files"),
+            ("write", "Writing a file"),
+            ("edit", "Editing a file"),
+            ("bash", "Running a command"),
+            ("shell", "Running a command"),
+            ("exec", "Running a command"),
+        ]
+        if let match = known.first(where: { key.contains($0.0) }) { return match.1 }
+        var words = key.split(whereSeparator: { $0 == "_" || $0 == "-" || $0 == "." || $0 == "/" }).map(String.init)
+        if words.first == "hub" { words.removeFirst() }
+        let phrase = words.joined(separator: " ")
+        return phrase.isEmpty ? "Working" : "Using " + phrase
+    }
+}
+
+struct HubLiveStepsView: View {
+    let steps: [HubLiveSteps.Step]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                let current = index == steps.count - 1
+                HStack(spacing: 8) {
+                    Group {
+                        if step.failed {
+                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                        } else if current {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(HubWorkspacePalette.accent.opacity(0.7))
+                        }
+                    }
+                    .frame(width: 16, height: 16)
+                    Text(step.title)
+                        .font(.footnote.weight(current ? .semibold : .regular))
+                        .foregroundStyle(current ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(HubWorkspacePalette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .animation(.easeOut(duration: 0.2), value: steps.map(\.id))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Working: " + steps.map(\.title).joined(separator: ", "))
+        .accessibilityIdentifier("hub.chat.liveSteps")
+    }
+}
+
+struct HubThinkingIndicator: View {
+    @State private var phase = 0
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<3) { index in
+                Circle()
+                    .fill(HubWorkspacePalette.accent)
+                    .frame(width: 7, height: 7)
+                    .opacity(phase == index ? 1 : 0.3)
+                    .scaleEffect(phase == index ? 1.15 : 0.9)
+            }
+        }
+        .padding(.vertical, 6)
+        .animation(.easeInOut(duration: 0.3), value: phase)
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                phase = (phase + 1) % 3
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Working")
     }
 }

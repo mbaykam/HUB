@@ -47,6 +47,41 @@ final class HubDeviceStateTests: XCTestCase {
         XCTAssertEqual(try HubDeviceState(server: server, store: store, now: { self.time.addingTimeInterval(61) }).cookies().map(\.name), ["dsh-auth-session"])
         XCTAssertTrue(try HubDeviceState(server: server, store: store, now: { self.time.addingTimeInterval(86_401) }).cookies().isEmpty)
     }
+    func testHUBSessionCookieOutlivesADayUntilItsOwnExpiry() throws {
+        let server = try HubServer(address: "https://hub.example.com"), store = PrivateFixture()
+        try HubDeviceState(server: server, store: store, now: { self.time }).rememberVerifiedSession([
+            cookie("dsh-auth-hub", expires: time.addingTimeInterval(30 * 86_400)),
+            cookie("CF_Authorization", expires: time.addingTimeInterval(86_400))])
+        let tenDays = HubDeviceState(server: server, store: store, now: { self.time.addingTimeInterval(10 * 86_400) })
+        XCTAssertEqual(try tenDays.cookies().map(\.name), ["dsh-auth-hub"])
+        XCTAssertTrue(try HubDeviceState(server: server, store: store, now: { self.time.addingTimeInterval(31 * 86_400) }).cookies().isEmpty)
+    }
+    func testAccessTokenIsValidatedStoredPerOriginAndClearedOnSignOut() throws {
+        let server = try HubServer(address: "https://hub.example.com"), store = PrivateFixture()
+        let state = HubDeviceState(server: server, store: store, now: { self.time })
+        XCTAssertThrowsError(try HubAccessToken(clientID: "not-a-client-id", clientSecret: String(repeating: "a", count: 64)))
+        XCTAssertThrowsError(try HubAccessToken(clientID: "0123456789abcdef.access", clientSecret: "short"))
+        XCTAssertThrowsError(try HubAccessToken(clientID: "0123456789abcdef.access", clientSecret: String(repeating: "a", count: 32) + " " + String(repeating: "a", count: 32)))
+        let token = try HubAccessToken(clientID: " 0123456789abcdef0123456789abcdef.access ", clientSecret: String(repeating: "f", count: 64))
+        XCTAssertEqual(token.clientID, "0123456789abcdef0123456789abcdef.access")
+        try state.rememberAccessToken(token)
+        XCTAssertEqual(try state.accessToken(), token)
+        XCTAssertNil(try HubDeviceState(server: try HubServer(address: "https://other.example.com"), store: store).accessToken())
+        try state.clear()
+        XCTAssertNil(try state.accessToken())
+    }
+    func testAccessHeadersOnlyGoToTheirOwnOrigin() throws {
+        let hub = try HubServer(address: "https://hub.example.com"), other = try HubServer(address: "https://other.example.com")
+        let token = try HubAccessToken(clientID: "0123456789abcdef0123456789abcdef.access", clientSecret: String(repeating: "e", count: 64))
+        HubAccessHeaders.use(token, for: hub)
+        defer { HubAccessHeaders.use(nil, for: hub) }
+        let config = URLSessionConfiguration.ephemeral
+        HubAccessHeaders.apply(to: config, server: hub)
+        XCTAssertEqual(config.httpAdditionalHeaders?["CF-Access-Client-Id"] as? String, token.clientID)
+        let foreign = URLSessionConfiguration.ephemeral
+        HubAccessHeaders.apply(to: foreign, server: other)
+        XCTAssertNil(foreign.httpAdditionalHeaders?["CF-Access-Client-Id"])
+    }
     func testOwnedReceiptRestoresTheOriginalConversationButNeverAdoptsAnotherCall() throws {
         let server = try HubServer(address: "https://hub.example.com"), store = PrivateFixture()
         let state = HubDeviceState(server: server, store: store, now: { self.time })
