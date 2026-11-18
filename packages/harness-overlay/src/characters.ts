@@ -316,7 +316,8 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_desktop_look"))tools.push({name:"hub_desktop_look",description:"See this Windows PC's screen and its open windows."});
           if(!tools.some(t=>t.name==="hub_desktop_act"))tools.push({name:"hub_desktop_act",description:"Use this Windows PC: click, type, press keys, scroll, drag and switch windows."});
           if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's diagram, chart, simulation or interactive HTML app; see canvas.md."});
-          if(!tools.some(t=>t.name==="hub_view_screen"))tools.push({name:"hub_view_screen",description:"Inspect one fresh phone-screen frame during an authorized voice call or its direct delegated task. Needs an image-capable model; requested analysis snapshots are retained in the conversation."});
+          if(!tools.some(t=>t.name==="hub_view_screen"))tools.push({name:"hub_view_screen",description:"Inspect one fresh phone-screen or live camera frame during an authorized voice call or its direct delegated task. Needs an image-capable model; requested analysis snapshots are retained in the conversation."});
+          if(!tools.some(t=>t.name==="hub_show_overlay"))tools.push({name:"hub_show_overlay",description:"Pin arrows, circles, labels and numbered steps into the user's live camera view during a video call, anchored to real objects."});
           send(200,{...this.store.snapshot(),tools,sharedSpeech:this.speechSettings.snapshot()});return;
         }
         if(req.method!=="POST"){send(405,{error:"method-not-allowed"});return;}

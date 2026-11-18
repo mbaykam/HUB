@@ -16,7 +16,48 @@ export function parseScreenRegions(value: unknown): ScreenRegion[] {
     return { x: r.x, y: r.y, width: r.width, height: r.height, ...(label ? { label } : {}) };
   });
 }
-type Lease = ScreenOwner & { shareId: string; sequence: number; attemptedAt: number; activeAt: number; frame?: { bytes: Buffer; expiresAt: number } };
+/** A thing the phone recognised and numbered on the frame it sent. */
+export interface SceneMark { id: number; label?: string; text?: string; x: number; y: number; width: number; height: number }
+/** What the frame shows besides pixels: where it came from and its numbered marks. */
+export interface VisionScene { source: "screen" | "camera"; marks: SceneMark[] }
+/** One overlay the phone pins into the room: on a mark, or at a point/box of a sent frame. */
+export interface OverlayItem { mark?: number; x?: number; y?: number; width?: number; height?: number; style: OverlayStyle; label?: string; step?: number }
+export const OVERLAY_STYLES = ["arrow", "circle", "box", "label", "step"] as const;
+export type OverlayStyle = typeof OVERLAY_STYLES[number];
+export interface ScreenOverlay { id: string; items: OverlayItem[]; note: string; sequence: number; clear: boolean; createdAt: number }
+
+const text = (value: unknown, max: number) => typeof value === "string" && value.trim() ? value.replace(/\s+/g, " ").trim().slice(0, max) : undefined;
+const unit = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+/** The phone's scene arrives as base64url JSON in a header; anything odd is dropped, never trusted as instructions. */
+export function parseScene(header: unknown, source: unknown): VisionScene {
+  const kind = source === "camera" ? "camera" : "screen";
+  if (typeof header !== "string" || !header || header.length > 12_000 || !/^[A-Za-z0-9_-]+$/.test(header)) return { source: kind, marks: [] };
+  let input: any;
+  try { input = JSON.parse(Buffer.from(header, "base64url").toString("utf8")); } catch { return { source: kind, marks: [] }; }
+  const marks: SceneMark[] = [], seen = new Set<number>();
+  for (const m of Array.isArray(input?.marks) ? input.marks.slice(0, 24) : []) {
+    if (!m || !Number.isSafeInteger(m.id) || m.id < 1 || m.id > 99 || seen.has(m.id) || !unit(m.x) || !unit(m.y) || !unit(m.width) || !unit(m.height)) continue;
+    seen.add(m.id);
+    const label = text(m.label, 40), words = text(m.text, 80);
+    marks.push({ id: m.id, x: m.x, y: m.y, width: Math.min(m.width, 1 - m.x), height: Math.min(m.height, 1 - m.y), ...(label ? { label } : {}), ...(words ? { text: words } : {}) });
+  }
+  return { source: kind, marks };
+}
+/** Crops a region (fractions of the frame) and fits the longest side into
+ * maxSide, using the image library HUB already ships for attachments. */
+export async function cropScreenFrame(bytes: Buffer, region: { x: number; y: number; width: number; height: number } | undefined, maxSide: number): Promise<Buffer> {
+  const name = "sharp";
+  const sharp = ((await import(name)) as any).default;
+  let image = sharp(bytes, { failOn: "error" });
+  const { width = 0, height = 0 } = await image.metadata();
+  if (!width || !height) throw new Error("unreadable-screen-frame");
+  if (region) {
+    const left = Math.max(0, Math.min(width - 1, Math.round(region.x * width))), top = Math.max(0, Math.min(height - 1, Math.round(region.y * height)));
+    image = image.extract({ left, top, width: Math.max(1, Math.min(width - left, Math.round(region.width * width))), height: Math.max(1, Math.min(height - top, Math.round(region.height * height))) });
+  }
+  return await image.resize(maxSide, maxSide, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+}
+type Lease = ScreenOwner & { shareId: string; sequence: number; attemptedAt: number; activeAt: number; frame?: { bytes: Buffer; expiresAt: number; scene: VisionScene } };
 export class ScreenError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
@@ -54,10 +95,11 @@ export class VoiceScreenFrames {
   private decoding = false;
   private expiry?: ReturnType<typeof setTimeout>;
   private marked?: ScreenHighlight & { shareId: string };
+  private overlaid?: ScreenOverlay & { shareId: string };
   constructor(private readonly validate: (bytes: Uint8Array) => Promise<void>, private readonly now = Date.now) {}
   private owns(owner: ScreenOwner) { return this.scope?.callId === owner.callId && this.scope.sessionId === owner.sessionId; }
   private forgetFrame() { if (this.expiry) clearTimeout(this.expiry); this.expiry = undefined; if (this.lease) this.lease.frame = undefined; }
-  clear() { this.forgetFrame(); this.lease = undefined; this.scope = undefined; this.seen.clear(); this.marked = undefined; }
+  clear() { this.forgetFrame(); this.lease = undefined; this.scope = undefined; this.seen.clear(); this.marked = undefined; this.overlaid = undefined; }
   private expireIdle() { if (this.lease && this.now() - this.lease.activeAt >= 15_000) { this.forgetFrame(); this.lease = undefined; } }
   start(owner: ScreenOwner, shareId: unknown) {
     requireId(shareId);
@@ -83,7 +125,7 @@ export class VoiceScreenFrames {
     if (!this.owns(owner) || this.lease?.shareId !== shareId) throw new ScreenError(410, "screen-share-ended");
     return this.lease;
   }
-  async receive(owner: ScreenOwner, shareId: unknown, sequence: number, ageMs: number, read: () => Promise<Uint8Array>, stillOwned: () => boolean = () => true) {
+  async receive(owner: ScreenOwner, shareId: unknown, sequence: number, ageMs: number, read: () => Promise<Uint8Array>, stillOwned: () => boolean = () => true, scene: VisionScene = { source: "screen", marks: [] }) {
     const lease = this.selected(owner, shareId), started = this.now();
     if (!Number.isSafeInteger(sequence) || sequence < 0 || !Number.isSafeInteger(ageMs) || ageMs < 0 || ageMs >= SCREEN_MAX_AGE_MS) throw new ScreenError(400, "invalid-screen-frame");
     if (sequence <= lease.sequence) throw new ScreenError(409, "stale-screen-frame");
@@ -97,7 +139,7 @@ export class VoiceScreenFrames {
       if (this.lease !== lease || !stillOwned()) throw new ScreenError(410, "screen-share-ended");
       const expiresAt = started + SCREEN_MAX_AGE_MS - ageMs;
       if (expiresAt <= this.now()) throw new ScreenError(409, "stale-screen-frame");
-      this.forgetFrame(); lease.sequence = sequence; lease.frame = { bytes, expiresAt };
+      this.forgetFrame(); lease.sequence = sequence; lease.frame = { bytes, expiresAt, scene };
       this.expiry = setTimeout(() => { if (this.lease === lease) this.forgetFrame(); }, expiresAt - this.now());
       this.expiry.unref();
     } finally { this.decoding = false; }
@@ -106,7 +148,14 @@ export class VoiceScreenFrames {
     const lease = this.lease;
     if (lease?.frame && lease.frame.expiresAt <= this.now()) this.forgetFrame();
     if (!lease?.frame || lease.sessionId !== sessionId) return;
-    return { bytes: Buffer.from(lease.frame.bytes), shareId: lease.shareId, sequence: lease.sequence, remainingMs: lease.frame.expiresAt - this.now() };
+    return { bytes: Buffer.from(lease.frame.bytes), shareId: lease.shareId, sequence: lease.sequence, remainingMs: lease.frame.expiresAt - this.now(), scene: lease.frame.scene };
+  }
+  /** An assistant pins overlays into the camera view; the phone anchors them in the room. */
+  overlay(sessionId: string, items: OverlayItem[], note: string, sequence: number, clear: boolean) {
+    const lease = this.lease;
+    if (!lease || lease.sessionId !== sessionId) throw new Error("The camera is not shared.");
+    this.overlaid = { id: randomUUID(), items, note, sequence, clear, createdAt: this.now(), shareId: lease.shareId };
+    return this.overlaid.id;
   }
   /** An assistant marks regions of the shared screen; the phone shows them. */
   highlight(sessionId: string, regions: ScreenRegion[], note: string) {
@@ -118,8 +167,10 @@ export class VoiceScreenFrames {
   status(owner: ScreenOwner) {
     this.expireIdle();
     const owned = this.owns(owner), marked = owned && this.marked && this.marked.shareId === this.lease?.shareId && this.now() - this.marked.createdAt < 60_000 ? this.marked : undefined;
+    const overlay = owned && this.overlaid && this.overlaid.shareId === this.lease?.shareId && this.now() - this.overlaid.createdAt < 600_000 ? this.overlaid : undefined;
     return { sharing: owned && Boolean(this.lease), hasFrame: owned && Boolean(this.frame(owner.sessionId)), maxAgeMs: SCREEN_MAX_AGE_MS,
-      ...(marked ? { highlight: { id: marked.id, regions: marked.regions, note: marked.note, sequence: marked.sequence } } : {}) };
+      ...(marked ? { highlight: { id: marked.id, regions: marked.regions, note: marked.note, sequence: marked.sequence } } : {}),
+      ...(overlay ? { overlay: { id: overlay.id, items: overlay.items, note: overlay.note, sequence: overlay.sequence, clear: overlay.clear } } : {}) };
   }
 }
 
@@ -150,7 +201,8 @@ export async function handleVoiceScreen(request: IncomingMessage, response: Serv
     if (request.method === "PUT") {
       if (mediaType !== "image/jpeg") throw new ScreenError(415, "jpeg-required");
       const integer = (key: string) => { const text = request.headers[key]; return typeof text === "string" && /^\d{1,16}$/.test(text) ? Number(text) : NaN; };
-      await frames.receive(call, request.headers["x-hub-screen-share"], integer("x-hub-screen-sequence"), integer("x-hub-screen-age-ms"), () => body(request, SCREEN_MAX_BYTES), owned);
+      await frames.receive(call, request.headers["x-hub-screen-share"], integer("x-hub-screen-sequence"), integer("x-hub-screen-age-ms"), () => body(request, SCREEN_MAX_BYTES), owned,
+        parseScene(request.headers["x-hub-screen-scene"], request.headers["x-hub-screen-source"]));
     } else if (request.method === "POST" || request.method === "DELETE") {
       if (mediaType !== "application/json") throw new ScreenError(415, "json-required");
       let input: unknown;
