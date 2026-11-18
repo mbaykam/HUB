@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.11
+
+- Video calls: camera frames carry the phone's numbered marks. hub_view_screen can read just the marks as text, or zoom into a grid cell or mark (cropped on this PC from the full frame).
+- hub_show_overlay pins arrows, circles, labels and numbered steps into the user's live camera view, anchored to real objects.
+
 ## 1.10.10
 
 - Knowledge AI writes a plain librarian note per source.
