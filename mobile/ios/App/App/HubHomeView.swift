@@ -681,7 +681,8 @@ struct HubHomeView: View {
                     else if value.startLocation.x > size.width - Self.edgeWidth && dx < 0 { beginPanelDrag(.tools) }
                     else { return }
                 }
-                if draggingPanel != nil || (panel != nil && abs(dx) > abs(dy)) { panelDrag = dx }
+                if draggingPanel != nil || (panel != nil && abs(dx) > 12 && abs(dx) > abs(dy) * 1.5) { panelDrag = dx }
+                else if panel != nil && panelDrag != 0 && abs(dy) > abs(dx) { panelDrag = 0 }
             }
             .onEnded { value in
                 let dx = value.translation.width, predicted = value.predictedEndTranslation.width
@@ -695,6 +696,13 @@ struct HubHomeView: View {
                     return
                 }
                 guard let open = panel else { panelDrag = 0; return }
+                // Scrolling the panel's list is a vertical drag; only a mostly
+                // sideways drag of real length may close the panel.
+                let dy = value.translation.height
+                guard abs(dx) > 30, abs(dx) > abs(dy) * 1.5 else {
+                    withAnimation(Self.panelSpring) { panelDrag = 0 }
+                    return
+                }
                 if open == .history, selectedChat != nil, value.startLocation.x < Self.edgeWidth, dx > 50, abs(dx) > abs(value.translation.height) {
                     // Second swipe from the left edge: leave the chat for Home.
                     selectedChat = nil

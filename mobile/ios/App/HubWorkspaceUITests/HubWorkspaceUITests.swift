@@ -268,10 +268,13 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["hub.chat.send"].isEnabled)
         XCTAssertEqual(app.webViews.count, 0)
         capture("Conversation after Stop")
-        app.buttons["Trajectory"].tap()
+        // The trajectory is one button in the header, not a second tab.
+        XCTAssertFalse(app.segmentedControls.firstMatch.exists, "No Chat/Trajectory tab bar")
+        app.buttons["hub.chat.trajectory"].tap()
+        XCTAssertTrue(app.buttons["Back to chat"].waitForExistence(timeout: 3))
         sleep(1)
         capture("Trajectory")
-        app.buttons["Chat"].tap()
+        app.buttons["Back to chat"].tap()
 
         more.tap()
         app.buttons["Conversation outputs"].tap()

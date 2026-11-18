@@ -281,21 +281,35 @@ struct HubLiveChatView: View {
 
     private var chatHeader: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button { composerFocused = false; back(deliveryUncertain || sending ? "" : draft) } label: {
                     Image(systemName: "chevron.left").font(.body.weight(.semibold))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 40, height: 40)
                         .hubGlassCircle()
                 }
                 .accessibilityLabel("Home")
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(renamedTitle ?? snapshot?.title ?? chat.title).font(.headline).lineLimit(1)
-                    if let character { Text(character).font(.caption).foregroundStyle(.secondary) }
-                    if let model = selectedModel ?? snapshot?.model {
-                        Text(model.model).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(renamedTitle ?? snapshot?.title ?? chat.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    let subtitle = [character, (selectedModel ?? snapshot?.model)?.model].compactMap { $0 }.joined(separator: " · ")
+                    if !subtitle.isEmpty {
+                        Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 4)
+                // The step-by-step view of the turn, one tap away instead of a
+                // second screen with its own tab bar.
+                Button {
+                    composerFocused = false
+                    withAnimation(.easeInOut(duration: 0.2)) { tab = tab == .chat ? .trajectory : .chat }
+                } label: {
+                    Image(systemName: tab == .trajectory ? "text.bubble.fill" : "point.3.connected.trianglepath.dotted")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 40, height: 40)
+                        .hubGlass(Circle(), interactive: true, tint: tab == .trajectory ? HubWorkspacePalette.accent.opacity(0.5) : nil)
+                }
+                .accessibilityLabel(tab == .trajectory ? "Back to chat" : "Trajectory")
+                .accessibilityHint(tab == .trajectory ? "Shows the conversation." : "Shows each step HUB took, with tools and timings.")
+                .accessibilityIdentifier("hub.chat.trajectory")
                 if tab == .chat, requestedVisual == nil, let latestVisual {
                     Button { composerFocused = false; showVisual(latestVisual) } label: {
                         Image(systemName: "rectangle.on.rectangle").frame(width: 44, height: 44)
@@ -314,7 +328,7 @@ struct HubLiveChatView: View {
                         videoCall()
                     } label: {
                         Image(systemName: "video.fill").font(.body.weight(.semibold))
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
                             .hubGlassCircle()
                     }
                     .accessibilityLabel("Video call")
@@ -335,20 +349,20 @@ struct HubLiveChatView: View {
                     .disabled(connectionLost || renaming)
                 } label: {
                     Image(systemName: "ellipsis").font(.body.weight(.semibold))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 40, height: 40)
                         .hubGlassCircle()
                 }
                 .accessibilityLabel("Chat options")
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            Picker("Conversation view", selection: $tab) {
-                Text("Chat").tag(ChatTab.chat)
-                Text("Trajectory").tag(ChatTab.trajectory)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+            if tab == .trajectory {
+                Text("Trajectory · each step of this chat")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.bottom, 4)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
             Divider()
             if connectionLost {
                 HStack {

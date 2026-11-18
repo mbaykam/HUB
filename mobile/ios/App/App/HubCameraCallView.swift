@@ -232,7 +232,9 @@ struct HubOverlayGlyph: View {
         case .circle: ring
         case .step: stepBadge
         case .arrow: HubOverlayArrow(item: item, size: size, tint: tint)
-        case .box: if let rect = item.rect, rect.width > 12, rect.height > 12 { brackets(rect) } else { ring }
+        // A box only frames something that is clearly an area; small or thin
+        // regions (a line of text, a button) read better as a ring.
+        case .box: if let rect = item.rect, rect.width > 60, rect.height > 60, rect.width / rect.height < 4 { brackets(rect) } else { ring }
         case .label: pin
         }
     }
@@ -412,26 +414,42 @@ struct HubOffscreenPointer: View {
     }
 }
 
-/// What the phone recognised, numbered as HUB sees it.
+/// What the phone recognised, as HUB sees it: a few named pins, not a box
+/// around every line of text. Overlapping finds collapse into the larger one,
+/// and at most eight show, so the view stays readable.
 struct HubSeenMarksLayer: View {
     let marks: [HubProjectedMark]
+
+    static func visible(_ marks: [HubProjectedMark], limit: Int = 8) -> [HubProjectedMark] {
+        var kept: [HubProjectedMark] = []
+        for mark in marks.sorted(by: { $0.rect.width * $0.rect.height > $1.rect.width * $1.rect.height }) {
+            let center = CGPoint(x: mark.rect.midX, y: mark.rect.midY)
+            if kept.contains(where: { $0.rect.insetBy(dx: -12, dy: -12).contains(center) }) { continue }
+            kept.append(mark)
+            if kept.count == limit { break }
+        }
+        return kept.sorted { $0.id < $1.id }
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.clear
-            ForEach(marks) { mark in
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(HubOverlayPalette.amber.opacity(0.85), lineWidth: 1.5)
-                    .frame(width: mark.rect.width, height: mark.rect.height)
-                    .overlay(alignment: .topLeading) {
-                        Text("\(mark.id)").font(.caption2.weight(.heavy)).foregroundStyle(.black)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(HubOverlayPalette.amber))
-                            .offset(x: -6, y: -9)
-                    }
-                    .position(x: mark.rect.midX, y: mark.rect.midY)
+            ForEach(Self.visible(marks)) { mark in
+                HStack(spacing: 5) {
+                    Text("\(mark.id)").font(.caption2.weight(.heavy)).foregroundStyle(.black)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Circle().fill(HubOverlayPalette.amber))
+                    Text(mark.label).font(.caption.weight(.semibold)).lineLimit(1)
+                }
+                .padding(.leading, 3).padding(.trailing, 9).padding(.vertical, 3)
+                .background(Capsule().fill(Color.black.opacity(0.45)))
+                .hubGlass(Capsule())
+                .fixedSize()
+                .position(x: mark.rect.midX, y: mark.rect.midY)
+                .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: marks.map(\.id))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
