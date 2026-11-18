@@ -110,12 +110,48 @@ struct HubFallbackGlassButtonStyle: ButtonStyle {
     }
 }
 
-/// Near-black with a few slow, soft glows, so glass above it has color to
-/// bend and the app doesn't read as a flat gray panel.
+/// How lively the backdrop is: 0 at rest, 1 while the user types or HUB is
+/// working. Screens set it; the backdrop eases between the two.
+private struct HubBackdropEnergyKey: EnvironmentKey { static let defaultValue: Double = 0 }
+/// A screen shown over Home (a chat) reports its energy up to Home's backdrop.
+struct HubBackdropEnergyPreference: PreferenceKey {
+    static let defaultValue: Double = 0
+    static func reduce(value: inout Double, nextValue: () -> Double) { value = max(value, nextValue()) }
+}
+
+extension EnvironmentValues {
+    var hubBackdropEnergy: Double {
+        get { self[HubBackdropEnergyKey.self] }
+        set { self[HubBackdropEnergyKey.self] = newValue }
+    }
+}
+
+/// Near-black with soft color moving slowly underneath, so glass above it has
+/// color to bend. On iOS 18 and later the color is a living mesh gradient that
+/// drifts at rest and brightens and quickens while the user types or HUB works;
+/// with Reduce Motion it holds still. Earlier systems get fixed glows.
 struct HubBackdrop: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.hubBackdropEnergy) private var energy
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        if #available(iOS 18.0, *) {
+            ZStack {
+                Color(uiColor: HubWorkspacePalette.background)
+                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion || scenePhase != .active)) { context in
+                    HubLivingMesh(time: context.date.timeIntervalSinceReferenceDate, energy: energy, dark: scheme == .dark)
+                }
+                .animation(.easeInOut(duration: 1.2), value: energy)
+            }
+            .accessibilityHidden(true)
+        } else {
+            staticGlows
+        }
+    }
+
+    private var staticGlows: some View {
         ZStack {
             Color(uiColor: HubWorkspacePalette.background)
             let dark = scheme == .dark
@@ -127,5 +163,48 @@ struct HubBackdrop: View {
                            center: UnitPoint(x: 0.25, y: 1.05), startRadius: 0, endRadius: 440)
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// A 3×3 mesh in HUB's indigo, violet and teal. The inner points wander on
+/// slow, out-of-phase orbits; the edges stay put so the screen is always
+/// covered. Energy widens the orbits, speeds them up and lifts the color.
+@available(iOS 18.0, *)
+struct HubLivingMesh: View {
+    let time: Double
+    let energy: Double
+    let dark: Bool
+
+    var body: some View {
+        let speed = 0.10 + energy * 0.22
+        let reach = Float(0.07 + energy * 0.08)
+        func wander(_ x: Float, _ y: Float, _ phase: Double) -> SIMD2<Float> {
+            let t = time * speed + phase
+            return SIMD2(x + reach * Float(sin(t)), y + reach * Float(cos(t * 0.83 + phase)))
+        }
+        func edge(_ x: Float, _ y: Float, _ phase: Double) -> SIMD2<Float> {
+            // Edge points slide along their edge only.
+            let t = time * speed * 0.7 + phase
+            let slide = reach * 0.6 * Float(sin(t))
+            return SIMD2(x == 0 || x == 1 ? x : x + slide, y == 0 || y == 1 ? y : y + slide)
+        }
+        let points: [SIMD2<Float>] = [
+            [0, 0], edge(0.5, 0, 0.4), [1, 0],
+            edge(0, 0.5, 1.7), wander(0.5, 0.5, 2.3), edge(1, 0.5, 3.1),
+            [0, 1], edge(0.5, 1, 4.2), [1, 1],
+        ]
+        let lift = dark ? 0.16 + energy * 0.16 : 0.10 + energy * 0.10
+        let base = Color(uiColor: HubWorkspacePalette.background)
+        let indigo = Color(hue: 0.64, saturation: 0.78, brightness: 0.95).opacity(lift * 1.3)
+        let violet = Color(hue: 0.78, saturation: 0.62, brightness: 0.92).opacity(lift)
+        let teal = Color(hue: 0.50, saturation: 0.80, brightness: 0.85).opacity(lift * 0.9)
+        let rose = Color(hue: 0.92, saturation: 0.55, brightness: 0.9).opacity(lift * 0.55)
+        return MeshGradient(width: 3, height: 3, points: points, colors: [
+            indigo, base.opacity(0), violet,
+            base.opacity(0), teal, base.opacity(0),
+            rose, base.opacity(0), indigo,
+        ], smoothsColors: true)
+        .blur(radius: 24)
+        .ignoresSafeArea()
     }
 }

@@ -387,6 +387,7 @@ struct HubHomeView: View {
     @State private var knowledgeApps: [HubKnowledgeAsset]?
     @State private var storeApps: [HubApp] = []
     @State private var appOpenError: String?
+    @State private var chatBackdropEnergy: Double = 0
     @State private var runningStoreApp: HubAppRun?
     @State private var knowledgeAppsOpen = false
     @State private var openingApp: String?
@@ -464,6 +465,8 @@ struct HubHomeView: View {
         .foregroundStyle(.primary)
         .tint(accent)
         .hubBackdrop()
+        .environment(\.hubBackdropEnergy, composerFocused || model.voiceCall != nil ? 1 : chatBackdropEnergy)
+        .onPreferenceChange(HubBackdropEnergyPreference.self) { chatBackdropEnergy = $0 }
         .preferredColorScheme(chatPreferences.appearance.colorScheme)
         .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
     }

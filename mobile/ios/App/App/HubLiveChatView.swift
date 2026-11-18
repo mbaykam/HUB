@@ -263,7 +263,9 @@ struct HubLiveChatView: View {
         }
         .foregroundStyle(.primary)
         .tint(accent)
-        .hubBackdrop()
+        // Home's living backdrop shows through; it comes alive while you type
+        // and while HUB works.
+        .preference(key: HubBackdropEnergyPreference.self, value: composerFocused || snapshot?.running == true ? 1 : 0)
     }
 
     private func openComposerAction(_ action: HubNativeChatRequest.ComposerAction?) {
