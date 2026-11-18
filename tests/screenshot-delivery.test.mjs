@@ -8,7 +8,7 @@ import {createRequire} from "node:module";
 import {EventEmitter} from "node:events";
 import test from "node:test";
 import {JSDOM} from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
-import {installDailyUseWeb} from "../packages/harness-overlay/src/host/daily-use-web.ts";
+import {installDailyUseWeb,settledObservation} from "../packages/harness-overlay/src/host/daily-use-web.ts";
 import {conversationScreenshots, installScreenshotDelivery, isDesktopScreenshotRequest} from "../packages/harness-overlay/src/host/screenshot-delivery.ts";
 import {agentBrowserSuccessResponse} from "../packages/harness-overlay/src/agent-browser-contract.ts";
 import {createScreenshotPreviews} from "../packages/harness-overlay/src/client/host/screenshot-previews.ts";
@@ -164,4 +164,19 @@ test("workspace screenshot persists in the settled chat turn and renders through
   assert.equal(image?.src, "blob:fixture"); assert.equal(image.alt, "screen.png");
   client.update([]);
   assert.equal(dom.window.document.querySelector("figure"), null); assert.deepEqual(revoked, ["blob:fixture"]);
+});
+
+test("a screenshot list asked for mid-turn waits for the capture's result", async () => {
+  const call = {type: "tool/call", data: {name: "hub_capture_desktop", callId: "c1"}};
+  const result = {type: "tool/result", data: {message: {content: [{type: "tool-result", toolCallId: "c1"}]}}};
+  const views = [[{type: "turn/start"}, call], [{type: "turn/start"}, call], [{type: "turn/start"}, call, result]];
+  let observed = 0, disposed = 0;
+  const view = events => ({events, [Symbol.dispose]() { disposed++; }});
+  const observe = async () => view(views[Math.min(++observed, views.length - 1)]);
+  const settled = await settledObservation(view(views[0]), observe, new AbortController().signal, {step: 5, limit: 200, once: 5});
+  assert.equal([...settled.events].at(-1), result);
+  assert.equal(observed, 2);
+  assert.equal(disposed, 2);
+  const done = view([{type: "turn/start"}, {type: "turn/end"}]);
+  assert.equal(await settledObservation(done, async () => { throw new Error("no wait when finished"); }, new AbortController().signal), done);
 });
