@@ -17,6 +17,13 @@ public struct HubScreenFrame {
     public let capturedAt: Date
     public let width: Int
     public let height: Int
+    /// Set for live camera frames: the numbered marks drawn on the image.
+    public let scene: HubVisionScene?
+
+    public init(id: UUID, jpeg: Data, capturedAt: Date, width: Int, height: Int, scene: HubVisionScene? = nil) {
+        self.id = id; self.jpeg = jpeg; self.capturedAt = capturedAt
+        self.width = width; self.height = height; self.scene = scene
+    }
 }
 
 /// Capture adapters call this only after the system's explicit sharing consent.

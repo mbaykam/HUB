@@ -32,7 +32,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>Share a camera image with your assistant when you choose to.</string>
+	<string>Share a camera image, or your live camera during a video call, with your assistant when you choose to.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Let your HUB assistants know where you are and what is nearby when you ask them.</string>
 	<key>NSMicrophoneUsageDescription</key>

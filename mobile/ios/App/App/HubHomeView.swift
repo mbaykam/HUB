@@ -32,7 +32,7 @@ struct HubVoiceCallSummary: Equatable {
 }
 
 enum HubVoiceCallControl {
-    case open, mute, end
+    case open, mute, end, camera
 }
 
 /// A slim bar that keeps a running voice call in reach while reading its chat.
@@ -69,6 +69,13 @@ struct HubVoiceCallBar: View {
                     .frame(width: 44, height: 44)
             }
             .accessibilityLabel(call.muted ? "Unmute" : "Mute")
+            Button { control(.camera) } label: {
+                Image(systemName: "video.fill")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Video")
+            .accessibilityHint("Shows HUB your camera, with pointers placed in the room.")
+            .accessibilityIdentifier("hub.voice.video")
             Button { control(.end) } label: {
                 Image(systemName: "phone.down.fill")
                     .foregroundStyle(.white)
@@ -379,7 +386,7 @@ struct HubHomeView: View {
                                 back: { unsent in
                                     if selectedChat.request.composerAction != nil, model.draft.isEmpty { model.draft = unsent }
                                     self.selectedChat = nil
-                                }, voice: voice, openChat: showChat, attachments: attachments,
+                                }, voice: voice, videoCall: { voiceControl(.camera) }, openChat: showChat, attachments: attachments,
                                 requestID: selectedChat.request.id, initialDraft: selectedChat.request.initialDraft,
                                 composerAction: selectedChat.request.composerAction, preferences: chatPreferences) { name in
                     if chatAPI() === selectedChat.api { updateChatTitle(selectedChat.request.choice.sessionId, name: name) }

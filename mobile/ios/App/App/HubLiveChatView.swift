@@ -17,6 +17,8 @@ struct HubLiveChatView: View {
     let api: HubConversationAPI
     let back: (String) -> Void
     let voice: () -> Void
+    /// Starts a video call in this chat (a voice call with the live camera).
+    let videoCall: () -> Void
     let openChat: (HubConversationChoice) -> Void
     let attachments: () -> HubChatAttachmentContext?
     let requestID: UUID
@@ -303,6 +305,17 @@ struct HubLiveChatView: View {
                     }
                     .accessibilityLabel("Hide keyboard")
                 }
+                Button {
+                    composerFocused = false
+                    videoCall()
+                } label: {
+                    Image(systemName: "video.fill").font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
+                }
+                .accessibilityLabel("Video call")
+                .accessibilityHint("Talk to HUB and show it your camera; it can point at things in the room.")
+                .accessibilityIdentifier("hub.chat.video")
                 Menu {
                     Button {
                         composerFocused = false

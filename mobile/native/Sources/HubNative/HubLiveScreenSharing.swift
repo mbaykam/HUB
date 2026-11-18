@@ -6,6 +6,8 @@ public struct HubScreenStatus: Decodable {
     public let maxAgeMs: Int
     /// Regions an assistant marked on the current share, if any.
     public let highlight: HubScreenHighlight?
+    /// Overlays an assistant pinned into a live camera share, if any.
+    public let overlay: HubCameraOverlay?
 }
 
 /// Normalized regions (0...1, top-left origin) an assistant marked on the

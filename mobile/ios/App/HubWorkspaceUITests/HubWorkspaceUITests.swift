@@ -340,6 +340,19 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["hub.voice.bar"].exists)
         XCTAssertTrue(app.buttons["End voice call"].exists)
 
+        // Video: the live camera with HUB's overlays (a stand-in scene here,
+        // since the simulator has no camera).
+        app.buttons["hub.voice.video"].tap()
+        let close = app.buttons["hub.camera.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        sleep(2)
+        capture("Video call overlays")
+        app.buttons["Show what HUB sees"].tap()
+        sleep(1)
+        capture("Video call marks")
+        close.tap()
+        XCTAssertTrue(app.buttons["Hide canvas"].waitForExistence(timeout: 5))
+
         // In a chat, the right edge opens the tools and the left edge the history;
         // a second left-edge swipe goes back Home.
         func edgeSwipe(from x: CGFloat, to endX: CGFloat) {

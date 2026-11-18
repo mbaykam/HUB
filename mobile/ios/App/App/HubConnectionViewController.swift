@@ -47,6 +47,9 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     }
     private var deviceState: HubDeviceState?
     private var openChatWhenVoiceConnects = false
+    private var openCameraWhenVoiceConnects = false
+    private var cameraVision: HubCameraVision?
+    private var cameraHost: UIViewController?
     private var keyboardObserver: NSObjectProtocol?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var pageDeadline: Task<Void, Never>?
@@ -911,14 +914,24 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func voiceChanged(_ model: HubNativeVoice, sheet: UIViewController?) {
         guard voice === model else { return }
         syncVoiceSummary()
-        if !model.isActive { openChatWhenVoiceConnects = false }
+        if !model.isActive {
+            openChatWhenVoiceConnects = false
+            openCameraWhenVoiceConnects = false
+            if cameraHost != nil { closeCamera() }
+        }
         guard openChatWhenVoiceConnects, model.connectedSessionID != nil,
               let destination = model.conversationDestination() else { return }
         openChatWhenVoiceConnects = false
+        let camera = openCameraWhenVoiceConnects
+        openCameraWhenVoiceConnects = false
         if let sheet, presentedViewController === sheet, sheet.presentedViewController == nil {
-            dismiss(animated: true) { [weak self] in self?.openNotification(destination) }
+            dismiss(animated: true) { [weak self] in
+                self?.openNotification(destination)
+                if camera { self?.presentCamera() }
+            }
         } else if presentedViewController == nil {
             openNotification(destination)
+            if camera { presentCamera() }
         }
     }
 
@@ -936,10 +949,45 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             model.isActive ? HubVoiceCallSummary(sessionID: model.activeSessionID, status: model.status, muted: model.muted) : nil
         }
         if home.voiceCall != summary { home.voiceCall = summary }
+        if cameraVision?.voice != summary { cameraVision?.voice = summary }
+    }
+
+    /// The live camera of the current call. Starting it with no call running
+    /// starts the call first and opens the camera once HUB listens.
+    private func presentCamera() {
+        let context = voice?.attachmentContext()
+        guard Self.voiceBarFixture || context != nil else {
+            openCameraWhenVoiceConnects = true
+            showVoice()
+            return
+        }
+        guard cameraHost == nil else { return }
+        let vision = HubCameraVision(context: context, fixture: Self.voiceBarFixture && context == nil)
+        vision.voice = home.voiceCall
+        cameraVision = vision
+        let screen = HubCameraCallView(vision: vision, mute: { [weak self] in self?.voice?.toggleMute() }, endCall: { [weak self] in
+            self?.closeCamera { [weak self] in self?.voice?.end() }
+        }, close: { [weak self] in self?.closeCamera() })
+        let host = UIHostingController(rootView: screen)
+        host.modalPresentationStyle = .fullScreen
+        host.overrideUserInterfaceStyle = .dark
+        cameraHost = host
+        var presenter: UIViewController = self
+        while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+        presenter.present(host, animated: true)
+    }
+
+    private func closeCamera(then finish: (() -> Void)? = nil) {
+        cameraVision?.stop()
+        cameraVision = nil
+        guard let host = cameraHost else { finish?(); return }
+        cameraHost = nil
+        host.dismiss(animated: true, completion: finish)
     }
 
     private func controlVoice(_ control: HubVoiceCallControl) {
         switch control {
+        case .camera: presentCamera()
         case .open: showVoice()
         case .mute: voice?.toggleMute()
         case .end:
