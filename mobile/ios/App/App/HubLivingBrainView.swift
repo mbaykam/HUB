@@ -5,7 +5,8 @@ import HubNative
 /// the Obsidian graph view. Each domain is a glowing hub with its notes
 /// radiating out; links pull related notes together; chats that touch no note
 /// float as dust around the edge.
-final class HubBrainSimulation {
+/// Built off the main thread, then only touched on it.
+final class HubBrainSimulation: @unchecked Sendable {
     struct Node {
         let id: String
         let title: String
