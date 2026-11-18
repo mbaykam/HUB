@@ -22,6 +22,8 @@ type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limit
 const defaults=defaultKnowledgeSettings;
 const day=()=>new Date().toISOString().slice(0,10);
 const quotaRetryDelay=15*60*1000;
+/** The longest one Knowledge AI model call may take. */
+export const KNOWLEDGE_CALL_TIMEOUT_MS=5*60_000;
 export class KnowledgeCurator {
   readonly store: KnowledgeStore; private generate:Generate; readonly lifetime=new AbortController();
   settings:KnowledgeSettings={...defaults};jobs=new Map<string,KnowledgeJob>(); status="starting"; embedding="Keyword search · local embeddings not installed";
@@ -30,7 +32,11 @@ export class KnowledgeCurator {
   private checked?:{key:string;at:number};
   private blockedRoute?:{key:string;message:string;quota?:boolean;retryAt?:number;failures?:number};
   restoredWork?:KnowledgeRestoreHold;
-  constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate,readonly admit?:()=>undefined|(()=>void)){this.store=store;this.generate=generate;}
+  constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate,readonly admit?:()=>undefined|(()=>void),callTimeoutMs=KNOWLEDGE_CALL_TIMEOUT_MS){this.store=store;
+    // One model call that never returns must not freeze learning: jobs run one
+    // at a time, so a hung request held every later chat in the queue until HUB
+    // restarted (seen 2026-11-18). Each call now gives up after a few minutes.
+    this.generate=((prompt:any,settings:any,signal:AbortSignal,options?:any)=>generate(prompt,settings,AbortSignal.any([signal,AbortSignal.timeout(callTimeoutMs)]),options)) as Generate;}
   async initialize(){
     await this.store.initialize();
     await this.store.organization.syncObsidianLinks();
