@@ -43,7 +43,7 @@ final class HubBrainSimulation: @unchecked Sendable {
 
     static let nodeLimit = 420
 
-    init(graph: HubHomeKnowledge, layout: HubKnowledgeLayout.Layout) {
+    init(graph: HubHomeKnowledge, layout: HubKnowledgeLayout.Layout, limit: Int = HubBrainSimulation.nodeLimit) {
         let titles = Dictionary(graph.nodes.map { ($0.id, $0.title ?? "Untitled") }, uniquingKeysWith: { a, _ in a })
         let kinds = Dictionary(graph.nodes.map { ($0.id, $0.kind) }, uniquingKeysWith: { a, _ in a })
         let roots = layout.groups.filter { $0.parentID == nil && $0.id != HubKnowledgeLayout.archiveID }
@@ -55,7 +55,7 @@ final class HubBrainSimulation: @unchecked Sendable {
         let notes = layout.points.filter { kinds[$0.id] != "conversation" }
         let chats = layout.points.filter { kinds[$0.id] == "conversation" }
             .sorted { (degree[$0.id] ?? 0) > (degree[$1.id] ?? 0) }
-        let chosen = Array((notes + chats).prefix(Self.nodeLimit))
+        let chosen = Array((notes + chats).prefix(max(notes.count, limit)))
 
         // One hub per top domain that has notes on screen.
         var hubIndex: [String: Int] = [:]
@@ -75,7 +75,7 @@ final class HubBrainSimulation: @unchecked Sendable {
             index[point.id] = nodes.count
             nodes.append(Node(id: point.id, title: titles[point.id] ?? "Untitled", tone: tone,
                               radius: chat ? 2.1 : 3.1 + CGFloat(weight) * 0.35, mass: chat ? 0.6 : 1 + weight * 0.15,
-                              gravity: chat ? 0.006 : 0.012, kind: chat ? .chat : .note,
+                              gravity: chat ? 0.014 : 0.012, kind: chat ? .chat : .note,
                               phase: Self.unit(point.id) * 6.28, hub: root.flatMap { hubIndex[$0.id] }))
             x.append(point.x + Self.unit(point.id + "x") * 4); y.append(point.y + Self.unit(point.id + "y") * 4)
         }
@@ -226,6 +226,8 @@ struct HubLivingBrainView: View {
     var interactive = false
     var scope = HubKnowledgeGraphView.Scope.all
     var active = true
+    /// How many dots at most; chats that touch no note are dropped first.
+    var nodeLimit = 220
     var openRecord: (String) -> Void
     var openDomain: ((String) -> Void)? = nil
     var openExplorer: (() -> Void)? = nil
@@ -285,9 +287,10 @@ struct HubLivingBrainView: View {
         let graph = graph
         let steps = reduceMotion ? 420 : 160
         let notes = scope != .archive, archive = scope != .notes
+        let limit = nodeLimit
         let built = await Task.detached(priority: .userInitiated) { () -> HubBrainSimulation in
             let layout = HubKnowledgeLayout.project(graph, includesNotes: notes, includesArchive: archive, overview: false, aspect: 1)
-            let simulation = HubBrainSimulation(graph: graph, layout: layout)
+            let simulation = HubBrainSimulation(graph: graph, layout: layout, limit: limit)
             simulation.warmUp(steps)
             return simulation
         }.value
@@ -324,7 +327,9 @@ struct HubLivingBrainView: View {
         }
         canvas.stroke(highlighted, with: .color(HubWorkspacePalette.border.opacity(0.7)), lineWidth: 1.1)
 
-        let grow = min(1.6, max(0.75, sqrt(scale)))
+        // Few dots: draw them larger and name every note.
+        let few = simulation.nodes.count <= 40
+        let grow = min(1.6, max(0.75, sqrt(scale))) * (few ? 1.5 : 1)
         for (i, node) in simulation.nodes.enumerated() where node.kind != .hub {
             let p = points[i]
             guard p.x > -20, p.y > -20, p.x < size.width + 20, p.y < size.height + 20 else { continue }
@@ -360,7 +365,7 @@ struct HubLivingBrainView: View {
             canvas.draw(label, in: box)
         }
         // Note names appear once there is room: zoomed in, or around the selection.
-        if interactive && scale >= 1.6 || focus != nil {
+        if few || (interactive && scale >= 1.6) || focus != nil {
             for (i, node) in simulation.nodes.enumerated() where node.kind == .note && (focus == nil || lit.contains(i)) {
                 let p = points[i]
                 guard CGRect(origin: .zero, size: size).contains(p) else { continue }

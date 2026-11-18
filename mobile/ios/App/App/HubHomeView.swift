@@ -1883,7 +1883,7 @@ struct HubHomeView: View {
             Group {
                 if knowledgeLiving {
                     HubLivingBrainView(graph: displayed, height: 460, interactive: true, scope: scope,
-                                       active: knowledgeOpen && !knowledgeDomainsOpen,
+                                       active: knowledgeOpen && !knowledgeDomainsOpen, nodeLimit: 420,
                                        openRecord: selectKnowledgeNode, openDomain: onDomain)
                         .background(Color(uiColor: HubWorkspacePalette.background).opacity(0.7), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
