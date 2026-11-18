@@ -3,6 +3,8 @@ import {createPrivateKey} from "node:crypto";
 import {NativePushStore,createApplePushSender,createNativePushHandler,type ApplePushConfig,type NativePushEvent} from "./native-push.ts";
 import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
 import {operationFailure} from "./operation-failure.ts";
+import {installNotificationSources,assistantExcerpt} from "./notification-sources.ts";
+import {effectiveKnowledgeCharacter} from "./knowledge-identity.ts";
 
 /** Opt-in native device delivery is independent from Telegram destinations and
  * never changes a character's tools, prompts, model or external-message policy. */
@@ -34,9 +36,11 @@ export function installNativePush(ctx:any,characters:any){
     if(event.type!=="turn/end"||header.origin!=="subagent"||!header.parentSession||/^hub-(goal|memory|automation)-/.test(header.id)||/^hub-(goal|memory|automation)-/.test(header.parentSession)||isKnowledgeEvaluation(header.id)||isKnowledgeEvaluation(header.parentSession))return;
     if(ctx.agents.get(header.parentSession)?.session?.header?.origin==="subagent")return;
     const failure=operationFailure(event.data?.reason);if(failure&&["user","cancelled","canceled"].includes(failure.kind))return;
-    const sequence=String(event.id??event.index??record.snapshotEvents().length);
-    publisher.publish({id:`task:${header.id}:${sequence}`,sessionId:header.parentSession,kind:"task",status:failure?"failed":"completed"});
+    const events=record.snapshotEvents(),sequence=String(event.id??event.index??events.length),excerpt=assistantExcerpt(events);
+    publisher.publish({id:`task:${header.id}:${sequence}`,sessionId:header.parentSession,kind:"task",status:failure?"failed":"completed",
+      title:failure?"A task needs checking":"Task finished",body:failure?"It stopped before finishing. Open the chat to see why.":excerpt||"The result is in the chat.",category:"reply"});
   },{global:true});
+  const offSources=installNotificationSources(ctx,characters,store,publisher.publish,effectiveKnowledgeCharacter);
   const timer=setInterval(()=>{void ready.then(()=>store.tick()).catch(()=>{});},30000);timer.unref();
-  return ()=>{void credentialScope.dispose();clearInterval(timer);offRoute();offEvents();if(characters.nativePush===publisher)characters.nativePush=undefined;};
+  return ()=>{void credentialScope.dispose();clearInterval(timer);offRoute();offEvents();offSources();if(characters.nativePush===publisher)characters.nativePush=undefined;};
 }

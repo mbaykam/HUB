@@ -150,3 +150,44 @@ async def test_rtvi_cannot_publish_the_stt_frame_before_the_attention_gate():
     await observer.on_push_frame(SimpleNamespace(source=attention_gate,frame=frame,direction=FrameDirection.DOWNSTREAM,timestamp=0))
     assert len(sent)==1
     assert sent[0].data.text==frame.text
+
+
+def test_reply_window_lets_the_user_answer_a_background_result_without_the_wake_phrase():
+    clock=[0.0]
+    state=VoiceAttention({'idleSeconds':180,'wakePhrases':['Vera'],'contextSeconds':0},clock=lambda:clock[0])
+    state.set_mode('background')
+    assert state.open_reply_window() is True
+    assert state.mode=='active' and state.reply_window
+    clock[0]=10;state.tick(busy=True)   # the assistant is still speaking
+    clock[0]=39;state.tick();assert state.mode=='active'
+    clock[0]=41;state.tick();assert state.mode=='background', 'no answer within 30 s: back to waiting'
+    assert state.open_reply_window() is True
+    assert state.accept('Okay, send it to Ali.')==(True,False)
+    assert not state.reply_window, 'an answer returns to the normal idle time'
+    clock[0]=41+60;state.tick();assert state.mode=='active'
+    assert state.open_reply_window() is False, 'only from background'
+    assert state.snapshot()['replyWindows']==2
+
+
+@pytest.mark.parametrize('text', ["That's all.", 'Thanks, that is all', 'Okay, stop listening', 'Vera, go to sleep', 'Şimdilik bu kadar.', 'Tamam, bu kadar, teşekkürler', 'Dinlemeyi bırak Vera'])
+def test_sleep_phrases_end_active_listening(text):
+    from voice_attention import sleep_request
+    assert sleep_request(text, ['Vera'])
+
+
+@pytest.mark.parametrize('text', ["That's all I wanted to know about the invoice", 'Is that all?', 'Bu kadar mı?', 'Stop listening to music', 'Thanks', 'Vera'])
+def test_requests_that_merely_contain_a_sleep_phrase_do_not_end_listening(text):
+    from voice_attention import sleep_request
+    assert not sleep_request(text, ['Vera'])
+
+def test_a_finished_background_task_is_announced_while_waiting_for_the_wake_phrase():
+    import time
+    from hub_native_llm import HubNativeLLMService
+    llm=HubNativeLLMService.__new__(HubNativeLLMService)
+    llm._speech_closed=False;llm._request_active=False
+    health=SpeechHealth();health.attention=VoiceAttention();health.attention.set_mode('background')
+    health.last_loud_audio=time.perf_counter()-5
+    llm._health=health
+    assert llm._ready_for_task_result(), 'background mode no longer holds results back'
+    health.bot_speaking=True
+    assert not llm._ready_for_task_result(), 'but it still waits for the assistant to finish speaking'

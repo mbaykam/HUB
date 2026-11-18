@@ -14,7 +14,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from wake_word import LocalWakeDetector
-from voice_attention import normalized_words
+from voice_attention import normalized_words, sleep_request
 
 SONIOX_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
 
@@ -285,6 +285,14 @@ class SonioxWakeSTTService(STTService):
         if wake_only:
             await self._turn_stopped()
             await self.push_frame(TTSSpeakFrame('Dinliyorum.' if self.language_code=='tr' else "I'm listening."))
+        elif sleep_request(text, self.attention.settings['wakePhrases']):
+            # "That's all" / "bu kadar": back to waiting for the wake phrase. The
+            # mode watcher closes the paid stream on its next pass.
+            await self._turn_stopped()
+            self.attention.set_mode('background')
+            phrase = self.attention.settings['wakePhrases'][0]
+            await self.push_frame(TTSSpeakFrame(f'Tamam. Bana ihtiyacın olunca {phrase} de.' if self.language_code=='tr'
+                                                else f'Okay. Say {phrase} when you need me.'))
         else:
             await self._turn_started()
             await self.push_frame(TranscriptionFrame(text,self._user_id,time_now_iso8601(),language,finalized=True))
@@ -323,10 +331,13 @@ class SonioxWakeSTTService(STTService):
                     self.attention.set_mode('active')
                     self.attention.wakes += 1
                     self.mode = 'active'
-                    # Wake plus the start of a same-breath command goes once.
+                    # Wake plus the start of a same-breath command goes once:
+                    # only the waking utterance, not nearby talk before it.
                     await self._connect()
                     self.wake_pending = True
-                    await self.socket.send(bytes(self.preroll))
+                    take = getattr(self.wake, 'take_utterance', None)
+                    utterance = take() if take else b''
+                    await self.socket.send(utterance or bytes(self.preroll))
                     self.preroll.clear()
                 else:
                     # Roll a long foreground stream between utterances, before

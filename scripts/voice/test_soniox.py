@@ -124,6 +124,23 @@ class HybridTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.sockets),2)
         self.assertEqual(self.sockets[1].sent[1],self.audio)
 
+    async def test_wake_sends_only_the_waking_utterance_not_nearby_talk(self):
+        await self.stt.set_attention('background')
+        for _ in range(5): await self.feed(b'\x07\x00'*1600)   # someone else talking
+        self.wake.take_utterance=lambda: b'\x09\x00'*800       # the detector's own wake utterance
+        self.wake.hit=True;await self.feed()
+        self.assertEqual(self.sockets[0].sent[1],b'\x09\x00'*800)
+        self.assertNotIn(b'\x07\x00'*1600,self.sockets[0].sent)
+        self.assertEqual(self.stt.preroll,bytearray())
+
+    async def test_thats_all_returns_to_wake_listening_without_a_model_turn(self):
+        await self.feed()
+        await self.emit([{'text':"Okay, that's all",'is_final':True,'language':'en'},{'text':'<end>','is_final':True}])
+        self.assertEqual(self.finals(),[])
+        self.assertEqual(self.attention.mode,'background')
+        spoken=[f.text for f in self.frames if isinstance(f,TTSSpeakFrame)]
+        self.assertEqual(spoken,['Okay. Say Vera when you need me.'])
+
     async def test_keyword_retains_same_breath_audio_once_and_only_final_endpoint_admits(self):
         await self.stt.set_attention('background')
         await self.feed();self.wake.hit=True;await self.feed()
