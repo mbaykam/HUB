@@ -18,7 +18,8 @@ final class HubScreenHighlighter {
         let content = UNMutableNotificationContent()
         content.title = "HUB is pointing at your screen"
         content.body = mark.note.isEmpty
-            ? (mark.drawable.compactMap(\.label).joined(separator: " · ").nilIfEmpty ?? "Look at the marked area.")
+            ? ((mark.drawable.compactMap(\.label) + (mark.paths ?? []).compactMap(\.label) + (mark.circles ?? []).compactMap(\.label))
+                .joined(separator: " · ").nilIfEmpty ?? "Look at the marked area.")
             : mark.note
         content.sound = .default
         content.interruptionLevel = .timeSensitive
@@ -66,7 +67,66 @@ final class HubScreenHighlighter {
                 UIBezierPath(roundedRect: tag, cornerRadius: tag.height / 2).fill()
                 text.draw(at: CGPoint(x: tag.minX + 10, y: tag.minY + 5))
             }
+            drawShapes(mark, size: size, accent: accent, line: line)
             _ = context
+        }
+    }
+
+    /// Aim lines, routes and target rings, each with a dark outline so it
+    /// stays visible on any background (a green pool table, a white page).
+    private static func drawShapes(_ mark: HubScreenHighlight, size: CGSize, accent: UIColor, line: CGFloat) {
+        let point = { (p: [Double]) in CGPoint(x: p[0] * size.width, y: p[1] * size.height) }
+        func stroke(_ path: UIBezierPath, width: CGFloat, dashed: Bool) {
+            if dashed { path.setLineDash([width * 3, width * 2.2], count: 2, phase: 0) }
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.lineWidth = width + 4
+            UIColor.black.withAlphaComponent(0.55).setStroke()
+            path.stroke()
+            path.lineWidth = width
+            accent.setStroke()
+            path.stroke()
+        }
+        func label(_ text: String, at anchor: CGPoint) {
+            let font = UIFont.systemFont(ofSize: max(20, size.width / 30), weight: .semibold)
+            let string = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: UIColor(red: 0.08, green: 0.1, blue: 0.2, alpha: 1)])
+            let textSize = string.size()
+            var tag = CGRect(x: anchor.x - textSize.width / 2 - 10, y: anchor.y - textSize.height - 22, width: textSize.width + 20, height: textSize.height + 10)
+            tag.origin.x = min(max(0, tag.origin.x), size.width - tag.width)
+            if tag.minY < 0 { tag.origin.y = anchor.y + 16 }
+            accent.setFill()
+            UIBezierPath(roundedRect: tag, cornerRadius: tag.height / 2).fill()
+            string.draw(at: CGPoint(x: tag.minX + 10, y: tag.minY + 5))
+        }
+        for path in (mark.paths ?? []).prefix(4) where path.drawable {
+            let points = path.points.map(point)
+            let bezier = UIBezierPath()
+            bezier.move(to: points[0])
+            for p in points.dropFirst() { bezier.addLine(to: p) }
+            stroke(bezier, width: line, dashed: path.style == "dashed")
+            if path.style != "line" && path.style != "dashed", let end = points.last, let before = points.dropLast().last {
+                let angle = atan2(end.y - before.y, end.x - before.x), length = max(18, line * 6)
+                let head = UIBezierPath()
+                for side: CGFloat in [-1, 1] {
+                    head.move(to: end)
+                    head.addLine(to: CGPoint(x: end.x - cos(angle + side * 0.45) * length, y: end.y - sin(angle + side * 0.45) * length))
+                }
+                stroke(head, width: line, dashed: false)
+            }
+            for p in points.dropFirst().dropLast() {
+                // Bends (a cushion bounce) get a small dot.
+                accent.setFill()
+                UIBezierPath(ovalIn: CGRect(x: p.x - line * 1.5, y: p.y - line * 1.5, width: line * 3, height: line * 3)).fill()
+            }
+            if let text = path.label, !text.isEmpty { label(text, at: points[0]) }
+        }
+        for circle in (mark.circles ?? []).prefix(6) where circle.drawable {
+            let center = point([circle.x, circle.y]), radius = circle.radius * size.width
+            let ring = UIBezierPath(ovalIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+            stroke(ring, width: line, dashed: false)
+            accent.withAlphaComponent(0.18).setFill()
+            ring.fill()
+            if let text = circle.label, !text.isEmpty { label(text, at: CGPoint(x: center.x, y: center.y - radius)) }
         }
     }
 }

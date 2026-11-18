@@ -20,8 +20,27 @@ public struct HubScreenHighlight: Decodable, Equatable, Sendable {
         public let height: Double
         public let label: String?
     }
+    /// An aim line or route: 2 to 6 points, drawn as an arrow, a line or dashes.
+    public struct Path: Decodable, Equatable, Sendable {
+        public let points: [[Double]]
+        public let style: String?
+        public let label: String?
+        public var drawable: Bool {
+            (2...6).contains(points.count) && points.allSatisfy { $0.count == 2 && (0...1).contains($0[0]) && (0...1).contains($0[1]) }
+        }
+    }
+    /// A ring around a target spot; radius is a fraction of the frame width.
+    public struct Circle: Decodable, Equatable, Sendable {
+        public let x: Double
+        public let y: Double
+        public let radius: Double
+        public let label: String?
+        public var drawable: Bool { (0...1).contains(x) && (0...1).contains(y) && radius > 0 && radius <= 0.5 }
+    }
     public let id: String
     public let regions: [Region]
+    public let paths: [Path]?
+    public let circles: [Circle]?
     public let note: String
     public let sequence: Int
 
