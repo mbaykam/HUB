@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.16
+
+- Delegating to a character with an allowed-tools list works; lists naming conversation-scoped tools (Knowledge) no longer fail every delegation.
+- hub_highlight_screen draws aim lines and routes (paths of 2-6 points: arrow, line or dashed) and target circles, besides boxes - enough to show a pool shot on a shared phone screen.
+
 ## 1.10.15
 
 - Questions to the user are asked in the conversation: ask_user_question no longer waits on a prompt only HUB's desktop window shows, which hung chats on the phone, Telegram and voice.
