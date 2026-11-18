@@ -379,7 +379,14 @@ struct HubHomeView: View {
         .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
     }
 
+    /// Home's layers, sheets and listeners, built in type-erased stages. As one
+    /// modifier chain its SwiftUI type nests so deeply that resolving it at
+    /// launch overflowed the iPhone's 1 MB main-thread stack (build 13).
     private var mainLayers: some View {
+        presentationsAndListeners(sheets(AnyView(callLayers)))
+    }
+
+    private var callLayers: some View {
         ZStack {
             workspaceContent
                 .opacity(selectedChat == nil ? 1 : 0)
@@ -414,6 +421,10 @@ struct HubHomeView: View {
         .hubBackdrop()
         .preferredColorScheme(chatPreferences.appearance.colorScheme)
         .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
+    }
+
+    private func sheets(_ content: AnyView) -> AnyView {
+        AnyView(content
         .sheet(isPresented: $knowledgeOpen, onDismiss: {
             clearKnowledgeSelection()
             knowledgeLocalCenter = nil
@@ -475,7 +486,11 @@ struct HubHomeView: View {
             if let api = chatAPI() { HubAppsView(api: api, webPage: attachments()?.server.origin.appendingPathComponent("apps")) }
         }
         .fullScreenCover(item: $runningApp) { HubKnowledgeAppRunner(file: $0) }
-        .fullScreenCover(item: $runningStoreApp) { HubAppRunner(run: $0) }
+        .fullScreenCover(item: $runningStoreApp) { HubAppRunner(run: $0) })
+    }
+
+    private func presentationsAndListeners(_ content: AnyView) -> some View {
+        content
         .task(id: KnowledgeAppsRequest(connected: model.connection == .connected, notes: model.knowledge?.nodes.count ?? -1)) {
             await loadKnowledgeApps()
         }
@@ -487,6 +502,7 @@ struct HubHomeView: View {
                 HubWorkspaceDirectoryView(api: api) { workspaceAttempt += 1 }
             }
         }
+        .erased()
         .alert("Rename workspace", isPresented: Binding(
             get: { workspaceToRename != nil }, set: { if !$0 { workspaceToRename = nil } }), presenting: workspaceToRename) { item in
             TextField("Workspace name", text: $workspaceTitle)
@@ -572,7 +588,7 @@ struct HubHomeView: View {
         }
     }
 
-    private var workspaceContent: some View { homeContent }
+    private var workspaceContent: some View { AnyView(homeContent) }
 
     private static let panelSpring = Animation.spring(response: 0.34, dampingFraction: 0.86)
     private static let edgeWidth: CGFloat = 30
@@ -749,6 +765,7 @@ struct HubHomeView: View {
                 .background(GeometryReader { geometry in
                     Color.clear.preference(key: HomeScrollOffset.self, value: geometry.frame(in: .named("homeScroll")).minY)
                 })
+                .erased()
             }
             .coordinateSpace(name: "homeScroll")
             // Scrolling the page puts the keyboard away, like Messages. The

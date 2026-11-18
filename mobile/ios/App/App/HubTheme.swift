@@ -65,6 +65,11 @@ extension View {
         if #available(iOS 16.0, *) { strikethrough(active) } else { opacity(active ? 0.6 : 1) }
     }
 
+    /// Ends a long modifier chain's nested type here. SwiftUI resolves such a
+    /// type in one deep recursion on the main thread, which has only 1 MB on an
+    /// iPhone; very long chains overflow it at launch.
+    func erased() -> AnyView { AnyView(self) }
+
     /// The deep backdrop every HUB screen sits on.
     func hubBackdrop() -> some View {
         background(HubBackdrop().ignoresSafeArea())

@@ -166,6 +166,7 @@ struct HubLiveChatView: View {
             }
             await loadFileDrafts()
         }
+        .erased()
         .fileImporter(isPresented: $filePickerOpen, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls): Task { await stageFiles(urls) }
