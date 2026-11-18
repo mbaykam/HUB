@@ -16,9 +16,9 @@ test('the phone scene header is parsed defensively',()=>{
 });
 
 test('zoom takes a grid cell or a mark, and marks read as one short line each',()=>{
- assert.deepEqual(zoomRegion('b3',scene),{x:0.25,y:0.5,width:0.25,height:0.25,label:'B3'});
+ assert.deepEqual(zoomRegion('c3',scene),{x:0.4,y:0.4,width:0.2,height:0.2,label:'C3'});assert.deepEqual(zoomRegion('E5',scene),{x:0.8,y:0.8,width:0.2,height:0.2,label:'E5'});
  const mark=zoomRegion('#1',scene);assert.equal(mark.label,'#1');assert.ok(mark.x<=0.5&&mark.x+mark.width>=0.7&&mark.width>=0.2);
- for(const bad of ['E1','A5','#9','top'])assert.throws(()=>zoomRegion(bad,scene));
+ for(const bad of ['F1','A6','#9','top'])assert.throws(()=>zoomRegion(bad,scene));
  assert.deepEqual(describeMarks(scene),['#1 Router "AX55" at 0.50,0.30 size 0.20x0.10','#2 Cable at 0.10,0.70 size 0.10x0.10']);
 });
 
@@ -63,17 +63,17 @@ function camera(frameScene=scene){
 test('a marks read costs no image; zoom crops the full frame; overlays land on the frame that was seen',async()=>{
  const c=camera();try{
   const view=c.tools.get(SCREEN_VIEW_TOOL),overlay=c.tools.get(OVERLAY_TOOL);
-  assert.match(c.agent.guidance,/4x4 grid/);assert.match(c.agent.guidance,/hub_show_overlay/);
+  assert.match(c.agent.guidance,/5x5 grid/);assert.match(c.agent.guidance,/hub_show_overlay/);
   await assert.rejects(overlay.execute({items:[{mark:1}]},c.exec),/Look first/);
   const marks=await view.execute({detail:'marks'},c.exec);
   assert.equal(c.saves(),0);assert.equal(marks.marks.length,2);assert.equal(marks.source,'camera');
   const overview=await view.execute({},c.exec);
   assert.equal(c.crops[0].region,undefined);assert.equal(c.crops[0].max,768);assert.equal(overview.source,'camera');assert.equal(overview.marks.length,2);
   const zoomed=await view.execute({zoom:'B3'},c.exec);
-  assert.deepEqual(c.crops[1].region,{x:0.25,y:0.5,width:0.25,height:0.25,label:'B3'});assert.equal(c.crops[1].max,1024);assert.equal(zoomed.zoom.cell,'B3');
+  assert.deepEqual(c.crops[1].region,{x:0.2,y:0.4,width:0.2,height:0.2,label:'B3'});assert.equal(c.crops[1].max,1024);assert.equal(zoomed.zoom.cell,'B3');
   const shown=await overlay.execute({items:[{x:0.5,y:0.5,style:'step',step:1,label:'Press'}],in_zoom:true,note:'Hold for 5 s'},c.exec);
   assert.equal(shown.shown,true);
-  assert.deepEqual(c.overlays[0],{sessionId:'chat',items:[{x:0.375,y:0.625,style:'step',label:'Press',step:1}],note:'Hold for 5 s',sequence:9,clear:true});
+  assert.deepEqual(c.overlays[0],{sessionId:'chat',items:[{x:0.30000000000000004,y:0.5,style:'step',label:'Press',step:1}],note:'Hold for 5 s',sequence:9,clear:true});
   await overlay.execute({items:[],clear:true},c.exec);assert.deepEqual(c.overlays[1].items,[]);
   await assert.rejects(view.execute({zoom:'Z9'},c.exec),/grid cell/);
   await assert.rejects(view.execute({sessionId:'other'},c.exec),/only detail and zoom/);

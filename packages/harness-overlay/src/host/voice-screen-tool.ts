@@ -5,16 +5,16 @@ import { parseScreenRegions, OVERLAY_STYLES, type OverlayItem, type ScreenRegion
 export const SCREEN_VIEW_TOOL = "hub_view_screen";
 export const SCREEN_HIGHLIGHT_TOOL = "hub_highlight_screen";
 export const OVERLAY_TOOL = "hub_show_overlay";
-export const VISION_GUIDANCE = "With the live camera, frames show numbered marks (#1, #2, …) on things the phone recognised, and a 4x4 grid: columns A-D left to right, rows 1-4 top to bottom. Pass detail \"marks\" to read just the marks list as text (no image, cheapest) when it can answer. Pass zoom with a grid cell like \"B3\" or a mark like \"#4\" to get a sharper crop of that part only. Then use hub_show_overlay to show the user things in the room: prefer targeting a mark; otherwise give x, y (0 to 1) on the frame you saw, or inside your last zoom with in_zoom true. Overlays stay pinned to the real place as the user moves the phone. Use one to four clear items, short labels, step numbers for sequences, and clear old overlays when the topic changes.";
+export const VISION_GUIDANCE = "With the live camera, frames show numbered marks (#1, #2, …) on things the phone recognised, and a 5x5 grid: columns A-E left to right, rows 1-5 top to bottom. Pass detail \"marks\" to read just the marks list as text (no image, cheapest) when it can answer. Pass zoom with a grid cell like \"C3\" or a mark like \"#4\" to get a sharper crop of that part only. Then use hub_show_overlay to show the user things in the room: prefer targeting a mark; otherwise give x, y (0 to 1) on the frame you saw, or inside your last zoom with in_zoom true. Overlays stay pinned to the real place as the user moves the phone. Use one to four clear items, short labels, step numbers for sequences, and clear old overlays when the topic changes.";
 export const OVERLAY_GUIDANCE = "Pins overlays into the user's live camera view: arrow, circle, box, label or numbered step, anchored to a numbered mark or to a point/box of the last frame you looked at. They stay on the real object as the phone moves. Call hub_view_screen first. Send items: [] with clear true to remove everything.";
-const CELL = /^([A-D])([1-4])$/i, MARK = /^#?(\d{1,2})$/;
+const CELL = /^([A-E])([1-5])$/i, MARK = /^#?(\d{1,2})$/;
 export interface ZoomRegion { x: number; y: number; width: number; height: number; label: string }
 /** A grid cell, or a mark padded so its surroundings stay readable. */
 export function zoomRegion(zoom: string, scene: VisionScene | undefined): ZoomRegion {
   const cell = CELL.exec(zoom.trim());
-  if (cell) return { x: (cell[1].toUpperCase().charCodeAt(0) - 65) / 4, y: (Number(cell[2]) - 1) / 4, width: 0.25, height: 0.25, label: cell[1].toUpperCase() + cell[2] };
+  if (cell) return { x: (cell[1].toUpperCase().charCodeAt(0) - 65) / 5, y: (Number(cell[2]) - 1) / 5, width: 0.2, height: 0.2, label: cell[1].toUpperCase() + cell[2] };
   const mark = MARK.exec(zoom.trim()), found = mark && scene?.marks.find(m => m.id === Number(mark[1]));
-  if (!found) throw new Error("Zoom takes a grid cell from A1 to D4 or a mark number shown on the frame.");
+  if (!found) throw new Error("Zoom takes a grid cell from A1 to E5 or a mark number shown on the frame.");
   const width = Math.min(1, Math.max(0.2, found.width * 1.6)), height = Math.min(1, Math.max(0.2, found.height * 1.6));
   const x = Math.min(1 - width, Math.max(0, found.x + found.width / 2 - width / 2)), y = Math.min(1 - height, Math.max(0, found.y + found.height / 2 - height / 2));
   return { x, y, width, height, label: "#" + found.id };
@@ -83,7 +83,7 @@ export function attachVoiceScreenTool(agent: any, ports: ScreenToolPorts, delega
     name: SCREEN_VIEW_TOOL, description: SCREEN_VIEW_GUIDANCE,
     parameters: { type: "object", properties: {
       detail: { type: "string", enum: ["image", "marks"], description: "marks: only the numbered marks as text, no image." },
-      zoom: { type: "string", description: "A grid cell A1-D4 or a mark like #3: returns a sharper crop of just that part." } }, additionalProperties: false },
+      zoom: { type: "string", description: "A grid cell A1-E5 or a mark like #3: returns a sharper crop of just that part." } }, additionalProperties: false },
     output: { schema: { type: "object" }, render: (_args: unknown, value: unknown) => [{ type: "text", text: JSON.stringify(value) }] },
     async execute(args: unknown, exec: any) {
       exec.signal.throwIfAborted();
@@ -91,7 +91,7 @@ export function attachVoiceScreenTool(agent: any, ports: ScreenToolPorts, delega
       if (!args || typeof args !== "object" || Array.isArray(args) || Object.keys(args).some(key => key !== "detail" && key !== "zoom")) throw new Error("Screen viewing takes only detail and zoom.");
       const { detail, zoom } = args as { detail?: unknown; zoom?: unknown };
       if (detail !== undefined && detail !== "image" && detail !== "marks" || zoom !== undefined && typeof zoom !== "string") throw new Error("detail is image or marks; zoom is a grid cell or mark.");
-      if (typeof zoom === "string" && !CELL.test(zoom.trim()) && !MARK.test(zoom.trim())) throw new Error("Zoom takes a grid cell from A1 to D4 or a mark number shown on the frame.");
+      if (typeof zoom === "string" && !CELL.test(zoom.trim()) && !MARK.test(zoom.trim())) throw new Error("Zoom takes a grid cell from A1 to E5 or a mark number shown on the frame.");
       const call = identity(), token = delegated?.request ?? activeUserRequest(agent);
       if (token < 0) throw new Error("A screen read needs a current user request, not a task completion or background trigger.");
       if (request !== token) { request = token; reads = 0; zooms = 0; markReads = 0; }
@@ -103,7 +103,7 @@ export function attachVoiceScreenTool(agent: any, ports: ScreenToolPorts, delega
         markReads++;
         lastView = { sequence: frame.sequence, scene: frame.scene };
         return { source: frame.scene?.source ?? "screen", sequence: frame.sequence, marks: describeMarks(frame.scene),
-          ...(frame.scene?.source === "camera" ? { grid: "4x4, columns A-D left to right, rows 1-4 top to bottom" } : {}) };
+          ...(frame.scene?.source === "camera" ? { grid: "5x5, columns A-E left to right, rows 1-5 top to bottom" } : {}) };
       }
       const zooming = typeof zoom === "string";
       if (pending || (zooming ? zooms >= 4 || now() - lastZoomAt < 1000 : reads >= 3 || now() - lastAt < 3000)) throw new Error("Screen reads are bounded. Wait for a new user question instead of polling.");
@@ -132,7 +132,7 @@ export function attachVoiceScreenTool(agent: any, ports: ScreenToolPorts, delega
         lastView = { sequence: frame.sequence, scene: frame.scene, zoom: region };
         const camera = frame.scene?.source === "camera", marks = describeMarks(frame.scene);
         const value = { observedAt: selectedAt - (5000 - frame.remainingMs), coverage: camera ? "one recent frame from the user's live camera" : "one recent user-shared phone frame", retained: "conversation attachment", sequence: frame.sequence,
-          ...(camera ? { source: "camera", grid: "4x4, columns A-D left to right, rows 1-4 top to bottom" } : {}),
+          ...(camera ? { source: "camera", grid: "5x5, columns A-E left to right, rows 1-5 top to bottom" } : {}),
           ...(marks.length ? { marks } : {}),
           ...(region ? { zoom: { cell: region.label, x: region.x, y: region.y, width: region.width, height: region.height, note: "Points inside this crop: use in_zoom true with hub_show_overlay." } } : {}) };
         const fallback = [{ type: "text", text: JSON.stringify(value) }];
