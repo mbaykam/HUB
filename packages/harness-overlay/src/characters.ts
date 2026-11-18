@@ -33,6 +33,11 @@ import {installPlanner} from "./host/planner.ts";
 import {installConversationTitles} from "./host/conversation-titles.ts";
 import {PhoneContextStore,createPhoneContextHandler,attachPhoneContextTool,PHONE_CONTEXT_TOOL} from "./host/phone-context.ts";
 import {installNativePush} from "./host/native-push-install.ts";
+import {installArchiveWeb} from "./host/archive-web.ts";
+import {installApps} from "./host/apps.ts";
+import {effectiveKnowledgeCharacter} from "./host/knowledge-identity.ts";
+import {installCraftGuide} from "./host/craft-guide.ts";
+import {installClaudeCodeProvider} from "./host/claude-code-provider.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
 export const name="hub-characters";
@@ -203,6 +208,10 @@ export class HubCharacters extends Service {
     ctx.effect(()=>installInstructionFiles(ctx,this,this.instructions),"HUB editable instruction files");
     ctx.effect(()=>installToolCatalog(ctx,this,()=>camofox.status()),"HUB read-only tool inventory");
     ctx.effect(()=>installNativePush(ctx,this),"HUB opt-in native notifications");
+    ctx.effect(()=>installArchiveWeb(ctx),"HUB archived conversations");
+    ctx.effect(()=>installApps(ctx,this,effectiveKnowledgeCharacter),"HUB Apps page and app sharing");
+    ctx.effect(()=>installCraftGuide(ctx),"HUB craft standards");
+    ctx.effect(()=>installClaudeCodeProvider(ctx),"Claude Code model provider");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
     ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");
   }
@@ -316,7 +325,10 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_desktop_look"))tools.push({name:"hub_desktop_look",description:"See this Windows PC's screen and its open windows."});
           if(!tools.some(t=>t.name==="hub_desktop_act"))tools.push({name:"hub_desktop_act",description:"Use this Windows PC: click, type, press keys, scroll, drag and switch windows."});
           if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's diagram, chart, simulation or interactive HTML app; see canvas.md."});
-          if(!tools.some(t=>t.name==="hub_view_screen"))tools.push({name:"hub_view_screen",description:"Inspect one fresh phone-screen frame during an authorized voice call or its direct delegated task. Needs an image-capable model; requested analysis snapshots are retained in the conversation."});
+          if(!tools.some(t=>t.name==="hub_view_screen"))tools.push({name:"hub_view_screen",description:"Inspect one fresh phone-screen or live camera frame during an authorized voice call or its direct delegated task. Needs an image-capable model; requested analysis snapshots are retained in the conversation."});
+          for(const [name,description] of [["hub_notify","Send the user an iPhone notification: results, questions they can answer from the lock screen, time-sensitive alerts."],["hub_app_save","Save or update a web app on the user's Apps page."],["hub_app_list","List the apps on the Apps page."],["hub_app_share","Share an app as an expiring link when the user asks."],["hub_app_unshare","Take down an app's share links."],["hub_app_remove","Remove an app when the user asks."]])
+            if(!tools.some(t=>t.name===name))tools.push({name,description});
+          if(!tools.some(t=>t.name==="hub_show_overlay"))tools.push({name:"hub_show_overlay",description:"Pin arrows, circles, labels and numbered steps into the user's live camera view during a video call, anchored to real objects."});
           send(200,{...this.store.snapshot(),tools,sharedSpeech:this.speechSettings.snapshot()});return;
         }
         if(req.method!=="POST"){send(405,{error:"method-not-allowed"});return;}

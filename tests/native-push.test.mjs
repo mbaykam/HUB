@@ -21,7 +21,7 @@ test('native registration requires existing authentication and CSRF marker; toke
   assert.equal((await fetch(url,{headers:{cookie:'fixture=1'}})).status,403);
   assert.equal((await fetch(url,{headers:{...headers,'sec-fetch-site':'cross-site'}})).status,403);
   const response=await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'register',device:registered})});
-  assert.equal(response.status,200);const body=await response.text();assert.equal(body.includes(registered.token),false);assert.deepEqual(JSON.parse(body),{version:1,configured:false,devices:1,pending:0});
+  assert.equal(response.status,200);const body=await response.text();assert.equal(body.includes(registered.token),false);const {preferences,...status}=JSON.parse(body);assert.deepEqual(status,{version:1,configured:false,devices:1,pending:0});assert.equal(preferences.kinds.reply,true);
   await fetch(url,{method:'POST',headers,body:JSON.stringify({action:'revoke',deviceId:registered.id,generation:2})});assert.equal(store.snapshot().devices,0);
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(root,{recursive:true,force:true});}
 });

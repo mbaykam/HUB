@@ -133,6 +133,7 @@ export function createVoiceWeb(ports: VoiceWebPorts, options: { now?: () => numb
     screenIdentity(sessionId: string) { return current?.sessionId === sessionId && !closing ? { callId: current.callId, sessionId } : undefined; },
     screenFrame(sessionId: string) { return current?.sessionId === sessionId && !closing ? screens.frame(sessionId) : undefined; },
     screenHighlight(sessionId: string, regions: import("./voice-screen.ts").ScreenRegion[], note: string) { if (current?.sessionId !== sessionId || closing) throw new Error("No active voice call."); return screens.highlight(sessionId, regions, note); },
+    screenOverlay(sessionId: string, items: import("./voice-screen.ts").OverlayItem[], note: string, sequence: number, clear: boolean) { if (current?.sessionId !== sessionId || closing) throw new Error("No active voice call."); return screens.overlay(sessionId, items, note, sequence, clear); },
     async handler(request: IncomingMessage, response: ServerResponse) {
       const rejection = ports.reject(request);
       if (rejection || request.headers["sec-fetch-site"] === "cross-site") { send(response, rejection ?? 403, { error: "unauthorized" }); return; }

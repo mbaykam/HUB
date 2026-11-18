@@ -71,6 +71,8 @@ export const CHARACTER_TOOL_GUIDE = `## Daily tools and collaboration\n${PLANNER
 
 export function installPlanner(ctx:any,characters:any){
   const store=new PlannerStore(join(characters.store.root,"..","hub-planner")),ready=store.load();void ready.catch(()=>{});
+  // The notification watcher reads the agenda for reminders and the morning brief.
+  characters.planner=store;
   const roots=new Map<string,string>();
   const rootSession=async(id:string,agent?:any)=>{if(!session(id))throw Error("Invalid conversation");if(roots.has(id))return roots.get(id)!;let current=id,header=agent?.session.header;const seen=new Set<string>();
     for(let depth=0;depth<16;depth++){

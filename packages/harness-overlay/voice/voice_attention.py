@@ -14,6 +14,29 @@ from pipecat.frames.frames import (InputAudioRawFrame, TranscriptionFrame,
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
 DEFAULT_ATTENTION = {"idleSeconds": 180, "wakePhrases": ["Vera"], "contextSeconds": 60}
+# After the assistant speaks up on its own (a finished background task), it
+# listens this long without needing the wake phrase, so the user can just answer.
+REPLY_WINDOW_SECONDS = 30
+# Whole requests that send the call back to waiting for the wake phrase.
+SLEEP_PHRASES = ("that's all", "that is all", "that's it", "that's it for now", "that's all for now", "stop listening",
+                 "you can stop listening", "go to sleep", "bu kadar", "şimdilik bu kadar", "simdilik bu kadar",
+                 "dinlemeyi bırak", "dinlemeyi birak", "uyu", "uyku moduna geç")
+_FILLER = {"ok", "okay", "thanks", "thank", "you", "alright", "great", "tamam", "tesekkurler", "tesekkur", "ederim", "sag", "ol", "olun"}
+
+
+def sleep_request(text, wake_phrases=()):
+    """True when the whole utterance asks the assistant to stop listening."""
+    words = normalized_words(text)
+    wakes = [normalized_words(p) for p in wake_phrases]
+    changed = True
+    while words and changed:
+        changed = False
+        for wake in wakes:
+            if wake and words[:len(wake)] == wake: words = words[len(wake):]; changed = True
+            if wake and len(words) >= len(wake) and words[-len(wake):] == wake: words = words[:-len(wake)]; changed = True
+        while words and words[0] in _FILLER | {'hey'}: words = words[1:]; changed = True
+        while words and words[-1] in _FILLER: words = words[:-1]; changed = True
+    return bool(words) and any(words == normalized_words(p) for p in SLEEP_PHRASES)
 
 
 def attention_settings(value=None):
@@ -45,21 +68,34 @@ class VoiceAttention:
         self.ring = deque(maxlen=24)
         self.wakes = 0
         self.ignored = 0
+        self.reply_window = False
+        self.replies = 0
 
     def set_mode(self, mode):
         if mode not in ('active', 'background'):
             raise ValueError('Invalid listening mode')
         self.mode = mode
+        self.reply_window = False
         self.last_interaction = self.clock()
         self.ring.clear()
         self.pending_context = ''
         self.context_at = 0
 
+    def open_reply_window(self):
+        """The assistant is about to speak up on its own: listen for an answer
+        without the wake phrase, briefly, then go back to waiting."""
+        if self.mode != 'background':
+            return False
+        self.set_mode('active')
+        self.reply_window = True
+        self.replies += 1
+        return True
+
     def tick(self, busy=False):
+        idle = REPLY_WINDOW_SECONDS if self.reply_window else self.settings['idleSeconds']
         if busy:
             self.last_interaction = self.clock()
-        elif (self.mode == 'active' and self.settings['idleSeconds']
-              and self.clock() - self.last_interaction >= self.settings['idleSeconds']):
+        elif self.mode == 'active' and idle and self.clock() - self.last_interaction >= idle:
             self.set_mode('background')
         self._prune()
 
@@ -73,6 +109,8 @@ class VoiceAttention:
         """Return (accepted, wake_only). Preserve actual STT words on admission."""
         if self.mode == 'active':
             self.last_interaction = self.clock()
+            # Answering within a reply window returns to the normal idle time.
+            self.reply_window = False
             return True, False
         words = normalized_words(text)
         for phrase in self.settings['wakePhrases']:
@@ -115,7 +153,8 @@ class VoiceAttention:
         self.tick()
         return {'mode': self.mode, 'wakePhrases': self.settings['wakePhrases'],
                 'idleSeconds': self.settings['idleSeconds'], 'contextSeconds': self.settings['contextSeconds'],
-                'wakeCount': self.wakes, 'ignoredUtterances': self.ignored}
+                'wakeCount': self.wakes, 'ignoredUtterances': self.ignored,
+                'replyWindow': self.reply_window, 'replyWindows': self.replies}
 
     def close(self):
         self.ring.clear()
@@ -138,6 +177,16 @@ class AttentionInputGate(FrameProcessor):
                    or health.user_speaking or health.stage=='transcribing'
                    or bool(gate and gate.blocked))
         if isinstance(frame, TranscriptionFrame) and not isinstance(frame, InterimTranscriptionFrame):
+            if state.mode == 'active' and sleep_request(frame.text, state.settings['wakePhrases']):
+                from pipecat.frames.frames import TTSSpeakFrame
+                language = str(getattr(frame.language, 'value', frame.language))
+                phrase = state.settings['wakePhrases'][0]
+                state.set_mode('background')
+                health.partial_text = ''
+                health.user_speaking = False
+                await self.push_frame(TTSSpeakFrame(f'Tamam. Bana ihtiyacın olunca {phrase} de.' if language.startswith('tr')
+                                                    else f'Okay. Say {phrase} when you need me.'))
+                return
             accepted, wake_only = state.accept(frame.text)
             if wake_only:
                 from pipecat.frames.frames import TTSSpeakFrame

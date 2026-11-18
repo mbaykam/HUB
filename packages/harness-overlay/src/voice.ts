@@ -27,6 +27,7 @@ import {installVoiceTitles} from "./host/voice-titles.ts";
 import {prepareVoiceShare} from "./host/voice-media.ts";
 import {createSonioxCredentialsHandler,createSonioxDictationHandler,type SpeechCredentials} from "./host/soniox-credentials.ts";
 import { installVoiceScreenTools } from "./host/voice-screen-tool.ts";
+import { cropScreenFrame } from "./host/voice-screen.ts";
 
 export const name = "hub-voice";
 export const inject = ["hubCharacters", "llm", "agents", "agentPresets", "tools", "sessionController", "storageDomain", "connection", "webServer", "subprocess", "credentials", "attachments"];
@@ -95,7 +96,9 @@ export function apply(ctx: Context, config: Config): void {
     history = await openConversationHistory(ctx.storageDomain);
     if (lifetime.signal.aborted) return;
     offTitles=installVoiceTitles(ctx,history);
-    screenTools=installVoiceScreenTools(ctx,{current:sessionId=>web?.screenIdentity(sessionId),frame:sessionId=>web?.screenFrame(sessionId),highlight:(sessionId,regions,note)=>{if(!web)throw new Error("Voice is unavailable.");return web.screenHighlight(sessionId,regions,note);}});
+    screenTools=installVoiceScreenTools(ctx,{current:sessionId=>web?.screenIdentity(sessionId),frame:sessionId=>web?.screenFrame(sessionId),highlight:(sessionId,regions,note)=>{if(!web)throw new Error("Voice is unavailable.");return web.screenHighlight(sessionId,regions,note);},
+      overlay:(sessionId,items,note,sequence,clear)=>{if(!web)throw new Error("Voice is unavailable.");return web.screenOverlay(sessionId,items,note,sequence,clear);},
+      transform:cropScreenFrame});
     const localProfiles = await openVoiceProfiles(ctx.storageDomain, {
       name: "HUB", instructions: "Be warm, concise and practical. Ask one question at a time.",
       route: { provider: config.provider, model: config.model, ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}) },
@@ -212,7 +215,8 @@ export function apply(ctx: Context, config: Config): void {
         const tools = ctx.tools.schemas(key).map(tool => ({ name: tool.name, description: tool.description.slice(0, 300) }));
         for (const tool of [
           { name: "hub_present", description: "Show diagrams, charts or interactive apps during voice; see canvas.md." },
-          { name: "hub_view_screen", description: "Read one fresh user-shared phone frame on request; vision model and existing tool permission required. The selected analysis frame is retained in the chat." },
+          { name: "hub_view_screen", description: "Read one fresh user-shared phone screen or live camera frame on request; vision model and existing tool permission required. The selected analysis frame is retained in the chat." },
+          { name: "hub_show_overlay", description: "Pin arrows, circles, labels and numbered steps into the user's live camera view, anchored to real objects." },
           { name: "hub_save_conversation", description: "Save this voice conversation to Recents when requested." },
           ...(tools.some(tool => tool.name === "subagent") ? [{ name: "hub_task", description: "Delegate work in the background. Also requires the native subagent tool." }] : []),
         ]) if (!tools.some(item => item.name === tool.name)) tools.push(tool);

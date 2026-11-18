@@ -198,8 +198,8 @@ class HubNativeLLMService(LLMService):
         if self._speech_closed or self._request_active:return False
         state=self._health
         if state is None:return True
-        attention=getattr(state,'attention',None)
-        if attention and attention.mode=='background':return False
+        # A finished background task is announced even while the call waits for
+        # the wake phrase; _task_results then listens briefly for an answer.
         import time
         gate=getattr(state,'playback_gate',None)
         return not (state.model_active or state.bot_speaking or state.synthesizing or
@@ -217,6 +217,10 @@ class HubNativeLLMService(LLMService):
                 except Exception:continue  # Heartbeat owns fatal connection handling.
             if not pending or not self._ready_for_task_result():continue
             event=pending.pop(0)
+            attention=getattr(self._health,'attention',None)
+            if attention is not None and attention.mode=='background':
+                # Let the user answer without saying the wake phrase first.
+                attention.open_reply_window()
             # This is already-durable native assistant text, never new user
             # input or another model request. Advance once; interruption must
             # not cause a command/result to be replayed automatically.

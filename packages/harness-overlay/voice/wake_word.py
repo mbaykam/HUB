@@ -54,7 +54,15 @@ class LocalWakeDetector:
         self.vad = vad
         self.reset()
 
+    def take_utterance(self):
+        """The audio of the utterance that woke us, from just before its start.
+        Handed once to the cloud recognizer, so the command is transcribed
+        without whatever was said nearby in the seconds before."""
+        value, self.utterance = getattr(self, 'utterance', b''), b''
+        return value
+
     def reset(self):
+        self.utterance = b''
         self.pending = bytearray()
         self.lookback = bytearray()
         self.speech = bytearray()
@@ -94,7 +102,9 @@ class LocalWakeDetector:
                     hit = self._check()
                     self.next_check = len(self.speech)+22400
                     if hit:
+                        utterance = bytes(self.speech)
                         self.reset()
+                        self.utterance = utterance
                         return hit
                 # Never slide to a name later in somebody else's sentence.
                 if len(self.speech) >= 96000:
