@@ -2386,7 +2386,7 @@ struct HubHomeView: View {
                         HStack(spacing: 10) {
                             Image(systemName: item.deleted ? "trash" : "checkmark.circle.fill")
                                 .foregroundStyle(item.deleted ? Color.secondary : Color.green.opacity(0.8))
-                            Text(item.title).lineLimit(2).strikethrough(!item.deleted).foregroundStyle(.secondary)
+                            Text(item.title).lineLimit(2).hubStrikethrough(!item.deleted).foregroundStyle(.secondary)
                             Spacer()
                             Button(item.deleted ? "Restore" : "Reopen") { restorePlannerItem(item) }
                                 .font(.footnote.weight(.semibold))
@@ -2447,7 +2447,7 @@ struct HubHomeView: View {
             } label: {
                 HStack(spacing: 8) {
                     Text(item.title).font(.subheadline).lineLimit(2).multilineTextAlignment(.leading)
-                        .strikethrough(done).foregroundStyle(done ? Color.secondary : Color.primary)
+                        .hubStrikethrough(done).foregroundStyle(done ? Color.secondary : Color.primary)
                     Spacer(minLength: 4)
                     if let due = item.date { dueChip(due) }
                     if item.sourceSessionId != nil {

@@ -60,6 +60,11 @@ extension View {
                                                        startPoint: .top, endPoint: .bottom), lineWidth: 0.7))
     }
 
+    /// Strikes through finished items (iOS 16+; earlier systems just dim them).
+    @ViewBuilder func hubStrikethrough(_ active: Bool) -> some View {
+        if #available(iOS 16.0, *) { strikethrough(active) } else { opacity(active ? 0.6 : 1) }
+    }
+
     /// The deep backdrop every HUB screen sits on.
     func hubBackdrop() -> some View {
         background(HubBackdrop().ignoresSafeArea())
