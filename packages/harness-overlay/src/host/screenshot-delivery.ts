@@ -37,37 +37,6 @@ function requireVisiblePNG(data: Buffer): void {
   }
 }
 
-/**
- * A plain request to capture the screen, in English or Turkish, in the user's
- * own words: it names a screenshot and asks for one, and is not a question
- * about how to take one or a request not to. Text is already lowercased and
- * stripped of accents.
- */
-export function isDesktopScreenshotRequest(text: string): boolean {
-  const words = text.replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim();
-  if (!words || words.length > 300) return false;
-  const names = /\b(?:screenshot|screen ?shot|screen ?capture|screengrab|ekran ?goruntu\w*|ekran ?resm\w*|ss)\b/u.test(words);
-  const asks = /\b(?:take|capture|show|send|grab|get|make|al|alir|alabilir|cek|ceker|cekebilir|goster|gosterebilir|gonder|gonderebilir|at|atar|atabilir|istiyorum)\w*/u.test(words);
-  const declines = /\b(?:dont|do not|don t|never|alma|cekme|gosterme|gonderme|atma|almayin|cekmeyin)\b/u.test(words);
-  const explains = /\b(?:how|explain|why|nasil|neden|niye|anlat)\w*/u.test(words);
-  return names && asks && !declines && !explains;
-}
-
-function desktopCaptureRequested(agent: any): boolean {
-  const events = agent.session.snapshotEvents();
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index];
-    if (event.type === "turn/end" || event.type === "turn/start") return false;
-    if (event.type !== "user/message" || event.data?.source?.kind !== "user") continue;
-    const content = event.data.content;
-    if (!Array.isArray(content)) return false;
-    const text = content.filter(block => block.type === "text" && typeof block.text === "string")
-      .map(block => block.text).join(" ").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/ı/gu, "i");
-    return isDesktopScreenshotRequest(text);
-  }
-  return false;
-}
-
 export async function readWorkspaceScreenshot(cwd: string, input: string, signal: AbortSignal) {
   signal.throwIfAborted();
   if (!isAbsolute(cwd) || typeof input !== "string" || input.length > 1024 || !/\.png$/i.test(input) ||
@@ -144,7 +113,7 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
   };
   const offDesktop = desktop && ctx.tools.register({
     name: desktopToolName,
-    description: "Capture the primary Windows display once and show it in this chat. Use for an explicit desktop screenshot request. The screen must be unlocked.",
+    description: "Capture the primary Windows display and show it in this chat. Use it whenever the user should see the screen: when they ask for it in any words, or to show the result of desktop work.",
     parameters: {type: "object", properties: {}, additionalProperties: false},
     output: {
       schema: {type: "object"},
@@ -153,8 +122,8 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
     },
     async execute(_args: unknown, exec: any) {
       const agent = exec.agent;
-      if (exec.parent || !agent?.session?.header?.id || agent.session.header.origin === "subagent" || !desktopCaptureRequested(agent)) {
-        throw Error("This capture needs the user's own request for a screenshot in the current turn. Do not retry or ask how to phrase it; use hub_desktop_look to see the screen, or tell the user the screenshot was not taken.");
+      if (exec.parent || !agent?.session?.header?.id || agent.session.header.origin === "subagent" || !currentTurnHasUserRequest(agent)) {
+        throw Error("Desktop screenshots are taken during a conversation turn the user started, not from background work. Tell the user the screenshot was not taken.");
       }
       const {data} = await captureScreen(agent.session.header.id, exec.signal);
       exec.signal.throwIfAborted();
@@ -181,7 +150,7 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
   const offGuide = ctx.systemPrompt?.section({
     name: "hub:screenshot-delivery",
     order: 92,
-    text: "Use browser_screenshot for a requested web page capture. For a Windows desktop screenshot, use hub_capture_desktop when available. It captures and displays the primary screen in one call. If the capture tool refuses, do not retry it or ask the user to rephrase: use hub_desktop_look to see the screen yourself, or say plainly that the screenshot was not taken. If Windows cannot capture, report that result and do not retry through PowerShell or CopyFromScreen. Use hub_show_screenshot for an existing workspace PNG; a local path does not display it.",
+    text: "To show the user this PC's screen, use hub_capture_desktop: it captures and displays the primary screen in the chat in one call. Screenshots saved to a file by other tools (a Windows or PowerShell screenshot) do not appear in the chat, and a local path does not display anything; use hub_show_screenshot for an existing PNG in this conversation's workspace. Use browser_screenshot for a web page. If a capture fails, say so plainly instead of claiming the user can see it.",
   });
   return () => { offGuide?.(); offControl?.(); offDesktop?.(); desktop?.dispose(); offTool(); };
 }

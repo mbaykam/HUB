@@ -9,7 +9,7 @@ import {EventEmitter} from "node:events";
 import test from "node:test";
 import {JSDOM} from "../vendor/deepseek-harness/node_modules/jsdom/lib/api.js";
 import {installDailyUseWeb,settledObservation} from "../packages/harness-overlay/src/host/daily-use-web.ts";
-import {conversationScreenshots, installScreenshotDelivery, isDesktopScreenshotRequest} from "../packages/harness-overlay/src/host/screenshot-delivery.ts";
+import {conversationScreenshots, installScreenshotDelivery} from "../packages/harness-overlay/src/host/screenshot-delivery.ts";
 import {agentBrowserSuccessResponse} from "../packages/harness-overlay/src/agent-browser-contract.ts";
 import {createScreenshotPreviews} from "../packages/harness-overlay/src/client/host/screenshot-previews.ts";
 
@@ -17,7 +17,7 @@ const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const {PNG} = createRequire(new URL("../packages/harness-overlay/package.json", import.meta.url))("pngjs");
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-test("desktop capture requires a current explicit request and publishes only a captured image", async t => {
+test("desktop capture works in any turn the user started, never from background work, and publishes only a captured image", async t => {
   const message = (text, kind = "user") => ({type: "user/message", data: {source: {kind}, content: [{type: "text", text}]}});
   const port = new EventEmitter();
   const requests = [];
@@ -42,13 +42,14 @@ test("desktop capture requires a current explicit request and publishes only a c
   const execute = (...events) => tool.execute({}, {signal: new AbortController().signal, agent: {
     session: {header: {id: "test-session"}, snapshotEvents: () => events},
   }});
-  for (const events of [[message("Masaüstü ekran görüntüsünü alma")], [message("Tekrar dene")],
-    [message("Explain how to take a screenshot of my desktop")], [message("Take a screenshot of my desktop", "tool")],
-    [message("Take a screenshot of my desktop"), {type: "turn/end"}]]) {
-    await assert.rejects(execute(...events), /own request/);
+  // Background work and finished turns may not capture; a turn the user started may, in any words.
+  for (const events of [[message("Take a screenshot of my desktop", "tool")], [message("Take a screenshot of my desktop"), {type: "turn/end"}], []]) {
+    await assert.rejects(execute(...events), /turn the user started/);
   }
   assert.equal(requests.length, 0);
-  for (const text of ["Masaustunun bir ekran goruntusunu al", "Ekran görüntüsü alır mısın?", "Can you grab a screenshot of my screen", "ss at"]) assert.ok(isDesktopScreenshotRequest(text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/ı/gu, "i")), text);
+  await execute({type: "turn/start"}, message("Again."));
+  assert.equal(requests.length, 1);
+  requests.length = 0;
   const result = await execute(message("Tüm masaüstünün ekran görüntüsünü al"));
   assert.equal(requests[0].operation, "desktop-screenshot");
   assert.deepEqual(requests[0].payload, {});

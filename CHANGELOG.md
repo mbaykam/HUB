@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.14
+
+- hub_capture_desktop works in any conversation turn the user started, whatever the wording; it no longer matches screenshot keywords. Background work still cannot capture.
+- The assistant guidance says screenshots saved to files by other tools do not appear in the chat, so it uses hub_capture_desktop to show the screen.
+
 ## 1.10.13
 
 - A screenshot taken during a reply now appears in the iPhone chat right away: a screenshot list asked for mid-turn waits briefly for a just-taken capture instead of answering without it.
