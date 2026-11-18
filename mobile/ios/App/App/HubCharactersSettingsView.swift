@@ -242,15 +242,24 @@ private struct HubCharacterEditor: View {
     private var model: some View {
         Section("Model") {
             if let models {
-                Picker("Model", selection: $selectedModel) {
-                    Text("No model").tag("")
-                    if !selectedModel.isEmpty, !models.models.contains(where: { $0.id == selectedModel }) {
-                        Text(selectedModel).tag(selectedModel)
-                    }
-                    ForEach(models.models.filter { $0.available != false || $0.id == selectedModel }) {
-                        Text("\($0.name) · \($0.provider)").tag($0.id)
+                NavigationLink {
+                    HubCatalogModelPicker(catalog: models, selection: $selectedModel)
+                } label: {
+                    let current = models.models.first { $0.id == selectedModel }
+                    HStack {
+                        Text("Model")
+                        Spacer(minLength: 8)
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(current?.name ?? (selectedModel.isEmpty ? "No model" : selectedModel)).lineLimit(1)
+                            if let current {
+                                Text(models.providers.first { $0.id == current.provider }?.name ?? current.provider)
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        .foregroundStyle(.secondary)
                     }
                 }
+                .accessibilityIdentifier("hub.character.model")
                 .onChange(of: selectedModel) { value in
                     let stored = value == Self.modelID(character.route) ? character.route : nil
                     effort = stored?.reasoningEffort ?? ""
@@ -389,5 +398,146 @@ private struct HubCharacterEditor: View {
         } catch {
             notice = "Could not reload the current settings."
         }
+    }
+}
+
+/// Choosing one model out of hundreds: grouped by provider, folded until
+/// needed, searchable, with filters and the facts that decide a choice.
+@MainActor
+struct HubCatalogModelPicker: View {
+    let catalog: HubModelCatalog
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var filter = Filter.all
+    @State private var open: Set<String> = []
+
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All", favorites = "Favorites", reasoning = "Reasoning", images = "Sees images", longContext = "Long context"
+        var id: Self { self }
+        func includes(_ model: HubModelCatalog.Model) -> Bool {
+            switch self {
+            case .all: return true
+            case .favorites: return model.favorite == true
+            case .reasoning: return model.reasoning
+            case .images: return model.input.contains("image")
+            case .longContext: return (model.contextWindow ?? 0) >= 200_000
+            }
+        }
+    }
+
+    private struct Group: Identifiable { let id: String; let name: String; let models: [HubModelCatalog.Model] }
+
+    private var groups: [Group] {
+        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usable = catalog.models.filter { ($0.available != false || $0.id == selection) && filter.includes($0) &&
+            (search.isEmpty || "\($0.name) \($0.modelID) \($0.provider) \($0.description ?? "")".localizedCaseInsensitiveContains(search)) }
+        let names = Dictionary(catalog.providers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let order = catalog.providers.map(\.id)
+        return Dictionary(grouping: usable, by: \.provider)
+            .map { Group(id: $0.key, name: names[$0.key] ?? $0.key,
+                         models: $0.value.sorted { ($0.favorite == true ? 0 : 1, $0.name) < ($1.favorite == true ? 0 : 1, $1.name) }) }
+            .sorted { (order.firstIndex(of: $0.id) ?? .max, $0.name) < (order.firstIndex(of: $1.id) ?? .max, $1.name) }
+    }
+
+    var body: some View {
+        let groups = groups
+        let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || filter != .all
+        List {
+            if let current = catalog.models.first(where: { $0.id == selection }) {
+                Section("Selected") { row(current, showProvider: true) }
+            }
+            Section {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Filter.allCases) { option in
+                            Button { filter = option } label: {
+                                Text(option.rawValue)
+                                    .font(.caption.weight(filter == option ? .semibold : .regular))
+                                    .padding(.horizontal, 12).frame(minHeight: 32)
+                                    .background(filter == option ? HubWorkspacePalette.accent.opacity(0.2) : HubWorkspacePalette.border.opacity(0.06), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(filter == option ? .isSelected : [])
+                        }
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+            }
+            if groups.isEmpty { Text("No matching models").foregroundStyle(.secondary) }
+            ForEach(groups) { group in
+                let expanded = searching || groups.count == 1 || open.contains(group.id)
+                Section {
+                    if expanded { ForEach(group.models) { row($0, showProvider: false) } }
+                } header: {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if open.contains(group.id) { open.remove(group.id) } else { open.insert(group.id) }
+                        }
+                    } label: {
+                        HStack {
+                            Text(group.name)
+                            Text("\(group.models.count)").foregroundStyle(.secondary)
+                            Spacer()
+                            if !searching && groups.count > 1 {
+                                Image(systemName: "chevron.down").rotationEffect(.degrees(expanded ? 0 : -90))
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(searching || groups.count == 1)
+                    .accessibilityLabel("\(group.name), \(group.models.count) models")
+                    .accessibilityHint(expanded ? "Hides these models" : "Shows these models")
+                }
+            }
+            Section {
+                Button("No model") { selection = ""; dismiss() }.foregroundStyle(.secondary)
+            }
+        }
+        .searchable(text: $query, prompt: "Find a model")
+        .navigationTitle("Model")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if let current = catalog.models.first(where: { $0.id == selection }) { open.insert(current.provider) }
+        }
+    }
+
+    private func row(_ model: HubModelCatalog.Model, showProvider: Bool) -> some View {
+        let chosen = model.id == selection
+        return Button { selection = model.id; dismiss() } label: {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(model.name).font(.body.weight(chosen ? .semibold : .regular)).lineLimit(1)
+                        if model.favorite == true { Image(systemName: "heart.fill").font(.caption2).foregroundStyle(.pink).accessibilityLabel("Favorite") }
+                    }
+                    if let description = model.description, !description.isEmpty {
+                        Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    HStack(spacing: 5) {
+                        if showProvider { badge(catalog.providers.first { $0.id == model.provider }?.name ?? model.provider) }
+                        if let window = model.contextWindow { badge(HubChatModels.tokens(window) + " context") }
+                        if model.reasoning { badge("Reasoning") }
+                        if model.input.contains("image") { badge("Images") }
+                        if let price = model.pricing { badge(price.input == 0 ? "free" : String(format: "$%.2f in", price.input), tint: .secondary) }
+                    }
+                }
+                Spacer(minLength: 4)
+                if chosen {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(HubWorkspacePalette.accent).accessibilityLabel("Selected")
+                }
+            }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hub.model.\(model.id)")
+    }
+
+    private func badge(_ text: String, tint: Color = HubWorkspacePalette.accent) -> some View {
+        Text(text).font(.caption2.weight(.medium)).foregroundStyle(tint)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(tint.opacity(0.12), in: Capsule()).lineLimit(1)
     }
 }

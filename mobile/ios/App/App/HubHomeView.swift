@@ -31,67 +31,110 @@ struct HubVoiceCallSummary: Equatable {
     var sessionID: String?
     var status: String
     var muted: Bool
+    /// The user's words, live, while they speak.
+    var hearing = ""
 }
 
 enum HubVoiceCallControl {
-    case open, mute, end, camera
+    case open, mute, end, camera, screen
 }
 
-/// A slim bar that keeps a running voice call in reach while reading its chat.
+/// The running call, at the bottom within thumb reach: what HUB is doing, the
+/// user's own words as they are recognised, and the call's controls,
+/// including the camera and screen sharing.
 struct HubVoiceCallBar: View {
     let call: HubVoiceCallSummary
     let inThisChat: Bool
+    var canShareScreen = HubVoiceCallBar.screenSharingAvailable
     let control: (HubVoiceCallControl) -> Void
 
+    static var screenSharingAvailable: Bool {
+        #if canImport(ScreenCaptureKit)
+        if #available(iOS 27.0, *) { return true }
+        #endif
+        return false
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            Button { control(.open) } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: call.muted ? "mic.slash.fill" : "waveform")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(HubWorkspacePalette.onAccent)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color.green))
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(inThisChat ? "Voice call · this chat" : "Voice call")
-                            .font(.subheadline.weight(.semibold))
-                        Text(call.muted ? "Muted" : call.status)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 6) {
+            if !call.hearing.isEmpty && !call.muted {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "waveform").font(.caption2.weight(.bold)).foregroundStyle(.green)
+                        .accessibilityHidden(true)
+                    Text(call.hearing)
+                        .font(.subheadline)
+                        .lineLimit(2)
+                        .truncationMode(.head)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .animation(nil, value: call.hearing)
                 }
-                .contentShape(Rectangle())
+                .padding(.horizontal, 6)
+                .padding(.top, 4)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("You said: \(call.hearing)")
+                .accessibilityIdentifier("hub.voice.hearing")
             }
-            .accessibilityLabel("Open voice controls")
-            .accessibilityIdentifier("hub.voice.bar")
-            Button { control(.mute) } label: {
-                Image(systemName: call.muted ? "mic.slash" : "mic")
-                    .frame(width: 44, height: 44)
+            HStack(spacing: 6) {
+                Button { control(.open) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: call.muted ? "mic.slash.fill" : "waveform")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(HubWorkspacePalette.onAccent)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(call.muted ? Color.orange : Color.green))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(inThisChat ? "Call · this chat" : "Voice call")
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            Text(call.muted ? "Muted" : call.status)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Open voice controls")
+                .accessibilityIdentifier("hub.voice.bar")
+                Button { control(.mute) } label: {
+                    Image(systemName: call.muted ? "mic.slash" : "mic")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(call.muted ? "Unmute" : "Mute")
+                Button { control(.camera) } label: {
+                    Image(systemName: "video.fill")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Camera")
+                .accessibilityHint("Shows HUB your camera, with pointers placed in the room.")
+                .accessibilityIdentifier("hub.voice.video")
+                if canShareScreen {
+                    Button { control(.screen) } label: {
+                        Image(systemName: "rectangle.inset.filled.and.person.filled")
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Share screen")
+                    .accessibilityHint("Lets HUB see your iPhone screen while you use other apps.")
+                    .accessibilityIdentifier("hub.voice.screen")
+                }
+                Button { control(.end) } label: {
+                    Image(systemName: "phone.down.fill")
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Color.red))
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("End voice call")
             }
-            .accessibilityLabel(call.muted ? "Unmute" : "Mute")
-            Button { control(.camera) } label: {
-                Image(systemName: "video.fill")
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel("Video")
-            .accessibilityHint("Shows HUB your camera, with pointers placed in the room.")
-            .accessibilityIdentifier("hub.voice.video")
-            Button { control(.end) } label: {
-                Image(systemName: "phone.down.fill")
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(Color.red))
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel("End voice call")
         }
         .buttonStyle(.plain)
         .padding(.leading, 8)
         .padding(.trailing, 4)
         .padding(.vertical, 4)
-        .hubGlass(Capsule(), tint: Color.green.opacity(0.35))
+        .hubGlass(RoundedRectangle(cornerRadius: 26, style: .continuous), tint: Color.green.opacity(0.3))
+        .animation(.easeOut(duration: 0.2), value: call.hearing.isEmpty)
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
@@ -343,6 +386,7 @@ struct HubHomeView: View {
     @State private var plannerEditor: PlannerEdit?
     @State private var knowledgeApps: [HubKnowledgeAsset]?
     @State private var storeApps: [HubApp] = []
+    @State private var appOpenError: String?
     @State private var runningStoreApp: HubAppRun?
     @State private var knowledgeAppsOpen = false
     @State private var openingApp: String?
@@ -399,20 +443,21 @@ struct HubHomeView: View {
                                     self.selectedChat = nil
                                 }, voice: voice, videoCall: { voiceControl(.camera) }, openChat: showChat, attachments: attachments,
                                 requestID: selectedChat.request.id, initialDraft: selectedChat.request.initialDraft,
-                                composerAction: selectedChat.request.composerAction, preferences: chatPreferences) { name in
+                                composerAction: selectedChat.request.composerAction, preferences: chatPreferences,
+                                callActive: model.voiceCall != nil) { name in
                     if chatAPI() === selectedChat.api { updateChatTitle(selectedChat.request.choice.sessionId, name: name) }
                 }
                     .id(selectedChat.request.choice.sessionId)
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if let call = model.voiceCall {
                 HubVoiceCallBar(call: call, inThisChat: call.sessionID != nil && call.sessionID == selectedChat?.request.choice.sessionId) { control in
                     composerFocused = false
                     todoFocused = false
                     voiceControl(control)
                 }
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.2), value: model.voiceCall == nil)
@@ -861,6 +906,9 @@ struct HubHomeView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                if let appOpenError {
+                    Label(appOpenError, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                }
             }
             .padding(.top, 4)
         }
@@ -877,15 +925,19 @@ struct HubHomeView: View {
     private func runStoreApp(_ app: HubApp) async {
         guard openingApp == nil, let api = chatAPI() else { return }
         openingApp = app.id
+        appOpenError = nil
         defer { openingApp = nil }
-        if let html = try? await api.appHTML(app) { runningStoreApp = HubAppRun(title: app.title, html: html) }
+        do { runningStoreApp = HubAppRun(title: app.title, html: try await api.appHTML(app)) }
+        catch { appOpenError = "Could not open \(app.title). Check that HUB is online and try again." }
     }
 
     private func runApp(_ app: HubKnowledgeAsset) async {
         guard openingApp == nil, let api = chatAPI() else { return }
         openingApp = app.id
+        appOpenError = nil
         defer { openingApp = nil }
-        if let data = try? await api.knowledgeAssetBytes(app) { runningApp = HubOpenedKnowledgeFile(asset: app, data: data) }
+        do { runningStoreApp = try await api.runnableKnowledgeApp(app) }
+        catch { appOpenError = "Could not open \(HubKnowledgeApps.title(app)). Check that HUB is online and try again." }
     }
 
     private func knowledgeSummary(_ graph: HubHomeKnowledge, notes: Int) -> some View {

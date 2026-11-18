@@ -25,6 +25,9 @@ struct HubUsageView: View {
             if let usage {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        if let claude = usage.claudeCode, claude.state != "not-configured" {
+                            claudeCode(claude)
+                        }
                         provider("Codex", usage.codex) {
                             if (usage.codex.rateLimits ?? []).isEmpty && usage.codex.credits == nil && usage.codex.individualLimit == nil {
                                 Text("Codex did not report usage limits.").foregroundStyle(.secondary)
@@ -148,6 +151,55 @@ struct HubUsageView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
+    }
+
+    /// Claude subscription limits, as Claude Code reported them on HUB's last
+    /// Claude Code turn. They are shared with Claude Code and claude.ai.
+    private func claudeCode(_ claude: HubUsageSnapshot.Provider) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Claude Code").font(.headline)
+            if claude.state == "waiting" {
+                Text("Limits appear after HUB's first Claude Code reply.").foregroundStyle(.secondary)
+            } else if claude.state != "ready" {
+                Text(claude.message ?? "Claude Code limits are unavailable.").foregroundStyle(.secondary)
+            }
+            ForEach(claude.windows ?? []) { window in
+                let used = max(0, min(100, window.usedPercent))
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: used, total: 100) {
+                        Text(claudeWindowName(window.id))
+                    } currentValueLabel: {
+                        Text("\(used, specifier: "%.0f")% used")
+                    }
+                    .tint(used >= 90 ? .red : used >= 75 ? .orange : HubWorkspacePalette.accent)
+                    if let resetsAt = window.resetsAt {
+                        Text("Resets \(Date(timeIntervalSince1970: resetsAt).formatted(.relative(presentation: .named)))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if let warning = claude.warning { Text(warning).font(.footnote).foregroundStyle(.orange) }
+            if let observed = claude.observedAt.flatMap(readingDate) {
+                Text("As of HUB's last Claude Code reply, \(observed.formatted(.relative(presentation: .named))). Shared with Claude Code and claude.ai.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
+        .accessibilityIdentifier("hub.usage.claude-code")
+    }
+
+    private func claudeWindowName(_ id: String) -> String {
+        switch id {
+        case "five_hour": return "5-hour limit"
+        case "seven_day": return "Weekly limit"
+        case "seven_day_opus": return "Weekly Opus limit"
+        case "seven_day_sonnet": return "Weekly Sonnet limit"
+        default: return id.replacingOccurrences(of: "_", with: " ").capitalized
+        }
     }
 
     private func row(_ label: String, _ value: String) -> some View {

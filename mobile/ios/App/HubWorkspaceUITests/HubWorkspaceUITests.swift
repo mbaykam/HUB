@@ -218,6 +218,10 @@ final class HubWorkspaceUITests: XCTestCase {
         if !usage.isHittable { app.swipeUp() }
         XCTAssertTrue(usage.waitForExistence(timeout: 5))
         usage.tap()
+        let claude = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "86% used", "86% used")).firstMatch
+        XCTAssertTrue(claude.waitForExistence(timeout: 5), "Claude Code limits are shown")
+        capture("Claude Code limits")
         let remaining = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "42%", "42%")).firstMatch
         XCTAssertTrue(remaining.waitForExistence(timeout: 5))
@@ -336,9 +340,15 @@ final class HubWorkspaceUITests: XCTestCase {
         capture("Chat canvas closed")
         reopen.tap()
         XCTAssertTrue(app.buttons["Hide canvas"].waitForExistence(timeout: 5))
-        // A running voice call stays in reach above its chat.
-        XCTAssertTrue(app.buttons["hub.voice.bar"].exists)
+        // A running voice call sits at the bottom within thumb reach, with the
+        // user's words live and the only camera button.
+        let bar = app.buttons["hub.voice.bar"]
+        XCTAssertTrue(bar.exists)
         XCTAssertTrue(app.buttons["End voice call"].exists)
+        XCTAssertGreaterThan(bar.frame.midY, app.windows.firstMatch.frame.height * 0.6, "The call bar is at the bottom")
+        XCTAssertTrue(app.descendants(matching: .any)["hub.voice.hearing"].exists, "What the user says shows live")
+        XCTAssertFalse(app.buttons["hub.chat.video"].exists, "One camera button during a call")
+        capture("Call bar")
 
         // Video: the live camera with HUB's overlays (a stand-in scene here,
         // since the simulator has no camera).
@@ -416,6 +426,20 @@ final class HubWorkspaceUITests: XCTestCase {
         mira.tap()
         sleep(2)
         capture("Character editor")
+        let modelTab = app.buttons["Model"].firstMatch
+        if modelTab.waitForExistence(timeout: 3) {
+            modelTab.tap()
+            let choose = app.descendants(matching: .any)["hub.character.model"].firstMatch
+            if choose.waitForExistence(timeout: 8) {
+                choose.tap()
+                sleep(1)
+                capture("Character model picker")
+                let back = app.navigationBars["Model"].buttons.firstMatch
+                if back.exists { back.tap(); sleep(1) }
+            } else {
+                capture("Character model tab")
+            }
+        }
         app.swipeUp()
         let lastRequest = app.buttons["Last model request"].firstMatch
         guard lastRequest.waitForExistence(timeout: 4), lastRequest.isHittable else { capture("Character editor end"); return }

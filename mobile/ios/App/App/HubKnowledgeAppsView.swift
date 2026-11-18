@@ -83,7 +83,7 @@ struct HubKnowledgeAppsView: View {
     @State private var failed = false
     @State private var opening: String?
     @State private var openFailed = false
-    @State private var running: HubOpenedKnowledgeFile?
+    @State private var running: HubAppRun?
 
     var body: some View {
         NavigationView {
@@ -122,7 +122,7 @@ struct HubKnowledgeAppsView: View {
         }
         .navigationViewStyle(.stack)
         .task { await load() }
-        .fullScreenCover(item: $running) { HubKnowledgeAppRunner(file: $0) }
+        .fullScreenCover(item: $running) { HubAppRunner(run: $0) }
     }
 
     private func tile(_ app: HubKnowledgeAsset) -> some View {
@@ -155,7 +155,7 @@ struct HubKnowledgeAppsView: View {
         opening = app.id
         openFailed = false
         defer { opening = nil }
-        do { running = HubOpenedKnowledgeFile(asset: app, data: try await api.knowledgeAssetBytes(app)) }
+        do { running = try await api.runnableKnowledgeApp(app) }
         catch { openFailed = true }
     }
 }
@@ -168,6 +168,15 @@ struct HubAppRun: Identifiable {
     let id = UUID()
     let title: String
     let html: String
+    /// Already wrapped by HUB in its sealed frame (Knowledge apps).
+    var contained = false
+}
+
+extension HubConversationAPI {
+    /// A Knowledge app ready to run, in HUB's sealed frame.
+    func runnableKnowledgeApp(_ asset: HubKnowledgeAsset) async throws -> HubAppRun {
+        HubAppRun(title: HubKnowledgeApps.title(asset), html: try await knowledgeAppDocument(asset), contained: true)
+    }
 }
 
 struct HubAppRunner: View {
@@ -176,7 +185,7 @@ struct HubAppRunner: View {
 
     var body: some View {
         NavigationView {
-            HubContainedDocumentView(document: HubContainedDocumentView.normalized(run.html))
+            HubContainedDocumentView(document: run.contained ? run.html : HubContainedDocumentView.normalized(run.html))
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle(run.title)
                 .navigationBarTitleDisplayMode(.inline)
@@ -241,7 +250,6 @@ struct HubAppsView: View {
     @State private var busy: String?
     @State private var notice: String?
     @State private var running: HubAppRun?
-    @State private var runningFile: HubOpenedKnowledgeFile?
     @State private var sharing: URL?
     @State private var renaming: HubApp?
     @State private var removing: HubApp?
@@ -314,7 +322,6 @@ struct HubAppsView: View {
         .navigationViewStyle(.stack)
         .task { await load() }
         .fullScreenCover(item: $running) { HubAppRunner(run: $0) }
-        .fullScreenCover(item: $runningFile) { HubKnowledgeAppRunner(file: $0) }
         .sheet(item: Binding(get: { sharing.map { IdentifiedURL(url: $0) } }, set: { sharing = $0?.url })) { HubShareLinkSheet(url: $0.url) }
         .alert("Rename app", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }), presenting: renaming) { app in
             TextField("Name", text: $title)
@@ -411,8 +418,8 @@ struct HubAppsView: View {
         guard busy == nil else { return }
         busy = asset.id
         defer { busy = nil }
-        do { runningFile = HubOpenedKnowledgeFile(asset: asset, data: try await api.knowledgeAssetBytes(asset)) }
-        catch { notice = "Could not open that app. Try again." }
+        do { running = try await api.runnableKnowledgeApp(asset) }
+        catch { notice = "Could not open \(HubKnowledgeApps.title(asset)). Check that HUB is online and try again." }
     }
 
     private func share(_ app: HubApp, hours: Int) async {

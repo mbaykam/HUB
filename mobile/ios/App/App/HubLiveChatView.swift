@@ -25,6 +25,8 @@ struct HubLiveChatView: View {
     let initialDraft: String
     let composerAction: HubNativeChatRequest.ComposerAction?
     let preferences: HubChatPreferences
+    /// A call is running: its bar carries the camera, so the header doesn't.
+    var callActive = false
     let renamed: (String) -> Void
     @ObservedObject private var activity = HubAppActivity.shared
     @FocusState private var composerFocused: Bool
@@ -306,17 +308,19 @@ struct HubLiveChatView: View {
                     }
                     .accessibilityLabel("Hide keyboard")
                 }
-                Button {
-                    composerFocused = false
-                    videoCall()
-                } label: {
-                    Image(systemName: "video.fill").font(.body.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .hubGlassCircle()
+                if !callActive {
+                    Button {
+                        composerFocused = false
+                        videoCall()
+                    } label: {
+                        Image(systemName: "video.fill").font(.body.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                            .hubGlassCircle()
+                    }
+                    .accessibilityLabel("Video call")
+                    .accessibilityHint("Talk to HUB and show it your camera; it can point at things in the room.")
+                    .accessibilityIdentifier("hub.chat.video")
                 }
-                .accessibilityLabel("Video call")
-                .accessibilityHint("Talk to HUB and show it your camera; it can point at things in the room.")
-                .accessibilityIdentifier("hub.chat.video")
                 Menu {
                     Button {
                         composerFocused = false

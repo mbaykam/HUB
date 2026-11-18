@@ -1073,12 +1073,23 @@ public struct HubUsageSnapshot: Decodable {
         public let last7Days: SpeechPeriod?
         public let month: SpeechPeriod?
         public let models: [SpeechModel]?
+        /// Claude Code: subscription windows as of `observedAt`.
+        public struct LimitWindow: Decodable, Identifiable {
+            public let id: String
+            public let usedPercent: Double
+            public let resetsAt: Double?
+            public let status: String?
+        }
+        public let observedAt: String?
+        public let windows: [LimitWindow]?
     }
     public let updatedAt: String
     public let codex: Provider
     public let openRouter: Provider
     public let unlid: Provider
     public let soniox: Provider
+    /// Missing from HUB hosts older than 1.10.12.
+    public let claudeCode: Provider?
 }
 
 public struct HubWorkspaceTask: Decodable, Identifiable {
@@ -2468,6 +2479,20 @@ public final class HubConversationAPI {
             throw HubAttachmentError.invalidResponse
         }
         return data
+    }
+
+    /// A saved HTML app, wrapped by HUB in its sealed frame. It travels as
+    /// JSON, which proxies such as a Cloudflare tunnel leave untouched; raw
+    /// HTML can be rewritten on the way and then fails its checksum.
+    public func knowledgeAppDocument(_ asset: HubKnowledgeAsset) async throws -> String {
+        struct Document: Decodable { let document: String }
+        guard Self.validKnowledgeAsset(asset) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], query: [
+            URLQueryItem(name: "view", value: "app-document"), URLQueryItem(name: "id", value: asset.id)
+        ], maxBytes: 16_000_000, operationTimeout: 30)
+        let value = try JSONDecoder().decode(Document.self, from: data)
+        guard !value.document.isEmpty else { throw HubAttachmentError.invalidResponse }
+        return value.document
     }
 
     public func uploadKnowledgeAsset(_ bytes: Data, name: String, attachingTo note: HubKnowledgeNote? = nil) async throws -> HubKnowledgeAssetReceipt {

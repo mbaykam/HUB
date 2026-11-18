@@ -12,6 +12,10 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     var lifecycleChanged: (() -> Void)?
     private(set) var status = "Ready"
     private(set) var transcript = ""
+    /// What the user is saying right now, live as speech recognition hears
+    /// it; cleared once HUB starts answering or a little after they stop.
+    private(set) var hearing = ""
+    private var hearingClear: DispatchWorkItem?
     private(set) var isActive = false
     private(set) var muted = false
     private let api: HubVoiceAPI
@@ -58,6 +62,21 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
     private func notify() { changed?(); lifecycleChanged?() }
+
+    /// Shows the user's words as they are recognised. A finished sentence stays
+    /// a few seconds so it can be read, unless HUB answers first.
+    private func hear(_ text: String, final: Bool = false) {
+        hearingClear?.cancel()
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard words != hearing else { return }
+        hearing = String(words.suffix(160))
+        if final, !words.isEmpty {
+            let clear = DispatchWorkItem { [weak self] in self?.hear("") }
+            hearingClear = clear
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: clear)
+        }
+        notify()
+    }
     private func update(_ value: String) { status = value; notify() }
     func waitForStartup() async -> Bool { await starting?.value; return isActive && lease != nil && peer != nil }
     func conversationDestination() -> HubNotificationDestination? {
@@ -81,7 +100,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
 
     func start() {
         guard !isActive, starting == nil, lease == nil else { return }
-        ending = false; isActive = true; transcript = ""; muted = false
+        ending = false; isActive = true; transcript = ""; hearing = ""; muted = false
         update("Connecting…")
         starting = Task {
             defer { starting = nil }
@@ -384,13 +403,16 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
             switch event.type {
             case "bot-ready": self.ready = true; self.readyTimeout?.cancel(); self.update(self.listeningStatus); self.monitorAttention()
             case "bot-stopped-speaking": self.update(self.listeningStatus)
-            case "bot-started-speaking": self.update("Speaking")
+            case "bot-started-speaking": self.hear(""); self.update("Speaking")
             case "bot-llm-started": self.update("Thinking…")
             case "error":
                 self.update(event.fatal == false
                     ? "Part of the reply had a problem. You can keep talking; check HUB before repeating a task."
                     : "Voice service interrupted. End or reconnect; check HUB before repeating a task.")
             case "user-transcription", "bot-tts-text":
+                if event.type == "user-transcription", let text = event.text {
+                    self.hear(text, final: event.final)
+                }
                 if let text = event.text, event.final {
                     self.transcript += "\(event.type == "user-transcription" ? "You" : "Assistant"): \(text)\n\n"
                     self.transcript = String(self.transcript.suffix(24_000)); self.notify()

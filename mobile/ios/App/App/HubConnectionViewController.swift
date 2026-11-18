@@ -265,7 +265,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         home.conversations = [HubConversationChoice(sessionId: "fixture-work", title: "Collect reading notes", updatedAt: 0)]
         home.connection = .connected
         if Self.voiceBarFixture {
-            home.voiceCall = HubVoiceCallSummary(sessionID: "fixture-work", status: "Listening", muted: false)
+            home.voiceCall = HubVoiceCallSummary(sessionID: "fixture-work", status: "Listening", muted: false,
+                                                 hearing: "Can you show me where the reset button is")
         }
         if ProcessInfo.processInfo.arguments.contains("--hub-native-read-fixture"),
            let fixtureServer = try? HubServer(address: "https://hub-workspace-fixture.invalid") {
@@ -951,7 +952,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         let active = voice?.isActive == true
         if home.hasActiveVoice != active { home.hasActiveVoice = active }
         let summary = voice.flatMap { model in
-            model.isActive ? HubVoiceCallSummary(sessionID: model.activeSessionID, status: model.status, muted: model.muted) : nil
+            model.isActive ? HubVoiceCallSummary(sessionID: model.activeSessionID, status: model.status, muted: model.muted, hearing: model.hearing) : nil
         }
         if home.voiceCall != summary { home.voiceCall = summary }
         if cameraVision?.voice != summary { cameraVision?.voice = summary }
@@ -982,6 +983,21 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         presenter.present(host, animated: true)
     }
 
+    /// Lets HUB see this iPhone's screen during the call, from the call bar.
+    private func presentScreenSharing() {
+        #if canImport(ScreenCaptureKit)
+        if #available(iOS 27.0, *) {
+            guard let context = voice?.attachmentContext(), let screen = try? HubScreenViewController(context: context) else {
+                showVoice()
+                return
+            }
+            var presenter: UIViewController = self
+            while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+            presenter.present(UINavigationController(rootViewController: screen), animated: true)
+        }
+        #endif
+    }
+
     private func closeCamera(then finish: (() -> Void)? = nil) {
         cameraVision?.stop()
         cameraVision = nil
@@ -993,6 +1009,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private func controlVoice(_ control: HubVoiceCallControl) {
         switch control {
         case .camera: presentCamera()
+        case .screen: presentScreenSharing()
         case .open: showVoice()
         case .mute: voice?.toggleMute()
         case .end:
@@ -1261,7 +1278,10 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
              "openRouter":{"state":"ready","usageDaily":1.25,"limit":{"amount":9,"remaining":6,"reset":"weekly"},
                            "account":{"totalCredits":20,"totalUsage":4}},
              "unlid":{"state":"not-configured"},
-             "soniox":{"state":"not-configured"}}
+             "soniox":{"state":"not-configured"},
+             "claudeCode":{"state":"ready","observedAt":"2026-11-14T17:40:00.000Z","windows":[
+                {"id":"five_hour","usedPercent":34,"resetsAt":1795010400,"status":"allowed"},
+                {"id":"seven_day","usedPercent":86,"resetsAt":1795154400,"status":"allowed_warning"}]}}
             """#.utf8)
         }
         if request.httpMethod == "GET", url.path == "/api/hub/voice/profiles" {
