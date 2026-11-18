@@ -38,7 +38,14 @@ export function installDailyUseWeb(ctx:any){
       }
       const session=req.headers["x-hub-session"],id=req.headers["x-hub-artifact"];
       if(typeof session!=="string"||!/^[-\w.]{1,200}$/.test(session)){send(400,{error:"invalid-session"});return;}
-      const query=ctx.get?.("sessionQuery")??ctx.sessionQuery,observation=await query.observeSession(session,{signal,projectionMode:"none"});
+      const query=ctx.get?.("sessionQuery")??ctx.sessionQuery,observe=()=>query.observeSession(session,{signal,projectionMode:"none"});
+      let observation=await observe();
+      // The iPhone asks for the screenshot list as soon as its live stream
+      // shows a screenshot, which can be a moment before that result is
+      // readable here; it then never asks again. While a reply is running,
+      // let a just-taken screenshot settle before answering the list.
+      if(req.headers["x-hub-screenshot"]===undefined&&id===undefined&&req.headers["x-hub-artifact-format"]!=="file")
+        observation=await settledObservation(observation,observe,signal);
       try{const events=[...observation.events],screenshots=conversationScreenshots(events),imageId=req.headers["x-hub-screenshot"];
         if(imageId!==undefined){
           const screenshot=screenshots.find(item=>item.id===imageId);
@@ -65,4 +72,28 @@ export function installDailyUseWeb(ctx:any){
       }finally{observation[Symbol.dispose]();}
     }catch{send(503,{error:"native-state-unavailable"});}
   }}));return()=>{offScreenshot();ended.clear();off.forEach((f:any)=>f());};
+}
+
+const SCREENSHOT_TOOLS=new Set(["hub_capture_desktop","hub_show_screenshot"]);
+const pause=(ms:number,signal:AbortSignal)=>new Promise<void>((resolve,reject)=>{const t=setTimeout(resolve,ms);signal.addEventListener("abort",()=>{clearTimeout(t);reject(signal.reason);},{once:true});});
+
+/** Mid-turn, wait (up to 4 s) for a screenshot call to have its result, and
+ * otherwise look once more after a second, so a list asked for right after a
+ * capture includes it. Finished conversations answer at once. */
+export async function settledObservation(observation:any,observe:()=>Promise<any>,signal:AbortSignal,wait={step:300,limit:4000,once:1000}){
+  const state=(events:any[])=>{
+    const last=events.at(-1),running=!!last&&last.type!=="turn/end";
+    const results=new Set(events.filter(e=>e.type==="tool/result").map(e=>e.data?.message?.content?.[0]?.toolCallId));
+    const pending=events.some(e=>e.type==="tool/call"&&SCREENSHOT_TOOLS.has(e.data?.name)&&!results.has(e.data?.callId));
+    return {running,pending};
+  };
+  let {running,pending}=state([...observation.events]);
+  if(!running)return observation;
+  let waited=0;
+  do{
+    await pause(pending?wait.step:wait.once,signal);waited+=pending?wait.step:wait.once;
+    observation[Symbol.dispose]();observation=await observe();
+    ({running,pending}=state([...observation.events]));
+  }while(pending&&running&&waited<wait.limit);
+  return observation;
 }

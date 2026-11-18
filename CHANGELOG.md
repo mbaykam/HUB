@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.13
+
+- A screenshot taken during a reply now appears in the iPhone chat right away: a screenshot list asked for mid-turn waits briefly for a just-taken capture instead of answering without it.
+
 ## 1.10.12
 
 - Desktop screenshots work on an idle PC: the Windows screen saver (which runs on its own desktop and blocks every capture) is closed first, as moving the mouse would. Voice calls can take a screenshot directly with hub_capture_desktop.
