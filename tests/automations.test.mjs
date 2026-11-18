@@ -58,3 +58,13 @@ test('calendar uses IANA timezone and skips nonexistent DST hours',()=>{
 test('watch SSRF, unapproved write tools, and unowned notification destinations are refused',async()=>{
  for(const ip of ['127.0.0.1','10.1.2.3','169.254.169.254','172.16.0.1','192.168.1.2','::1','::ffff:127.0.0.1','fd00::1'])assert.equal(isPublicAddress(ip),false);assert.equal(isPublicAddress('1.1.1.1'),true);await assert.rejects(readPublicWatch('https://127.0.0.1/',AbortSignal.timeout(1000)),/Private network/);assert.throws(()=>validateAutomation(input({tools:['shell'],allowWrites:false})),/permission/);assert.throws(()=>validateAutomation(input({notification:'telegram',sourceSessionId:'arbitrary'})),/authorized/);assert.throws(()=>validateAutomation(input({trigger:{kind:'interval',seconds:1}})),/five minutes/);
 });
+
+test('a new task needs no exact revision; a stale edit says the current revision; bad triggers say what to send',async t=>{
+ const f=await fixture(t);
+ const created=await f.store.change({action:'save',revision:-7,automation:input()});
+ assert.ok(created);
+ const job=f.store.snapshot().automations[0];
+ await assert.rejects(f.store.change({action:'save',id:job.id,revision:-7,automation:input()}),new RegExp('current revision is '+f.store.snapshot().revision));
+ assert.throws(()=>validateAutomation(input({trigger:{kind:'tomorrow'}})),/trigger\.kind to one of: once/);
+ assert.throws(()=>validateAutomation(input({trigger:{kind:'once',at:'in 3 days'}})),/epoch milliseconds/);
+});

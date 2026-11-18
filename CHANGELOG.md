@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.15
+
+- Questions to the user are asked in the conversation: ask_user_question no longer waits on a prompt only HUB's desktop window shows, which hung chats on the phone, Telegram and voice.
+- Automation tool errors say what to send (trigger kinds, epoch-millisecond times, the current revision); a new automation needs no exact revision.
+- A duplicate Knowledge note title names the existing note's id.
+
 ## 1.10.14
 
 - hub_capture_desktop works in any conversation turn the user started, whatever the wording; it no longer matches screenshot keywords. Background work still cannot capture.

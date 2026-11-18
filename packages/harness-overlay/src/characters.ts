@@ -37,6 +37,7 @@ import {installArchiveWeb} from "./host/archive-web.ts";
 import {installApps} from "./host/apps.ts";
 import {effectiveKnowledgeCharacter} from "./host/knowledge-identity.ts";
 import {installCraftGuide} from "./host/craft-guide.ts";
+import {installChatQuestions} from "./host/chat-questions.ts";
 import {installClaudeCodeProvider} from "./host/claude-code-provider.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
@@ -211,6 +212,7 @@ export class HubCharacters extends Service {
     ctx.effect(()=>installArchiveWeb(ctx),"HUB archived conversations");
     ctx.effect(()=>installApps(ctx,this,effectiveKnowledgeCharacter),"HUB Apps page and app sharing");
     ctx.effect(()=>installCraftGuide(ctx),"HUB craft standards");
+    ctx.effect(()=>installChatQuestions(ctx),"HUB questions in the conversation");
     ctx.effect(()=>installClaudeCodeProvider(ctx),"Claude Code model provider");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
     ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");

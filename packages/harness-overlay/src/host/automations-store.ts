@@ -24,7 +24,10 @@ export class AutomationsStore {
   }
   snapshot(){return structuredClone({revision:this.committed.revision,automations:this.committed.automations,hostRunsOnlyWhileOnline:true as const,blockedRoutes:Object.entries(this.committed.blocked).map(([route,message])=>({route,message}))});}
   async change(command:any){return this.exclusive(async()=>{
-    if(command.revision!==this.state.revision)throw Error("Automations changed; refresh before editing");
+    // The revision guards edits of existing tasks against stale copies; a new
+    // task cannot conflict with anything, so it needs no exact revision.
+    const creating=command.action==="save"&&!this.state.automations.some(j=>j.id===command.id);
+    if(!creating&&command.revision!==this.state.revision)throw Error(`Automations changed since you last read them; the current revision is ${this.state.revision}. Call list, review the task, and retry with revision ${this.state.revision}.`);
     const now=this.ports.now(),job=this.state.automations.find(j=>j.id===command.id);
     if(command.action==="save"){
       const input=validateAutomation(command.automation);await this.ports.route(input.characterId);
@@ -113,8 +116,8 @@ export function validateAutomation(value:any):AutomationInput {
   for(const key of ["dailyBudget","inputPrice","outputPrice"])if(!Number.isFinite(value[key])||value[key]<=0||value[key]>100)throw Error("Invalid usage estimate");
   if(!["pwa","telegram"].includes(value.notification)||value.notification==="telegram"&&!/^minke-im-telegram-[a-f0-9]{32}$/.test(value.sourceSessionId??""))throw Error("Telegram notifications require the originating authorized Telegram chat");
   if(value.goalId!==undefined&&(typeof value.goalId!=="string"||!/^[-a-f0-9]{36}$/.test(value.goalId)))throw Error("Invalid linked goal ID");
-  const t=value.trigger;if(!t||!["once","interval","calendar","watch","event"].includes(t.kind))throw Error("Choose a trigger");
-  if(t.kind==="once"&&(!Number.isSafeInteger(t.at)||t.at<=0))throw Error("Invalid execution time");
+  const t=value.trigger;if(!t||!["once","interval","calendar","watch","event"].includes(t.kind))throw Error("Set trigger.kind to one of: once {at: epoch milliseconds}, interval {seconds >= 300}, calendar {hour, minute, days 0-6, timezone}, watch {url, rule, seconds}, event {event}.");
+  if(t.kind==="once"&&(!Number.isSafeInteger(t.at)||t.at<=0))throw Error("trigger.at must be a time in epoch milliseconds (for example "+(Date.now()+3*86400000)+" is three days from now).");
   if(["interval","watch"].includes(t.kind)&&(!Number.isInteger(t.seconds)||t.seconds<300||t.seconds>31536000))throw Error("Intervals must be at least five minutes");
   if(t.kind==="calendar"){if(!Number.isInteger(t.hour)||t.hour<0||t.hour>23||!Number.isInteger(t.minute)||t.minute<0||t.minute>59||!Array.isArray(t.days)||!t.days.length||t.days.some((d:any)=>!Number.isInteger(d)||d<0||d>6))throw Error("Invalid calendar rule");new Intl.DateTimeFormat("en",{timeZone:t.timezone}).format(0);}
   if(t.kind==="watch"){const url=new URL(t.url);if(url.protocol!=="https:"||url.username||url.password||url.port&&url.port!=="443")throw Error("Watch a public HTTPS source");if(!["changed","contains","not-contains","above","below"].includes(t.rule)||typeof (t.value??"")!=="string"||(t.value??"").length>1000)throw Error("Invalid watch condition");}

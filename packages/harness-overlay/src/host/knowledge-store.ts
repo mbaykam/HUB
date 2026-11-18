@@ -290,7 +290,8 @@ export class KnowledgeStore {
         const filename=change.title.normalize("NFC").replace(/[\u0000-\u001f<>:"/\\|?*#\[\]^]/g," ").trim().replace(/[. ]+$/g,"");
         if (!filename || /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(filename)) throw new Error("Invalid note title");
         const path=existing?.path ?? `Notes/${filename}.md`;
-        if (notes.some(n=>n.path.toLowerCase()===path.toLowerCase() && n.id!==change.id)) throw new Error("Existing title: reuse its identity");
+        const same=notes.find(n=>n.path.toLowerCase()===path.toLowerCase() && n.id!==change.id);
+        if (same) throw new Error(`A note titled "${change.title}" already exists (id ${same.id}). Update that note with its id instead of creating a second one.`);
         return {change,existing,path,permalink:path.slice(0,-3)};
       });
       if(new Set(reserved.map(n=>n.path.toLowerCase())).size!==reserved.length) throw new Error("Duplicate paths in plan");
