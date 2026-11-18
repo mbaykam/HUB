@@ -4,6 +4,13 @@
 
 - Video calls: camera frames carry the phone's numbered marks. hub_view_screen can read just the marks as text, or zoom into a grid cell or mark (cropped on this PC from the full frame).
 - hub_show_overlay pins arrows, circles, labels and numbered steps into the user's live camera view, anchored to real objects.
+- Notifications carry real content, group per chat and offer Reply, Approve/Deny and Snooze buttons; hub_notify; per-kind preferences, quiet hours and a test notification.
+- Agenda reminders before events and a morning brief.
+- Apps page at /apps with hub_app_save/list/share/unshare/remove; sharing publishes to here.now with an expiry.
+- Archived conversations can be restored.
+- Claude Code as a model provider (Opus, Sonnet, Haiku) using HUB's tools.
+- Craft standards for every assistant.
+- Wake word: background results are announced with a 30 s reply window; only the waking sentence reaches Soniox; "that's all" returns to wake-word listening.
 
 ## 1.10.10
 
