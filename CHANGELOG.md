@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.18
+
+- Projects: group chats under a named project. Creating one only asks for a name; HUB makes its folder in Documents\HUB Projects on this PC.
+- Each project has instructions and a shared note that every chat in it reads; the assistant keeps the note current with the new hub_project_note tool.
+- Any existing chat can be added to, moved between or removed from projects; removing a project keeps its chats, folder and note.
+
 ## 1.10.17
 
 - Knowledge learns the people in your life and what you do: new memory categories 'people' and 'life', on by default; small asides count.
