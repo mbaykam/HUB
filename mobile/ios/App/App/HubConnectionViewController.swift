@@ -1284,6 +1284,14 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
                 {"id":"seven_day","usedPercent":86,"resetsAt":1795154400,"status":"allowed_warning"}]}}
             """#.utf8)
         }
+        if request.httpMethod == "GET", url.path == "/api/hub/projects" {
+            return Data(#"""
+            {"revision":2,"projects":[
+                {"id":"7d3c4d0e-0d55-4e43-9d1e-5a0c4c1f2b11","name":"Thesis","folder":"C:\\Users\\Fixture\\Documents\\HUB Projects\\Thesis",
+                 "instructions":"Answer formally.","sessionIds":["fixture-project-chat"],"note":"# Thesis\n\nDraft due 1 March.",
+                 "createdAt":0,"updatedAt":0}]}
+            """#.utf8)
+        }
         if request.httpMethod == "GET", url.path == "/api/hub/voice/profiles" {
             return Data(#"""
             {"revision":3,"selectedId":"216cb7b2-8e8f-48d5-86f9-cf92a29aca14","profiles":[

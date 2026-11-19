@@ -367,14 +367,19 @@ struct HubHomeView: View {
     @State private var archivedSessions: Set<String> = []
     @State private var sessionToArchive: HubConversationChoice?
     @State private var workspaceChats: [String: HubConversationChoice] = [:]
-    @State private var expandedWorkspaces: Set<String> = []
     @State private var workspaceAttempt = 0
     @State private var workspaceError: String?
     @State private var workspaceBusy = false
-    @State private var workspaceDirectoryOpen = false
-    @State private var workspaceToRemove: HubWorkspaceItem?
-    @State private var workspaceToRename: HubWorkspaceItem?
-    @State private var workspaceTitle = ""
+    @State private var projects: [HubProject]?
+    @State private var projectsExpanded = true
+    @State private var expandedProjects: Set<String> = []
+    @State private var projectsAttempt = 0
+    @State private var projectError: String?
+    @State private var projectBusy = false
+    @State private var newProjectOpen = false
+    @State private var newProjectName = ""
+    @State private var projectToEdit: HubProject?
+    @State private var projectToRemove: HubProject?
     @State private var voiceHistoryOpen = false
     @State private var todoDraft = ""
     @State private var todoDraftID = UUID()
@@ -545,28 +550,29 @@ struct HubHomeView: View {
         .sheet(isPresented: $voiceHistoryOpen) {
             if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
         }
-        .sheet(isPresented: $workspaceDirectoryOpen) {
-            if let api = chatAPI() {
-                HubWorkspaceDirectoryView(api: api) { workspaceAttempt += 1 }
+        .sheet(item: $projectToEdit) { project in
+            HubProjectSettingsView(project: project) { change in
+                try await changeProjects(change)
             }
         }
         .erased()
-        .alert("Rename workspace", isPresented: Binding(
-            get: { workspaceToRename != nil }, set: { if !$0 { workspaceToRename = nil } }), presenting: workspaceToRename) { item in
-            TextField("Workspace name", text: $workspaceTitle)
-            Button("Rename") {
-                let name = workspaceTitle
-                Task { await renameWorkspace(item, title: name) }
+        .alert("New project", isPresented: $newProjectOpen) {
+            TextField("Project name", text: $newProjectName)
+            Button("Create") {
+                let name = newProjectName
+                Task { await createProject(name) }
             }
-            .disabled(workspaceTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("HUB makes a folder for it on your PC and keeps a shared note every chat in the project can use.")
         }
-        .alert("Remove workspace?", isPresented: Binding(
-            get: { workspaceToRemove != nil }, set: { if !$0 { workspaceToRemove = nil } }), presenting: workspaceToRemove) { item in
-            Button("Remove", role: .destructive) { Task { await removeWorkspace(item) } }
+        .alert("Remove project?", isPresented: Binding(
+            get: { projectToRemove != nil }, set: { if !$0 { projectToRemove = nil } }), presenting: projectToRemove) { project in
+            Button("Remove", role: .destructive) { Task { try? await changeProjects(.remove(id: project.id)) } }
             Button("Cancel", role: .cancel) {}
-        } message: { item in
-            Text("\(item.title) will be removed from the workspace list. Its files and conversations stay on HUB.")
+        } message: { project in
+            Text("\(project.name) leaves the list. Its chats go back to your history, and its folder and note stay on your PC.")
         }
         .alert("Archive conversation?", isPresented: Binding(
             get: { sessionToArchive != nil }, set: { if !$0 { sessionToArchive = nil } }), presenting: sessionToArchive) { chat in
@@ -625,10 +631,11 @@ struct HubHomeView: View {
                 archivedSessions = []
                 sessionToArchive = nil
                 workspaceChats = [:]
-                expandedWorkspaces = []
-                workspaceDirectoryOpen = false
-                workspaceToRename = nil
-                workspaceToRemove = nil
+                projects = nil
+                expandedProjects = []
+                newProjectOpen = false
+                projectToEdit = nil
+                projectToRemove = nil
                 knowledgeApps = nil
                 knowledgeAppsOpen = false
                 runningApp = nil
@@ -1171,11 +1178,16 @@ struct HubHomeView: View {
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if query.isEmpty {
+                        projectsSection
                         pinnedHistory
                     }
                     if let results = query.isEmpty ? model.conversations : historyResults?.conversations {
                         let pinnedIDs = query.isEmpty ? Set(bookmarks?.sessionIds ?? []) : []
-                        let conversations = results.filter { !archivedSessions.contains($0.sessionId) && !pinnedIDs.contains($0.sessionId) }
+                        // Chats in a project are listed under it, not twice.
+                        let projectIDs = query.isEmpty ? Set((projects ?? []).flatMap(\.sessionIds)) : []
+                        let conversations = results.filter {
+                            !archivedSessions.contains($0.sessionId) && !pinnedIDs.contains($0.sessionId) && !projectIDs.contains($0.sessionId)
+                        }
                         if conversations.isEmpty && pinnedIDs.isEmpty {
                             Text(query.isEmpty ? "No conversations yet" : "No matching conversations")
                                 .font(.subheadline)
@@ -1202,7 +1214,6 @@ struct HubHomeView: View {
                     } else {
                         ProgressView(query.isEmpty ? "Loading conversations…" : "Searching…").padding(.vertical, 8)
                     }
-                    if query.isEmpty { workspaceHistory }
                 }
             }
             Divider()
@@ -1211,7 +1222,6 @@ struct HubHomeView: View {
                     closePanel()
                     voiceHistoryOpen = true
                 }
-                historyFooterButton("New workspace", icon: "folder.badge.plus") { workspaceDirectoryOpen = true }
             }
             .disabled(model.connection != .connected)
             .padding(.bottom, 4)
@@ -1219,6 +1229,9 @@ struct HubHomeView: View {
         .task(id: model.connection == .connected) { await loadBookmarks() }
         .task(id: WorkspaceRequest(connected: model.connection == .connected, attempt: workspaceAttempt)) {
             if model.connection == .connected { await loadWorkspaces() }
+        }
+        .task(id: WorkspaceRequest(connected: model.connection == .connected, attempt: projectsAttempt)) {
+            if model.connection == .connected { await loadProjects() }
         }
         .task(id: HistoryRequest(query: query, attempt: historyAttempt, connected: model.connection == .connected)) {
             historyResults = nil
@@ -1244,55 +1257,174 @@ struct HubHomeView: View {
         let attempt: Int
     }
 
-    private var workspaceHistory: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            historySectionLabel("Workspaces")
-            if let workspaceError {
-                Text(workspaceError).font(.footnote).foregroundStyle(.secondary)
-                Button("Refresh workspaces") { workspaceAttempt += 1 }.frame(minHeight: 44)
-            }
-            if let workspaces {
-                if workspaces.isEmpty { Text("No workspaces").font(.footnote).foregroundStyle(.secondary) }
-                ForEach(workspaces) { item in
-                    DisclosureGroup(isExpanded: Binding(
-                        get: { expandedWorkspaces.contains(item.id) },
-                        set: { if $0 { expandedWorkspaces.insert(item.id) } else { expandedWorkspaces.remove(item.id) } }
-                    )) {
-                        ForEach(item.sessionIds.filter { !archivedSessions.contains($0) }, id: \.self) { id in
-                            historyRow(workspaceChats[id] ?? HubConversationChoice(sessionId: id,
-                                title: "Untitled conversation", updatedAt: 0), workspace: item)
-                        }
-                        Button {
-                            Task { await newChat(workspaceID: item.id) }
-                        } label: {
-                            Label("New chat in workspace", systemImage: "plus").frame(minHeight: 44)
-                        }
-                        .disabled(creatingChat || workspaceBusy)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Label(item.title, systemImage: "folder").lineLimit(1)
-                            Spacer()
-                            Menu {
-                                workspacePlacement(item, in: workspaces)
-                                Button("Rename") { workspaceTitle = item.title; workspaceToRename = item }
-                                Button("Remove workspace", role: .destructive) { workspaceToRemove = item }
-                            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                            .disabled(workspaceBusy)
-                            .accessibilityLabel("Options for \(item.title)")
-                        }
-                        .frame(minHeight: 44)
+    /// Projects sit at the top of the panel: a collapsible list, each project
+    /// opening to its chats. Creating one only asks for a name.
+    private var projectsSection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { projectsExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Projects").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(projectsExpanded ? 90 : 0))
+                        Spacer()
                     }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 36)
+                    .contentShape(Rectangle())
                 }
-            } else if workspaceError == nil && model.connection == .connected {
-                ProgressView("Loading workspaces…")
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("hub.projects.toggle")
+                .accessibilityLabel(projectsExpanded ? "Projects, expanded" : "Projects, collapsed")
+                Button {
+                    newProjectName = ""
+                    newProjectOpen = true
+                } label: {
+                    Image(systemName: "plus").font(.footnote.weight(.semibold)).frame(width: 44, height: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("hub.projects.new")
+                .accessibilityLabel("New project")
+                .disabled(projectBusy || model.connection != .connected)
             }
-            if workspaces != nil && workspaceError == nil {
-                Button { workspaceAttempt += 1 } label: {
-                    Label("Refresh workspaces", systemImage: "arrow.clockwise").font(.footnote).frame(minHeight: 44)
+            .padding(.top, 8)
+            if projectsExpanded {
+                if let projectError {
+                    Text(projectError).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 10)
+                    Button("Retry") { projectsAttempt += 1 }.font(.footnote).frame(minHeight: 44).padding(.horizontal, 10)
+                }
+                if let projects {
+                    if projects.isEmpty {
+                        Button {
+                            newProjectName = ""
+                            newProjectOpen = true
+                        } label: {
+                            Label("New project", systemImage: "folder.badge.plus")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(projects) { project in projectRow(project) }
+                } else if projectError == nil && model.connection == .connected {
+                    ProgressView().padding(.horizontal, 10).frame(minHeight: 44)
                 }
             }
         }
-        .disabled(model.connection != .connected)
+    }
+
+    private func projectRow(_ project: HubProject) -> some View {
+        let open = expandedProjects.contains(project.id)
+        let chats = project.sessionIds.filter { !archivedSessions.contains($0) }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if open { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: open ? "folder.fill" : "folder")
+                            .font(.caption)
+                            .foregroundStyle(accent)
+                            .frame(width: 18)
+                        Text(project.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                        Spacer()
+                        if !chats.isEmpty {
+                            Text("\(chats.count)").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("hub.project.\(project.id)")
+                .accessibilityLabel("\(project.name), \(chats.count) chats")
+                Menu {
+                    Button { Task { await newChat(projectID: project.id) } } label: {
+                        Label("New chat in project", systemImage: "square.and.pencil")
+                    }
+                    Button { projectToEdit = project } label: {
+                        Label("Instructions and note", systemImage: "doc.text")
+                    }
+                    Button(role: .destructive) { projectToRemove = project } label: {
+                        Label("Remove project", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                }
+                .disabled(projectBusy)
+                .accessibilityLabel("Options for \(project.name)")
+            }
+            if open {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(chats, id: \.self) { id in
+                        historyRow(workspaceChats[id] ?? HubConversationChoice(sessionId: id, title: "Untitled conversation", updatedAt: 0))
+                    }
+                    Button { Task { await newChat(projectID: project.id) } } label: {
+                        Label("New chat in project", systemImage: "plus")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(creatingChat || projectBusy)
+                }
+                .padding(.leading, 14)
+            }
+        }
+    }
+
+    private func loadProjects() async {
+        guard let api = chatAPI() else { if projects == nil { projects = [] }; return }
+        do {
+            let snapshot = try await api.projects()
+            guard !Task.isCancelled, chatAPI() === api else { return }
+            projects = snapshot.projects
+            projectError = nil
+            // Chats only listed under a project still need their titles.
+            let missing = snapshot.projects.flatMap(\.sessionIds).filter { workspaceChats[$0] == nil }
+            if !missing.isEmpty, let titles = try? await api.workspaceChatTitles(), chatAPI() === api {
+                workspaceChats.merge(titles) { cached, _ in cached }
+            }
+        } catch {
+            if !Task.isCancelled && chatAPI() === api {
+                projectError = "Projects need HUB 1.10.18 or newer on your PC."
+            }
+        }
+    }
+
+    @discardableResult
+    private func changeProjects(_ change: HubProjectChange) async throws -> HubProjectsSnapshot? {
+        guard !projectBusy, let api = chatAPI() else { return nil }
+        projectBusy = true
+        defer { projectBusy = false }
+        do {
+            let snapshot = try await api.changeProject(change)
+            guard chatAPI() === api else { return nil }
+            projects = snapshot.projects
+            projectError = nil
+            return snapshot
+        } catch {
+            if chatAPI() === api { projectError = "Could not update projects. Check the connection and try again." }
+            throw error
+        }
+    }
+
+    private func createProject(_ name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let snapshot = try? await changeProjects(.create(name: trimmed)),
+              let created = snapshot.projects.first else { return }
+        projectsExpanded = true
+        expandedProjects.insert(created.id)
     }
 
     private func loadWorkspaces() async {
@@ -1318,45 +1450,6 @@ struct HubHomeView: View {
         }
     }
 
-    @ViewBuilder private func workspacePlacement(_ item: HubWorkspaceItem, in items: [HubWorkspaceItem]) -> some View {
-        if let index = items.firstIndex(where: { $0.id == item.id }) {
-            if index > 0 {
-                Button("Move workspace up") { Task { await moveWorkspace(item.id, before: items[index - 1].id) } }
-            }
-            if index + 1 < items.count {
-                let next = items.dropFirst(index + 2).first?.id
-                Button("Move workspace down") { Task { await moveWorkspace(item.id, before: next) } }
-            }
-        }
-    }
-
-    private func moveWorkspace(_ id: String, before anchor: String?) async {
-        guard !workspaceBusy, let api = chatAPI() else { return }
-        workspaceBusy = true
-        defer { workspaceBusy = false; workspaceAttempt += 1 }
-        do {
-            let order = try await api.moveWorkspace(id, before: anchor)
-            guard chatAPI() === api, let workspaces else { return }
-            let byID = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0) })
-            if Set(order) == Set(byID.keys) { self.workspaces = order.compactMap { byID[$0] } }
-        } catch {
-            if chatAPI() === api { workspaceError = "Could not confirm the workspace order." }
-        }
-    }
-
-    private func moveSession(_ id: String, in workspace: HubWorkspaceItem, before anchor: String?) async {
-        guard !workspaceBusy, let api = chatAPI() else { return }
-        workspaceBusy = true
-        defer { workspaceBusy = false; workspaceAttempt += 1 }
-        do {
-            let updated = try await api.moveWorkspaceSession(id, in: workspace.id, before: anchor)
-            guard chatAPI() === api else { return }
-            workspaces = workspaces?.map { $0.id == updated.id ? updated : $0 }
-        } catch {
-            if chatAPI() === api { workspaceError = "Could not confirm the conversation order." }
-        }
-    }
-
     private func archiveSession(_ id: String) async {
         guard !workspaceBusy, let api = chatAPI() else { return }
         workspaceBusy = true
@@ -1368,35 +1461,6 @@ struct HubHomeView: View {
             workspaceAttempt += 1
         } catch {
             if chatAPI() === api { workspaceError = "Could not confirm the archive. Refresh workspaces to check." }
-        }
-    }
-
-    private func renameWorkspace(_ item: HubWorkspaceItem, title: String) async {
-        guard !workspaceBusy, let api = chatAPI() else { return }
-        workspaceBusy = true
-        defer { workspaceBusy = false }
-        do {
-            let updated = try await api.renameWorkspace(id: item.id, title: title)
-            guard chatAPI() === api else { return }
-            workspaces = workspaces?.map { $0.id == updated.id ? updated : $0 }
-            workspaceAttempt += 1
-        } catch {
-            if chatAPI() === api { workspaceError = "Could not confirm the new workspace name. Refresh to check." }
-        }
-    }
-
-    private func removeWorkspace(_ item: HubWorkspaceItem) async {
-        guard !workspaceBusy, let api = chatAPI() else { return }
-        workspaceBusy = true
-        defer { workspaceBusy = false }
-        do {
-            try await api.removeWorkspace(id: item.id)
-            guard chatAPI() === api else { return }
-            workspaces?.removeAll { $0.id == item.id }
-            expandedWorkspaces.remove(item.id)
-            workspaceAttempt += 1
-        } catch {
-            if chatAPI() === api { workspaceError = "Could not confirm removal. Refresh to check." }
         }
     }
 
@@ -1471,7 +1535,7 @@ struct HubHomeView: View {
         return date.formatted(.dateTime.day().month(.abbreviated))
     }
 
-    private func historyRow(_ chat: HubConversationChoice, workspace: HubWorkspaceItem? = nil) -> some View {
+    private func historyRow(_ chat: HubConversationChoice) -> some View {
         let pinned = bookmarks?.sessionIds.contains(chat.sessionId) == true
         return HStack(spacing: 6) {
             Button { showChat(chat) } label: {
@@ -1504,18 +1568,21 @@ struct HubHomeView: View {
                     }
                     .disabled(bookmarksBusy)
                 }
-                if let workspace {
-                    let ids = workspace.sessionIds.filter { !archivedSessions.contains($0) }
-                    if let index = ids.firstIndex(of: chat.sessionId) {
-                        if index > 0 {
-                            Button("Move conversation up") { Task { await moveSession(chat.sessionId, in: workspace, before: ids[index - 1]) } }
-                                .disabled(workspaceBusy)
+                if let projects, !projects.isEmpty {
+                    let current = projects.first { $0.sessionIds.contains(chat.sessionId) }
+                    Menu {
+                        ForEach(projects.filter { $0.id != current?.id }) { project in
+                            Button(project.name) { Task { try? await changeProjects(.add(id: project.id, sessionID: chat.sessionId)) } }
                         }
-                        if index + 1 < ids.count {
-                            let next = ids.dropFirst(index + 2).first
-                            Button("Move conversation down") { Task { await moveSession(chat.sessionId, in: workspace, before: next) } }
-                                .disabled(workspaceBusy)
+                    } label: {
+                        Label(current == nil ? "Add to project" : "Move to project", systemImage: "folder")
+                    }
+                    .disabled(projectBusy)
+                    if current != nil {
+                        Button { Task { try? await changeProjects(.detach(sessionID: chat.sessionId)) } } label: {
+                            Label("Remove from project", systemImage: "folder.badge.minus")
                         }
+                        .disabled(projectBusy)
                     }
                 }
                 Button(role: .destructive) { sessionToArchive = chat } label: {
@@ -1554,7 +1621,7 @@ struct HubHomeView: View {
         }
     }
 
-    private func newChat(workspaceID: String? = nil, action: HubNativeChatRequest.ComposerAction? = nil) async {
+    private func newChat(projectID: String? = nil, action: HubNativeChatRequest.ComposerAction? = nil) async {
         guard !model.sending, !creatingChat, let api = chatAPI() else { return }
         // Started from Home or from the drawer over a chat; give up if the user opens another chat meanwhile.
         let startedIn = selectedChat?.request.id
@@ -1562,15 +1629,23 @@ struct HubHomeView: View {
         let initialDraft = action == nil ? "" : model.draft
         defer { creatingChat = false }
         do {
-            let id = try await api.createChat(workspaceID: workspaceID)
+            let id = try await api.createChat()
             guard chatAPI() === api else { return }
+            if let projectID {
+                // The chat joins the project before its first message, so its
+                // first reply already sees the project's instructions and note.
+                let snapshot = try await api.changeProject(.add(id: projectID, sessionID: id))
+                guard chatAPI() === api else { return }
+                projects = snapshot.projects
+                workspaceChats[id] = HubConversationChoice(sessionId: id, title: "New chat", updatedAt: Date().timeIntervalSince1970 * 1_000)
+            }
             guard selectedChat?.request.id == startedIn else { return }
             if action != nil, model.draft == initialDraft { model.draft = "" }
             showChat(HubNativeChatRequest(choice: HubConversationChoice(sessionId: id, title: "New chat", updatedAt: 0),
                                           initialDraft: initialDraft, composerAction: action))
         } catch {
             if chatAPI() === api {
-                if workspaceID != nil { workspaceError = "Could not open a chat in this workspace." }
+                if projectID != nil { projectError = "Could not open a chat in this project." }
                 else { model.sendError = "Could not open a new conversation. Try again when connected." }
             }
         }
@@ -3058,4 +3133,94 @@ struct HubFileDocument: FileDocument {
         self.bytes = bytes
     }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: bytes) }
+}
+
+/// A project's name, instructions and shared note. Every chat in the project
+/// reads the instructions and note; HUB keeps the note up to date as you work.
+struct HubProjectSettingsView: View {
+    let project: HubProject
+    let save: (HubProjectChange) async throws -> HubProjectsSnapshot?
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var instructions: String
+    @State private var note: String
+    @State private var saving = false
+    @State private var failure: String?
+
+    init(project: HubProject, save: @escaping (HubProjectChange) async throws -> HubProjectsSnapshot?) {
+        self.project = project
+        self.save = save
+        _name = State(initialValue: project.name)
+        _instructions = State(initialValue: project.instructions)
+        _note = State(initialValue: project.note)
+    }
+
+    private var changed: Bool {
+        name.trimmingCharacters(in: .whitespacesAndNewlines) != project.name || instructions != project.instructions || note != project.note
+    }
+
+    var body: some View {
+        NavigationView {
+            HubForm {
+                Section("Name") {
+                    TextField("Project name", text: $name).accessibilityIdentifier("hub.project.name")
+                }
+                Section {
+                    TextEditor(text: $instructions)
+                        .frame(minHeight: 120)
+                        .accessibilityIdentifier("hub.project.instructions")
+                } header: { Text("Instructions") } footer: {
+                    Text("How HUB should work in this project, for example \"Answer in Turkish, be formal, the deadline is 1 March.\"")
+                }
+                Section {
+                    TextEditor(text: $note)
+                        .font(.callout.monospaced())
+                        .frame(minHeight: 220)
+                        .accessibilityIdentifier("hub.project.note")
+                } header: { Text("Project note") } footer: {
+                    Text("Shared memory for every chat in this project. HUB updates it as decisions and progress come up.")
+                }
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Folder on your PC").font(.subheadline)
+                        Text(project.folder).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    HStack {
+                        Text("Chats")
+                        Spacer()
+                        Text("\(project.sessionIds.count)").foregroundStyle(.secondary)
+                    }
+                }
+                if let failure {
+                    Section { Text(failure).foregroundStyle(.red).font(.footnote) }
+                }
+            }
+            .navigationTitle(project.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await commit() } }
+                        .disabled(!changed || saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .interactiveDismissDisabled(changed)
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private func commit() async {
+        saving = true
+        defer { saving = false }
+        failure = nil
+        do {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed != project.name { _ = try await save(.rename(id: project.id, name: trimmed)) }
+            if instructions != project.instructions { _ = try await save(.instructions(id: project.id, text: instructions)) }
+            if note != project.note { _ = try await save(.note(id: project.id, text: note)) }
+            dismiss()
+        } catch {
+            failure = "Could not save. Check the connection and try again; your text is still here."
+        }
+    }
 }

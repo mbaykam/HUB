@@ -983,6 +983,49 @@ public struct HubWorkspaceItem: Decodable, Identifiable {
     }
 }
 
+/// A named group of chats with shared instructions and a shared note. HUB
+/// keeps its files in a folder it creates on the PC; the phone never picks one.
+public struct HubProject: Decodable, Identifiable, Equatable {
+    public let id: String
+    public let name: String
+    public let folder: String
+    public let instructions: String
+    public let sessionIds: [String]
+    public let note: String
+
+    public init(id: String, name: String, folder: String, instructions: String, sessionIds: [String], note: String) {
+        self.id = id; self.name = name; self.folder = folder
+        self.instructions = instructions; self.sessionIds = sessionIds; self.note = note
+    }
+}
+
+public struct HubProjectsSnapshot: Decodable {
+    public let revision: Int
+    public let projects: [HubProject]
+}
+
+public enum HubProjectChange {
+    case create(name: String)
+    case rename(id: String, name: String)
+    case instructions(id: String, text: String)
+    case note(id: String, text: String)
+    case remove(id: String)
+    case add(id: String, sessionID: String)
+    case detach(sessionID: String)
+
+    var command: [String: String] {
+        switch self {
+        case .create(let name): return ["action": "create", "name": name]
+        case .rename(let id, let name): return ["action": "rename", "id": id, "name": name]
+        case .instructions(let id, let text): return ["action": "instructions", "id": id, "instructions": text]
+        case .note(let id, let text): return ["action": "note", "id": id, "content": text]
+        case .remove(let id): return ["action": "remove", "id": id]
+        case .add(let id, let sessionID): return ["action": "add", "id": id, "sessionId": sessionID]
+        case .detach(let sessionID): return ["action": "detach", "sessionId": sessionID]
+        }
+    }
+}
+
 public struct HubWorkspaceDirectory: Decodable {
     public struct Entry: Decodable, Identifiable {
         public let name: String
@@ -3401,6 +3444,20 @@ public final class HubConversationAPI {
             byID[item.sessionId] = HubConversationChoice(sessionId: item.sessionId,
                 title: title.isEmpty ? "Untitled conversation" : String(title.prefix(240)), updatedAt: item.updatedAt)
         }
+    }
+
+    // MARK: Projects
+
+    public func projects() async throws -> HubProjectsSnapshot {
+        let data = try await requestData("api/hub/projects", headers: ["x-hub-projects": "1"], maxBytes: 8_388_608)
+        return try JSONDecoder().decode(HubProjectsSnapshot.self, from: data)
+    }
+
+    public func changeProject(_ change: HubProjectChange) async throws -> HubProjectsSnapshot {
+        let body = try JSONSerialization.data(withJSONObject: change.command)
+        guard body.count <= 60_000 else { throw HubAttachmentError.tooLarge }
+        let data = try await requestData("api/hub/projects", headers: ["x-hub-projects": "1"], body: body, maxBytes: 8_388_608)
+        return try JSONDecoder().decode(HubProjectsSnapshot.self, from: data)
     }
 
     // MARK: Archived chats

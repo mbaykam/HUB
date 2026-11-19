@@ -235,6 +235,33 @@ final class HubWorkspaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testProjectsSitAtTheTopOfTheHistoryPanelWithoutFolderPicking() {
+        let app = readFixtureApp(extraArguments: [])
+        let history = app.buttons["Chat history"]
+        XCTAssertTrue(history.waitForExistence(timeout: 20))
+        history.tap()
+        let project = app.buttons["hub.project.7d3c4d0e-0d55-4e43-9d1e-5a0c4c1f2b11"]
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["hub.projects.new"].exists)
+        XCTAssertFalse(app.buttons["New workspace"].exists)
+        // Projects come before the dated history.
+        let chat = app.buttons["hub.history.fixture-work"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 5))
+        XCTAssertLessThan(project.frame.minY, chat.frame.minY)
+        project.tap()
+        XCTAssertTrue(app.buttons["hub.history.fixture-project-chat"].waitForExistence(timeout: 5))
+        capture("Projects")
+        app.buttons["Options for Thesis"].tap()
+        app.buttons["Instructions and note"].tap()
+        XCTAssertTrue(app.textViews["hub.project.note"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Folder on your PC"].exists)
+        capture("Project instructions and note")
+        app.buttons["Cancel"].tap()
+        app.buttons["hub.projects.toggle"].tap()
+        XCTAssertFalse(project.waitForExistence(timeout: 1))
+    }
+
+    @MainActor
     func testNativeChatStopWaitsForTheTurnToEndAndKeepsTheDraft() {
         let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture"])
         let history = app.buttons["Chat history"]
