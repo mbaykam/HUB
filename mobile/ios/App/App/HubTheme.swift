@@ -137,11 +137,14 @@ struct HubBackdrop: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.hubBackdropEnergy) private var energy
     @Environment(\.scenePhase) private var scenePhase
+    /// UI tests drive fixtures and wait for the app to settle; a still wash
+    /// keeps them deterministic.
+    private static let fixtures = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--hub-native-") }
 
     var body: some View {
         ZStack {
             Color(uiColor: HubWorkspacePalette.background)
-            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: reduceMotion || scenePhase != .active)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 12, paused: reduceMotion || scenePhase != .active || Self.fixtures)) { context in
                 HubAuroraWash(time: context.date.timeIntervalSinceReferenceDate, energy: energy, dark: scheme == .dark)
             }
             .animation(.easeInOut(duration: 1.6), value: energy)
@@ -155,8 +158,9 @@ struct HubBackdrop: View {
     }
 }
 
-/// Four large, very soft color fields drawn as radial gradients. Each spans
-/// most of the screen, so together they read as one continuous wash.
+/// Four large, very soft color fields. Each is drawn once at a fixed size and
+/// only moved and scaled afterwards, so every frame is cheap compositing work
+/// rather than re-rendering full-screen gradients.
 struct HubAuroraWash: View {
     let time: Double
     let energy: Double
@@ -176,26 +180,32 @@ struct HubAuroraWash: View {
     ]
 
     var body: some View {
-        Canvas { context, size in
+        GeometryReader { proxy in
+            let size = proxy.size
+            let span = max(size.width, size.height)
             let speed = 0.045 + energy * 0.06
             let strength = (dark ? 0.34 : 0.22) + energy * 0.08
-            let span = max(size.width, size.height)
-            for field in Self.fields {
-                let t = time * speed + field.phase
-                // Slow Lissajous paths and a gentle breathing size.
-                let center = CGPoint(x: (field.x + field.drift * sin(t)) * size.width,
-                                     y: (field.y + field.drift * 0.8 * sin(t * 0.73 + 1.3)) * size.height)
-                let radius = span * field.size * (0.85 + 0.12 * sin(t * 0.61 + field.phase)) / 2
-                let color = Color(hue: field.hue, saturation: field.saturation, brightness: field.brightness)
-                let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-                context.fill(Path(ellipseIn: rect), with: .radialGradient(
-                    Gradient(stops: [
-                        .init(color: color.opacity(strength), location: 0),
-                        .init(color: color.opacity(strength * 0.45), location: 0.45),
-                        .init(color: color.opacity(0), location: 1),
-                    ]),
-                    center: center, startRadius: 0, endRadius: radius))
+            ZStack(alignment: .topLeading) {
+                ForEach(Self.fields.indices, id: \.self) { index in
+                    let field = Self.fields[index]
+                    let t = time * speed + field.phase
+                    let diameter = span * field.size
+                    let color = Color(hue: field.hue, saturation: field.saturation, brightness: field.brightness)
+                    Circle()
+                        .fill(RadialGradient(stops: [
+                            .init(color: color.opacity(strength), location: 0),
+                            .init(color: color.opacity(strength * 0.45), location: 0.45),
+                            .init(color: color.opacity(0), location: 1),
+                        ], center: .center, startRadius: 0, endRadius: diameter / 2))
+                        .frame(width: diameter, height: diameter)
+                        // Slow Lissajous paths and a gentle breathing size.
+                        .scaleEffect(0.85 + 0.12 * sin(t * 0.61 + field.phase))
+                        .position(x: (field.x + field.drift * sin(t)) * size.width,
+                                  y: (field.y + field.drift * 0.8 * sin(t * 0.73 + 1.3)) * size.height)
+                }
             }
+            .frame(width: size.width, height: size.height)
         }
+        .allowsHitTesting(false)
     }
 }
