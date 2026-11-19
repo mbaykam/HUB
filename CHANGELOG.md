@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.19
+
+- Chat screenshots carry their position in the conversation, so the iPhone app keeps each one between the messages around it after the reply finishes.
+
 ## 1.10.18
 
 - Projects: group chats under a named project. Creating one only asks for a name; HUB makes its folder in Documents\HUB Projects on this PC.

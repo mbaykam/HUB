@@ -165,7 +165,7 @@ function windowsDesktopPort(): AgentBrowserProcessPort | undefined {
 /** Resolve only an image reference committed by this tool in this session. */
 export function conversationScreenshots(events: readonly any[]) {
   const pending = new Set<string>();
-  const images = new Map<string, {id: string; name: string; turn: number; attachment: any}>();
+  const images = new Map<string, {id: string; name: string; turn: number; seq?: number; attachment: any}>();
   for (const event of events) {
     if (event.type === "tool/call" && [toolName, desktopToolName].includes(event.data?.name) && typeof event.data.callId === "string") pending.add(event.data.callId);
     if (event.type !== "tool/result") continue;
@@ -176,7 +176,9 @@ export function conversationScreenshots(events: readonly any[]) {
         !/^sha256:[a-f0-9]{64}$/u.test(attachment.attachmentId) || !/^image\/(png|jpeg|webp)$/u.test(attachment.mediaType) ||
         !Number.isSafeInteger(attachment.bytes) || attachment.bytes < 1 || attachment.bytes > maxBytes) continue;
     const id = createHash("sha256").update(result.toolCallId).digest("hex");
-    images.set(id, {id, name, turn: event.data.turn, attachment});
+    // seq lets the phone keep the image between the messages around it once
+    // the reply has finished, instead of moving it after the whole reply.
+    images.set(id, {id, name, turn: event.data.turn, ...(Number.isSafeInteger(event.seq) ? {seq: event.seq} : {}), attachment});
   }
   return [...images.values()];
 }
