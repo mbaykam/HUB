@@ -602,22 +602,37 @@ struct HubLiveChatView: View {
                                     .font(.footnote)
                                     .foregroundStyle(message.role == "command-error" ? Color.red : Color.secondary)
                                 } else {
+                                    // Screenshots stay where they were taken: before the turn's
+                                    // first message, or after the message sent just before them.
+                                    if let turn = message.turn,
+                                       messages.first(where: { $0.turn == turn && $0.role == "assistant" })?.id == message.id {
+                                        ForEach(screenshots.filter {
+                                            $0.turn == turn && HubChatScreenshot.anchor(of: $0, in: messages) == nil
+                                        }) { screenshot in
+                                            screenshotImage(screenshot)
+                                        }
+                                    }
                                     if !message.text.isEmpty {
                                         HubMarkdownText(source: message.text)
+                                            .contextMenu {
+                                                Button { UIPasteboard.general.string = message.text } label: {
+                                                    Label("Copy message", systemImage: "doc.on.doc")
+                                                }
+                                            }
                                     }
                                     chatPhotos(message)
+                                    ForEach(screenshots.filter {
+                                        $0.turn == message.turn && HubChatScreenshot.anchor(of: $0, in: messages) == message.id
+                                    }) { screenshot in
+                                        screenshotImage(screenshot)
+                                    }
                                     if let turn = message.turn, messages.last(where: { $0.turn == turn && $0.role == "assistant" })?.id == message.id {
                                         if turn != currentTurn, let entries = activity[turn], !entries.isEmpty {
                                             transcriptActivity(entries)
                                         }
-                                        ForEach(screenshots.filter { $0.turn == turn }) { screenshot in
-                                            screenshotImage(screenshot)
-                                        }
                                         if turn != currentTurn {
                                             messageActions(message, usage: usage[turn])
                                         }
-                                    } else if !message.text.isEmpty {
-                                        copyMessage(message.text)
                                     }
                                 }
                             }
@@ -701,17 +716,8 @@ struct HubLiveChatView: View {
         }
     }
 
-    private func copyMessage(_ text: String) -> some View {
-        Button { UIPasteboard.general.string = text } label: {
-            Image(systemName: "doc.on.doc").frame(width: 44, height: 36)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Copy message")
-    }
-
     private func messageActions(_ message: HubChatMessage, usage: HubChatTurnUsage?) -> some View {
         HStack(spacing: 6) {
-            if !message.text.isEmpty { copyMessage(message.text) }
             if let sequence = Int(message.id) {
                 Button {
                     Task { await branch(sequence) }

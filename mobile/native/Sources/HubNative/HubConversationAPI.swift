@@ -854,6 +854,22 @@ public struct HubChatScreenshot: Decodable, Identifiable {
     public let id: String
     public let name: String
     public let turn: Int
+    /// Where in the conversation it was taken (HUB 1.10.19+), so it stays
+    /// between the messages around it after the reply finishes.
+    public let seq: Int?
+
+    public init(id: String, name: String, turn: Int, seq: Int? = nil) {
+        self.id = id; self.name = name; self.turn = turn; self.seq = seq
+    }
+
+    /// The assistant message an image follows: the last one of its turn sent
+    /// before the image was taken. Nil means it comes before the turn's first
+    /// message (or, without a position, after the turn's last message).
+    public static func anchor(of screenshot: HubChatScreenshot, in messages: [HubChatMessage]) -> String? {
+        let turnMessages = messages.filter { $0.role == "assistant" && $0.turn == screenshot.turn }
+        guard let seq = screenshot.seq else { return turnMessages.last?.id }
+        return turnMessages.last { (Int($0.id) ?? .max) < seq }?.id
+    }
 }
 
 public struct HubConversationApp: Decodable, Identifiable {
