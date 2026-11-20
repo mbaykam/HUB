@@ -192,8 +192,14 @@ export class KnowledgeStore {
     if(found.kind==="conversation")try{const archived=await this.archive.read(id);assets=[...new Map(archived.messages.flatMap(m=>m.assets??[]).map(a=>[a.id,a])).values()];
       // A HUB chat's photos and screenshots live in its session; the phone loads them from there.
       if(typeof (archived as any).sessionId==="string"&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test((archived as any).sessionId))sessionId=(archived as any).sessionId;}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+    // A brain note shows the pictures of the chats it was learned from.
+    const sourceSessions:string[]=[];
+    if(found.kind!=="conversation")for(const conversationId of new Set((sourceMap[id]?.sources??[]).map(s=>s.conversationId).filter((c):c is string=>typeof c==="string"))){
+      if(sourceSessions.length>=5)break;
+      try{const archived:any=await this.archive.read(conversationId);if(typeof archived.sessionId==="string"&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(archived.sessionId))sourceSessions.push(archived.sessionId);}catch{/* archive gone */}
+    }
     return { id, title: found.title, permalink: found.permalink, hash: found.hash, modifiedAt: found.modifiedAt,kind:found.kind,protected:found.protected, content: found.body,
-      ...(assets?{assets}:{}),...(sessionId?{sessionId}:{}),
+      ...(assets?{assets}:{}),...(sessionId?{sessionId}:{}),...(sourceSessions.length?{sourceSessions}:{}),
       backlinks: graph.nodes.filter(n => incoming.has(n.id)),
       links: graph.nodes.filter(n => outgoing.has(n.id)), sources: (sourceMap[id]?.sources??[]).map(({conversationId,...ref})=>({...ref,...(conversationId&&graph.nodes.some(n=>n.id===conversationId&&n.kind==="conversation")?{conversationId}:{})})) };
   }

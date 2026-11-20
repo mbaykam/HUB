@@ -31,7 +31,8 @@ export function installDailyUseWeb(ctx:any){
         const headers=items.some((s:any)=>s.origin==="subagent"&&(s.running||now-s.updatedAt<24*60*60000))&&query?.listSessions?await query.listSessions(signal):[],parents=new Map<string,string>(headers.map(({header}:any)=>[header.id,header.parentSession]));
         let inspected=0;
         for(const s of items){if(isKnowledgeEvaluation(s.sessionId)||s.blank||archived.has(s.sessionId))continue;const v=s.projections?.values??{},parentId=parents.get(s.sessionId)??v.subagent?.parentSessionId??v.subagent?.parentSession;
-          const toolWork=(v.sessionStats?.toolMs??0)>0,recent=!s.running&&toolWork&&now-s.updatedAt<24*60*60000;
+          // Any chat used in the last day counts as recent work, not only ones that ran tools.
+          const recent=!s.running&&now-s.updatedAt<24*60*60000;
           if(recent&&ended.get(s.sessionId)?.version!==s.updatedAt&&inspected++<25){const observation=await query.observeSession(s.sessionId,{signal,projectionMode:"none"});try{const end=[...observation.events].reverse().find((e:any)=>e.type==="turn/end");ended.set(s.sessionId,{version:s.updatedAt,kind:end?.data?.reason?.kind??"unknown"});if(ended.size>2000)ended.delete(ended.keys().next().value!);}finally{observation[Symbol.dispose]();}}
           const kind=ended.get(s.sessionId)?.kind,completed=recent&&kind==="completed",failed=recent&&kind==="error",stopped=recent&&["aborted","interrupted"].includes(kind??"");
           if(s.running||recent||s.origin==="subagent")byId[s.sessionId]={title:v.title,running:s.running,completed,failed,stopped,origin:s.origin,parentId,updatedAt:s.updatedAt,blank:s.blank};
@@ -83,7 +84,12 @@ export function installDailyUseWeb(ctx:any){
           for(const event of events){if(event.type!=="user/message"&&event.type!=="assistant/message")continue;
             for(const block of event.data?.message?.content??[]){const a=block?.type==="image"?block.attachment:undefined;
               if(a&&typeof a.attachmentId==="string"&&!seen.has(a.attachmentId)&&photos.length<60){seen.add(a.attachmentId);photos.push({attachmentId:a.attachmentId,mediaType:a.mediaType,bytes:a.bytes,...(typeof a.name==="string"?{name:a.name}:{})});}}}
-          send(200,{artifacts:apps.map(({content,...item})=>item),screenshots:screenshots.map(({attachment,...item})=>item),photos});return;}
+          // Web photos the assistant showed as Markdown images.
+          const imageLinks:{url:string;alt:string}[]=[],links=new Set<string>();
+          for(const event of events){if(event.type!=="assistant/message")continue;
+            for(const block of event.data?.message?.content??[]){if(block?.type!=="text"||typeof block.text!=="string")continue;
+              for(const m of block.text.matchAll(/!\[([^\]]{0,200})\]\((https:\/\/[^)\s]{1,1000})\)/g)){if(!links.has(m[2])&&imageLinks.length<30){links.add(m[2]);imageLinks.push({url:m[2],alt:m[1]});}}}}
+          send(200,{artifacts:apps.map(({content,...item})=>item),screenshots:screenshots.map(({attachment,...item})=>item),photos,imageLinks});return;}
         const app=apps.find(f=>f.id===id);if(!app){send(404,{error:"artifact-unavailable"});return;}
         send(200,{document:artifactDocument(app,files),name:app.name,at:app.at});
       }finally{observation[Symbol.dispose]();}
