@@ -354,13 +354,14 @@ struct HubLivingBrainView: View {
     @State private var selected: String?
     @State private var refit = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack(alignment: .bottom) {
             if let simulation = holder.simulation {
                 HubBrainSurface(simulation: simulation, interactive: interactive, allowsPan: allowsPan,
-                                running: active && scenePhase == .active, padding: interactive ? 36 : 22,
+                                // Not scenePhase: in this UIKit-hosted app it never reads .active.
+                                // The display link stops by itself in the background.
+                                running: active, padding: interactive ? 36 : 22,
                                 selectedID: selected, refit: refit, tap: tap)
                 if let selected, let node = simulation.nodes.first(where: { $0.id == selected }) {
                     selectionChip(node)
@@ -604,7 +605,15 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
         focus = selectedID.flatMap { id in simulation.nodes.firstIndex { $0.id == id } }
         lit = Set(focus.map { [$0] + simulation.neighbors[$0] } ?? [])
         buildLayers()
+        drawStill()
         wake()
+    }
+
+    /// Places every layer once, so the graph shows even before (or without) animation.
+    private func drawStill() {
+        guard let simulation, bounds.width > 0, bounds.height > 0 else { return }
+        if !userMoved { simulation.fit(bounds.size, padding: padding, immediate: simulation.scale == 0) }
+        _ = render(simulation)
     }
 
     func refit(token: Int) {
@@ -624,6 +633,7 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
         for layer in [linkLayer, nodeLayer, labelLayer] { layer.frame = bounds }
         for path in [mesh, similar, highlight] { path.frame = bounds }
         for spoke in spokes.values { spoke.frame = bounds }
+        drawStill()
         wake()
     }
 
