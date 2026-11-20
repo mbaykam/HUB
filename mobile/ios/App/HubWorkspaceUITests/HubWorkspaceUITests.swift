@@ -25,11 +25,11 @@ final class HubWorkspaceUITests: XCTestCase {
         // Home keeps Knowledge compact: no graph controls, just the domain strip.
         XCTAssertFalse(app.buttons["Zoom in"].exists)
         add.tap()
-        XCTAssertTrue(app.buttons["Choose character"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Research…"].exists)
+        XCTAssertTrue(app.buttons["Research…"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Choose character"].exists)
         XCTAssertTrue(app.buttons["Files"].exists)
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-        let menuClosed = { XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Choose character"]) }
+        let menuClosed = { XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Research…"]) }
         if XCTWaiter.wait(for: [menuClosed()], timeout: 4) != .completed {
             capture("Menu still open")
             if add.isHittable { add.tap() }

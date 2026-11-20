@@ -64,6 +64,7 @@ struct HubModelSlotsView: View {
     @State private var failed = false
     @State private var attempt = 0
     @State private var notice: String?
+    @State private var speedOpen = false
 
     var body: some View {
         HubList {
@@ -109,6 +110,13 @@ struct HubModelSlotsView: View {
             }
         }
         .navigationTitle("Models")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { speedOpen = true } label: { Image(systemName: "speedometer") }
+                    .accessibilityLabel("Model speed")
+            }
+        }
+        .sheet(isPresented: $speedOpen) { HubModelSpeedView() }
         .task(id: attempt) { await load() }
         .refreshable { await load() }
     }

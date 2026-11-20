@@ -603,6 +603,8 @@ struct HubHomeView: View {
         }
         .onChange(of: selectedChat?.request.choice.sessionId) { id in
             HubNotifications.shared.visibleSessionID = id
+            // Back on Home: the chat just used belongs in Your work.
+            if id == nil { refreshWork() }
         }
         .onChange(of: model.connection) { connection in
             if connection == .needsSetup || connection == .signInRequired {
@@ -776,7 +778,7 @@ struct HubHomeView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             } else {
                                 HubLivingBrainView(graph: value, height: Self.brainHeight, interactive: true, active: homeVisible,
-                                                   projects: projects ?? [], openRecord: selectKnowledgeNode,
+                                                   projects: projects ?? [], allowsPan: false, openRecord: selectKnowledgeNode,
                                                    openProject: { id in projectToEdit = projects?.first { $0.id == id } },
                                                    openDomain: { id in
                                                        showKnowledge()
@@ -1007,6 +1009,16 @@ struct HubHomeView: View {
     private func knowledgeStat(_ value: Int, label: String) -> some View {
         (Text(value, format: .number).fontWeight(.semibold) + Text(" \(label)").foregroundColor(HubWorkspacePalette.muted))
             .accessibilityElement(children: .combine)
+    }
+
+    private func refreshWork() {
+        guard model.connection == .connected, let api = chatAPI() else { return }
+        Task {
+            if let value = try? await api.workActivity(), chatAPI() === api {
+                model.work = value
+                model.workUnavailable = false
+            }
+        }
     }
 
     private func workSummary(_ work: HubHomeWork) -> some View {
@@ -1880,8 +1892,8 @@ struct HubHomeView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        if let sessionID = note.sessionId, let api = chatAPI() {
-                            HubConversationPicturesStrip(api: api, sessionID: sessionID)
+                        if !note.pictureSessions.isEmpty, let api = chatAPI() {
+                            HubConversationPicturesStrip(api: api, sessionIDs: note.pictureSessions)
                         }
                         HubMarkdownText(source: note.content)
                         noteFiles(note.content)
@@ -2272,7 +2284,6 @@ struct HubHomeView: View {
                     startChatAction("Commands & skills", icon: "terminal", action: .commands)
                     startChatAction("Files", icon: "paperclip", action: .files)
                     startChatAction("Photos", icon: "photo", action: .photos)
-                    startChatAction("Choose character", icon: "person.crop.circle", action: .characters)
                     startChatAction("Research…", icon: "magnifyingglass", action: .research)
                     startChatAction("Research tasks", icon: "list.bullet.rectangle", action: .researchTasks)
                     startChatAction("Instructions", icon: "doc.text", action: .instructions)
@@ -3265,31 +3276,45 @@ struct HubProjectSettingsView: View {
         }
     }
 }
-/// The pictures of a chat archive in Knowledge: photos shared in the chat and
-/// screenshots HUB took, side by side. Each opens full size.
+/// The pictures that belong with a Knowledge record: photos shared in its
+/// chats and screenshots HUB took there, side by side. Each opens full size.
 struct HubConversationPicturesStrip: View {
     let api: HubConversationAPI
-    let sessionID: String
-    @State private var photos: [HubChatMessage.Photo] = []
-    @State private var screenshots: [HubChatScreenshot] = []
+    let sessionIDs: [String]
+    private struct Picture: Identifiable {
+        enum Source { case photo(HubChatMessage.Photo), screenshot(HubChatScreenshot), web(URL) }
+        let id: String
+        let session: String
+        let source: Source
+    }
+    @State private var pictures: [Picture] = []
 
     var body: some View {
         Group {
-            if !photos.isEmpty || !screenshots.isEmpty {
+            if !pictures.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Pictures · \(photos.count + screenshots.count)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("Pictures · \(pictures.count)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(photos) { photo in
-                                HubChatImageView(name: photo.name ?? "Photo", canSave: true) {
-                                    try await api.chatPhoto(sessionID: sessionID, photo: photo)
-                                }
-                                .frame(width: 220, height: 165)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            }
-                            ForEach(screenshots) { shot in
-                                HubChatImageView(name: shot.name, canSave: true) {
-                                    try await api.chatScreenshot(sessionID: sessionID, id: shot.id)
+                            ForEach(pictures) { picture in
+                                Group {
+                                    switch picture.source {
+                                    case .photo(let photo):
+                                        HubChatImageView(name: photo.name ?? "Photo", canSave: true) {
+                                            try await api.chatPhoto(sessionID: picture.session, photo: photo)
+                                        }
+                                    case .screenshot(let shot):
+                                        HubChatImageView(name: shot.name, canSave: true) {
+                                            try await api.chatScreenshot(sessionID: picture.session, id: shot.id)
+                                        }
+                                    case .web(let url):
+                                        AsyncImage(url: url) { phase in
+                                            if let image = phase.image { image.resizable().scaledToFill() }
+                                            else if phase.error != nil { Image(systemName: "photo").foregroundStyle(.secondary) }
+                                            else { ProgressView() }
+                                        }
+                                        .background(HubWorkspacePalette.panel)
+                                    }
                                 }
                                 .frame(width: 220, height: 165)
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -3300,10 +3325,15 @@ struct HubConversationPicturesStrip: View {
                 .accessibilityIdentifier("hub.knowledge.pictures")
             }
         }
-        .task(id: sessionID) {
-            guard let artifacts = try? await api.chatArtifacts(sessionID: sessionID), !Task.isCancelled else { return }
-            photos = artifacts.photos ?? []
-            screenshots = artifacts.screenshots
+        .task(id: sessionIDs) {
+            var found: [Picture] = []
+            for session in sessionIDs.prefix(5) {
+                guard let artifacts = try? await api.chatArtifacts(sessionID: session), !Task.isCancelled else { continue }
+                found += (artifacts.photos ?? []).map { Picture(id: session + "/" + $0.attachmentId, session: session, source: .photo($0)) }
+                found += artifacts.screenshots.map { Picture(id: session + "/" + $0.id, session: session, source: .screenshot($0)) }
+                found += (artifacts.imageLinks ?? []).compactMap { link in URL(string: link.url).map { Picture(id: session + "/" + link.url, session: session, source: .web($0)) } }
+            }
+            if !Task.isCancelled { pictures = Array(found.prefix(30)) }
         }
     }
 }

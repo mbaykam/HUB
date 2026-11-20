@@ -190,6 +190,15 @@ final class HubBrainSimulation: @unchecked Sendable {
             let speed = (vx[i] * vx[i] + vy[i] * vy[i]).squareRoot()
             if speed > 6 { vx[i] *= 6 / speed; vy[i] *= 6 / speed }
             x[i] += vx[i]; y[i] += vy[i]
+            // Never lose a dot: a broken value goes back near its domain, and
+            // nothing drifts far away.
+            if !x[i].isFinite || !y[i].isFinite {
+                let home = node.hub.map { (x[$0], y[$0]) } ?? (0, 0)
+                x[i] = (home.0.isFinite ? home.0 : 0) + Self.unit(node.id + "rx") * 20 - 10
+                y[i] = (home.1.isFinite ? home.1 : 0) + Self.unit(node.id + "ry") * 20 - 10
+                vx[i] = 0; vy[i] = 0
+            }
+            x[i] = min(1_500, max(-1_500, x[i])); y[i] = min(1_500, max(-1_500, y[i]))
         }
         // Cools to a full stop; a drag warms it up again.
         alpha = pinned == nil ? alpha * 0.975 : max(alpha, 0.25)
@@ -199,12 +208,14 @@ final class HubBrainSimulation: @unchecked Sendable {
     /// Eases the camera toward showing every node inside `size`.
     func fit(_ size: CGSize, padding: CGFloat, immediate: Bool) {
         guard !nodes.isEmpty, size.width > 0, size.height > 0 else { return }
-        var minX = Double.infinity, maxX = -Double.infinity, minY = Double.infinity, maxY = -Double.infinity
-        for i in nodes.indices {
-            minX = min(minX, x[i]); maxX = max(maxX, x[i]); minY = min(minY, y[i]); maxY = max(maxY, y[i])
-        }
-        let target = min((size.width - padding * 2) / CGFloat(max(60, maxX - minX)),
-                         (size.height - padding * 2) / CGFloat(max(60, maxY - minY)))
+        // Frame the bulk of the graph: a few far-off dots must not shrink everything else to a speck.
+        let xs = x.filter(\.isFinite).sorted(), ys = y.filter(\.isFinite).sorted()
+        guard !xs.isEmpty, !ys.isEmpty else { return }
+        let cut = xs.count > 40 ? xs.count / 40 : 0
+        let minX = xs[cut], maxX = xs[xs.count - 1 - cut], minY = ys[cut], maxY = ys[ys.count - 1 - cut]
+        let raw = min((size.width - padding * 2) / CGFloat(max(60, maxX - minX)),
+                      (size.height - padding * 2) / CGFloat(max(60, maxY - minY)))
+        let target = min(4, max(0.35, raw.isFinite ? raw : 1))
         let targetCenter = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
         if immediate || scale == 0 {
             scale = target; center = targetCenter
@@ -216,7 +227,7 @@ final class HubBrainSimulation: @unchecked Sendable {
     }
 
     func screen(_ i: Int, size: CGSize, zoom: CGFloat, pan: CGSize) -> CGPoint {
-        let s = scale * zoom
+        let s = (scale > 0 ? scale : 1) * zoom
         return CGPoint(x: size.width / 2 + pan.width + (CGFloat(x[i]) - center.x) * s,
                        y: size.height / 2 + pan.height + (CGFloat(y[i]) - center.y) * s)
     }
@@ -262,6 +273,8 @@ struct HubLivingBrainView: View {
     var nodeLimit = 220
     /// HUB projects, drawn as their own markers next to their chats.
     var projects: [HubProject] = []
+    /// One-finger panning; off on Home, where the graph should not wander off screen.
+    var allowsPan = true
     var openRecord: (String) -> Void
     var openProject: ((String) -> Void)? = nil
     var openDomain: ((String) -> Void)? = nil
@@ -301,6 +314,8 @@ struct HubLivingBrainView: View {
                 }
             }
             .task(id: signature) { await build() }
+            // Coming back to Home redraws and reframes the graph.
+            .onChange(of: active) { visible in if visible { userMoved = false; zoom = 1; pan = .zero; wakeToken += 1 } }
             // After a touch the graph settles within a few seconds; then it stops redrawing.
             .task(id: wakeToken) {
                 awake = true
@@ -497,7 +512,7 @@ struct HubLivingBrainView: View {
             let target = simulation.world(value.location, size: size, zoom: scale, pan: pan)
             simulation.x[index] = target.0
             simulation.y[index] = target.1
-        } else if let start = dragStart {
+        } else if allowsPan, let start = dragStart {
             pan = CGSize(width: start.width + value.translation.width, height: start.height + value.translation.height)
         }
     }

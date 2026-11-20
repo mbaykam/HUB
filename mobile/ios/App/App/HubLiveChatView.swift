@@ -65,6 +65,10 @@ struct HubLiveChatView: View {
     @State private var openHelper: HubHomeWork.Helper?
     /// Emails the assistant wrote for the user to send from their mail app.
     @State private var mailDrafts: [HubMailState.Draft] = []
+    @State private var speedSentAt: Date?
+    @State private var speedFirstAt: Date?
+    @State private var speedModel: String?
+    @State private var speedOpen = false
     @State private var latestVisible = false
     @State private var bottomRequest = 0
     @State private var characterPickerOpen = false
@@ -169,6 +173,23 @@ struct HubLiveChatView: View {
         }
         .task(id: snapshot?.running) { await loadModelSlots() }
         .task { await followHelpers() }
+        // Speed meter: first words, then end of the reply.
+        .onChange(of: snapshot?.partial.isEmpty == false || snapshot?.messages.last?.role == "assistant") { started in
+            if started, speedSentAt != nil, speedFirstAt == nil { speedFirstAt = Date() }
+        }
+        .onChange(of: snapshot?.running) { running in
+            guard running == false, let sent = speedSentAt else { return }
+            let first = speedFirstAt ?? Date()
+            let turn = snapshot?.latestMessageTurn
+            let tokens = turn.flatMap { snapshot?.usageByTurn[$0]?.output }
+            if let model = speedModel {
+                var speed = HubModelSpeed.load()
+                speed.record(model: model, sentAt: sent, firstTokenAt: first, endedAt: Date(), outputTokens: tokens)
+                speed.save()
+            }
+            speedSentAt = nil; speedFirstAt = nil
+        }
+        .sheet(isPresented: $speedOpen) { HubModelSpeedView() }
         .sheet(isPresented: $helpersOpen) {
             HubHelpersSheet(api: api, helpers: helpers, opened: openHelper, stop: stopHelper)
         }
@@ -386,6 +407,10 @@ struct HubLiveChatView: View {
                         modelPickerOpen = true
                     } label: { Label("Model & reasoning", systemImage: "cpu") }
                     .disabled(connectionLost || snapshot?.running == true || awaitingAfter != nil)
+                    Button {
+                        composerFocused = false
+                        speedOpen = true
+                    } label: { Label("Model speed", systemImage: "speedometer") }
                     Button {
                         composerFocused = false
                         renameDraft = renamedTitle ?? snapshot?.title ?? chat.title
@@ -1044,10 +1069,6 @@ struct HubLiveChatView: View {
                     .disabled(sending || connectionLost || attachmentBusy || deliveryUncertain)
                     Button {
                         composerFocused = false
-                        characterPickerOpen = true
-                    } label: { Label("Choose character", systemImage: "person.crop.circle") }
-                    Button {
-                        composerFocused = false
                         researchMode = .new
                     } label: { Label("Research…", systemImage: "magnifyingglass") }
                     .disabled(!fileDrafts.isEmpty)
@@ -1367,6 +1388,10 @@ struct HubLiveChatView: View {
         bottomRequest += 1
         sending = true
         error = nil
+        if snapshot?.running != true {
+            speedSentAt = Date(); speedFirstAt = nil
+            speedModel = (selectedModel ?? snapshot?.model)?.model
+        }
         Task {
             defer { sending = false }
             do {
@@ -2798,5 +2823,48 @@ struct HubMailDraftCard: View {
         .padding(12)
         .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityIdentifier("hub.chat.mailDraft.\(draft.id)")
+    }
+}
+/// Each model's speed as measured on this phone: how long until the first
+/// words arrive, and how fast it writes after that.
+struct HubModelSpeedView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var speed = HubModelSpeed.load()
+
+    var body: some View {
+        NavigationView {
+            HubList {
+                let summaries = speed.summaries
+                if summaries.isEmpty {
+                    Text("Send a few messages and each model's speed appears here.").foregroundStyle(.secondary)
+                }
+                ForEach(summaries) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.model).font(.headline)
+                        HStack(spacing: 18) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(format: "%.1f s", item.firstToken)).font(.title3.weight(.semibold)).monospacedDigit()
+                                Text("First words").font(.caption).foregroundStyle(.secondary)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.tokensPerSecond.map { String(format: "%.0f", $0) } ?? "–").font(.title3.weight(.semibold)).monospacedDigit()
+                                Text("Tokens / second").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(item.count) replies").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                Section {
+                } footer: {
+                    Text("Measured on this phone from the last 20 replies of each model: the wait includes the network and any tools the model used before writing. Typical values, not a benchmark.")
+                }
+            }
+            .navigationTitle("Model speed")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .navigationViewStyle(.stack)
     }
 }

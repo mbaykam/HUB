@@ -621,6 +621,14 @@ public struct HubKnowledgeNote: Decodable {
     public let sources: [Source]?
     /// For a HUB chat archive: the chat it came from, to show its pictures.
     public let sessionId: String?
+    /// For a brain note: the chats it was learned from (HUB 1.10.23+).
+    public let sourceSessions: [String]?
+
+    /// Chats whose pictures belong with this record.
+    public var pictureSessions: [String] {
+        var seen = Set<String>()
+        return ([sessionId].compactMap { $0 } + (sourceSessions ?? [])).filter { seen.insert($0).inserted }
+    }
 }
 
 public struct HubKnowledgeOriginalSource: Decodable {
@@ -1162,6 +1170,9 @@ public struct HubChatArtifacts: Decodable {
     public let artifacts: [HubConversationApp]?
     /// Photos shared in the chat's messages (HUB 1.10.22+).
     public let photos: [HubChatMessage.Photo]?
+    /// Web photos the assistant showed in replies (HUB 1.10.23+).
+    public struct ImageLink: Decodable, Equatable { public let url: String; public let alt: String }
+    public let imageLinks: [ImageLink]?
 }
 
 public struct HubChatPhoto {
