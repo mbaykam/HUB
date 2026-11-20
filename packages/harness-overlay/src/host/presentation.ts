@@ -54,7 +54,7 @@ export class PresentationRuntime {
     });
     let offPrompt: () => void;
     try {
-      offPrompt = agent.ctx.systemPrompt.section({ name: "hub:visual-explanations", order: 1001, text: "Use hub_present proactively when a diagram, chart, simulation or interactive utility materially helps. Follow shared canvas.md: html is passive, vega uses interpreted signals, app supports inline JavaScript in an offline isolated frame. Supply complete content and its own controls. Each call replaces this conversation's canvas. Keep voice natural. Success means available, not seen." + reactiveGuidance });
+      offPrompt = agent.ctx.systemPrompt.section({ name: "hub:visual-explanations", order: 1001, text: "Use hub_present only when the user asks for a visual or the answer truly needs a chart, adjustable value or interactive tool; plans, designs and lists stay in text, and real photos beat sketches. If unrequested, offer in one line instead of building. Follow shared canvas.md: html is passive, vega uses interpreted signals, app supports inline JavaScript in an offline isolated frame. Supply complete content and its own controls. Each call replaces this conversation's canvas. Keep voice natural. Success means available, not seen." + reactiveGuidance });
     } catch (error) { offTool(); throw error; }
     this.#sessions.set(agent.id, state);
     state.release = () => {

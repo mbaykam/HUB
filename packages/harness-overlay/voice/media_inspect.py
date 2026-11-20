@@ -47,20 +47,42 @@ def acquire(url, directory):
         if (info.get('duration') or 0) > 180:
             return 'Video exceeds three minutes; attach the relevant clip'
 
-    with YoutubeDL(dict(quiet=True, logger=Quiet(), noplaylist=True, playlistend=1,
-                        plugin_dirs=[], cachedir=False, socket_timeout=8, retries=1,
-                        extractor_retries=0, fragment_retries=0, max_filesize=MAX_BYTES,
-                        format='best[height<=720][ext=mp4]/best[height<=720]',
-                        outtmpl=str(directory/'source.%(ext)s'), restrictfilenames=True,
-                        progress_hooks=[bounded], match_filter=duration,
-                        enable_file_urls=False, external_downloader={}, postprocessors=[])) as downloader:
-        info = downloader.extract_info(canonical_url(url), download=True)
-        if not info or info.get('_type') in ('playlist', 'multi_video'):
-            raise ValueError('Choose one video or attach its file')
-        path = Path(downloader.prepare_filename(info)).resolve()
-        if path.parent != directory.resolve() or not path.is_file():
-            raise ValueError('The platform did not provide a downloadable video')
-        return path, str(info.get('title') or 'Public video')[:200]
+    def fetch(fmt, name):
+        with YoutubeDL(dict(quiet=True, logger=Quiet(), noplaylist=True, playlistend=1,
+                            plugin_dirs=[], cachedir=False, socket_timeout=8, retries=1,
+                            extractor_retries=0, fragment_retries=0, max_filesize=MAX_BYTES,
+                            format=fmt, outtmpl=str(directory/(name + '.%(ext)s')), restrictfilenames=True,
+                            progress_hooks=[bounded], match_filter=duration,
+                            enable_file_urls=False, external_downloader={}, postprocessors=[])) as downloader:
+            try:
+                info = downloader.extract_info(source, download=True)
+            except Exception as error:
+                if 'format is not available' in str(error):
+                    return None, None
+                raise
+            if not info or info.get('_type') in ('playlist', 'multi_video'):
+                raise ValueError('Choose one video or attach its file')
+            path = Path(downloader.prepare_filename(info)).resolve()
+            if path.parent != directory.resolve():
+                raise ValueError('The platform did not provide a downloadable video')
+            # yt-dlp skips files over max_filesize without raising.
+            return (path if path.is_file() else None), str(info.get('title') or 'Public video')[:200]
+
+    source = canonical_url(url)
+    # One small file with picture and sound when the platform offers it.
+    path, title = fetch('best[height<=720][ext=mp4]/best[height<=720]', 'source')
+    if path:
+        return path, None, title
+    # Instagram often offers only full-size combined files (over the limit)
+    # plus separate small picture and sound tracks: take those separately.
+    video, title = fetch('bv[height<=960][ext=mp4]/bv[height<=960]/wv', 'source-video')
+    if video:
+        audio, _ = fetch('ba[ext=m4a]/ba', 'source-audio')
+        return video, audio, title
+    path, title = fetch('worst[ext=mp4]/worst', 'source')
+    if path:
+        return path, None, title
+    raise ValueError('The platform did not provide a video under 25 MB; attach a shorter clip')
 
 
 def inspect(job):
@@ -71,14 +93,17 @@ def inspect(job):
     start, seconds = float(job.get('startSeconds', 0)), float(job.get('durationSeconds', 60))
     if not math.isfinite(start) or not math.isfinite(seconds) or not 0 <= start <= 3600 or not 1 <= seconds <= MAX_SECONDS:
         raise ValueError('Choose a start time and a clip of 1–120 seconds')
-    path, title = (acquire(job['url'], output) if job.get('url') else (Path(job['inputPath']).resolve(), 'Attached media'))
-    if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= MAX_BYTES:
-        raise ValueError('Use a regular video/audio attachment under 25 MB')
+    path, sound, title = (acquire(job['url'], output) if job.get('url') else (Path(job['inputPath']).resolve(), None, 'Attached media'))
+    def load(item):
+        if item.is_symlink() or not item.is_file() or not 0 < item.stat().st_size <= MAX_BYTES:
+            raise ValueError('Use a regular video/audio attachment under 25 MB')
+        return item.read_bytes()
     # Decode bytes, with external protocols disabled. A media file cannot load
     # an HLS playlist, local companion file or remote URL through the decoder.
-    data = path.read_bytes()
-    def container():
-        media = av.open(io.BytesIO(data), mode='r', options={'protocol_whitelist': 'pipe', 'enable_drefs': '0', 'use_absolute_path': '0'})
+    data = load(path)
+    sound_data = load(sound) if sound else data
+    def container(source=None):
+        media = av.open(io.BytesIO(source or data), mode='r', options={'protocol_whitelist': 'pipe', 'enable_drefs': '0', 'use_absolute_path': '0'})
         if not set(media.format.name.split(',')) & {'mov','mp4','m4a','3gp','3g2','mj2','matroska','webm','wav','mp3','ogg','flac'}:
             media.close()
             raise ValueError('Unsupported media container; attach MP4, WebM, WAV or MP3')
@@ -111,7 +136,7 @@ def inspect(job):
                     frames.append({'file':name,'seconds':round(at,3)})
                     break
     audio, audio_present = [], False
-    with container() as media:
+    with container(sound_data) as media:
         if media.streams.audio:
             audio_present = True
             stream = media.streams.audio[0]

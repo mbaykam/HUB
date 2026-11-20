@@ -68,7 +68,7 @@ test("chats in a project get the project prompt and can update the note through 
   let section, tool;
   const ctx = {
     systemPrompt: {section(s) { section = s; return () => {}; }},
-    tools: {register(t) { tool = t; return () => {}; }},
+    tools: {register(t) { if (t.name === "hub_project_note") tool = t; return () => {}; }},
     webServer: {register() { return () => {}; }},
     connection: {requestRejection() { return undefined; }},
   };
@@ -86,4 +86,58 @@ test("chats in a project get the project prompt and can update the note through 
   assert.match(store.readNoteNow(p), /Flights booked for 3 May/);
   await assert.rejects(tool.execute({action: "read"}, {agent: {session: {header: {id: "session-other"}}}}), /not part of a project/);
   await dispose();
+});
+
+const chatHarness = async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hub-chat-tools-"));
+  const tools = {}, created = [], prompts = [];
+  const sessionController = {
+    async create({sessionId}) { created.push(sessionId); return {sessionId}; },
+    async prompt(request) { prompts.push(request); return {accepted: true}; },
+  };
+  const ctx = {
+    systemPrompt: {section() { return () => {}; }},
+    tools: {register(t) { tools[t.name] = t; return () => {}; }},
+    webServer: {register() { return () => {}; }},
+    connection: {requestRejection() { return undefined; }},
+  };
+  const characters = {store: {root: join(dir, "hub-characters")}, host: {sessionController}};
+  installProjects(ctx, characters, join(dir, "HUB Projects"));
+  await characters.projects.load();
+  const chat = (id, source = "user") => ({agent: {session: {header: {id}, snapshotEvents: () => [{type: "user/message", data: {source: {kind: source}}}]}}});
+  return {tools, created, prompts, store: characters.projects, chat};
+};
+
+test("a chat can open a new chat in its own project when the user asks", async () => {
+  const {tools, created, prompts, store, chat} = await chatHarness();
+  const p = (await store.change({action: "create", name: "Noodle stand"})).projects[0];
+  await store.change({action: "add", id: p.id, sessionId: "session-a"});
+  const result = await tools.hub_new_chat.execute({message: "Plan the menu prices."}, chat("session-a"));
+  assert.equal(result.project, "Noodle stand");
+  assert.equal(created.length, 1);
+  assert.equal(prompts[0].sessionId, result.sessionId);
+  assert.match(prompts[0].content[0].text, /Plan the menu prices\./);
+  assert.ok(store.projectFor(result.sessionId)?.id === p.id);
+  const loose = await tools.hub_new_chat.execute({message: "Unrelated.", project: "none"}, chat("session-a"));
+  assert.equal(store.projectFor(loose.sessionId), undefined);
+  await assert.rejects(tools.hub_new_chat.execute({message: "x", project: "Missing"}, chat("session-a")), /No project called/);
+  await assert.rejects(tools.hub_new_chat.execute({message: "x"}, chat("session-a", "plugin")), /only when the user asks/);
+  await assert.rejects(tools.hub_new_chat.execute({message: "x"}, {agent: {session: {header: {id: "sub", origin: "subagent"}, snapshotEvents: () => []}}}), /Only a chat/);
+});
+
+test("a chat can create projects and move chats in and out of them", async () => {
+  const {tools, store, chat} = await chatHarness();
+  const made = await tools.hub_projects.execute({action: "create", name: "Thesis", instructions: "Be formal.", add_this_chat: true}, chat("session-t"));
+  assert.equal(made.project, "Thesis");
+  assert.equal(store.projectFor("session-t")?.name, "Thesis");
+  await tools.hub_projects.execute({action: "create", name: "Garden"}, chat("session-t"));
+  await tools.hub_projects.execute({action: "add", project: "garden", sessionId: "session-g"}, chat("session-t"));
+  assert.equal(store.projectFor("session-g")?.name, "Garden");
+  const listed = await tools.hub_projects.execute({action: "list"}, chat("session-t"));
+  assert.equal(listed.thisChatProject, "Thesis");
+  assert.equal(listed.projects.length, 2);
+  await tools.hub_projects.execute({action: "detach"}, chat("session-t"));
+  assert.equal(store.projectFor("session-t"), undefined);
+  await tools.hub_projects.execute({action: "rename", project: "Garden", name: "Balcony garden"}, chat("session-t"));
+  assert.ok(store.snapshot().projects.some(p => p.name === "Balcony garden"));
 });

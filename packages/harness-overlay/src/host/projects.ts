@@ -186,6 +186,7 @@ export function installProjects(ctx: any, characters: any, root = join(homedir()
       return {saved: true, project: project.name, characters: next.length};
     },
   });
+  const chatTools = installChatTools(ctx, characters, store, ready, projectOf, output);
   const offRoute = ctx.webServer.register({kind: "exact", path: "/api/hub/projects", async handler(req: IncomingMessage, res: ServerResponse) {
     const send = (code: number, data: unknown) => { res.writeHead(code, {"content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff"}); res.end(JSON.stringify(data)); };
     const rejected = ctx.connection.requestRejection(req);
@@ -202,5 +203,93 @@ export function installProjects(ctx: any, characters: any, root = join(homedir()
       send(200, {revision: snapshot.revision, projects: await Promise.all(snapshot.projects.map(async p => ({...p, note: await store.readNote(p).catch(() => "")})))});
     } catch (error) { send(409, {error: "project-operation-failed", detail: (error as Error).message.slice(0, 300)}); }
   }});
-  return async () => { offRoute(); offTool(); offPrompt(); await ready.catch(() => {}); };
+  return async () => { offRoute(); offTool(); chatTools(); offPrompt(); await ready.catch(() => {}); };
+}
+
+/** True when the newest message in this chat came from the user, not a tool or automation. */
+export function userAskedNow(agent: any): boolean {
+  const events = agent?.session?.snapshotEvents?.() ?? [];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.type === "turn/end") return false;
+    if (event.type === "user/message") return event.data?.source?.kind === "user";
+  }
+  return false;
+}
+
+/** Find a project by id or (case-insensitive) name. */
+export function findProject(projects: HubProject[], ref: unknown): HubProject | undefined {
+  if (typeof ref !== "string" || !ref.trim()) return undefined;
+  const key = ref.trim().toLocaleLowerCase();
+  return projects.find(p => p.id === ref) ?? projects.find(p => p.name.toLocaleLowerCase() === key);
+}
+
+/**
+ * Lets a chat open new chats and organise projects for the user. These act
+ * only on the user's own request in the current turn, from a top-level chat.
+ */
+function installChatTools(ctx: any, characters: any, store: ProjectsStore, ready: Promise<void>, projectOf: (header: any) => HubProject | undefined, output: any) {
+  const controller = () => characters.host?.sessionController ?? ctx.sessionController;
+  const topLevel = (exec: any) => {
+    const header = exec.agent?.session?.header;
+    if (!header || header.origin === "subagent" || typeof header.id !== "string" || header.id.startsWith("hub-")) throw Error("Only a chat with the user can do this.");
+    if (!userAskedNow(exec.agent)) throw Error("Do this only when the user asks for it in this conversation.");
+    return header;
+  };
+  const opened = new Map<string, number>();
+  const offNew = ctx.tools.register({
+    name: "hub_new_chat",
+    description: "Open a new, separate chat for the user when they ask (\"start a new chat about X\", \"continue this in a fresh chat\"). message is the first message of the new chat: a self-contained brief with everything it needs, because the new chat cannot see this one. project: a project name or id to put it in, \"same\" (default: this chat's project, if any) or \"none\". The new chat starts working on the brief right away and appears in the user's chat list. Tell the user it was opened; do not do its work here too.",
+    parameters: {type: "object", properties: {message: {type: "string"}, project: {type: "string"}}, required: ["message"], additionalProperties: false},
+    output,
+    async execute(args: any, exec: any) {
+      const header = topLevel(exec);
+      const brief = cleanText(args.message, 12_000, "The message").trim();
+      if (!brief) throw Error("Write the first message for the new chat");
+      const turnKey = `${header.id}:${(exec.agent.session.snapshotEvents?.() ?? []).filter((e: any) => e.type === "user/message").length}`;
+      const count = (opened.get(turnKey) ?? 0) + 1;
+      if (count > 3) throw Error("At most three new chats per request");
+      await ready;
+      const ref = typeof args.project === "string" ? args.project.trim() : "same";
+      const target = ref.toLowerCase() === "none" ? undefined : ref.toLowerCase() === "same" || !ref ? projectOf(header) : findProject(store.snapshot().projects, ref);
+      if (ref && !["same", "none"].includes(ref.toLowerCase()) && !target) throw Error(`No project called "${ref}". Use hub_projects list, or create it first.`);
+      const sessions = controller();
+      if (!sessions?.create || !sessions?.prompt) throw Error("This HUB cannot open chats from a conversation.");
+      const sessionId = "session-" + randomUUID();
+      const created = await sessions.create({sessionId});
+      if (created?.sessionId !== sessionId) throw Error("HUB could not open the chat");
+      opened.set(turnKey, count);
+      if (target) await store.change({action: "add", id: target.id, sessionId});
+      await sessions.prompt({requestId: randomUUID(), sessionId, mode: "queue", content: [{type: "text", text: `(Opened by HUB from another chat at your request.)\n\n${brief}`}]}, AbortSignal.timeout(30_000));
+      return {opened: true, sessionId, project: target?.name ?? null};
+    },
+  });
+  const offProjects = ctx.tools.register({
+    name: "hub_projects",
+    description: "Organise the user's projects (named groups of chats with shared instructions and a note), when the user asks. Actions: list; create (name, optional instructions; add_this_chat to put this chat in it); add (project, optional sessionId — default this chat — moves the chat into the project); detach (optional sessionId, default this chat — takes it out of its project); rename (project, name); instructions (project, instructions — replaces them). project is a name or id. Removing a whole project is left to the user in the app.",
+    parameters: {type: "object", properties: {action: {enum: ["list", "create", "add", "detach", "rename", "instructions"]}, project: {type: "string"}, name: {type: "string"}, instructions: {type: "string"}, sessionId: {type: "string"}, add_this_chat: {type: "boolean"}}, required: ["action"], additionalProperties: false},
+    output,
+    async execute(args: any, exec: any) {
+      await ready;
+      const summary = () => store.snapshot().projects.map(p => ({id: p.id, name: p.name, chats: p.sessionIds.length, instructions: p.instructions.slice(0, 300)}));
+      if (args.action === "list") return {projects: summary(), thisChatProject: exec.agent ? projectOf(exec.agent.session.header)?.name ?? null : null};
+      const header = topLevel(exec);
+      const need = () => { const p = findProject(store.snapshot().projects, args.project); if (!p) throw Error(`No project called "${args.project ?? ""}". Use list to see them.`); return p; };
+      const session = typeof args.sessionId === "string" && args.sessionId ? args.sessionId : header.id;
+      switch (args.action) {
+        case "create": {
+          const after = await store.change({action: "create", name: args.name ?? args.project, instructions: args.instructions});
+          const project = after.projects[0];
+          if (args.add_this_chat) await store.change({action: "add", id: project.id, sessionId: header.id});
+          return {created: true, project: project.name, folder: project.folder, thisChatAdded: !!args.add_this_chat};
+        }
+        case "add": { const p = need(); await store.change({action: "add", id: p.id, sessionId: session}); return {added: true, project: p.name, sessionId: session}; }
+        case "detach": { const was = store.projectFor(session); await store.change({action: "detach", sessionId: session}); return {detached: !!was, project: was?.name ?? null}; }
+        case "rename": { const p = need(); await store.change({action: "rename", id: p.id, name: args.name}); return {renamed: true, from: p.name, to: cleanName(args.name)}; }
+        case "instructions": { const p = need(); await store.change({action: "instructions", id: p.id, instructions: args.instructions ?? ""}); return {saved: true, project: p.name}; }
+        default: throw Error("Unknown action");
+      }
+    },
+  });
+  return () => { offNew(); offProjects(); };
 }

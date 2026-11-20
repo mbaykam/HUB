@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.20
+
+- Instagram reels can be watched again: when the only combined video is over 25 MB, HUB takes the small picture and sound tracks separately.
+- Chats build visuals and small apps only when asked or when a chart or adjustable tool is really needed; plans and designs stay in text, and real photos are preferred over sketches.
+- A chat can open a new chat with a starting brief (hub_new_chat) and create projects or move chats into and out of them (hub_projects), when the user asks.
 ## 1.10.19
 
 - Chat screenshots carry their position in the conversation, so the iPhone app keeps each one between the messages around it after the reply finishes.
