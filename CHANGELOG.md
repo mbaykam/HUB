@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.24
+
+- Schedule replaces Tasks, modelled on OpenClaw: reminders (your own words sent at a time, no AI run), jobs HUB runs at a time, and a heartbeat that checks a short list during your active hours and stays silent unless something needs you. HUB manages them with one tool, hub_schedule.
+- One identity in every chat: no character roster, the iPhone app is "this app", one working folder, and tools that duplicate another (other web searches and browsers, extra delegation and scheduling routes, ask_user_question) are no longer offered in chat.
+- Camofox is the main web search and falls back from Google to Bing and DuckDuckGo when an engine blocks. Research runs several searches and reads at once, retries a blocked page through a plain fetch and an archived copy, and follows a plan, read, find-gaps loop.
+- Profile facts you state are added to USER.md automatically, dated and sourced; each can be undone on its own. Notes can be updated in place (hub_knowledge_update_note) instead of duplicated.
+- Automatic recall searches with your latest message, not the start of the chat, so it stops pulling the same notes into every reply.
+- HUB can ask you to share your screen or camera (hub_request_share); the chat shows a button that starts the call.
+- Skills whose header was rewritten as YAML by another editor load again.
 ## 1.10.23
 
 - Knowledge notes list the chats they were learned from, so the iPhone shows those chats' photos, screenshots and web pictures with the note.

@@ -45,7 +45,18 @@ export class KnowledgeSkills {
     const path=await this.store.skillPath(name),info=await lstat(path).catch(e=>{if(e.code!=="ENOENT")throw e;return undefined;});
     if(!info)return undefined;if(info.isSymbolicLink()||!info.isFile()||info.size>40000)throw Error("Skill must be a regular Markdown file under 40 KB");
     const raw=await readFile(path,"utf8"),front=raw.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)?.[0];if(!front)throw Error("Skill metadata is missing");
-    const field=(key:string)=>{const value=front.match(new RegExp(`^${key}: (.+)$`,"m"))?.[1];return value?JSON.parse(value):undefined;};
+    // HUB writes one JSON value per line; Obsidian and other editors rewrite
+    // the header as YAML (bare strings, "- item" lists, nested keys). Read both.
+    const field=(key:string)=>{
+      const line=new RegExp(`^${key}:[ \\t]*(.*)$`,"m").exec(front);if(!line)return undefined;
+      const value=line[1]!.trim(),unquote=(v:string)=>v.trim().replace(/^(["'])(.*)\1$/,"$2");
+      if(value){try{return JSON.parse(value);}catch{return unquote(value);}}
+      const block:string[]=[];
+      for(const l of front.slice(line.index+line[0].length).split(/\r?\n/).slice(1)){if(/^(\s+\S|-\s)/.test(l))block.push(l);else break;}
+      if(!block.length)return undefined;
+      if(block.every(l=>/^\s*-\s/.test(l)))return block.map(l=>unquote(l.replace(/^\s*-\s+/,"")));
+      return Object.fromEntries(block.map(l=>{const [k,...v]=l.trim().split(/:\s*/);return [k,unquote(v.join(": "))];}));
+    };
     const id=field("hub_id"),title=field("title"),description=field("description"),requiredTools=field("required_tools")??[];
     if(typeof id!=="string"||typeof title!=="string"||typeof description!=="string"||!Array.isArray(requiredTools)||!requiredTools.every(t=>typeof t==="string"))throw Error("Skill metadata is invalid");
     if((await this.store.admission.blocked()).has(id))return undefined;

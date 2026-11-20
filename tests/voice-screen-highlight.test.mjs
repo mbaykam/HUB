@@ -29,6 +29,6 @@ test('the assistant marks the shared screen through hub_highlight_screen',async(
  const tool=tools.get('hub_highlight_screen');assert.ok(tool);
  const value=await tool.execute({regions:[{x:0.5,y:0.5,width:0.2,height:0.1,label:'Wi-Fi'}],note:'Tap Wi-Fi'},{agent,signal:new AbortController().signal});
  assert.equal(value.shown,true);assert.deepEqual(marks[0],{sessionId:'chat',regions:[{x:0.5,y:0.5,width:0.2,height:0.1,label:'Wi-Fi'}],note:'Tap Wi-Fi'});
- await assert.rejects(tool.execute({regions:[]},{agent,signal:new AbortController().signal}),/one to six/);
+ await assert.rejects(tool.execute({regions:[]},{agent,signal:new AbortController().signal}),/at least one region/);
  off();assert.equal(tools.size,0);
 });

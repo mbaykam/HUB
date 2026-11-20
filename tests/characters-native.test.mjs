@@ -372,8 +372,9 @@ test('model identity and natural conversation handoffs stay consistent without a
   assert.match(JSON.stringify(main.requests[0]),/powered by main\/mock/);assert.doesNotMatch(JSON.stringify(main.requests[0]),/powered by legacy\/old-qwen/);
   assert.ok(main.requests[0].tools.every(tool=>!tool.name.startsWith('mcp__hub_memory__')));const blockedLegacy=await parent.ctx.tools.execute({agent:parent,name:'mcp__hub_memory__search_notes',arguments:{},callId:'legacy-denied',signal:AbortSignal.timeout(1000)});assert.equal(blockedLegacy.isError,true);assert.equal(legacyRan,false);
   assert.match(JSON.stringify(fast.requests[0]),/powered by fast\/mock/);assert.match(JSON.stringify(fast.requests[0]),/Mode: voice/);
-  assert.match(main.requests[0].system,new RegExp(`ID: ${voice.id} · Role: voice assistant · Display name: Vera`));
-  assert.match(main.requests[0].system,/names are editable display labels/);
+  // One assistant: no roster of characters, one identity whatever the model.
+  assert.doesNotMatch(main.requests[0].system,/Display name: Vera|Configured characters/);
+  assert.match(main.requests[0].system,/one assistant with one memory, whichever model answers/);
   assert.match(main.requests[0].system,/Shared instruction proof/);assert.match(fast.requests[0].system,/Shared instruction proof/);
   assert.match(main.requests[0].system,/User fixture version one/);assert.match(fast.requests[0].system,/User fixture version one/);
   assert.match(main.requests[0].system,/Memory index revision one/);assert.match(fast.requests[0].system,/Memory index revision one/);
@@ -390,7 +391,7 @@ test('model identity and natural conversation handoffs stay consistent without a
   assert.deepEqual(JSON.parse(inspected.record.json),JSON.parse(JSON.stringify(fast.requests[1],(k,v)=>k==='signal'?undefined:v)),'Inspector must match the native adapter request, including shared instructions, tool schemas and conversation history');
   assert.match(fast.requests[1].system,/Memory index revision two/);assert.doesNotMatch(fast.requests[1].system,/Memory index revision one/);
   assert.match(fast.requests[1].system,/User fixture version two/);assert.doesNotMatch(fast.requests[1].system,/User fixture version one/);
-  assert.match(fast.requests[1].system,/Mode: voice/);assert.match(fast.requests[1].system,new RegExp(`ID: ${voice.id} · Role: voice assistant · Display name: Nova`));
+  assert.match(fast.requests[1].system,/Mode: voice/);
   await say(parent,'Let your main assistant take over our conversation again.');assert.equal(main.requests.length,2);assert.equal(characters.store.selected(parent.id).name,'HUB');
   const newChat=ctx.agentLoop.create('new-default-chat',{provider:'legacy',model:'old-qwen'});await say(newChat,'Hello');assert.equal(main.requests.length,3);assert.equal(deployment.provider,'main');
   await say(newChat,'Show the fixture plan as a visual.');

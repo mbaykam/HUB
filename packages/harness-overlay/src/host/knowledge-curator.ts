@@ -39,6 +39,8 @@ export function withLifeCategories<T extends {categories?:string[]}>(settings:T)
 export const KNOWLEDGE_CALL_TIMEOUT_MS=5*60_000;
 export class KnowledgeCurator {
   readonly store: KnowledgeStore; private generate:Generate; readonly lifetime=new AbortController();
+  /** Runs after a pass that proposed profile facts (HUB applies them itself). */
+  afterOrganize?:()=>Promise<void>;
   settings:KnowledgeSettings={...defaults};jobs=new Map<string,KnowledgeJob>(); status="starting"; embedding="Keyword search · local embeddings not installed";
   recalls:KnowledgeRecall[]=[];
   private costs:Record<string,number>={}; private running?:Promise<void>; private writing:Promise<unknown>=Promise.resolve();
@@ -267,6 +269,7 @@ export class KnowledgeCurator {
       job.revision=revision??undefined;await this.saveJob(job);
       await atomicJson(join(this.store.root,"distill",`${digest(job.id)}.json`),{plan,source:job.source,settings});
       phase="memory extraction";const memories=await distillMemories(this.store,plan,job.source,settings,job.pass?.id??job.id);job.memoryRevision=memories.revision;job.memoryCount=memories.count;
+      if(plan.profileSuggestions?.length)void this.afterOrganize?.().catch(()=>{});
       job.status="done";job.outcome=revision?"organized":plan.decision==="archive-only"?"archive-only":"skipped";job.revision=revision??undefined;job.error=undefined;job.reason=plan.reason;this.status="ready";
     }catch(error){
       const e=error as {code?:string;message?:string;revision?:string};if(phase==="model response")this.checked=undefined;

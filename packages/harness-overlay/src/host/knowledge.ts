@@ -32,6 +32,20 @@ import {installVoiceMediaContext} from "./voice-media.ts";
 
 // Native hooks/tool registries remain the permission boundary. Curator itself
 // has no tools; ordinary recall goes through the conversation-owned registry.
+/** Read and write the profile targets (USER.md, a character's instructions). */
+function profilePorts(characters:any){
+  return {
+    read:async(target:string)=>{
+      if(target==="USER.md"){await characters.instructions.refresh();const content=characters.instructions.text(target);return {content,hash:digest(content)};}
+      const c=characters.store.snapshot().characters.find((c:any)=>"character:"+c.id===target);if(!c)throw Error("Character no longer exists");return {content:c.instructions,hash:digest(c.instructions)};
+    },
+    save:async(target:string,hash:string,content:string)=>{
+      if(target==="USER.md")await characters.instructions.save(target,hash,content);
+      else{const state=characters.store.snapshot(),c=state.characters.find((c:any)=>"character:"+c.id===target);if(!c||digest(c.instructions)!==hash)throw Error("Character instructions changed");await characters.store.change({action:"save",revision:state.revision,character:{...c,instructions:content}},(c:any)=>characters.validate(c));}
+    },
+  };
+}
+
 export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:string;captureSince:number;embeddingPython?:string;embeddingRoot?:string}) {
   const store=new KnowledgeStore(config.vault,config.knowledgeRoot??join(process.env.DSH_HOME??join(homedir(),".dsh"),"hub-knowledge"));
   const backups=new KnowledgeBackups(store);
@@ -61,6 +75,22 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   if(embeddings){store.rank=(query,notes,limit)=>embeddings.rank(query,notes,limit);store.similarities=notes=>embeddings.layout(notes);void embeddings.start().then(()=>{curator.embedding=embeddings.status;}).catch(()=>{curator.embedding="Local embeddings unavailable · keyword search active";});}
   const imports=new KnowledgeImportBatches(store,source=>curator.enqueue(source),()=>curator.settings);
   const ready=curator.initialize().then(async()=>{await imports.recover();});void ready.catch(()=>{curator.status="unavailable";});
+  // Facts the user states about themself go into the always-loaded profile
+  // (USER.md) by themselves, as the user asked; each one is dated, sourced and
+  // undoable from Knowledge. Suggestions from before this started stay for review.
+  const autoProfileSince=async()=>{
+    const path=join(store.root,"profile-auto.json");
+    try{const since=JSON.parse(await readFile(path,"utf8")).since;if(Number.isFinite(since))return since as number;}catch{}
+    const since=Date.now();await atomicJson(path,{since});return since;
+  };
+  void ready.then(autoProfileSince).catch(()=>{});
+  curator.afterOrganize=async()=>{
+    const characters=ctx.hubCharacters??ctx.get?.("hubCharacters");if(!characters)return;
+    const since=await autoProfileSince(),snapshot=await store.organization.snapshot();
+    for(const s of snapshot.suggestions)if(s.target==="USER.md"&&s.status==="pending"&&s.at>=since){
+      try{await store.organization.decideProfile(s.id,"approve",profilePorts(characters));}catch{}
+    }
+  };
   ctx.effect(()=>installKnowledgeSkills(ctx,store,ready),"HUB memory index and portable skills");
   ctx.effect(()=>installMediaInspection(ctx,store,ready),"HUB local media evidence");
   async function enrich(source:any,snapshot:readonly any[],event:any,sessionId:string){
@@ -170,12 +200,29 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       const revision=await store.apply({decision:"update-knowledge",reason:"Explicitly requested note",changes:[{id,title:args.title,body:args.content,expectedHash:null,links:[]}]},source);
       return JSON.stringify({id,title:args.title,revision,saved:true});
     }});
-    mounts.set(agent.id,()=>{off();offRead();offWrite();});
+    // Editing in place keeps one note per subject: a new fact replaces the old
+    // line instead of a second copy. Each edit is journaled and can be undone.
+    const offUpdate=agent.ctx.tools.register({name:"hub_knowledge_update_note",description:"Update an existing note in place (not chat archives) when the user asks you to change, correct or add to it, or when what they just told you replaces a fact in it. Read it first with hub_knowledge_read; send the complete new content, keeping everything that is still true and replacing outdated lines rather than appending contradictions. Optional title renames it. The previous version can be restored with Undo in Knowledge.",parameters:{type:"object",properties:{id:{type:"string"},content:{type:"string"},title:{type:"string"}},required:["id","content"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any)=>{
+      await ready;assertKnowledgeTool(ctx,agent,"hub_knowledge_write_note");
+      if(!currentTurnHasUserRequest(agent))throw Error("Updating a note needs a request from the user in this turn");
+      if(typeof args.id!=="string"||typeof args.content!=="string"||args.content.trim().length<12||args.content.length>16000||redactKnowledgeSecrets(args.content)!==args.content||args.title!==undefined&&(typeof args.title!=="string"||args.title.trim().length<2||args.title.length>120))throw Error("Invalid note update or credentials in note");
+      const note=(await store.scan()).find((n:any)=>n.id===args.id);
+      if(!note)throw Error("Note not found; search for it and use its id");
+      if(note.protected)throw Error("Original conversations are read-only; update a note instead");
+      const source={id:"requested-note-edit-"+randomUUID(),sessionId:agent.id,channel:"pwa",completedAt:Date.now(),content:"User requested a note update."};
+      const revision=await store.apply({decision:"update-knowledge",reason:"Requested note update",changes:[{id:note.id,title:(args.title??note.title).trim(),body:args.content,expectedHash:note.hash,links:[]}]},source);
+      return JSON.stringify({id:note.id,title:(args.title??note.title).trim(),revision,saved:true});
+    }});
+    mounts.set(agent.id,()=>{off();offRead();offWrite();offUpdate();});
   },{global:true});
   const offDisposed=ctx.on("agent/disposed",({agent}:any)=>{mounts.get(agent.id)?.();mounts.delete(agent.id);},{global:true});
   const offRecall=ctx.on("agent/pre-step",async({agent,messages,signal}:any,next:any)=>{
     const decision=await next();if(decision.kind==="reject"||signal.aborted||agent.id.startsWith("hub-memory-"))return decision;
-    const query=messages.filter((m:any)=>m.source?.kind==="user").flatMap((m:any)=>m.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text??"")??[]).join(" ").slice(0,2000);if(!query.trim())return decision;
+    // Search with what the user just said (newest first), not the start of the
+    // chat: joining every message and cutting at 2000 characters kept only the
+    // oldest ones, so each reply recalled the same notes.
+    const said=messages.filter((m:any)=>m.source?.kind==="user").map((m:any)=>(m.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text??"")??[]).join(" ").trim()).filter(Boolean);
+    const latest=said.at(-1)??"",query=(latest.length<80&&said.length>1?latest+" "+said.at(-2):latest).slice(0,2000);if(!query.trim())return decision;
     const topicContext=knowledgeRecallContext(agent.session.snapshotEvents());
     const trace=(status:"used"|"empty"|"unavailable",notes:any[]=[],bytes=0,coverage?:{indexed:number;omitted:number;complete:boolean})=>curator.recordRecall({sessionId:agent.id,at:Date.now(),query:query.slice(0,140),status,notes:notes.map(n=>({id:n.id,title:n.title,reason:n.reason??"search"})),context:{bytes,estimatedTokens:Math.ceil(bytes/3),measurement:"estimated-from-utf8"},...(coverage?{coverage}:{})});
     try{
@@ -283,10 +330,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
       }else if(command.action==="profile-review"){
         const characters=ctx.hubCharacters??ctx.get?.("hubCharacters");if(!characters)throw Error("Character instructions unavailable");
         if(!["approve","reject","undo"].includes(command.decision))throw Error("Invalid profile decision");
-        send(res,200,await store.organization.decideProfile(command.id,command.decision,{read:async target=>{
-          if(target==="USER.md"){await characters.instructions.refresh();const content=characters.instructions.text(target);return {content,hash:digest(content)};}
-          const c=characters.store.snapshot().characters.find((c:any)=>"character:"+c.id===target);if(!c)throw Error("Character no longer exists");return {content:c.instructions,hash:digest(c.instructions)};
-        },save:async(target,hash,content)=>{if(target==="USER.md")await characters.instructions.save(target,hash,content);else{const state=characters.store.snapshot(),c=state.characters.find((c:any)=>"character:"+c.id===target);if(!c||digest(c.instructions)!==hash)throw Error("Character instructions changed");await characters.store.change({action:"save",revision:state.revision,character:{...c,instructions:content}},(c:any)=>characters.validate(c));}}}));return;
+        send(res,200,await store.organization.decideProfile(command.id,command.decision,profilePorts(characters)));return;
       }else if(command.action==="start-import"){
         send(res,200,await imports.admit(command.id,command.recordIds,command.previewHash));return;
       }else if(command.action==="archive-import"){send(res,200,await imports.archive(command.id));return;

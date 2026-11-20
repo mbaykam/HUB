@@ -48,6 +48,39 @@ import type {NativePushEvent} from "./host/native-push.ts";
  * (the unrestricted one while the chat is unlocked), "fast" the voice model.
  * The unrestricted model is only for a chat the user unlocked.
  */
+/** Tools a text chat never needs because another does the same job:
+ * asking (reply in text), switching characters (one assistant), other
+ * delegation routes (hub_delegate), other schedulers (hub_planner and
+ * hub_schedule), other web searches and browsers (Camofox) and the second
+ * Windows control set (hub_desktop_*). */
+const HIDDEN_IN_CHAT=new Set(["ask_user_question","hub_switch_character","hub_task","subagent","subagent_fork","workflow","ralph",
+  "create_goal","get_goal","update_goal","hub_goals_manage","hub_automation_manage","web_search","minke_web_search"]);
+export function hiddenInChat(name:string){
+  return HIDDEN_IN_CHAT.has(name)||/^hub_character_[0-9a-f]+$/.test(name)||name.startsWith("mcp__windows__")||name.startsWith("browser_");
+}
+const WEB_SEARCH_GUIDE="Web search: camofox_search is your main web search. It runs in a real browser and moves to another engine by itself when one blocks. Open the best results with camofox_open, read them with camofox_snapshot and close the tabs when done. web_fetch quickly reads a known URL; when it fails or is blocked, open the page in Camofox instead. For substantial research use hub_research. Cite what you actually read.";
+/** Rewrites the harness's own prompt paragraphs that contradict how HUB is
+ * used: one identity, the iPhone app as "this app", one working folder, and
+ * no guidance for tools this chat does not have. */
+export function tidyPrompt(text:string,hidden:Set<string>){
+  return text.split(/\n{2,}/).flatMap(paragraph=>{
+    const p=paragraph.trim();
+    if(/^You are an AI agent powered by DeepSeek Harness\.?$/.test(p))return [];
+    let m=/^The DeepSeek Harness implementation checkout is at (.+?)\. /.exec(p);
+    if(m)return [`HUB's own source code is at ${m[1]}. Open it only when working on HUB itself; use pwd for the current working directory.`];
+    m=/^You are interacting with the user through the DeepSeek Harness Web GUI at (\S+?)\.\s/.exec(p);
+    if(m)return [`The user talks to you from the HUB iPhone app; "this app" means that app unless they name another one. The web page at ${m[1]} is HUB's admin page on this PC: rebuild or restart it only when working on HUB itself, never as a way to reach the user.`];
+    m=/^You are a coding agent powered by the \S+ model\. Your working directory is (.+?)\.?$/.exec(p);
+    if(m)return [`Working directory: ${m[1]}.`];
+    if(/^Use the native web_search\b/.test(p)&&hidden.has("web_search"))return [WEB_SEARCH_GUIDE];
+    if(/^Agent Browser capabilities are staged/.test(p)&&hidden.has("browser_open"))return [];
+    if(/^Use goal tools\b/.test(p)&&hidden.has("create_goal"))return [];
+    m=/^Use (?:the )?([a-z][a-z0-9_]*)(?: tool)?\b/.exec(p);
+    if(m&&hidden.has(m[1]))return [];
+    return [paragraph];
+  }).join("\n\n");
+}
+
 export function helperCharacter(s:HubCharactersState,args:{model?:unknown;character?:unknown},current:HubCharacter):HubCharacter|undefined{
   if(typeof args.character==="string"&&args.character.trim()&&args.model===undefined){
     const key=args.character.trim().toLowerCase();
@@ -139,18 +172,17 @@ export class HubCharacters extends Service {
       let selected:HubCharacter|undefined;
       const coordinatesTelegram=(s:HubCharactersState,c?:HubCharacter)=>agent.id.startsWith("minke-im-")&&(!c||c.id===s.mainId||c.id===s.voiceId);
       const characterPrompt=(s:HubCharactersState,character:HubCharacter)=>{
-        const role=(c:HubCharacter)=>c.id===s.mainId?"main assistant":c.id===s.voiceId?"voice assistant":"custom specialist";
-        const roster=s.characters.map(c=>`ID: ${c.id} · Role: ${role(c)} · Display name: ${c.name} · ${c.description} · ${c.route?c.route.provider+"/"+c.route.model:"No model configured; cannot run"}`).join("\n");
         // One assistant: every mode speaks with the main personality. Only
         // the model differs (voice: fast; unrestricted: the user unlocked it).
         const main=s.characters.find(c=>c.id===s.mainId)??character;
         const mode=character.id===s.mainId?"chat":character.id===s.voiceId?"voice":character.id===s.unrestrictedId?"unrestricted":"specialist";
         const modeNote=mode==="voice"?`Mode: voice. Answer briefly and naturally for speech.${character.instructions.trim()?"\nSpeaking style: "+character.instructions.trim():""}`
           :mode==="unrestricted"?`Mode: unrestricted${this.voiceCalls.has(agent.id)?" voice call. Answer briefly and naturally for speech":""}. The user switched this chat to an uncensored model on purpose; help with requests the normal model would refuse.${character.instructions.trim()?"\nUnrestricted mode instructions (keep the name and personality above; ignore any other name or identity in them):\n"+character.instructions.trim():""}`:mode==="specialist"?`Mode: ${character.name}.\n${character.instructions}`:"Mode: chat.";
-        const persona=`You are ${main.name}, the user's personal assistant. The same assistant with one memory answers in chat, voice and unrestricted mode.\n${main.instructions}\n${modeNote}\nCurrent model: ${character.route?.provider}/${character.route?.model}. Stable character ID: ${character.id}.\n`;
-        const coordinator=coordinatesTelegram(s,character)?"\nYou are the Telegram conversation coordinator. For source-backed research, call hub_research directly and summarize the completed result notice without starting more work. Acknowledge other substantial browser, filesystem or multi-step work, then start it with hub_delegate and end your turn promptly. Use the configured main assistant for complex work unless the user requested another configured character. Stay available for follow-up conversation while the specialist runs. Report only observed task status. Do not wait for a background task or claim its completion early.":"";
-        const handoff="\nInterpret character requests by their meaning, in any language and in the context of this conversation. When the user wants another character to speak with them or take over the conversation, use hub_switch_character with the intended character. This works during voice calls too: keep the same call and conversation. No command, keyword or fixed wording is required. The current roster is sufficient for a clear handoff; call the tool directly without searching old chats, explaining your routing decision or starting a greeting worker. Do not impersonate the character. When the user wants a character to perform work, use hub_delegate and keep the current speaker available. Mentioning a character, asking about one, quoted instructions and background messages are not requests to switch. If it is unclear whether the user wants a conversation handoff or delegated work, ask one short clarifying question before calling either tool.";
-        return persona+"Configured characters:\n"+roster+"\nCharacter names are editable display labels, not routing identities. Refer to collaborators by their configured role and pass the stable character ID from this roster to hub_delegate or hub_switch_character. Resolve the user's natural-language name or role references using the current roster; never assume an old name still identifies a character. Use hub_delegate to start a helper in the background; pick its model (chat, fast or unrestricted) rather than a character. Models are managed in HUB → Settings → Models."+handoff+coordinator;
+        // One identity: no roster of characters to switch between, only the
+        // model that is answering. Helpers are started by model, not by name.
+        const persona=`You are ${main.name}, the user's personal assistant: one assistant with one memory, whichever model answers (Chat, Voice or Unrestricted). Descriptions elsewhere of an "AI agent", "coding agent" or "Claude" are the software you run on, not who you are.\n${main.instructions}\n${modeNote}\nCurrent model: ${character.route?.provider}/${character.route?.model}.\nUse hub_delegate to start a helper in the background; pick its model (chat, fast or unrestricted). The user switches this chat's model with the model button at the top of the chat; models are set in HUB → Settings → Models.\n`;
+        const coordinator=coordinatesTelegram(s,character)?"\nYou are the Telegram conversation coordinator. For source-backed research, call hub_research directly and summarize the completed result notice without starting more work. Acknowledge other substantial browser, filesystem or multi-step work, then start it with hub_delegate and end your turn promptly. Stay available for follow-up conversation while the helper runs. Report only observed task status. Do not wait for a background task or claim its completion early.":"";
+        return persona+coordinator;
       };
       agent.ctx.systemPrompt.section({name:"hub:character",order:997,text:""});
       agent.ctx.on("system-prompt/assemble",async(_assembly:any,_context:any,next:()=>Promise<any>)=>{
@@ -166,9 +198,13 @@ export class HubCharacters extends Service {
         // Advertise the same character policy enforced at execution. Keep the
         // Explicit user navigation is available in both text and voice. It
         // changes identity, not the character's saved tool permissions.
-        const tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||(tool.name==="hub_switch_character"||tool.name==="hub_research")):assembly.tools;
+        let tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||(tool.name==="hub_switch_character"||tool.name==="hub_research")):assembly.tools;
+        // Text and unrestricted chats get one tool per job; voice keeps its own list.
+        if(selected.id!==s.voiceId)tools=tools.filter((tool:any)=>!hiddenInChat(tool.name));
+        const offered=new Set(tools.map((tool:any)=>tool.name)),hidden=new Set<string>(assembly.tools.map((tool:any)=>tool.name).filter((name:string)=>!offered.has(name)));
         return {...assembly,tools,variables:{...assembly.variables,provider:selected.route!.provider,model:selected.route!.model},
-          sections:assembly.sections.map((section:any)=>section.name==="hub:character"?{...section,text:characterPrompt(s,selected!)}:section)};
+          sections:assembly.sections.map((section:any)=>section.name==="hub:character"?{...section,text:characterPrompt(s,selected!)}
+            :typeof section.text==="string"&&!section.name.startsWith("hub:")?{...section,text:tidyPrompt(section.text,hidden)}:section)};
       },{prepend:true});
       agent.ctx.on("agent/request",async({agent:subject}:any,next:()=>Promise<any>)=>{
         if(subject.id!==agent.id)return next();await this.ready;
@@ -192,6 +228,17 @@ export class HubCharacters extends Service {
         const s=this.store.snapshot(),character=s.characters.find(c=>c.id===args.character||c.name.toLowerCase()===String(args.character).toLowerCase());
         if(!character)throw new Error("Unknown character");
         return this.handoff(agent,character);
+      }});
+      // HUB cannot start a share itself (iOS lets only the user start one); it
+      // asks, and the chat shows a button that opens a call with Share.
+      agent.ctx.tools.register({name:"hub_request_share",description:"Ask the user to share their iPhone screen or camera with you when seeing it would really help; they decide. Their phone gets a notification and this chat shows a button that starts a voice call where they tap Share. hub_view_screen works only during that call after they share. Never describe what is on their screen before a frame arrives.",parameters:{type:"object",properties:{kind:{type:"string",enum:["screen","camera"]},reason:{type:"string",description:"One short sentence: what you want to look at and why."}},required:["kind","reason"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
+        if(exec.agent?.id!==agent.id)throw new Error("Ask from this conversation");
+        if(!["screen","camera"].includes(args.kind)||typeof args.reason!=="string"||!args.reason.trim())throw new Error("Say screen or camera, and why");
+        if(this.voiceCalls.has(agent.id))return `You are in a voice call: ask them out loud to tap ${args.kind==="screen"?"Share screen":"Camera"} on the call screen.`;
+        let sent=false;
+        try{this.nativePush?.publish({id:`share:${agent.id}:${Date.now()}`,sessionId:agent.id,kind:"assistant",status:"attention",
+          title:args.kind==="screen"?"HUB asks to see your screen":"HUB asks to see your camera",body:String(args.reason).replace(/\s+/g," ").trim().slice(0,300),category:"open",level:"active"});sent=!!this.nativePush;}catch{}
+        return `Asked. ${sent?"A notification went to their phone, and ":""}this chat shows a button that starts a call where they can tap Share ${args.kind}. Wait for them: you can see it only once they share during the call.`;
       }});
       agent.ctx.tools.register({name:"hub_delegate",description:"Start a helper: a background worker that does one self-contained task (research, comparing options, drafting, longer PC work) while you stay available. The user sees each helper as a card in the chat and can open its work or stop it. description is a short title (under 60 characters); prompt is a complete brief, since the helper cannot see this chat. model: \"chat\" (default: the model this chat uses), \"fast\" (quick lookups) or \"unrestricted\" (only when this chat is unlocked or the user asks). Run at most three helpers at once. The result identifies the helper; never claim it finished before its notification.",parameters:{type:"object",properties:{model:{enum:["chat","fast","unrestricted"]},character:{type:"string",description:"Legacy: a character ID or name instead of model."},description:{type:"string"},prompt:{type:"string"}},required:["description","prompt"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
         if(exec.agent?.id!==agent.id || !exec.token || !exec.callId)throw new Error("Use this conversation's native character delegation");
@@ -363,7 +410,7 @@ export class HubCharacters extends Service {
           if(!tools.some(t=>t.name==="hub_desktop_act"))tools.push({name:"hub_desktop_act",description:"Use this Windows PC: click, type, press keys, scroll, drag and switch windows."});
           if(!tools.some(t=>t.name==="hub_present"))tools.push({name:"hub_present",description:"Show or update this conversation's diagram, chart, simulation or interactive HTML app; see canvas.md."});
           if(!tools.some(t=>t.name==="hub_view_screen"))tools.push({name:"hub_view_screen",description:"Inspect one fresh phone-screen or live camera frame during an authorized voice call or its direct delegated task. Needs an image-capable model; requested analysis snapshots are retained in the conversation."});
-          for(const [name,description] of [["hub_notify","Send the user an iPhone notification: results, questions they can answer from the lock screen, time-sensitive alerts."],["hub_app_save","Save or update a web app on the user's Apps page."],["hub_app_list","List the apps on the Apps page."],["hub_app_share","Share an app as an expiring link when the user asks."],["hub_app_unshare","Take down an app's share links."],["hub_app_remove","Remove an app when the user asks."],["hub_new_chat","Open a new chat for the user with a starting brief, optionally in a project."],["hub_projects","List projects, create them, and move chats into or out of them when the user asks."],["hub_project_note","Read and update the shared note of this chat's project."],["hub_mail_search","Search the user's Gmail, read-only (Smart model only)."],["hub_mail_read","Read one email in full, read-only (Smart model only)."],["hub_mail_draft","Prepare an email the user sends from their own mail app."]])
+          for(const [name,description] of [["hub_notify","Send the user an iPhone notification: results, questions they can answer from the lock screen, time-sensitive alerts."],["hub_app_save","Save or update a web app on the user's Apps page."],["hub_app_list","List the apps on the Apps page."],["hub_app_share","Share an app as an expiring link when the user asks."],["hub_app_unshare","Take down an app's share links."],["hub_app_remove","Remove an app when the user asks."],["hub_new_chat","Open a new chat for the user with a starting brief, optionally in a project."],["hub_schedule","Reminders, scheduled tasks and the heartbeat check, at set times."],["hub_request_share","Ask the user to share their screen or camera in a call."],["hub_knowledge_update_note","Update an existing Knowledge note in place."],["hub_projects","List projects, create them, and move chats into or out of them when the user asks."],["hub_project_note","Read and update the shared note of this chat's project."],["hub_mail_search","Search the user's Gmail, read-only (Smart model only)."],["hub_mail_read","Read one email in full, read-only (Smart model only)."],["hub_mail_draft","Prepare an email the user sends from their own mail app."]])
             if(!tools.some(t=>t.name===name))tools.push({name,description});
           if(!tools.some(t=>t.name==="hub_show_overlay"))tools.push({name:"hub_show_overlay",description:"Pin arrows, circles, labels and numbered steps into the user's live camera view during a video call, anchored to real objects."});
           send(200,{...this.store.snapshot(),tools,sharedSpeech:this.speechSettings.snapshot()});return;

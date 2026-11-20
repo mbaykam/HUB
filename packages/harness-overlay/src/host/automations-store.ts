@@ -46,6 +46,7 @@ export class AutomationsStore {
       if(command.action==="pause"||command.action==="cancel"){if(this.active?.id===job.id)this.active.abort.abort();job.state=command.action==="pause"?"paused":"cancelled";job.status=job.state;}
       else if(command.action==="resume"){if(job.state==="cancelled")throw Error("Edit a cancelled task to reactivate it");job.state="active";job.status="scheduled";job.nextAt=nextOccurrence(job.trigger,now);}
       else if(command.action==="run-once"){if(job.status==="running"||job.status==="checking")throw Error("Already running");if(job.state==="cancelled")throw Error("Cancelled task");job.state="active";job.status="scheduled";job.pendingEvent="Manual test requested by the user";job.nextAt=now;}
+      else if(command.action==="delete"){if(this.active?.id===job.id)this.active.abort.abort();this.state.automations.splice(this.state.automations.indexOf(job),1);await this.save();return this.snapshot();}
       else throw Error("Unknown automation command");job.revision++;job.updatedAt=now;
     }
     await this.save();return this.snapshot();
@@ -85,6 +86,13 @@ export class AutomationsStore {
         const current=this.state.automations.find(j=>j.id===job.id)!;if(current.state!=="active"||signal.aborted)return;
         if(watchValue!==undefined){current.lastValue=digest(watchValue);current.lastMatch=watchMatch;current.lastCheckAt=now;}
         if(!fire){current.nextAt=nextOccurrence(job.trigger,now);current.status="scheduled";await this.save();return;}
+        // Outside its active hours a recurring check is skipped without a model
+        // call or a receipt; a one-time job waits for the next active minute.
+        if(job.activeHours&&!job.pendingEvent?.startsWith("Manual test")&&!withinActiveHours(job.activeHours,now)){
+          let next=job.trigger.kind==="once"?now+60000:nextOccurrence(job.trigger,now);
+          for(let guard=0;next!==undefined&&guard<2880&&!withinActiveHours(job.activeHours,next);guard++)next=job.trigger.kind==="once"?next+60000:nextOccurrence(job.trigger,next);
+          current.nextAt=next;current.status="scheduled";await this.save();return;
+        }
         const estimate=job.goalId?0:job.maxSteps*((Buffer.byteLength(job.prompt+(job.pendingEvent??""))+32000)*job.inputPrice+job.maxOutputTokens*job.outputPrice)/1e6;
         const today=new Date(now).toISOString().slice(0,10),runs=current.runs.filter(r=>new Date(r.at).toISOString().slice(0,10)===today);
         if(runs.length>=job.dailyMaxRuns||runs.reduce((s,r)=>s+r.estimatedCost,0)+estimate>job.dailyBudget){current.status="budget-paused";current.lastError="Daily task budget/run limit reached; original task retained.";current.nextAt=Date.parse(today+"T00:00:00Z")+86400000;await this.save();return;}
@@ -126,7 +134,18 @@ export function validateAutomation(value:any):AutomationInput {
   if(comparison&&(typeof t.value!=="string"||!t.value.trim()||t.value.length>1000||["above","below"].includes(comparison)&&!Number.isFinite(Number(t.value))))throw Error("Set a nonempty valid comparison value");
   if(t.kind==="event"&&t.operator&&!t.path)throw Error("Choose the event field to compare");
   if(t.jsonPath||t.path)if(typeof (t.jsonPath??t.path)!=="string"||!/^[a-zA-Z0-9_.-]{1,100}$/.test(t.jsonPath??t.path))throw Error("Use a simple JSON field path");
-  return structuredClone({title:value.title.trim(),prompt:value.prompt,characterId:value.characterId,trigger:t,missed:value.missed,tools:[...new Set(value.tools)] as string[],allowWrites:value.allowWrites,maxOutputTokens:value.maxOutputTokens,maxSteps:value.maxSteps,dailyMaxRuns:value.dailyMaxRuns,dailyBudget:value.dailyBudget,inputPrice:value.inputPrice,outputPrice:value.outputPrice,notification:value.notification,sourceSessionId:value.sourceSessionId,goalId:value.goalId});
+  if(value.kind!==undefined&&!["task","reminder","heartbeat"].includes(value.kind))throw Error("kind is task, reminder or heartbeat");
+  if(value.kind==="heartbeat"&&t.kind!=="interval")throw Error("A heartbeat repeats on an interval");
+  const hours=value.activeHours;
+  if(hours!==undefined){if(!hours||![hours.start,hours.end].every(m=>Number.isInteger(m)&&m>=0&&m<1440)||hours.start===hours.end||typeof hours.timezone!=="string")throw Error("Active hours need start and end minutes and a timezone");new Intl.DateTimeFormat("en",{timeZone:hours.timezone}).format(0);}
+  return structuredClone({title:value.title.trim(),prompt:value.prompt,characterId:value.characterId,trigger:t,missed:value.missed,tools:[...new Set(value.tools)] as string[],allowWrites:value.allowWrites,maxOutputTokens:value.maxOutputTokens,maxSteps:value.maxSteps,dailyMaxRuns:value.dailyMaxRuns,dailyBudget:value.dailyBudget,inputPrice:value.inputPrice,outputPrice:value.outputPrice,notification:value.notification,sourceSessionId:value.sourceSessionId,goalId:value.goalId,
+    ...(value.kind&&value.kind!=="task"?{kind:value.kind}:{}),...(hours?{activeHours:{start:hours.start,end:hours.end,timezone:hours.timezone}}:{})});
+}
+/** Whether `at` falls inside the active hours, in their own timezone. */
+export function withinActiveHours(hours:{start:number;end:number;timezone:string},at:number){
+  const parts=Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:hours.timezone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(at).map(p=>[p.type,p.value]));
+  const minute=Number(parts.hour)*60+Number(parts.minute);
+  return hours.start<hours.end?minute>=hours.start&&minute<hours.end:minute>=hours.start||minute<hours.end;
 }
 export function nextOccurrence(trigger:AutomationTrigger,after:number):number|undefined{
   if(trigger.kind==="once")return trigger.at;
