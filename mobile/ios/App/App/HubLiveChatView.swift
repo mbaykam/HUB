@@ -631,10 +631,13 @@ struct HubLiveChatView: View {
                                             historyRequest += 1
                                         }
                                         .disabled(historyLoading || connectionLost)
-                                    } else {
+                                    } else if historyLoading {
                                         ProgressView()
-                                            .opacity(historyLoading ? 1 : 0.5)
                                             .accessibilityLabel("Loading earlier messages")
+                                    } else {
+                                        // A still marker: a spinner that never stops
+                                        // would keep the app from ever going idle.
+                                        Color.clear.frame(height: 24)
                                     }
                                 }
                                 .frame(maxWidth: .infinity)
