@@ -1,11 +1,14 @@
 import SwiftUI
+import UIKit
 import CryptoKit
 import HubNative
 
-/// A living "second brain": a force-directed graph that keeps drifting, like
-/// the Obsidian graph view. Each domain is a glowing hub with its notes
-/// radiating out; links pull related notes together; chats that touch no note
-/// float as dust around the edge.
+/// A living "second brain" built the way Obsidian's graph view works: a force
+/// simulation (repel, link springs, a pull toward each domain) stepped at a
+/// fixed 60 Hz, drawn by a retained layer tree that only moves and never
+/// repaints, so dragging a note stays smooth at the display's full rate.
+/// Each domain is a glowing hub with its notes around it; links pull related
+/// notes together; chats float near the notes they touched.
 /// Built off the main thread, then only touched on it.
 final class HubBrainSimulation: @unchecked Sendable {
     struct Node {
@@ -39,18 +42,38 @@ final class HubBrainSimulation: @unchecked Sendable {
     }
 
     private(set) var nodes: [Node] = []
+    /// Each node's kind, read every frame without touching the Node structs.
+    private(set) var kinds: [Kind] = []
     private(set) var links: [Link] = []
     private(set) var neighbors: [[Int]] = []
-    var x: [Double] = [], y: [Double] = [], vx: [Double] = [], vy: [Double] = []
-    var pinned: Int?
+    private(set) var x: [Double] = [], y: [Double] = []
+    private var vx: [Double] = [], vy: [Double] = []
+    /// Positions one step back, so frames between two 60 Hz steps are drawn in between.
+    private var px: [Double] = [], py: [Double] = []
+    // Flat copies of the per-node and per-link numbers the step reads, so the
+    // hot loops never touch the Node structs (strings and colors).
+    private var mass: [Double] = [], gravity: [Double] = [], hubOf: [Int] = []
+    private var fx: [Double] = [], fy: [Double] = []
+    private var la: [Int] = [], lb: [Int] = [], length: [Double] = [], strength: [Double] = []
+    private var shareA: [Double] = [], shareB: [Double] = []
+    /// The node held under a finger, and where the finger is in graph units.
+    private(set) var pinned: Int?
+    private var pinX = 0.0, pinY = 0.0
     private var alpha = 1.0
-    private var last: Date?
-    private var clock = 0.0
+    private var alphaTarget = 0.0
+    private var accumulator = 0.0
     // The camera, eased toward fitting every node.
     private(set) var scale: CGFloat = 0
     private(set) var center = CGPoint.zero
 
     static let nodeLimit = 420
+    private static let step = 1.0 / 60
+    /// d3-force's cooling: about 300 steps (5 seconds) from hot to still.
+    private static let alphaDecay = 0.0228
+    private static let alphaMin = 0.002
+    /// How warm the graph runs while a note is held, so its neighbours follow.
+    private static let dragAlpha = 0.3
+    private static let velocityKeep = 0.68
 
     init(graph: HubHomeKnowledge, layout: HubKnowledgeLayout.Layout, limit: Int = HubBrainSimulation.nodeLimit, projects: [HubProject] = []) {
         let titles = Dictionary(graph.nodes.map { ($0.id, $0.title ?? "Untitled") }, uniquingKeysWith: { a, _ in a })
@@ -125,92 +148,160 @@ final class HubBrainSimulation: @unchecked Sendable {
         }
         neighbors = Array(repeating: [], count: nodes.count)
         for item in links { neighbors[item.a].append(item.b); neighbors[item.b].append(item.a) }
-        vx = Array(repeating: 0, count: nodes.count)
-        vy = Array(repeating: 0, count: nodes.count)
+
+        let count = nodes.count
+        vx = Array(repeating: 0, count: count); vy = vx
+        fx = vx; fy = vx
+        px = x; py = y
+        kinds = nodes.map(\.kind)
+        mass = nodes.map(\.mass)
+        gravity = nodes.map(\.gravity)
+        hubOf = nodes.map { $0.hub ?? -1 }
+        la = links.map(\.a); lb = links.map(\.b)
+        length = links.map(\.length); strength = links.map(\.strength)
+        // The lighter end of a link moves more: each end takes the other's share of the mass.
+        shareA = links.map { 2 * nodes[$0.b].mass / (nodes[$0.a].mass + nodes[$0.b].mass) }
+        shareB = links.map { 2 * nodes[$0.a].mass / (nodes[$0.a].mass + nodes[$0.b].mass) }
     }
 
-    /// Settles the layout quickly before it is first shown.
+    /// Settles the layout before it is first shown, then lets it cool from warm.
     func warmUp(_ steps: Int) {
         for _ in 0..<steps { tick() }
+        px = x; py = y
+        alpha = min(alpha, 0.12)
     }
 
-    func advance(to date: Date, moving: Bool) {
-        let elapsed = last.map { date.timeIntervalSince($0) } ?? 1 / 60
-        last = date
-        guard moving else { return }
-        let steps = max(1, min(3, Int((elapsed * 60).rounded())))
-        for _ in 0..<steps { tick() }
+    /// Runs the fixed 60 Hz steps that fit into `seconds`. Returns whether anything still moves.
+    @discardableResult
+    func advance(by seconds: Double) -> Bool {
+        guard !settled else { accumulator = 0; return false }
+        accumulator += min(max(seconds, 0), 0.1)
+        var steps = 0
+        while accumulator >= Self.step && steps < 4 {
+            px = x; py = y
+            tick()
+            accumulator -= Self.step
+            steps += 1
+        }
+        if steps == 4 { accumulator = 0 }
+        return !settled
     }
-
-    /// Wakes the graph for a drag, so neighbors follow and then settle again.
-    func reheat() { alpha = max(alpha, 0.35) }
 
     /// Nothing is moving: the view can stop redrawing.
-    var settled: Bool { pinned == nil && alpha < 0.02 }
+    var settled: Bool { pinned == nil && alpha < Self.alphaMin }
+
+    /// Where node `i` is right now, between the last two steps.
+    func position(_ i: Int) -> (Double, Double) {
+        if i == pinned { return (pinX, pinY) }
+        let t = min(1, accumulator / Self.step)
+        return (px[i] + (x[i] - px[i]) * t, py[i] + (y[i] - py[i]) * t)
+    }
+
+    /// Picks a note up: it follows the finger exactly while the graph warms so
+    /// its neighbours are pulled along.
+    func hold(_ i: Int, at point: (Double, Double)) {
+        guard nodes.indices.contains(i) else { return }
+        pinned = i
+        move(to: point)
+        alpha = max(alpha, Self.dragAlpha)
+        alphaTarget = Self.dragAlpha
+    }
+
+    func move(to point: (Double, Double)) {
+        guard let i = pinned, point.0.isFinite, point.1.isFinite else { return }
+        pinX = min(1_500, max(-1_500, point.0)); pinY = min(1_500, max(-1_500, point.1))
+        x[i] = pinX; y[i] = pinY; px[i] = pinX; py[i] = pinY
+        vx[i] = 0; vy[i] = 0
+    }
+
+    /// Lets go: the note stays where it was dropped and everything cools to a stop.
+    func release() {
+        pinned = nil
+        alphaTarget = 0
+    }
+
+    /// Warms a still graph a little, e.g. when it comes back on screen.
+    func nudge() { alpha = max(alpha, 0.05) }
 
     private func tick() {
-        let count = nodes.count
-        guard count > 0 else { return }
-        clock += 1 / 60
-        var fx = [Double](repeating: 0, count: count), fy = [Double](repeating: 0, count: count)
+        let n = nodes.count
+        guard n > 0 else { return }
+        alpha += (alphaTarget - alpha) * Self.alphaDecay
+        if pinned == nil && alphaTarget == 0 && alpha < Self.alphaMin {
+            alpha = 0
+            for i in 0..<n { vx[i] = 0; vy[i] = 0 }
+            return
+        }
         // Repulsion between every pair close enough to matter.
-        let cutoff = 300.0 * 300.0
-        for i in 0..<count {
-            let xi = x[i], yi = y[i], mi = nodes[i].mass
-            for j in (i + 1)..<count {
-                let dx = xi - x[j], dy = yi - y[j]
-                let distance = dx * dx + dy * dy
-                guard distance < cutoff else { continue }
-                let d2 = max(distance, 36)
-                let force = 260 * mi * nodes[j].mass / d2
-                let d = d2.squareRoot()
-                let px = dx / d * force, py = dy / d * force
-                fx[i] += px; fy[i] += py
-                fx[j] -= px; fy[j] -= py
+        x.withUnsafeBufferPointer { X in
+            y.withUnsafeBufferPointer { Y in
+                mass.withUnsafeBufferPointer { M in
+                    fx.withUnsafeMutableBufferPointer { FX in
+                        fy.withUnsafeMutableBufferPointer { FY in
+                            for i in 0..<n { FX[i] = 0; FY[i] = 0 }
+                            for i in 0..<n {
+                                let xi = X[i], yi = Y[i], mi = M[i]
+                                var ax = 0.0, ay = 0.0
+                                var j = i + 1
+                                while j < n {
+                                    let dx = xi - X[j], dy = yi - Y[j]
+                                    let d2 = dx * dx + dy * dy
+                                    if d2 < 90_000 {
+                                        let c = max(d2, 36)
+                                        let f = 260 * mi * M[j] / (c * c.squareRoot())
+                                        let ox = dx * f, oy = dy * f
+                                        ax += ox; ay += oy
+                                        FX[j] -= ox; FY[j] -= oy
+                                    }
+                                    j += 1
+                                }
+                                FX[i] += ax; FY[i] += ay
+                            }
+                        }
+                    }
+                }
             }
         }
-        for item in links {
-            let dx = x[item.b] - x[item.a], dy = y[item.b] - y[item.a]
+        // Springs along the links.
+        for k in 0..<la.count {
+            let a = la[k], b = lb[k]
+            let dx = x[b] - x[a], dy = y[b] - y[a]
             let d = max(1, (dx * dx + dy * dy).squareRoot())
-            let force = (d - item.length) * item.strength
-            let px = dx / d * force, py = dy / d * force
-            let total = nodes[item.a].mass + nodes[item.b].mass
-            fx[item.a] += px * nodes[item.b].mass / total * 2; fy[item.a] += py * nodes[item.b].mass / total * 2
-            fx[item.b] -= px * nodes[item.a].mass / total * 2; fy[item.b] -= py * nodes[item.a].mass / total * 2
+            let f = (d - length[k]) * strength[k] / d
+            let ox = dx * f, oy = dy * f
+            fx[a] += ox * shareA[k]; fy[a] += oy * shareA[k]
+            fx[b] -= ox * shareB[k]; fy[b] -= oy * shareB[k]
         }
-        for i in 0..<count {
-            if i == pinned { vx[i] = 0; vy[i] = 0; continue }
-            let node = nodes[i]
+        for i in 0..<n {
+            if i == pinned { x[i] = pinX; y[i] = pinY; vx[i] = 0; vy[i] = 0; continue }
             // Notes are drawn toward their own domain, domains toward the middle.
-            var gx = x[i] * node.gravity, gy = y[i] * node.gravity
-            if let hub = node.hub { gx = (x[i] - x[hub]) * 0.03 + x[i] * 0.003; gy = (y[i] - y[hub]) * 0.03 + y[i] * 0.003 }
-            vx[i] = (vx[i] + (fx[i] / node.mass - gx) * alpha) * 0.72
-            vy[i] = (vy[i] + (fy[i] / node.mass - gy) * alpha) * 0.72
+            var gx = x[i] * gravity[i], gy = y[i] * gravity[i]
+            let hub = hubOf[i]
+            if hub >= 0 { gx = (x[i] - x[hub]) * 0.03 + x[i] * 0.003; gy = (y[i] - y[hub]) * 0.03 + y[i] * 0.003 }
+            vx[i] = (vx[i] + (fx[i] / mass[i] - gx) * alpha) * Self.velocityKeep
+            vy[i] = (vy[i] + (fy[i] / mass[i] - gy) * alpha) * Self.velocityKeep
             // A capped step: nothing ever flies off.
             let speed = (vx[i] * vx[i] + vy[i] * vy[i]).squareRoot()
             if speed > 6 { vx[i] *= 6 / speed; vy[i] *= 6 / speed }
             x[i] += vx[i]; y[i] += vy[i]
-            // Never lose a dot: a broken value goes back near its domain, and
-            // nothing drifts far away.
+            // Never lose a dot: a broken value goes back near its domain.
             if !x[i].isFinite || !y[i].isFinite {
-                let home = node.hub.map { (x[$0], y[$0]) } ?? (0, 0)
-                x[i] = (home.0.isFinite ? home.0 : 0) + Self.unit(node.id + "rx") * 20 - 10
-                y[i] = (home.1.isFinite ? home.1 : 0) + Self.unit(node.id + "ry") * 20 - 10
-                vx[i] = 0; vy[i] = 0
+                let home = hub >= 0 ? (x[hub], y[hub]) : (0, 0)
+                x[i] = (home.0.isFinite ? home.0 : 0) + Self.unit(nodes[i].id + "rx") * 20 - 10
+                y[i] = (home.1.isFinite ? home.1 : 0) + Self.unit(nodes[i].id + "ry") * 20 - 10
+                vx[i] = 0; vy[i] = 0; px[i] = x[i]; py[i] = y[i]
             }
             x[i] = min(1_500, max(-1_500, x[i])); y[i] = min(1_500, max(-1_500, y[i]))
         }
-        // Cools to a full stop; a drag warms it up again.
-        alpha = pinned == nil ? alpha * 0.975 : max(alpha, 0.25)
-        if alpha < 0.005 { alpha = 0 }
     }
 
-    /// Eases the camera toward showing every node inside `size`.
-    func fit(_ size: CGSize, padding: CGFloat, immediate: Bool) {
-        guard !nodes.isEmpty, size.width > 0, size.height > 0 else { return }
+    /// Eases the camera toward showing every node inside `size`. Returns whether it is still moving.
+    @discardableResult
+    func fit(_ size: CGSize, padding: CGFloat, immediate: Bool) -> Bool {
+        guard !nodes.isEmpty, size.width > 0, size.height > 0 else { return false }
         // Frame the bulk of the graph: a few far-off dots must not shrink everything else to a speck.
         let xs = x.filter(\.isFinite).sorted(), ys = y.filter(\.isFinite).sorted()
-        guard !xs.isEmpty, !ys.isEmpty else { return }
+        guard !xs.isEmpty, !ys.isEmpty else { return false }
         let cut = xs.count > 40 ? xs.count / 40 : 0
         let minX = xs[cut], maxX = xs[xs.count - 1 - cut], minY = ys[cut], maxY = ys[ys.count - 1 - cut]
         let raw = min((size.width - padding * 2) / CGFloat(max(60, maxX - minX)),
@@ -219,33 +310,12 @@ final class HubBrainSimulation: @unchecked Sendable {
         let targetCenter = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
         if immediate || scale == 0 {
             scale = target; center = targetCenter
-        } else {
-            scale += (target - scale) * 0.06
-            center.x += (targetCenter.x - center.x) * 0.06
-            center.y += (targetCenter.y - center.y) * 0.06
+            return false
         }
-    }
-
-    func screen(_ i: Int, size: CGSize, zoom: CGFloat, pan: CGSize) -> CGPoint {
-        let s = (scale > 0 ? scale : 1) * zoom
-        return CGPoint(x: size.width / 2 + pan.width + (CGFloat(x[i]) - center.x) * s,
-                       y: size.height / 2 + pan.height + (CGFloat(y[i]) - center.y) * s)
-    }
-
-    func world(_ point: CGPoint, size: CGSize, zoom: CGFloat, pan: CGSize) -> (Double, Double) {
-        let s = max(0.0001, scale * zoom)
-        return (Double(center.x + (point.x - size.width / 2 - pan.width) / s),
-                Double(center.y + (point.y - size.height / 2 - pan.height) / s))
-    }
-
-    func nearest(to point: CGPoint, size: CGSize, zoom: CGFloat, pan: CGSize, within limit: CGFloat) -> Int? {
-        var best: Int?, bestDistance = limit
-        for i in nodes.indices {
-            let p = screen(i, size: size, zoom: zoom, pan: pan)
-            let distance = hypot(p.x - point.x, p.y - point.y) - (nodes[i].kind == .hub ? 6 : 0)
-            if distance < bestDistance { best = i; bestDistance = distance }
-        }
-        return best
+        scale += (target - scale) * 0.08
+        center.x += (targetCenter.x - center.x) * 0.08
+        center.y += (targetCenter.y - center.y) * 0.08
+        return abs(target - scale) > 0.002 || hypot(targetCenter.x - center.x, targetCenter.y - center.y) > 0.3
     }
 
     static func unit(_ text: String) -> Double {
@@ -264,8 +334,7 @@ private final class HubBrainHolder: ObservableObject {
 struct HubLivingBrainView: View {
     let graph: HubHomeKnowledge
     var height: CGFloat = 300
-    /// Full screen: drag nodes, pan and pinch. On Home it only takes taps, so
-    /// the page still scrolls.
+    /// Drag notes around and pinch to zoom. Off: the graph only takes taps.
     var interactive = false
     var scope = HubKnowledgeGraphView.Scope.all
     var active = true
@@ -273,7 +342,8 @@ struct HubLivingBrainView: View {
     var nodeLimit = 220
     /// HUB projects, drawn as their own markers next to their chats.
     var projects: [HubProject] = []
-    /// One-finger panning; off on Home, where the graph should not wander off screen.
+    /// One-finger panning of empty space; off on Home, where the page scrolls
+    /// instead and the graph must not wander off screen.
     var allowsPan = true
     var openRecord: (String) -> Void
     var openProject: ((String) -> Void)? = nil
@@ -282,56 +352,31 @@ struct HubLivingBrainView: View {
 
     @StateObject private var holder = HubBrainHolder()
     @State private var selected: String?
-    @State private var zoom: CGFloat = 1
-    @State private var pan: CGSize = .zero
-    @GestureState private var pinch: CGFloat = 1
-    @State private var dragStart: CGSize?
-    /// Redraws only while something moves, so a still graph costs nothing.
-    @State private var awake = true
-    @State private var wakeToken = 0
-    /// Once the user has moved or zoomed, the camera stops refitting.
-    @State private var userMoved = false
+    @State private var refit = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .bottom) {
-                if let simulation = holder.simulation {
-                    gestures(TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active || !awake || scenePhase != .active)) { context in
-                        Canvas { canvas, size in
-                            simulation.advance(to: context.date, moving: true)
-                            if !userMoved { simulation.fit(size, padding: interactive ? 36 : 22, immediate: false) }
-                            draw(simulation, in: &canvas, size: size)
-                        }
-                    }
-                    .contentShape(Rectangle()), simulation: simulation, size: geometry.size)
-                    if let selected, let index = simulation.nodes.firstIndex(where: { $0.id == selected }) {
-                        selectionChip(simulation.nodes[index])
-                    }
-                } else {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack(alignment: .bottom) {
+            if let simulation = holder.simulation {
+                HubBrainSurface(simulation: simulation, interactive: interactive, allowsPan: allowsPan,
+                                running: active && scenePhase == .active, padding: interactive ? 36 : 22,
+                                selectedID: selected, refit: refit, tap: tap)
+                if let selected, let node = simulation.nodes.first(where: { $0.id == selected }) {
+                    selectionChip(node)
                 }
-            }
-            .task(id: signature) { await build() }
-            // Coming back to Home redraws and reframes the graph.
-            .onChange(of: active) { visible in if visible { userMoved = false; zoom = 1; pan = .zero; wakeToken += 1 } }
-            // After a touch the graph settles within a few seconds; then it stops redrawing.
-            .task(id: wakeToken) {
-                awake = true
-                for _ in 0..<20 {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    if Task.isCancelled { return }
-                    if holder.simulation?.settled ?? true { break }
-                }
-                awake = false
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .task(id: signature) { await build() }
+        // Coming back to Home reframes the graph.
+        .onChange(of: active) { visible in if visible { refit += 1 } }
         .frame(height: height)
         .clipped()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Knowledge brain graph")
-        .accessibilityHint(interactive ? "Drag to move around, pinch to zoom. Tap a dot to see what it is."
+        .accessibilityHint(interactive ? "Drag a dot to move it, pinch to zoom. Tap a dot to see what it is."
                                        : "Tap a dot to see what it is, or tap the graph to explore Knowledge.")
     }
 
@@ -351,7 +396,7 @@ struct HubLivingBrainView: View {
         let key = signature
         guard holder.signature != key else { return }
         let graph = graph
-        let steps = reduceMotion ? 420 : 160
+        let steps = reduceMotion ? 420 : 220
         let notes = scope != .archive, archive = scope != .notes
         let limit = nodeLimit, projects = archive ? projects : []
         let built = await Task.detached(priority: .userInitiated) { () -> HubBrainSimulation in
@@ -363,125 +408,21 @@ struct HubLivingBrainView: View {
         guard !Task.isCancelled else { return }
         holder.signature = key
         holder.simulation = built
-        wakeToken += 1
         if let selected, !built.nodes.contains(where: { $0.id == selected }) { self.selected = nil }
     }
 
-    private func draw(_ simulation: HubBrainSimulation, in canvas: inout GraphicsContext, size: CGSize) {
-        let scale = zoom * pinch
-        let points = simulation.nodes.indices.map { simulation.screen($0, size: size, zoom: scale, pan: pan) }
-        let focus = selected.flatMap { id in simulation.nodes.firstIndex { $0.id == id } }
-        let lit = Set(focus.map { [$0] + simulation.neighbors[$0] } ?? [])
-        let dim = focus != nil
-
-        // Links: domain spokes in their domain's color, the rest as a fine mesh.
-        var mesh = Path(), highlighted = Path(), similarPath = Path()
-        var spokes: [Int: Path] = [:]
-        for link in simulation.links where link.visible {
-            let a = points[link.a], b = points[link.b]
-            if let focus, link.a == focus || link.b == focus {
-                highlighted.move(to: a); highlighted.addLine(to: b)
-            } else if link.similar {
-                similarPath.move(to: a); similarPath.addLine(to: b)
-            } else if simulation.nodes[link.b].kind == .hub {
-                spokes[link.b, default: Path()].move(to: a)
-                spokes[link.b, default: Path()].addLine(to: b)
-            } else {
-                mesh.move(to: a); mesh.addLine(to: b)
-            }
-        }
-        canvas.stroke(mesh, with: .color(HubWorkspacePalette.border.opacity(dim ? 0.06 : 0.14)), lineWidth: 0.6)
-        canvas.stroke(similarPath, with: .color(HubWorkspacePalette.border.opacity(dim ? 0.03 : 0.08)),
-                      style: StrokeStyle(lineWidth: 0.6, dash: [2.5, 3]))
-        for (hub, path) in spokes {
-            canvas.stroke(path, with: .color(simulation.nodes[hub].tone.opacity(dim ? 0.08 : 0.28)), lineWidth: 0.7)
-        }
-        canvas.stroke(highlighted, with: .color(HubWorkspacePalette.border.opacity(0.7)), lineWidth: 1.1)
-
-        // Few dots: draw them larger and name every note.
-        let few = simulation.nodes.count <= 40
-        let grow = min(1.6, max(0.75, sqrt(scale))) * (few ? 1.5 : 1)
-        for (i, node) in simulation.nodes.enumerated() where node.kind != .hub && node.kind != .project {
-            let p = points[i]
-            guard p.x > -20, p.y > -20, p.x < size.width + 20, p.y < size.height + 20 else { continue }
-            let r = node.radius * grow * (i == focus ? 1.8 : 1)
-            let faded = dim && !lit.contains(i)
-            let opacity = faded ? 0.18 : (node.kind == .chat ? 0.55 : 0.95)
-            if node.kind == .note && !faded {
-                canvas.fill(Path(ellipseIn: CGRect(x: p.x - r * 2.2, y: p.y - r * 2.2, width: r * 4.4, height: r * 4.4)),
-                            with: .color(node.tone.opacity(0.10)))
-            }
-            canvas.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(node.tone.opacity(opacity)))
-        }
-        // Hubs glow on top, each named in its own color.
-        var taken: [CGRect] = []
-        for (i, node) in simulation.nodes.enumerated() where node.kind == .hub {
-            let p = points[i]
-            let r = node.radius * grow
-            let faded = dim && !lit.contains(i)
-            let halos: [(CGFloat, Double)] = [(3.6, 0.07), (2.2, 0.14)]
-            for (spread, alpha) in halos {
-                let g = r * spread
-                canvas.fill(Path(ellipseIn: CGRect(x: p.x - g, y: p.y - g, width: g * 2, height: g * 2)),
-                            with: .color(node.tone.opacity(faded ? alpha / 3 : alpha)))
-            }
-            canvas.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(node.tone.opacity(faded ? 0.35 : 1)))
-            canvas.fill(Path(ellipseIn: CGRect(x: p.x - r * 0.4, y: p.y - r * 0.4, width: r * 0.8, height: r * 0.8)), with: .color(.white.opacity(faded ? 0.2 : 0.75)))
-            var label = canvas.resolve(Text(node.title).font(.caption2.weight(.semibold)))
-            label.shading = .color(node.tone.opacity(faded ? 0.35 : 1))
-            let measured = label.measure(in: CGSize(width: 160, height: 30))
-            let box = CGRect(x: p.x - measured.width / 2, y: p.y + r + 4, width: measured.width, height: measured.height)
-            if taken.contains(where: { $0.intersects(box) }) { continue }
-            taken.append(box)
-            canvas.draw(label, in: box)
-        }
-        // Projects: a rounded square in a ring, named in bold, so they read as
-        // something other than a note or a domain.
-        for (i, node) in simulation.nodes.enumerated() where node.kind == .project {
-            let p = points[i]
-            let r = node.radius * grow
-            let faded = dim && !lit.contains(i)
-            let ring = CGRect(x: p.x - r * 1.9, y: p.y - r * 1.9, width: r * 3.8, height: r * 3.8)
-            canvas.stroke(Path(roundedRect: ring, cornerRadius: r * 1.1), with: .color(node.tone.opacity(faded ? 0.2 : 0.6)), lineWidth: 1.2)
-            let square = CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
-            canvas.fill(Path(roundedRect: square, cornerRadius: r * 0.5), with: .color(node.tone.opacity(faded ? 0.3 : 1)))
-            var label = canvas.resolve(Text(Image(systemName: "folder.fill")).font(.caption2) + Text(" " + node.title).font(.caption.weight(.bold)))
-            label.shading = .color(Color.primary.opacity(faded ? 0.35 : 0.95))
-            let measured = label.measure(in: CGSize(width: 180, height: 30))
-            let box = CGRect(x: p.x - measured.width / 2, y: p.y + r * 1.9 + 4, width: measured.width, height: measured.height)
-            if taken.contains(where: { $0.intersects(box) }) { continue }
-            taken.append(box)
-            canvas.draw(label, in: box)
-        }
-        // Note names appear once there is room: zoomed in, or around the selection.
-        if few || (interactive && scale >= 1.6) || focus != nil {
-            for (i, node) in simulation.nodes.enumerated() where node.kind == .note && (focus == nil || lit.contains(i)) {
-                let p = points[i]
-                guard CGRect(origin: .zero, size: size).contains(p) else { continue }
-                let short = node.title.count > 26 ? String(node.title.prefix(25)) + "…" : node.title
-                var label = canvas.resolve(Text(short).font(.caption2))
-                label.shading = .color(.primary.opacity(i == focus ? 1 : 0.7))
-                let measured = label.measure(in: CGSize(width: 170, height: 30))
-                let box = CGRect(x: p.x - measured.width / 2, y: p.y + 6, width: measured.width, height: measured.height)
-                if taken.contains(where: { $0.insetBy(dx: -2, dy: -1).intersects(box) }) { continue }
-                taken.append(box)
-                canvas.draw(label, in: box)
-            }
-        }
-    }
-
-    private func tap(at location: CGPoint, simulation: HubBrainSimulation, size: CGSize) {
-        let scale = zoom * pinch
-        guard let index = simulation.nearest(to: location, size: size, zoom: scale, pan: pan, within: 24) else {
+    /// A tap on a dot selects it (its links light up); a second tap opens it.
+    /// A tap on empty space clears the selection, or opens Knowledge.
+    private func tap(_ id: String?) {
+        guard let id, let node = holder.simulation?.nodes.first(where: { $0.id == id }) else {
             if selected != nil { withAnimation(.easeOut(duration: 0.2)) { selected = nil } }
             else { openExplorer?() }
             return
         }
-        let node = simulation.nodes[index]
-        if selected == node.id {
+        if selected == id {
             open(node)
         } else {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selected = node.id }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selected = id }
             UISelectionFeedbackGenerator().selectionChanged()
         }
     }
@@ -494,26 +435,6 @@ struct HubLivingBrainView: View {
             openProject?(String(node.id.dropFirst(8)))
         } else {
             openRecord(node.id)
-        }
-    }
-
-    private func drag(_ value: DragGesture.Value, simulation: HubBrainSimulation, size: CGSize) {
-        let scale = zoom * pinch
-        if dragStart == nil {
-            dragStart = pan
-            userMoved = true
-            if let index = simulation.nearest(to: value.startLocation, size: size, zoom: scale, pan: pan, within: 26) {
-                simulation.pinned = index
-                simulation.reheat()
-                wakeToken += 1
-            }
-        }
-        if let index = simulation.pinned {
-            let target = simulation.world(value.location, size: size, zoom: scale, pan: pan)
-            simulation.x[index] = target.0
-            simulation.y[index] = target.1
-        } else if allowsPan, let start = dragStart {
-            pan = CGSize(width: start.width + value.translation.width, height: start.height + value.translation.height)
         }
     }
 
@@ -543,35 +464,607 @@ struct HubLivingBrainView: View {
     }
 }
 
-extension HubLivingBrainView {
-    /// Taps everywhere; drags and pinches only on the full-screen graph, so
-    /// Home still scrolls over it.
-    @ViewBuilder fileprivate func gestures<Content: View>(_ content: Content, simulation: HubBrainSimulation, size: CGSize) -> some View {
-        if interactive {
-            content
-                .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if dragStart != nil || hypot(value.translation.width, value.translation.height) > 4 {
-                            drag(value, simulation: simulation, size: size)
-                        }
-                    }
-                    .onEnded { value in
-                        if dragStart == nil { tap(at: value.location, simulation: simulation, size: size) }
-                        // Only a real drag wakes the neighbours; a tap leaves the graph still.
-                        if simulation.pinned != nil { simulation.pinned = nil; simulation.reheat(); wakeToken += 1 }
-                        dragStart = nil
-                    })
-                .simultaneousGesture(MagnificationGesture()
-                    .updating($pinch) { value, state, _ in state = value }
-                    .onEnded { zoom = min(5, max(0.4, zoom * $0)); userMoved = true })
-        } else if #available(iOS 16.0, *) {
-            content.gesture(SpatialTapGesture().onEnded { tap(at: $0.location, simulation: simulation, size: size) })
-        } else {
-            content.simultaneousGesture(DragGesture(minimumDistance: 0).onEnded { value in
-                if hypot(value.translation.width, value.translation.height) <= 4 {
-                    tap(at: value.location, simulation: simulation, size: size)
-                }
-            })
+/// Hosts the layer-drawn graph and its touch handling.
+private struct HubBrainSurface: UIViewRepresentable {
+    let simulation: HubBrainSimulation
+    let interactive: Bool
+    let allowsPan: Bool
+    let running: Bool
+    let padding: CGFloat
+    let selectedID: String?
+    let refit: Int
+    let tap: (String?) -> Void
+
+    func makeUIView(context: Context) -> HubBrainLayerView { HubBrainLayerView() }
+
+    func updateUIView(_ view: HubBrainLayerView, context: Context) {
+        view.tap = tap
+        view.padding = padding
+        view.configure(simulation: simulation, interactive: interactive, allowsPan: allowsPan)
+        view.selectedID = selectedID
+        view.refit(token: refit)
+        view.running = running
+    }
+}
+
+/// The graph's drawing and touches. Every dot, glow and label is its own layer,
+/// made once; each frame only moves them and redraws the thin link paths, so
+/// Core Animation composites the picture on the GPU instead of the CPU
+/// repainting it. A note under the finger is picked up at once and the page
+/// behind does not scroll; anywhere else the page scrolls as usual.
+final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
+    var tap: ((String?) -> Void)?
+    var padding: CGFloat = 22
+    var running = false { didSet { if running != oldValue { running ? wake() : sleep() } } }
+    var selectedID: String? {
+        didSet {
+            guard selectedID != oldValue else { return }
+            focus = selectedID.flatMap { id in simulation?.nodes.firstIndex { $0.id == id } }
+            lit = Set(focus.map { [$0] + (simulation?.neighbors[$0] ?? []) } ?? [])
+            labelOrder = []
+            wake()
         }
+    }
+    /// Names in the order they claim space: the selected dot, domains, projects, the rest.
+    private var labelOrder: [Int] = []
+
+    private var simulation: HubBrainSimulation?
+    private var interactive = false
+    private var allowsPan = true
+    private var refitToken: Int?
+    // Camera: the simulation frames the graph; zoom and pan are the user's on top.
+    private var zoom: CGFloat = 1
+    private var pan = CGPoint.zero
+    private var userMoved = false
+    private var glide = CGPoint.zero
+    private var pinchStartZoom: CGFloat = 1
+    private var panStart = CGPoint.zero
+    private var heldMoved = false
+    private var touchStart = CGPoint.zero
+    private var focus: Int?
+    private var lit = Set<Int>()
+
+    private var displayLink: CADisplayLink?
+    private var lastFrame: CFTimeInterval?
+    private var awakeUntil: CFTimeInterval = 0
+
+    private let linkLayer = CALayer()
+    private let nodeLayer = CALayer()
+    private let labelLayer = CALayer()
+    private let mesh = CAShapeLayer()
+    private let similar = CAShapeLayer()
+    private let highlight = CAShapeLayer()
+    private var spokes: [Int: CAShapeLayer] = [:]
+    private var dots: [CALayer] = []
+    private var labels: [CALayer?] = []
+    private var labelShown: [Float] = []
+    private var dotShown: [Float] = []
+    private var lastGrow: CGFloat = 0
+    private var points: [CGPoint] = []
+
+    private lazy var hold: UILongPressGestureRecognizer = {
+        let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+        recognizer.minimumPressDuration = 0
+        recognizer.allowableMovement = .greatestFiniteMagnitude
+        recognizer.delegate = self
+        return recognizer
+    }()
+    private lazy var panner: UIPanGestureRecognizer = {
+        let recognizer = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = self
+        return recognizer
+    }()
+    private lazy var pinch: UIPinchGestureRecognizer = {
+        let recognizer = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+        recognizer.delegate = self
+        return recognizer
+    }()
+    private lazy var tapper: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
+        recognizer.delegate = self
+        return recognizer
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isMultipleTouchEnabled = true
+        for layer in [linkLayer, nodeLayer, labelLayer] { self.layer.addSublayer(layer) }
+        for path in [mesh, similar, highlight] {
+            path.fillColor = nil
+            path.lineCap = .round
+            linkLayer.addSublayer(path)
+        }
+        mesh.lineWidth = 0.6
+        similar.lineWidth = 0.6
+        similar.lineDashPattern = [2.5, 3]
+        highlight.lineWidth = 1.1
+        addGestureRecognizer(tapper)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func configure(simulation: HubBrainSimulation, interactive: Bool, allowsPan: Bool) {
+        if self.interactive != interactive || self.allowsPan != allowsPan || gestureRecognizers?.contains(hold) != true && interactive {
+            self.interactive = interactive
+            self.allowsPan = allowsPan
+            for recognizer in [hold, panner, pinch] { removeGestureRecognizer(recognizer) }
+            if interactive {
+                // Inside the scrolling Home page a dot is picked up after a short
+                // touch, so a quick swipe that starts on one still scrolls the page.
+                hold.minimumPressDuration = allowsPan ? 0 : 0.09
+                addGestureRecognizer(hold)
+                addGestureRecognizer(pinch)
+                if allowsPan { addGestureRecognizer(panner) }
+            }
+        }
+        guard simulation !== self.simulation else { return }
+        self.simulation = simulation
+        focus = selectedID.flatMap { id in simulation.nodes.firstIndex { $0.id == id } }
+        lit = Set(focus.map { [$0] + simulation.neighbors[$0] } ?? [])
+        buildLayers()
+        wake()
+    }
+
+    func refit(token: Int) {
+        guard token != refitToken else { return }
+        let first = refitToken == nil
+        refitToken = token
+        guard !first else { return }
+        zoom = 1; pan = .zero; glide = .zero; userMoved = false
+        simulation?.nudge()
+        wake()
+    }
+
+    deinit { displayLink?.invalidate() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        for layer in [linkLayer, nodeLayer, labelLayer] { layer.frame = bounds }
+        for path in [mesh, similar, highlight] { path.frame = bounds }
+        for spoke in spokes.values { spoke.frame = bounds }
+        wake()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) { buildLayers(); wake() }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { sleep() } else { wake() }
+    }
+
+    // MARK: Frames
+
+    private func wake(for seconds: CFTimeInterval = 1.5) {
+        guard running, window != nil, simulation != nil else { return }
+        awakeUntil = max(awakeUntil, CACurrentMediaTime() + seconds)
+        if displayLink == nil {
+            let link = CADisplayLink(target: HubBrainFrameTarget(self), selector: #selector(HubBrainFrameTarget.tick(_:)))
+            if #available(iOS 15.0, *) {
+                link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+            }
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+        lastFrame = nil
+        displayLink?.isPaused = false
+    }
+
+    private func sleep() {
+        displayLink?.isPaused = true
+        lastFrame = nil
+    }
+
+    fileprivate func onFrame(_ link: CADisplayLink) {
+        guard let simulation, bounds.width > 0 else { return }
+        let now = link.timestamp
+        let elapsed = lastFrame.map { now - $0 } ?? 1.0 / 60
+        lastFrame = now
+        let moving = simulation.advance(by: elapsed)
+        var gliding = false
+        if glide != .zero {
+            pan.x += glide.x * CGFloat(elapsed); pan.y += glide.y * CGFloat(elapsed)
+            let keep = CGFloat(pow(0.04, elapsed))
+            glide.x *= keep; glide.y *= keep
+            if hypot(glide.x, glide.y) < 8 { glide = .zero } else { gliding = true }
+        }
+        var framing = false
+        if !userMoved { framing = simulation.fit(bounds.size, padding: padding, immediate: false) }
+        let fading = render(simulation)
+        if !moving && !gliding && !framing && !fading && now > awakeUntil {
+            sleep()
+        }
+    }
+
+    // MARK: Layers
+
+    private func buildLayers() {
+        for layer in dots { layer.removeFromSuperlayer() }
+        for layer in labels { layer?.removeFromSuperlayer() }
+        for layer in spokes.values { layer.removeFromSuperlayer() }
+        dots = []; labels = []; spokes = [:]; lastGrow = 0; labelOrder = []
+        guard let simulation else { return }
+        let border = UIColor(HubWorkspacePalette.border).resolvedColor(with: traitCollection)
+        mesh.strokeColor = border.cgColor
+        similar.strokeColor = border.cgColor
+        highlight.strokeColor = border.withAlphaComponent(0.7).cgColor
+        for (i, node) in simulation.nodes.enumerated() where node.kind == .hub {
+            let spoke = CAShapeLayer()
+            spoke.fillColor = nil
+            spoke.lineWidth = 0.7
+            spoke.lineCap = .round
+            spoke.strokeColor = UIColor(node.tone).resolvedColor(with: traitCollection).cgColor
+            spoke.frame = bounds
+            linkLayer.insertSublayer(spoke, below: highlight)
+            spokes[i] = spoke
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        // Draw order: chats, notes, then projects and domains on top.
+        let order: [HubBrainSimulation.Kind] = [.chat, .note, .project, .hub]
+        dots = simulation.nodes.map { _ in CALayer() }
+        for kind in order {
+            for (i, node) in simulation.nodes.enumerated() where node.kind == kind {
+                let tone = UIColor(node.tone).resolvedColor(with: traitCollection)
+                let dot = dots[i]
+                dot.bounds = .zero
+                switch node.kind {
+                case .chat:
+                    dot.addSublayer(Self.circle(node.radius, tone.withAlphaComponent(0.55)))
+                case .note:
+                    dot.addSublayer(Self.circle(node.radius * 2.2, tone.withAlphaComponent(0.10)))
+                    dot.addSublayer(Self.circle(node.radius, tone.withAlphaComponent(0.95)))
+                case .hub:
+                    dot.addSublayer(Self.circle(node.radius * 3.6, tone.withAlphaComponent(0.07)))
+                    dot.addSublayer(Self.circle(node.radius * 2.2, tone.withAlphaComponent(0.14)))
+                    dot.addSublayer(Self.circle(node.radius, tone))
+                    dot.addSublayer(Self.circle(node.radius * 0.4, UIColor.white.withAlphaComponent(0.75)))
+                case .project:
+                    let ring = CAShapeLayer()
+                    let side = node.radius * 3.8
+                    ring.path = UIBezierPath(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side),
+                                             cornerRadius: node.radius * 1.1).cgPath
+                    ring.fillColor = nil
+                    ring.strokeColor = tone.withAlphaComponent(0.6).cgColor
+                    ring.lineWidth = 1.2
+                    dot.addSublayer(ring)
+                    let square = CALayer()
+                    square.bounds = CGRect(x: 0, y: 0, width: node.radius * 2, height: node.radius * 2)
+                    square.cornerRadius = node.radius * 0.5
+                    square.backgroundColor = tone.cgColor
+                    square.position = .zero
+                    dot.addSublayer(square)
+                }
+                nodeLayer.addSublayer(dot)
+            }
+        }
+        labels = Array(repeating: nil, count: simulation.nodes.count)
+        labelShown = Array(repeating: 0, count: simulation.nodes.count)
+        dotShown = Array(repeating: 1, count: simulation.nodes.count)
+        points = Array(repeating: .zero, count: simulation.nodes.count)
+        CATransaction.commit()
+    }
+
+    private static func circle(_ radius: CGFloat, _ color: UIColor) -> CALayer {
+        let layer = CALayer()
+        layer.bounds = CGRect(x: 0, y: 0, width: radius * 2, height: radius * 2)
+        layer.cornerRadius = radius
+        layer.backgroundColor = color.cgColor
+        layer.position = .zero
+        return layer
+    }
+
+    /// A node's name, drawn once into an image the first time it is needed.
+    private func label(_ i: Int, _ node: HubBrainSimulation.Node) -> CALayer? {
+        if let made = labels[i] { return made }
+        guard node.kind != .chat else { return nil }
+        let text = NSMutableAttributedString()
+        let caption = UIFont.preferredFont(forTextStyle: .caption2)
+        switch node.kind {
+        case .hub:
+            text.append(NSAttributedString(string: node.title, attributes: [
+                .font: UIFont.systemFont(ofSize: caption.pointSize, weight: .semibold),
+                .foregroundColor: UIColor(node.tone).resolvedColor(with: traitCollection)]))
+        case .project:
+            let font = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .bold)
+            if let folder = UIImage(systemName: "folder.fill", withConfiguration: UIImage.SymbolConfiguration(font: caption))?
+                .withTintColor(UIColor.label.resolvedColor(with: traitCollection), renderingMode: .alwaysOriginal) {
+                let attachment = NSTextAttachment()
+                attachment.image = folder
+                attachment.bounds = CGRect(x: 0, y: -1, width: folder.size.width, height: folder.size.height)
+                text.append(NSAttributedString(attachment: attachment))
+            }
+            text.append(NSAttributedString(string: " " + node.title, attributes: [
+                .font: font, .foregroundColor: UIColor.label.resolvedColor(with: traitCollection)]))
+        default:
+            let short = node.title.count > 26 ? String(node.title.prefix(25)) + "…" : node.title
+            text.append(NSAttributedString(string: short, attributes: [
+                .font: caption, .foregroundColor: UIColor.label.resolvedColor(with: traitCollection).withAlphaComponent(0.78)]))
+        }
+        let measured = text.boundingRect(with: CGSize(width: 190, height: 40), options: [.usesLineFragmentOrigin], context: nil).size
+        let size = CGSize(width: ceil(measured.width), height: ceil(measured.height))
+        guard size.width > 0, size.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = window?.screen.scale ?? UIScreen.main.scale
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in text.draw(at: .zero) }
+        let layer = CALayer()
+        layer.contents = image.cgImage
+        layer.contentsScale = format.scale
+        layer.bounds = CGRect(origin: .zero, size: size)
+        layer.opacity = 0
+        labelLayer.addSublayer(layer)
+        labels[i] = layer
+        return layer
+    }
+
+    /// Moves every layer to this frame's positions. Returns whether a fade is still running.
+    private func render(_ simulation: HubBrainSimulation) -> Bool {
+        let nodes = simulation.nodes
+        let kinds = simulation.kinds
+        guard dots.count == nodes.count else { return false }
+        let size = bounds.size
+        let scale = (simulation.scale > 0 ? simulation.scale : 1) * zoom
+        for i in nodes.indices {
+            let p = simulation.position(i)
+            points[i] = CGPoint(x: size.width / 2 + pan.x + (CGFloat(p.0) - simulation.center.x) * scale,
+                                y: size.height / 2 + pan.y + (CGFloat(p.1) - simulation.center.y) * scale)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
+        let dim = focus != nil
+        // Links: domain spokes in their domain's colour, the rest as a fine mesh.
+        let meshPath = CGMutablePath(), similarPath = CGMutablePath(), highlightPath = CGMutablePath()
+        var spokePaths: [Int: CGMutablePath] = [:]
+        for link in simulation.links where link.visible {
+            let a = points[link.a], b = points[link.b]
+            if let focus, link.a == focus || link.b == focus {
+                highlightPath.move(to: a); highlightPath.addLine(to: b)
+            } else if link.similar {
+                similarPath.move(to: a); similarPath.addLine(to: b)
+            } else if kinds[link.b] == .hub {
+                let path = spokePaths[link.b] ?? CGMutablePath()
+                path.move(to: a); path.addLine(to: b)
+                spokePaths[link.b] = path
+            } else {
+                meshPath.move(to: a); meshPath.addLine(to: b)
+            }
+        }
+        mesh.path = meshPath
+        mesh.opacity = dim ? 0.06 : 0.14
+        similar.path = similarPath
+        similar.opacity = dim ? 0.03 : 0.08
+        highlight.path = highlightPath
+        for (hub, spoke) in spokes {
+            spoke.path = spokePaths[hub]
+            spoke.opacity = dim ? 0.08 : 0.28
+        }
+
+        // Few dots: draw them larger and name every note.
+        let few = nodes.count <= 40
+        let grow = min(1.6, max(0.75, sqrt(zoom))) * (few ? 1.5 : 1)
+        let regrow = abs(grow - lastGrow) > 0.004
+        if regrow { lastGrow = grow }
+        let view = bounds.insetBy(dx: -40, dy: -40)
+        var fading = false
+        for i in nodes.indices {
+            let dot = dots[i]
+            let p = points[i]
+            let visible = view.contains(p)
+            if dot.isHidden == visible { dot.isHidden = !visible }
+            guard visible else { continue }
+            dot.position = p
+            let bigger: CGFloat = i == focus ? 1.8 : 1
+            if regrow || i == focus || dot.affineTransform().a != grow * bigger {
+                dot.setAffineTransform(CGAffineTransform(scaleX: grow * bigger, y: grow * bigger))
+            }
+            let target: Float = dim && !lit.contains(i) ? (kinds[i] == .hub ? 0.35 : 0.2) : 1
+            if dotShown[i] != target {
+                dotShown[i] += (target - dotShown[i]) * 0.25
+                if abs(dotShown[i] - target) < 0.02 { dotShown[i] = target } else { fading = true }
+                dot.opacity = dotShown[i]
+            }
+        }
+
+        // Names: domains and projects always; notes fade in as you zoom, like
+        // Obsidian's text fade, and around the selected dot. No two overlap.
+        let noteNames: Float = few ? 1 : (interactive ? Float(min(1, max(0, (zoom - 1.35) / 0.5))) : 0)
+        var taken: [CGRect] = []
+        if labelOrder.count != nodes.count {
+            labelOrder = nodes.indices.sorted { rank(kinds[$0], $0) < rank(kinds[$1], $1) }
+        }
+        for i in labelOrder {
+            guard kinds[i] != .chat else { continue }
+            var target: Float
+            switch kinds[i] {
+            case .hub, .project: target = dim && !lit.contains(i) ? 0.35 : 1
+            default: target = focus == nil ? noteNames : (lit.contains(i) ? (i == focus ? 1 : 0.85) : 0)
+            }
+            if !bounds.contains(points[i]) { target = 0 }
+            var shown = labelShown[i]
+            if target == 0 && shown == 0 { continue }
+            let node = nodes[i]
+            guard let layer = label(i, node) else { continue }
+            let below = node.radius * lastGrow * (node.kind == .project ? 1.9 : 1) * (i == focus ? 1.8 : 1) + 4
+            let box = CGRect(x: points[i].x - layer.bounds.width / 2, y: points[i].y + below,
+                             width: layer.bounds.width, height: layer.bounds.height)
+            if target > 0 {
+                if taken.contains(where: { $0.insetBy(dx: -2, dy: -1).intersects(box) }) { target = 0 } else { taken.append(box) }
+            }
+            if shown != target {
+                shown += (target - shown) * 0.22
+                if abs(shown - target) < 0.02 { shown = target } else { fading = true }
+                labelShown[i] = shown
+            }
+            layer.position = CGPoint(x: box.midX, y: box.midY)
+            layer.opacity = shown
+        }
+        return fading
+    }
+
+    /// Who gets a name first when names would overlap.
+    private func rank(_ kind: HubBrainSimulation.Kind, _ i: Int) -> Int {
+        if i == focus { return 0 }
+        switch kind {
+        case .hub: return 1
+        case .project: return 2
+        default: return lit.contains(i) ? 3 : 4
+        }
+    }
+
+    // MARK: Touches
+
+    /// The dot under `point`, if any; small dots get a generous finger-sized target.
+    private func node(at point: CGPoint, within limit: CGFloat) -> Int? {
+        guard let simulation, points.count == simulation.nodes.count else { return nil }
+        var best: Int?, bestDistance = limit
+        let kinds = simulation.kinds
+        for i in kinds.indices where !dots[i].isHidden {
+            let distance = hypot(points[i].x - point.x, points[i].y - point.y) - (kinds[i] == .hub ? 6 : 0)
+            if distance < bestDistance { best = i; bestDistance = distance }
+        }
+        return best
+    }
+
+    private func world(_ point: CGPoint) -> (Double, Double) {
+        guard let simulation else { return (0, 0) }
+        let s = max(0.0001, (simulation.scale > 0 ? simulation.scale : 1) * zoom)
+        return (Double(simulation.center.x + (point.x - bounds.width / 2 - pan.x) / s),
+                Double(simulation.center.y + (point.y - bounds.height / 2 - pan.y) / s))
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // Only where a gesture starts: a second finger must not move the held dot.
+        if (gestureRecognizer === hold || gestureRecognizer === panner), gestureRecognizer.state == .possible,
+           hold.state == .possible || hold.state == .failed {
+            touchStart = touch.location(in: self)
+        }
+        return true
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === hold {
+            // Only a touch that lands on a dot picks it up; elsewhere the page scrolls.
+            return node(at: touchStart, within: allowsPan ? 26 : 22) != nil
+        }
+        if gestureRecognizer === panner {
+            return node(at: touchStart, within: 26) == nil
+        }
+        // While a dot is held, the page behind must not scroll.
+        if gestureRecognizer is UIPanGestureRecognizer, hold.state == .began || hold.state == .changed {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // Pinch and pan together; a held note and a pinch together.
+        (gestureRecognizer === pinch && (other === panner || other === hold)) ||
+            (other === pinch && (gestureRecognizer === panner || gestureRecognizer === hold))
+    }
+
+    @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+        let hit = node(at: recognizer.location(in: self), within: 24)
+        tap?(hit.flatMap { simulation?.nodes[$0].id })
+    }
+
+    @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
+        guard let simulation else { return }
+        let location = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began:
+            guard let index = node(at: touchStart, within: allowsPan ? 26 : 22) else { return }
+            heldMoved = false
+            glide = .zero
+            simulation.hold(index, at: simulation.position(index))
+            wake()
+        case .changed:
+            guard simulation.pinned != nil else { return }
+            if !heldMoved, hypot(location.x - touchStart.x, location.y - touchStart.y) > 6 {
+                heldMoved = true
+                userMoved = true
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
+            if heldMoved {
+                // The dot keeps the same offset from the finger it had when picked up.
+                let start = world(touchStart), now = world(location)
+                let origin = simulation.position(simulation.pinned!)
+                simulation.move(to: (origin.0 + now.0 - start.0, origin.1 + now.1 - start.1))
+                touchStart = location
+            }
+            wake()
+        case .ended, .cancelled, .failed:
+            let index = simulation.pinned
+            simulation.release()
+            wake(for: 6)
+            // Held without moving: a tap on that dot.
+            if recognizer.state == .ended, !heldMoved, let index { tap?(simulation.nodes[index].id) }
+            heldMoved = false
+        default:
+            break
+        }
+    }
+
+    @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            panStart = pan
+            glide = .zero
+            userMoved = true
+            wake()
+        case .changed:
+            let move = recognizer.translation(in: self)
+            pan = CGPoint(x: panStart.x + move.x, y: panStart.y + move.y)
+            wake()
+        case .ended:
+            // Flicks keep gliding and slow down, like scrolling.
+            let velocity = recognizer.velocity(in: self)
+            glide = hypot(velocity.x, velocity.y) > 120 ? velocity : .zero
+            wake()
+        default:
+            break
+        }
+    }
+
+    @objc private func pinched(_ recognizer: UIPinchGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            pinchStartZoom = zoom
+            glide = .zero
+            userMoved = true
+        case .changed:
+            let next = min(5, max(0.4, pinchStartZoom * recognizer.scale))
+            if allowsPan, recognizer.numberOfTouches >= 2 {
+                // Zoom around the fingers: the point under them stays put.
+                let anchor = recognizer.location(in: self)
+                let ratio = next / zoom
+                let fromCenter = CGPoint(x: anchor.x - bounds.width / 2 - pan.x, y: anchor.y - bounds.height / 2 - pan.y)
+                pan.x -= fromCenter.x * (ratio - 1)
+                pan.y -= fromCenter.y * (ratio - 1)
+                panStart = pan
+                if panner.state == .changed { panner.setTranslation(.zero, in: self) }
+            }
+            zoom = next
+            wake()
+        default:
+            wake()
+        }
+    }
+}
+
+/// Keeps the display link from holding the view alive.
+private final class HubBrainFrameTarget: NSObject {
+    weak var view: HubBrainLayerView?
+    init(_ view: HubBrainLayerView) { self.view = view }
+    @objc func tick(_ link: CADisplayLink) {
+        guard let view else { link.invalidate(); return }
+        view.onFrame(link)
     }
 }

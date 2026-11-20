@@ -104,7 +104,17 @@ struct HubLiveChatView: View {
     @State private var queueEdit: HubQueuedChatMessage?
     @State private var queueDraft = ""
     @State private var queueBusy = false
+    /// The message just sent, shown at once until HUB's copy of it arrives,
+    /// so a sent message never seems to vanish while HUB gets ready.
+    @State private var echo: SentEcho?
     @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
+
+    private struct SentEcho: Equatable {
+        let text: String
+        let attachments: Int
+        /// The newest user message before this one was sent.
+        let after: String
+    }
 
     private struct LoadedVisual {
         let summary: HubChatPresentation
@@ -785,6 +795,18 @@ struct HubLiveChatView: View {
                                 if !steps.isEmpty { HubLiveStepsView(steps: steps) }
                                 if snapshot.partial.isEmpty && steps.isEmpty { HubThinkingIndicator() }
                             }
+                            // Messages HUB has not taken in yet stay in the chat,
+                            // marked as waiting, instead of disappearing.
+                            ForEach(queuedMessages ?? []) { item in
+                                pendingBubble(item.text.isEmpty ? "Attachment" : item.text,
+                                              caption: item.placement == .steering ? "Steering the current turn" : "Waiting for HUB",
+                                              item: item)
+                            }
+                            if let echo {
+                                pendingBubble(echo.text.isEmpty ? (echo.attachments == 1 ? "1 attachment" : "\(echo.attachments) attachments") : echo.text,
+                                              caption: sending ? "Sending…" : "Sent", item: nil)
+                                if !snapshot.running && awaitingAfter != nil && !connectionLost { HubThinkingIndicator() }
+                            }
                         } else if !connectionLost {
                             ProgressView("Loading chat…")
                         }
@@ -815,6 +837,12 @@ struct HubLiveChatView: View {
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
                 }
                 .onChange(of: screenshots.map(\.id)) { _ in
+                    if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
+                }
+                .onChange(of: echo) { _ in
+                    if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
+                }
+                .onChange(of: queuedMessages?.count) { _ in
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
                 }
                 .onChange(of: bottomRequest) { _ in scroll.scrollTo("latest", anchor: .bottom) }
@@ -1017,9 +1045,7 @@ struct HubLiveChatView: View {
             } else if !connectionLost && snapshot?.lastTurnWasStopped == true {
                 Label("Turn stopped", systemImage: "stop.circle").font(.footnote).foregroundStyle(.secondary)
             }
-            if let items = queuedMessages, !items.isEmpty {
-                queuedMessagesView(items)
-            } else if !queueAvailable && !connectionLost {
+            if !queueAvailable && !connectionLost {
                 Button("Refresh message queue") { attempt += 1 }.font(.footnote)
             }
             if !fileDrafts.isEmpty {
@@ -1150,45 +1176,48 @@ struct HubLiveChatView: View {
         .onDisappear { dictation.cancel() }
     }
 
-    private func queuedMessagesView(_ items: [HubQueuedChatMessage]) -> some View {
-        DisclosureGroup("Queued messages · \(items.count)") {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(items) { item in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.text.isEmpty ? "Attachment" : item.text).lineLimit(2)
-                                if item.placement == .steering {
-                                    Text("Steering the current turn").font(.caption2).foregroundStyle(.secondary)
+    /// A sent message HUB has not taken in yet: drawn like the user's other
+    /// messages, a little faded, with what it is waiting for underneath.
+    private func pendingBubble(_ text: String, caption: String, item: HubQueuedChatMessage?) -> some View {
+        HStack {
+            Spacer(minLength: 48)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(verbatim: text)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(accent.opacity(0.22), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                HStack(spacing: 4) {
+                    Image(systemName: "clock").imageScale(.small)
+                    Text(caption)
+                    if let item {
+                        Menu {
+                            if item.canEdit {
+                                Button("Edit") {
+                                    composerFocused = false
+                                    error = nil
+                                    queueDraft = item.text
+                                    queueEdit = item
                                 }
                             }
-                            Spacer()
-                            Menu {
-                                if item.canEdit {
-                                    Button("Edit") {
-                                        composerFocused = false
-                                        error = nil
-                                        queueDraft = item.text
-                                        queueEdit = item
-                                    }
-                                }
-                                if item.placement == .queued && snapshot?.running == true {
-                                    Button("Send to current turn") { changeQueue(item, action: .steer) }
-                                }
-                                Button("Remove from queue", role: .destructive) { changeQueue(item, action: .remove) }
-                            } label: {
-                                Image(systemName: "ellipsis").frame(width: 44, height: 40)
-                                    .accessibilityLabel("Queued message options")
+                            if item.placement == .queued && snapshot?.running == true {
+                                Button("Send to current turn") { changeQueue(item, action: .steer) }
                             }
-                            .disabled(queueBusy || connectionLost)
+                            Button("Remove from queue", role: .destructive) { changeQueue(item, action: .remove) }
+                        } label: {
+                            Image(systemName: "ellipsis").frame(width: 36, height: 28)
                         }
+                        .accessibilityLabel("Queued message options")
+                        .disabled(queueBusy || connectionLost)
                     }
                 }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
-            .frame(height: CGFloat(min(items.count, 3)) * 44)
         }
-        .font(.footnote)
-        .padding(.horizontal, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("hub.chat.pending")
     }
 
     private func changeQueue(_ item: HubQueuedChatMessage, action: HubChatQueueAction) {
@@ -1300,6 +1329,12 @@ struct HubLiveChatView: View {
                 guard !Task.isCancelled else { return }
                 queuedMessages = items
                 queueAvailable = items != nil
+                // Once the message waits in HUB's queue, the queue shows it.
+                if let echo, items?.contains(where: {
+                    $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == echo.text
+                }) == true {
+                    self.echo = nil
+                }
             }) { value in
                 guard !Task.isCancelled else { return }
                 let completed = snapshot?.running == true && !value.running
@@ -1323,6 +1358,10 @@ struct HubLiveChatView: View {
                 if renamedTitle == value.title { renamedTitle = nil }
                 if value.running || completed || (awaitingAfter != nil && (value.latestUserMessageID ?? "") != awaitingAfter) {
                     awaitingAfter = nil
+                }
+                // HUB's own copy of the sent message has arrived.
+                if let echo, (value.latestUserMessageID ?? "") != echo.after {
+                    self.echo = nil
                 }
             }
         } catch {
@@ -1392,8 +1431,15 @@ struct HubLiveChatView: View {
             speedSentAt = Date(); speedFirstAt = nil
             speedModel = (selectedModel ?? snapshot?.model)?.model
         }
+        if HubChatCommand.leadingName(in: text) == nil {
+            echo = SentEcho(text: text.trimmingCharacters(in: .whitespacesAndNewlines), attachments: files.count, after: previous)
+        }
         Task {
-            defer { sending = false }
+            var delivered = false
+            defer {
+                sending = false
+                if !delivered { echo = nil }
+            }
             do {
                 var prepared: ([String], [HubChatPhoto]) = ([], [])
                 let context = attachments()
@@ -1438,6 +1484,7 @@ struct HubLiveChatView: View {
                     }
                 } else {
                     try await api.sendChat(text, sessionID: chat.sessionId, files: prepared.0, photos: prepared.1, delivery: delivery)
+                    delivered = true
                 }
                 if draft == text { draft = "" }
                 for file in files {
@@ -1454,6 +1501,7 @@ struct HubLiveChatView: View {
                     try? await Task.sleep(nanoseconds: 12_000_000_000)
                     if awaitingAfter == previous {
                         awaitingAfter = nil
+                        if echo?.after == previous { echo = nil }
                         error = "HUB accepted your message. Reconnecting to check its status."
                         connectionLost = true
                         reconnect()
