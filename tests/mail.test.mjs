@@ -63,3 +63,19 @@ test('the release includes the mail reader', async () => {
   const staged = new URL('../runtime/host/node_modules/@lencx/minke-harness-overlay/voice/mail_imap.py', import.meta.url);
   assert.deepEqual(await readFile(staged), await readFile(new URL('../packages/harness-overlay/voice/mail_imap.py', import.meta.url)));
 });
+
+test("several Gmail accounts: the old single account is kept, and a request names which one", async () => {
+  const {writeFile} = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "hub-mail-accounts-"));
+  await writeFile(join(root, "account.json"), JSON.stringify({address: "me@gmail.com", password: "x", savedAt: 1}));
+  const store = new MailStore(root); await store.load();
+  assert.deepEqual(store.accounts.map(a => a.address), ["me@gmail.com"]);
+  assert.equal(store.pick().address, "me@gmail.com");
+  await store.saveAccount({address: "work@gmail.com", password: "y", savedAt: 2});
+  assert.throws(() => store.pick(), /Say which account/);
+  assert.equal(store.pick("WORK@gmail.com").address, "work@gmail.com");
+  assert.throws(() => store.pick("other@gmail.com"), /No connected Gmail account/);
+  await store.removeAccount("me@gmail.com");
+  const again = new MailStore(root); await again.load();
+  assert.deepEqual(again.accounts.map(a => a.address), ["work@gmail.com"]);
+});
