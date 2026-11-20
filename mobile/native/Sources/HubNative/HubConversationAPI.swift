@@ -40,6 +40,23 @@ public struct HubChatCharacterPicker: Decodable {
     public let pending: Bool
     public let canSelect: Bool
     public let characters: [Character]
+    /// The chat's normal model and the unrestricted one (HUB 1.10.21+).
+    public let mainId: String?
+    public let unrestrictedId: String?
+
+    /// This chat is switched to the unrestricted model.
+    public var unlocked: Bool { unrestrictedId != nil && selectedId == unrestrictedId }
+
+    /// A short, typical refusal at the start of a reply, in English or Turkish.
+    public static func looksLikeRefusal(_ text: String) -> Bool {
+        let head = String(text.prefix(400)).lowercased()
+        let phrases = ["i can't help", "i cannot help", "i can’t help", "i can't assist", "i cannot assist", "i can’t assist",
+                       "i won't", "i won’t", "i'm not able to", "i’m not able to", "i am not able to", "i'm unable to", "i’m unable to",
+                       "i can't provide", "i can’t provide", "i cannot provide", "i must decline", "i can't do that", "i can’t do that",
+                       "against my guidelines", "i'm sorry, but i", "i’m sorry, but i",
+                       "yardımcı olamam", "yardımcı olamıyorum", "bunu yapamam", "bunu yapamıyorum", "bu konuda yardım", "maalesef bu"]
+        return phrases.contains { head.contains($0) }
+    }
 }
 
 public struct HubHomeWork: Decodable {

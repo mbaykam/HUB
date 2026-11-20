@@ -56,6 +56,9 @@ struct HubLiveChatView: View {
     @State private var historyAnchor: String?
     @State private var readingLatest = true
     @State private var historyTopVisible = false
+    /// The chat's normal and unrestricted models, for the lock and retry.
+    @State private var modelSlots: HubChatCharacterPicker?
+    @State private var slotBusy = false
     @State private var latestVisible = false
     @State private var bottomRequest = 0
     @State private var characterPickerOpen = false
@@ -158,6 +161,7 @@ struct HubLiveChatView: View {
         .task(id: historyRequest) {
             if historyRequest != 0 { await loadEarlierMessages() }
         }
+        .task(id: snapshot?.running) { await loadModelSlots() }
         .task(id: ScreenshotLoad(sequence: snapshot?.latestScreenshotSequence, retry: screenshotRetry)) {
             await loadScreenshots()
         }
@@ -299,6 +303,24 @@ struct HubLiveChatView: View {
                     }
                 }
                 Spacer(minLength: 4)
+                // Unlock: the whole chat answers with the unrestricted model
+                // until it is locked again.
+                if let modelSlots, modelSlots.unrestrictedId != nil, modelSlots.mainId != nil {
+                    Button {
+                        composerFocused = false
+                        Task { await setUnlocked(!modelSlots.unlocked) }
+                    } label: {
+                        Image(systemName: modelSlots.unlocked ? "lock.open.fill" : "lock.fill")
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(modelSlots.unlocked ? .orange : nil)
+                            .frame(width: 40, height: 40)
+                            .hubGlass(Circle(), interactive: true, tint: modelSlots.unlocked ? Color.orange.opacity(0.35) : nil)
+                    }
+                    .disabled(slotBusy || !modelSlots.canSelect)
+                    .accessibilityLabel(modelSlots.unlocked ? "Unrestricted model on" : "Unrestricted model off")
+                    .accessibilityHint(modelSlots.unlocked ? "Switches this chat back to the normal model." : "Switches this whole chat to the unrestricted model.")
+                    .accessibilityIdentifier("hub.chat.unlock")
+                }
                 // The step-by-step view of the turn, one tap away instead of a
                 // second screen with its own tab bar.
                 Button {
@@ -632,6 +654,11 @@ struct HubLiveChatView: View {
                                                 Button { UIPasteboard.general.string = message.text } label: {
                                                     Label("Copy message", systemImage: "doc.on.doc")
                                                 }
+                                                if modelSlots?.unrestrictedId != nil, modelSlots?.unlocked == false, !snapshot.running {
+                                                    Button { retryUnrestricted(after: message) } label: {
+                                                        Label("Retry unrestricted", systemImage: "lock.open")
+                                                    }
+                                                }
                                             }
                                     }
                                     chatPhotos(message)
@@ -732,6 +759,18 @@ struct HubLiveChatView: View {
 
     private func messageActions(_ message: HubChatMessage, usage: HubChatTurnUsage?) -> some View {
         HStack(spacing: 6) {
+            // A refusal from the normal model: one tap asks the unrestricted one.
+            if let modelSlots, modelSlots.unrestrictedId != nil, !modelSlots.unlocked,
+               message.id == snapshot?.messages.last(where: { $0.role == "assistant" })?.id,
+               HubChatCharacterPicker.looksLikeRefusal(message.text) {
+                Button { retryUnrestricted(after: message) } label: {
+                    Label("Retry unrestricted", systemImage: "lock.open").frame(minHeight: 36)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.orange)
+                .disabled(connectionLost || slotBusy || snapshot?.running == true)
+                .accessibilityIdentifier("hub.chat.retryUnrestricted")
+            }
             if let sequence = Int(message.id) {
                 Button {
                     Task { await branch(sequence) }
@@ -775,6 +814,44 @@ struct HubLiveChatView: View {
     private func screenshotImage(_ screenshot: HubChatScreenshot) -> some View {
         HubChatImageView(name: screenshot.name, canSave: true) {
             try await api.chatScreenshot(sessionID: chat.sessionId, id: screenshot.id)
+        }
+    }
+
+    private func loadModelSlots() async {
+        guard let value = try? await api.chatCharacters(sessionID: chat.sessionId), !Task.isCancelled else { return }
+        modelSlots = value
+    }
+
+    /// Switches the chat between its normal model and the unrestricted one.
+    @discardableResult
+    private func setUnlocked(_ unlocked: Bool) async -> Bool {
+        guard !slotBusy else { return false }
+        slotBusy = true
+        defer { slotBusy = false }
+        do {
+            let current = try await api.chatCharacters(sessionID: chat.sessionId)
+            guard let target = unlocked ? current.unrestrictedId : current.mainId else { return false }
+            if current.selectedId != target {
+                _ = try await api.selectChatCharacter(sessionID: chat.sessionId, id: target, revision: current.revision)
+            }
+            modelSlots = try await api.chatCharacters(sessionID: chat.sessionId)
+            error = nil
+            return true
+        } catch {
+            self.error = "Could not switch the model. Check that HUB is online and try again."
+            return false
+        }
+    }
+
+    /// Answers the last message again with the unrestricted model.
+    private func retryUnrestricted(after message: HubChatMessage) {
+        let messages = olderMessages + (snapshot?.messages ?? [])
+        guard let index = messages.firstIndex(where: { $0.id == message.id }),
+              let question = messages[..<index].last(where: { $0.role == "user" && !$0.text.isEmpty })?.text else { return }
+        Task {
+            guard await setUnlocked(true) else { return }
+            draft = question
+            send()
         }
     }
 
