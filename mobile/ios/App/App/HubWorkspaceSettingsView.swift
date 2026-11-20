@@ -32,6 +32,10 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubSpeechSettingsView(api: api)) {
                         Label("Speech", systemImage: "waveform")
                     }
+                    NavigationLink(destination: HubMailSettingsView(api: api)) {
+                        Label("Email", systemImage: "envelope")
+                    }
+                    .accessibilityIdentifier("hub.settings.email")
                     NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
                         Label("Knowledge AI", systemImage: "circle.hexagongrid")
                     }
@@ -1354,5 +1358,83 @@ private struct HubInstructionEditor: View {
         } catch {
             self.notice = "Could not confirm the save. The draft is retained. Check the saved instructions before trying again."
         }
+    }
+}
+
+/// Connects Gmail for reading. HUB reads with an app password and never
+/// sends: drafts open in the user's own mail app.
+@MainActor
+struct HubMailSettingsView: View {
+    let api: HubConversationAPI
+    @State private var state: HubMailState?
+    @State private var address = ""
+    @State private var password = ""
+    @State private var busy = false
+    @State private var notice: String?
+    @State private var confirmRemove = false
+
+    var body: some View {
+        HubList {
+            if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+            if let state, state.configured, let connected = state.address {
+                Section {
+                    Label(connected, systemImage: "checkmark.circle.fill")
+                    Text("HUB can search and read this mailbox. It never marks mail as read, moves or deletes it, and it cannot send: when it writes an email, you send it yourself from your mail app.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Text("Only the Smart model can read mail. Helpers, Fast and Unrestricted cannot.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section {
+                    Button("Disconnect Gmail", role: .destructive) { confirmRemove = true }
+                }
+            } else if state != nil {
+                Section {
+                    TextField("Gmail address", text: $address)
+                        .textContentType(.emailAddress).keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField("App password (16 letters)", text: $password)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("hub.mail.password")
+                    Button(busy ? "Checking…" : "Connect") { Task { await connect() } }
+                        .disabled(busy || address.isEmpty || password.filter { !$0.isWhitespace }.count != 16)
+                } footer: {
+                    Text("Create an app password at myaccount.google.com/apppasswords (it needs 2-Step Verification). HUB stores it only on your PC and uses it to read mail.")
+                }
+                Section {
+                    Link("Open Google app passwords", destination: URL(string: "https://myaccount.google.com/apppasswords")!)
+                }
+            } else {
+                ProgressView()
+            }
+        }
+        .navigationTitle("Email")
+        .task { await load() }
+        .alert("Disconnect Gmail?", isPresented: $confirmRemove) {
+            Button("Disconnect", role: .destructive) { Task { await remove() } }
+        } message: {
+            Text("HUB forgets the app password. You can also revoke it in your Google account.")
+        }
+    }
+
+    private func load() async {
+        do { state = try await api.mail(); notice = nil }
+        catch { notice = "Could not reach HUB. Check that it is online." }
+    }
+
+    private func connect() async {
+        busy = true
+        defer { busy = false }
+        do {
+            state = try await api.changeMail(["action": "save", "address": address.trimmingCharacters(in: .whitespaces), "password": password])
+            password = ""
+            notice = nil
+        } catch {
+            notice = "Gmail did not accept that. Check the address and the 16-letter app password, and that HUB is online."
+        }
+    }
+
+    private func remove() async {
+        do { state = try await api.changeMail(["action": "remove"]); notice = nil }
+        catch { notice = "Could not disconnect. Try again." }
     }
 }

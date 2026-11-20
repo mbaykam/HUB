@@ -80,6 +80,21 @@ public struct HubChatCharacterPicker: Decodable {
     }
 }
 
+/// Gmail connection and email drafts the assistant prepared (HUB 1.10.21+).
+public struct HubMailState: Decodable, Equatable {
+    public struct Draft: Decodable, Equatable, Identifiable {
+        public let id: String
+        public let to: String
+        public let cc: String
+        public let subject: String
+        public let body: String
+        public let mailto: String
+    }
+    public let configured: Bool
+    public let address: String?
+    public let drafts: [Draft]?
+}
+
 /// A helper's work, read-only (HUB 1.10.21+).
 public struct HubHelperWork: Decodable, Equatable {
     public struct Entry: Decodable, Equatable, Identifiable {
@@ -1892,6 +1907,21 @@ public final class HubConversationAPI {
               value.conversations.allSatisfy({ HubVoiceAPI.validID($0.sessionId) && !$0.title.isEmpty && $0.title.utf8.count <= 960 && $0.updatedAt.isFinite && $0.updatedAt >= 0 }) else { throw HubAttachmentError.invalidResponse }
         return value
     }
+    /// Gmail status and this chat's email drafts (HUB 1.10.21+).
+    public func mail(sessionID: String? = nil) async throws -> HubMailState {
+        var query: [URLQueryItem] = []
+        if let sessionID, HubVoiceAPI.validID(sessionID) { query.append(URLQueryItem(name: "sessionId", value: sessionID)) }
+        let data = try await requestData("api/hub/mail", headers: ["x-hub-mail": "1"], query: query)
+        return try JSONDecoder().decode(HubMailState.self, from: data)
+    }
+
+    /// Saves (after a test login), removes the account, or dismisses a draft.
+    public func changeMail(_ command: [String: String]) async throws -> HubMailState {
+        let body = try JSONSerialization.data(withJSONObject: command)
+        let data = try await requestData("api/hub/mail", headers: ["x-hub-mail": "1"], body: body, operationTimeout: 45)
+        return try JSONDecoder().decode(HubMailState.self, from: data)
+    }
+
     /// What a helper was asked, the steps it took and what it wrote.
     public func helperWork(sessionID: String) async throws -> HubHelperWork {
         guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }

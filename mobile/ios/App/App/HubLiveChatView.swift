@@ -63,6 +63,8 @@ struct HubLiveChatView: View {
     @State private var helpers: [HubHomeWork.Helper] = []
     @State private var helpersOpen = false
     @State private var openHelper: HubHomeWork.Helper?
+    /// Emails the assistant wrote for the user to send from their mail app.
+    @State private var mailDrafts: [HubMailState.Draft] = []
     @State private var latestVisible = false
     @State private var bottomRequest = 0
     @State private var characterPickerOpen = false
@@ -727,6 +729,15 @@ struct HubLiveChatView: View {
                             if requestedVisual == nil, let latestVisual {
                                 visualReopenCard(latestVisual)
                             }
+                            // Emails waiting for the user: HUB never sends them itself.
+                            ForEach(mailDrafts) { draft in
+                                HubMailDraftCard(draft: draft) {
+                                    Task {
+                                        _ = try? await api.changeMail(["action": "dismiss", "id": draft.id])
+                                        mailDrafts.removeAll { $0.id == draft.id }
+                                    }
+                                }
+                            }
                             // Helpers at work right now, each one tap from its steps.
                             ForEach(helpers.filter { $0.state == .running }) { helper in
                                 HubHelperCard(helper: helper, open: {
@@ -865,6 +876,10 @@ struct HubLiveChatView: View {
             if let work = try? await api.workActivity(), !Task.isCancelled {
                 let next = work.helpers(of: chat.sessionId)
                 if next != helpers { withAnimation(.easeInOut(duration: 0.2)) { helpers = next } }
+            }
+            if let mail = try? await api.mail(sessionID: chat.sessionId), !Task.isCancelled {
+                let next = mail.drafts ?? []
+                if next != mailDrafts { withAnimation(.easeInOut(duration: 0.2)) { mailDrafts = next } }
             }
             let busy = helpers.contains { $0.state == .running } || snapshot?.running == true
             do { try await Task.sleep(nanoseconds: busy ? 3_000_000_000 : 20_000_000_000) } catch { return }
@@ -2745,5 +2760,39 @@ struct HubHelperWorkView: View {
                 do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
             }
         }
+    }
+}
+/// An email the assistant wrote. Opening it hands it to the user's mail app,
+/// where only the user's own tap sends it.
+struct HubMailDraftCard: View {
+    let draft: HubMailState.Draft
+    let dismiss: () -> Void
+    @Environment(\.openURL) private var openURL
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Email draft · not sent", systemImage: "envelope")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("To: \(draft.to)").font(.footnote)
+            if !draft.cc.isEmpty { Text("Cc: \(draft.cc)").font(.footnote) }
+            Text(draft.subject).font(.subheadline.weight(.semibold))
+            Text(draft.body).font(.footnote).lineLimit(expanded ? nil : 4)
+                .onTapGesture { withAnimation { expanded.toggle() } }
+            HStack {
+                Button {
+                    if let url = URL(string: draft.mailto) { openURL(url) }
+                } label: {
+                    Label("Open in Mail", systemImage: "paperplane").frame(minHeight: 36)
+                }
+                .hubGlassButton(prominent: true)
+                .accessibilityHint("Opens the email in your mail app. It is sent only if you tap Send there.")
+                Spacer()
+                Button("Dismiss", action: dismiss).font(.footnote).frame(minHeight: 36)
+            }
+        }
+        .padding(12)
+        .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityIdentifier("hub.chat.mailDraft.\(draft.id)")
     }
 }
