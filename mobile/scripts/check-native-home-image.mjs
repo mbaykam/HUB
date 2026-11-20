@@ -9,7 +9,8 @@ for (let y = 32; y < 304; y++) {
   for (let x = 10; x < 155; x++) {
     const i = (y * info.width + x) * info.channels;
     const [r, g, b] = data.subarray(i, i + 3);
-    if (b >= 21 && b <= 55 && r < 32 && g >= r && b > g + 5) workspacePixels++;
+    // HUB's plain charcoal backdrop and cards (a little blue, never pure black).
+    if (r >= 6 && r < 45 && g >= r && b > g && b <= 60) workspacePixels++;
     if (r >= 140 && g >= 140 && b >= 165) controlPixels++;
     if (y > 255 && r >= 105 && g >= 105 && b >= 125) bottomControls++;
   }
