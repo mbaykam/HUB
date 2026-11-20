@@ -27,3 +27,18 @@ test('an explicit Telegram handoff is durable and isolated to that conversation'
  assert.equal(copy.selected('new-text-chat').id,s.mainId);
  }finally{assert.equal(dirname(root),tmpdir());assert.ok(basename(root).startsWith('hub-character-store-'));await rm(root,{recursive:true,force:true});}
 });
+
+test('an existing uncensored character becomes the unrestricted model on load, and a chat can switch to it and back',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'hub-character-store-'));
+ try{const state=seed();const devil=state.characters[2];devil.route={provider:'unlid',model:'glm-5.3-flash-uncensored'};
+ const first=new CharacterStore(root);await first.load(async()=>state);
+ const store=new CharacterStore(root);await store.load(async()=>{throw Error('Must load saved state')});
+ const s=store.snapshot();assert.equal(s.unrestrictedId,devil.id);
+ await store.change({action:'select',revision:s.revision,id:devil.id,sessionId:'chat-1'},async()=>{});
+ assert.equal(store.selected('chat-1').id,devil.id);
+ await store.change({action:'select',revision:store.snapshot().revision,id:s.mainId,sessionId:'chat-1'},async()=>{});
+ assert.equal(store.selected('chat-1').id,s.mainId);
+ await store.change({action:'delete',revision:store.snapshot().revision,id:devil.id},async()=>{});
+ assert.equal(store.snapshot().unrestrictedId,null);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

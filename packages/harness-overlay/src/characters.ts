@@ -319,7 +319,7 @@ export class HubCharacters extends Service {
             const s=this.store.snapshot(),mount=this.mounts.get(sessionId),c=mount?.assembled?.character??mount?.voiceCharacter??this.store.selected(sessionId,mount?.turnSnapshot??s);
             if(query.get("view")==="picker"){
               const selected=this.store.selected(sessionId,s),canSelect=!!mount&&this.pickerAllowed(sessionId);
-              send(200,{revision:s.revision,currentId:c.id,selectedId:selected.id,pending:c.id!==selected.id,canSelect,characters:s.characters.map(x=>({id:x.id,name:x.name,avatar:x.avatar,description:x.description,role:x.id===s.mainId?"Main assistant":x.id===s.voiceId?"Voice assistant":"Specialist",model:x.route?x.route.provider+" / "+x.route.model:null}))});return;
+              send(200,{revision:s.revision,currentId:c.id,selectedId:selected.id,pending:c.id!==selected.id,canSelect,mainId:s.mainId,voiceId:s.voiceId,unrestrictedId:s.unrestrictedId??null,characters:s.characters.map(x=>({id:x.id,name:x.name,avatar:x.avatar,description:x.description,role:x.id===s.mainId?"Main assistant":x.id===s.voiceId?"Voice assistant":x.id===s.unrestrictedId?"Unrestricted":"Specialist",model:x.route?x.route.provider+" / "+x.route.model:null}))});return;
             }
             send(200,{revision:s.revision,character:{id:c.id,name:c.name,route:c.route}});return;
           }
