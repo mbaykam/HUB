@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.23
+
+- Knowledge notes list the chats they were learned from, so the iPhone shows those chats' photos, screenshots and web pictures with the note.
+- Your work on Home includes every chat used in the last day, not only ones that ran tools.
+
 ## 1.10.22
 
 - Several Gmail accounts: search one or all of them; a draft names the account it should be sent from.
