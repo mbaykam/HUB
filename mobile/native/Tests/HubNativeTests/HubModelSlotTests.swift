@@ -21,4 +21,18 @@ final class HubModelSlotTests: XCTestCase {
         XCTAssertTrue(HubChatCharacterPicker.looksLikeRefusal("Maalesef bu konuda yardımcı olamam."))
         XCTAssertFalse(HubChatCharacterPicker.looksLikeRefusal("Here are three noodle stand layouts to compare."))
     }
+    func testAChatListsOnlyItsOwnHelpersNewestFirst() throws {
+        let json = #"{"byId":{"h1":{"title":"Compare cookers","running":false,"completed":true,"failed":false,"stopped":false,"origin":"subagent","updatedAt":10,"parentId":"chat-a"},"h2":{"title":"Find permits","running":true,"completed":false,"failed":false,"stopped":false,"origin":"subagent","updatedAt":20,"parentId":"chat-a"},"h3":{"title":"Other","running":true,"completed":false,"failed":false,"stopped":false,"origin":"subagent","updatedAt":30,"parentId":"chat-b"},"chat-a":{"running":false,"completed":false,"failed":false,"stopped":false,"updatedAt":5}},"at":40}"#
+        let work = try JSONDecoder().decode(HubHomeWork.self, from: Data(json.utf8))
+        let helpers = work.helpers(of: "chat-a")
+        XCTAssertEqual(helpers.map(\.id), ["h2", "h1"])
+        XCTAssertEqual(helpers.map(\.state), [.running, .done])
+    }
+
+    func testHelperWorkDecodes() throws {
+        let json = #"{"sessionId":"h1","title":"Compare cookers","brief":"Compare three cookers","running":false,"outcome":"done","entries":[{"kind":"step","title":"web_search","detail":"pasta cooker","failed":true,"at":1},{"kind":"text","text":"Pick the 4-basket one.","at":2}]}"#
+        let work = try JSONDecoder().decode(HubHelperWork.self, from: Data(json.utf8))
+        XCTAssertEqual(work.entries.count, 2)
+        XCTAssertEqual(work.entries.first?.failed, true)
+    }
 }

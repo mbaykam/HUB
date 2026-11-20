@@ -59,6 +59,10 @@ struct HubLiveChatView: View {
     /// The chat's normal and unrestricted models, for the lock and retry.
     @State private var modelSlots: HubChatCharacterPicker?
     @State private var slotBusy = false
+    /// Helpers this chat started, newest first.
+    @State private var helpers: [HubHomeWork.Helper] = []
+    @State private var helpersOpen = false
+    @State private var openHelper: HubHomeWork.Helper?
     @State private var latestVisible = false
     @State private var bottomRequest = 0
     @State private var characterPickerOpen = false
@@ -162,6 +166,10 @@ struct HubLiveChatView: View {
             if historyRequest != 0 { await loadEarlierMessages() }
         }
         .task(id: snapshot?.running) { await loadModelSlots() }
+        .task { await followHelpers() }
+        .sheet(isPresented: $helpersOpen) {
+            HubHelpersSheet(api: api, helpers: helpers, opened: openHelper, stop: stopHelper)
+        }
         .task(id: ScreenshotLoad(sequence: snapshot?.latestScreenshotSequence, retry: screenshotRetry)) {
             await loadScreenshots()
         }
@@ -382,6 +390,22 @@ struct HubLiveChatView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
+            if !helpers.isEmpty {
+                let running = helpers.filter { $0.state == .running }.count
+                Button { composerFocused = false; openHelper = nil; helpersOpen = true } label: {
+                    HStack(spacing: 6) {
+                        if running > 0 { ProgressView().controlSize(.mini) } else { Image(systemName: "person.2") }
+                        Text(running > 0 ? "Helpers · \(running) running" : "Helpers · \(helpers.count)")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 30)
+                    .background(HubWorkspacePalette.border.opacity(0.09), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 6)
+                .accessibilityIdentifier("hub.chat.helpers")
+            }
             if tab == .trajectory {
                 Text("Trajectory · each step of this chat")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -693,6 +717,14 @@ struct HubLiveChatView: View {
                             if requestedVisual == nil, let latestVisual {
                                 visualReopenCard(latestVisual)
                             }
+                            // Helpers at work right now, each one tap from its steps.
+                            ForEach(helpers.filter { $0.state == .running }) { helper in
+                                HubHelperCard(helper: helper, open: {
+                                    composerFocused = false
+                                    openHelper = helper
+                                    helpersOpen = true
+                                }, stop: { Task { await stopHelper(helper) } })
+                            }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
                             if snapshot.running && !connectionLost {
@@ -815,6 +847,24 @@ struct HubLiveChatView: View {
         HubChatImageView(name: screenshot.name, canSave: true) {
             try await api.chatScreenshot(sessionID: chat.sessionId, id: screenshot.id)
         }
+    }
+
+    /// Keeps the chat's helper list current: often while one runs, rarely otherwise.
+    private func followHelpers() async {
+        while !Task.isCancelled {
+            if let work = try? await api.workActivity(), !Task.isCancelled {
+                let next = work.helpers(of: chat.sessionId)
+                if next != helpers { withAnimation(.easeInOut(duration: 0.2)) { helpers = next } }
+            }
+            let busy = helpers.contains { $0.state == .running } || snapshot?.running == true
+            do { try await Task.sleep(nanoseconds: busy ? 3_000_000_000 : 20_000_000_000) } catch { return }
+        }
+    }
+
+    private func stopHelper(_ helper: HubHomeWork.Helper) async {
+        do { try await api.cancelChat(sessionID: helper.id) }
+        catch { self.error = "Could not stop the helper. Check that HUB is online and try again." }
+        if let work = try? await api.workActivity() { helpers = work.helpers(of: chat.sessionId) }
     }
 
     private func loadModelSlots() async {
@@ -2495,5 +2545,174 @@ struct HubThinkingIndicator: View {
         }
         .accessibilityElement()
         .accessibilityLabel("Working")
+    }
+}
+
+/// A running helper in the chat: its task, a live indicator, Open and Stop.
+struct HubHelperCard: View {
+    let helper: HubHomeWork.Helper
+    let open: () -> Void
+    let stop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: open) {
+                HStack(spacing: 10) {
+                    HubHelperStateIcon(state: helper.state)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(helper.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                        Text(HubHelperStateIcon.label(helper.state)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows the helper's steps")
+            if helper.state == .running {
+                Button(action: stop) { Image(systemName: "stop.circle").font(.title3).frame(width: 44, height: 44) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Stop helper")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityIdentifier("hub.chat.helper.\(helper.id)")
+    }
+}
+
+struct HubHelperStateIcon: View {
+    let state: HubHomeWork.Helper.State
+
+    static func label(_ state: HubHomeWork.Helper.State) -> String {
+        switch state {
+        case .running: return "Working…"
+        case .done: return "Done"
+        case .failed: return "Failed"
+        case .stopped: return "Stopped"
+        }
+    }
+
+    var body: some View {
+        Group {
+            switch state {
+            case .running: ProgressView()
+            case .done: Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+            case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+            case .stopped: Image(systemName: "stop.circle.fill").foregroundColor(.secondary)
+            }
+        }
+        .frame(width: 24, height: 24)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Everything a chat's helpers did.
+struct HubHelpersSheet: View {
+    let api: HubConversationAPI
+    let helpers: [HubHomeWork.Helper]
+    var opened: HubHomeWork.Helper?
+    let stop: (HubHomeWork.Helper) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection: String?
+
+    var body: some View {
+        NavigationView {
+            List {
+                if helpers.isEmpty { Text("This chat has not started any helpers.").foregroundStyle(.secondary) }
+                ForEach(helpers) { helper in
+                    NavigationLink(tag: helper.id, selection: $selection) {
+                        HubHelperWorkView(api: api, helper: helper, stop: stop)
+                    } label: {
+                        HStack(spacing: 10) {
+                            HubHelperStateIcon(state: helper.state)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(helper.title).lineLimit(2)
+                                Text("\(HubHelperStateIcon.label(helper.state)) · \(Date(timeIntervalSince1970: helper.updatedAt / 1000).formatted(.relative(presentation: .named)))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Helpers")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .onAppear { if selection == nil { selection = opened?.id } }
+        }
+        .navigationViewStyle(.stack)
+    }
+}
+
+/// One helper's work, read-only: its brief, each step and what it wrote.
+struct HubHelperWorkView: View {
+    let api: HubConversationAPI
+    let helper: HubHomeWork.Helper
+    let stop: (HubHomeWork.Helper) async -> Void
+    @State private var work: HubHelperWork?
+    @State private var failed = false
+    @State private var stopping = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let work {
+                    Text("Task").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    HubMarkdownText(source: work.brief.isEmpty ? helper.title : work.brief)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(HubWorkspacePalette.border.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    ForEach(Array(work.entries.enumerated()), id: \.offset) { _, entry in
+                        if entry.kind == "step" {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.title ?? "Step").font(.footnote.weight(.semibold))
+                                    if let detail = entry.detail, !detail.isEmpty {
+                                        Text(detail).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(3)
+                                    }
+                                }
+                            } icon: {
+                                Image(systemName: entry.failed == true ? "xmark.circle" : "wrench.and.screwdriver")
+                                    .foregroundColor(entry.failed == true ? .orange : .secondary)
+                            }
+                        } else if let text = entry.text {
+                            HubMarkdownText(source: text)
+                        }
+                    }
+                    if work.running {
+                        HStack(spacing: 8) { ProgressView(); Text("Working…").foregroundStyle(.secondary) }
+                    }
+                } else if failed {
+                    Text("Could not load this helper's work. Check that HUB is online.").foregroundStyle(.secondary)
+                } else {
+                    ProgressView("Loading…")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+        }
+        .navigationTitle(helper.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if work?.running ?? (helper.state == .running) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(stopping ? "Stopping…" : "Stop") {
+                        stopping = true
+                        Task { await stop(helper); stopping = false }
+                    }
+                    .disabled(stopping)
+                }
+            }
+        }
+        .task {
+            // Refreshes while the helper is still working.
+            while !Task.isCancelled {
+                if let value = try? await api.helperWork(sessionID: helper.id) { work = value; failed = false }
+                else if work == nil { failed = true }
+                guard work?.running == true else { return }
+                do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
+            }
+        }
     }
 }

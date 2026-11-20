@@ -59,6 +59,25 @@ public struct HubChatCharacterPicker: Decodable {
     }
 }
 
+/// A helper's work, read-only (HUB 1.10.21+).
+public struct HubHelperWork: Decodable, Equatable {
+    public struct Entry: Decodable, Equatable, Identifiable {
+        public let kind: String
+        public let title: String?
+        public let detail: String?
+        public let failed: Bool?
+        public let text: String?
+        public let at: Double
+        public var id: String { "\(at)-\(kind)-\(title ?? "")-\(text?.prefix(24) ?? "")" }
+    }
+    public let sessionId: String
+    public let title: String
+    public let brief: String
+    public let running: Bool
+    public let outcome: String
+    public let entries: [Entry]
+}
+
 public struct HubHomeWork: Decodable {
     public struct Item: Decodable {
         public let title: String?
@@ -68,8 +87,30 @@ public struct HubHomeWork: Decodable {
         public let stopped: Bool
         public let origin: String?
         public let updatedAt: Double
+        /// The chat that started this helper.
+        public let parentId: String?
     }
     public let byId: [String: Item]
+
+    /// A helper started from a chat, for its card.
+    public struct Helper: Identifiable, Equatable {
+        public enum State: Equatable { case running, done, failed, stopped }
+        public let id: String
+        public let title: String
+        public let state: State
+        public let updatedAt: Double
+    }
+
+    /// The helpers a chat started, newest first.
+    public func helpers(of sessionID: String) -> [Helper] {
+        byId.compactMap { id, item -> Helper? in
+            guard item.parentId == sessionID else { return nil }
+            let state: Helper.State = item.running ? .running : item.failed ? .failed : item.stopped ? .stopped : .done
+            let title = item.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Helper(id: id, title: title?.isEmpty == false ? title! : "Helper", state: state, updatedAt: item.updatedAt)
+        }
+        .sorted { $0.updatedAt > $1.updatedAt }
+    }
 }
 
 public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
@@ -1830,6 +1871,13 @@ public final class HubConversationAPI {
               value.conversations.allSatisfy({ HubVoiceAPI.validID($0.sessionId) && !$0.title.isEmpty && $0.title.utf8.count <= 960 && $0.updatedAt.isFinite && $0.updatedAt >= 0 }) else { throw HubAttachmentError.invalidResponse }
         return value
     }
+    /// What a helper was asked, the steps it took and what it wrote.
+    public func helperWork(sessionID: String) async throws -> HubHelperWork {
+        guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
+        let data = try await requestData("api/hub/helper", headers: ["x-hub-daily-use": "1", "x-hub-session": sessionID])
+        return try JSONDecoder().decode(HubHelperWork.self, from: data)
+    }
+
     public func workActivity() async throws -> HubHomeWork {
         let data = try await requestData("api/hub/activity", headers: ["x-hub-daily-use": "1"])
         let work = try JSONDecoder().decode(HubHomeWork.self, from: data)
