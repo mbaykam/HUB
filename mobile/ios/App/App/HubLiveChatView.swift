@@ -55,6 +55,7 @@ struct HubLiveChatView: View {
     @State private var historyRequest = 0
     @State private var historyAnchor: String?
     @State private var readingLatest = true
+    @State private var historyTopVisible = false
     @State private var latestVisible = false
     @State private var bottomRequest = 0
     @State private var characterPickerOpen = false
@@ -562,12 +563,25 @@ struct HubLiveChatView: View {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if let snapshot {
                             if olderPage?.hasMore ?? snapshot.hasMore {
-                                Button(historyError ? "Retry loading earlier messages" : "Load earlier messages") {
-                                    readingLatest = false
-                                    historyRequest += 1
+                                // Scrolling up to the top loads the earlier
+                                // messages by itself; a button appears only to
+                                // retry after a failure.
+                                Group {
+                                    if historyError {
+                                        Button("Retry loading earlier messages") {
+                                            readingLatest = false
+                                            historyRequest += 1
+                                        }
+                                        .disabled(historyLoading || connectionLost)
+                                    } else {
+                                        ProgressView()
+                                            .opacity(historyLoading ? 1 : 0.5)
+                                            .accessibilityLabel("Loading earlier messages")
+                                    }
                                 }
-                                .disabled(historyLoading || connectionLost)
-                                if historyLoading { ProgressView("Loading earlier messages…") }
+                                .frame(maxWidth: .infinity)
+                                .onAppear { historyTopVisible = true; autoLoadEarlier() }
+                                .onDisappear { historyTopVisible = false }
                             }
                             let messages = olderMessages + snapshot.messages
                             let activity = Dictionary(grouping: olderActivity + snapshot.activity, by: \.turn)
@@ -684,7 +698,7 @@ struct HubLiveChatView: View {
                 .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
                     readingLatest = false
                 }.onEnded { _ in
-                    if latestVisible { readingLatest = true }
+                    if latestVisible { readingLatest = true } else { autoLoadEarlier() }
                 })
                 .onChange(of: snapshot?.messages.last?.id) { _ in
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
@@ -761,6 +775,13 @@ struct HubLiveChatView: View {
     private func screenshotImage(_ screenshot: HubChatScreenshot) -> some View {
         HubChatImageView(name: screenshot.name, canSave: true) {
             try await api.chatScreenshot(sessionID: chat.sessionId, id: screenshot.id)
+        }
+    }
+
+    /// Loads the previous page once the user has scrolled up to the top.
+    private func autoLoadEarlier() {
+        if historyTopVisible && !readingLatest && !historyLoading && !historyError && !connectionLost {
+            historyRequest += 1
         }
     }
 

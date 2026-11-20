@@ -152,12 +152,12 @@ struct HubNativeChatRequest: Equatable {
 }
 
 enum HubWorkspacePalette {
-    /// Near-black in dark mode, a cool off-white in light mode.
-    static let background = dynamic(light: 0xF2F3F8, dark: 0x030407)
+    /// A plain modern charcoal in dark mode, a cool off-white in light mode.
+    static let background = dynamic(light: 0xF2F3F8, dark: 0x0B0C0F)
     /// Solid surfaces: list rows, sheets, chips.
-    static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x111319))
-    /// Home cards: slightly see-through so the backdrop's glow shows.
-    static let card = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x0F1117, lightAlpha: 0.86, darkAlpha: 0.78))
+    static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x16181D))
+    /// Home cards: one step lighter than the background.
+    static let card = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x14161B, lightAlpha: 0.9, darkAlpha: 0.96))
     static let accentUIColor = dynamic(light: 0x3D4FD6, dark: 0xA3B1FF)
     static let accent = Color(uiColor: accentUIColor)
     static let onAccent = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x0A0D1F))

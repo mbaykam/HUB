@@ -126,86 +126,12 @@ extension EnvironmentValues {
     }
 }
 
-/// A dark, quiet backdrop with one slow wash of color across the whole screen,
-/// like light through frosted glass: warm amber and dusky rose drifting above,
-/// deep teal and slate blue below. Large soft blobs move on slow,
-/// out-of-phase paths so it never looks like fixed corner glows. It quickens
-/// and brightens a little while the user types or HUB works, and holds still
-/// with Reduce Motion or when the app is in the background.
+/// A plain, modern dark backdrop: one solid color behind every screen, no
+/// glows or moving color. Cards and glass controls sit on it.
 struct HubBackdrop: View {
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.hubBackdropEnergy) private var energy
-    @Environment(\.scenePhase) private var scenePhase
-    /// UI tests drive fixtures and wait for the app to settle; a still wash
-    /// keeps them deterministic.
-    private static let fixtures = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--hub-native-") }
-
     var body: some View {
-        ZStack {
-            Color(uiColor: HubWorkspacePalette.background)
-            TimelineView(.animation(minimumInterval: 1.0 / 12, paused: reduceMotion || scenePhase != .active || Self.fixtures)) { context in
-                HubAuroraWash(time: context.date.timeIntervalSinceReferenceDate, energy: energy, dark: scheme == .dark)
-            }
-            .animation(.easeInOut(duration: 1.6), value: energy)
-            // A gentle darkening at the top and bottom keeps text and bars calm.
-            LinearGradient(colors: [Color(uiColor: HubWorkspacePalette.background).opacity(scheme == .dark ? 0.55 : 0.35), .clear,
-                                    .clear, Color(uiColor: HubWorkspacePalette.background).opacity(scheme == .dark ? 0.6 : 0.4)],
-                           startPoint: .top, endPoint: .bottom)
-        }
-        .ignoresSafeArea()
-        .accessibilityHidden(true)
-    }
-}
-
-/// Four large, very soft color fields. Each is drawn once at a fixed size and
-/// only moved and scaled afterwards, so every frame is cheap compositing work
-/// rather than re-rendering full-screen gradients.
-struct HubAuroraWash: View {
-    let time: Double
-    let energy: Double
-    let dark: Bool
-
-    private struct Field {
-        let hue: Double, saturation: Double, brightness: Double
-        let x: Double, y: Double, size: Double
-        let phase: Double, drift: Double
-    }
-
-    private static let fields: [Field] = [
-        Field(hue: 0.06, saturation: 0.62, brightness: 0.85, x: 0.55, y: 0.22, size: 1.05, phase: 0.0, drift: 0.16),  // amber
-        Field(hue: 0.97, saturation: 0.45, brightness: 0.70, x: 0.25, y: 0.38, size: 0.85, phase: 2.1, drift: 0.14),  // dusky rose
-        Field(hue: 0.50, saturation: 0.55, brightness: 0.60, x: 0.20, y: 0.78, size: 1.10, phase: 4.0, drift: 0.15),  // deep teal
-        Field(hue: 0.60, saturation: 0.45, brightness: 0.65, x: 0.80, y: 0.70, size: 0.95, phase: 5.3, drift: 0.13),  // slate blue
-    ]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            let span = max(size.width, size.height)
-            let speed = 0.045 + energy * 0.06
-            let strength = (dark ? 0.34 : 0.22) + energy * 0.08
-            ZStack(alignment: .topLeading) {
-                ForEach(Self.fields.indices, id: \.self) { index in
-                    let field = Self.fields[index]
-                    let t = time * speed + field.phase
-                    let diameter = span * field.size
-                    let color = Color(hue: field.hue, saturation: field.saturation, brightness: field.brightness)
-                    Circle()
-                        .fill(RadialGradient(stops: [
-                            .init(color: color.opacity(strength), location: 0),
-                            .init(color: color.opacity(strength * 0.45), location: 0.45),
-                            .init(color: color.opacity(0), location: 1),
-                        ], center: .center, startRadius: 0, endRadius: diameter / 2))
-                        .frame(width: diameter, height: diameter)
-                        // Slow Lissajous paths and a gentle breathing size.
-                        .scaleEffect(0.85 + 0.12 * sin(t * 0.61 + field.phase))
-                        .position(x: (field.x + field.drift * sin(t)) * size.width,
-                                  y: (field.y + field.drift * 0.8 * sin(t * 0.73 + 1.3)) * size.height)
-                }
-            }
-            .frame(width: size.width, height: size.height)
-        }
-        .allowsHitTesting(false)
+        Color(uiColor: HubWorkspacePalette.background)
+            .ignoresSafeArea()
+            .accessibilityHidden(true)
     }
 }
