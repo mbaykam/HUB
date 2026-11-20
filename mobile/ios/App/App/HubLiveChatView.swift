@@ -843,11 +843,13 @@ struct HubLiveChatView: View {
                 }
             }
             HStack(alignment: .bottom, spacing: 6) {
-                HubComposerField(text: $draft, focus: $composerFocused, identifier: "hub.chat.draft") {
+                HubComposerField(text: $draft, focus: $composerFocused, identifier: "hub.chat.draft", live: dictation.isActive) {
                     send(fromKeyboard: true)
                 }
                 .submitLabel(.send)
                 .padding(.leading, 12)
+                // While voice typing only the microphone (to stop) and Send stay.
+                if !dictation.isActive {
                 Menu {
                     Button {
                         composerFocused = false
@@ -890,18 +892,21 @@ struct HubLiveChatView: View {
                 }
                 .accessibilityLabel("More actions")
                 .accessibilityIdentifier("hub.chat.more")
+                }
                 HubDictationButton(dictation: dictation, identifier: "hub.chat.dictate") {
                     if !dictation.isActive { dictationBase = draft }
                     dictation.toggle(api: api)
                 }
                 .disabled(!dictation.isActive && connectionLost)
-                Button {
-                    dictation.cancel()
-                    composerFocused = false
-                    voice()
-                } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
-                .accessibilityLabel("Voice")
-                .accessibilityIdentifier("hub.chat.voice")
+                if !dictation.isActive {
+                    Button {
+                        dictation.cancel()
+                        composerFocused = false
+                        voice()
+                    } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Voice")
+                    .accessibilityIdentifier("hub.chat.voice")
+                }
                 if snapshot?.running == true || awaitingAfter != nil {
                     Button(action: stop) {
                         Image(systemName: "stop.fill")

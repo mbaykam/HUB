@@ -320,6 +320,10 @@ struct HubComposerField: View {
     @Binding var text: String
     let focus: FocusState<Bool>.Binding
     let identifier: String
+    /// While voice typing, the words are shown in a view that keeps the
+    /// newest line in sight instead of the editable field, which would let
+    /// them run off below its bottom edge.
+    var live = false
     let submit: () -> Void
     @State private var previous = ""
     @State private var lastSubmit = Date.distantPast
@@ -327,7 +331,25 @@ struct HubComposerField: View {
     var body: some View {
         let prompt = Text("Chat…").foregroundColor(HubWorkspacePalette.accent.opacity(0.75))
         Group {
-            if #available(iOS 16.0, *) {
+            if live {
+                ScrollViewReader { scroll in
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            (text.isEmpty ? Text("Listening…").foregroundColor(.secondary) : Text(text))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 11)
+                            Color.clear.frame(height: 1).id("live-end")
+                        }
+                    }
+                    .frame(maxHeight: 180)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onAppear { scroll.scrollTo("live-end", anchor: .bottom) }
+                    .onChange(of: text) { _ in
+                        withAnimation(.easeOut(duration: 0.15)) { scroll.scrollTo("live-end", anchor: .bottom) }
+                    }
+                }
+                .accessibilityIdentifier(identifier + ".live")
+            } else if #available(iOS 16.0, *) {
                 TextField("Chat…", text: $text, prompt: prompt, axis: .vertical).lineLimit(1...5)
             } else {
                 TextField("Chat…", text: $text, prompt: prompt)

@@ -312,6 +312,8 @@ struct HubHomeView: View {
     @State private var panel: Panel?
     @State private var draggingPanel: Panel?
     @State private var homeScrollOffset: CGFloat?
+    @AppStorage("hub.home.dayCollapsed") private var dayCollapsed = false
+    @AppStorage("hub.home.workCollapsed") private var workCollapsed = false
     @State private var keyboardShownAt = Date.distantPast
     @State private var panelDrag: CGFloat = 0
     @StateObject private var dictation = HubDictation()
@@ -758,21 +760,27 @@ struct HubHomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     connectionRow
-                    section("Knowledge", icon: "brain.head.profile", actionLabel: "Explore knowledge", open: showKnowledge) {
+                    // Knowledge fills the top of Home with no card around it:
+                    // the graph runs edge to edge, the details sit below it.
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Knowledge").font(.headline).accessibilityAddTraits(.isHeader)
+                            Spacer()
+                            Button(action: showKnowledge) { Text("Explore knowledge").font(.footnote).foregroundStyle(accent).frame(minHeight: 40) }
+                                .buttonStyle(.plain)
+                        }
                         if let value = model.knowledge {
                             let notes = value.nodes.filter { $0.kind != "conversation" }
                             if value.nodes.isEmpty {
                                 Text("Notes appear here as HUB learns from your chats.")
                                     .font(.caption).foregroundStyle(.secondary)
                             } else {
-                                HubLivingBrainView(graph: value, height: 300, active: homeVisible, openRecord: selectKnowledgeNode,
+                                HubLivingBrainView(graph: value, height: Self.brainHeight, active: homeVisible, openRecord: selectKnowledgeNode,
                                                    openDomain: { id in
                                                        showKnowledge()
                                                        focusKnowledgeDomain(id)
                                                    }, openExplorer: showKnowledge)
-                                    .background(Color(uiColor: HubWorkspacePalette.background).opacity(0.7), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                    .padding(.horizontal, -6)
+                                    .padding(.horizontal, -16)
                                     .accessibilityIdentifier("hub.home.brain")
                             }
                             knowledgeSummary(value, notes: notes.count)
@@ -801,17 +809,18 @@ struct HubHomeView: View {
                             knowledgeAppsRow
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     section("Your day", icon: "calendar", actionLabel: "Open ↗", open: {
                         hideKeyboard()
                         plannerOpen = true
-                    }) {
+                    }, collapsed: $dayCollapsed) {
                         if let planner = model.planner {
                             personalPlanner(planner)
                         }
 
                     }
                     if let work = model.work {
-                        section("Your work", icon: "bolt.fill") { workSummary(work) }
+                        section("Your work", icon: "bolt.fill", collapsed: $workCollapsed) { workSummary(work) }
                     } else if model.workUnavailable {
                         section("Your work") {
                             Button("Retry loading work", action: connect)
@@ -2244,7 +2253,7 @@ struct HubHomeView: View {
                     .disabled(model.connection != .connected)
             }
             HStack(alignment: .bottom, spacing: 3) {
-                HubComposerField(text: $model.draft, focus: $composerFocused, identifier: "hub.home.draft") {
+                HubComposerField(text: $model.draft, focus: $composerFocused, identifier: "hub.home.draft", live: dictation.isActive) {
                     if canSend {
                         dictation.cancel()
                         dismissKeyboard(then: send)
@@ -2253,6 +2262,8 @@ struct HubHomeView: View {
                 .submitLabel(.send)
                 .disabled(model.sending || creatingChat)
                 .padding(.leading, 12)
+                // While voice typing only the microphone (to stop) and Send stay.
+                if !dictation.isActive {
                 Menu {
                     startChatAction("Commands & skills", icon: "terminal", action: .commands)
                     startChatAction("Files", icon: "paperclip", action: .files)
@@ -2266,18 +2277,21 @@ struct HubHomeView: View {
                 }
                 .accessibilityLabel("More actions")
                 .disabled(model.connection != .connected || model.sending || creatingChat || model.uncertainChat != nil)
+                }
                 HubDictationButton(dictation: dictation, identifier: "hub.home.dictate") {
                     if !dictation.isActive { dictationBase = model.draft }
                     dictation.toggle(api: chatAPI())
                 }
                 .disabled(!dictation.isActive && (model.sending || creatingChat || model.hasActiveVoice))
-                Button {
-                    dictation.cancel()
-                    dismissKeyboard(then: voice)
-                } label: {
-                    Image(systemName: "waveform").frame(width: 44, height: 44)
+                if !dictation.isActive {
+                    Button {
+                        dictation.cancel()
+                        dismissKeyboard(then: voice)
+                    } label: {
+                        Image(systemName: "waveform").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel(model.hasActiveVoice ? "Open voice controls" : "Speak")
                 }
-                .accessibilityLabel(model.hasActiveVoice ? "Open voice controls" : "Speak")
                 Button {
                     dictation.cancel()
                     dismissKeyboard(then: send)
@@ -2742,21 +2756,44 @@ struct HubHomeView: View {
         }
     }
 
+    /// The Knowledge graph on Home: about half the screen.
+    static var brainHeight: CGFloat { max(300, min(520, UIScreen.main.bounds.height * 0.46)) }
+
     private func section<Content: View>(_ title: LocalizedStringKey, icon: String? = nil, actionLabel: LocalizedStringKey = "Open", open: (() -> Void)? = nil,
+                                        collapsed: Binding<Bool>? = nil,
                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(accent)
-                        .frame(width: 26, height: 26)
-                        .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .accessibilityHidden(true)
+                // A collapsible section folds and unfolds from its title.
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { collapsed?.wrappedValue.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if let icon {
+                            Image(systemName: icon)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(accent)
+                                .frame(width: 26, height: 26)
+                                .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .accessibilityHidden(true)
+                        }
+                        Text(title)
+                            .font(.headline)
+                        if let collapsed {
+                            Image(systemName: "chevron.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(collapsed.wrappedValue ? -90 : 0))
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .frame(minHeight: 40)
+                    .contentShape(Rectangle())
                 }
-                Text(title)
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
+                .buttonStyle(.plain)
+                .allowsHitTesting(collapsed != nil)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityValue(collapsed.map { Text($0.wrappedValue ? "Collapsed" : "Expanded") } ?? Text(""))
                 if let open {
                     Spacer()
                     Button(action: open) { Text(actionLabel).font(.footnote).foregroundStyle(accent).frame(minHeight: 40) }
@@ -2764,7 +2801,7 @@ struct HubHomeView: View {
                         .accessibilityLabel(Text(actionLabel))
                 }
             }
-            content()
+            if collapsed?.wrappedValue != true { content() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .hubCard()
