@@ -2,12 +2,13 @@ import {conversationScreenshots,installScreenshotDelivery} from "./screenshot-de
 import {conversationArtifacts,artifactDocument} from "./conversation-artifacts.ts";
 import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
 import {createHash} from "node:crypto";
+import {helperWork} from "./helper-work.ts";
 /** Read-only native state, available before any chat has been opened in the
  * new PWA process. No task is resumed, repeated or cancelled by these reads. */
 export function installDailyUseWeb(ctx:any){
   const offScreenshot=installScreenshotDelivery(ctx);
   const ended=new Map<string,{version:number;kind:string}>();
-  const off=["activity","artifacts","conversations"].map(action=>ctx.webServer.register({kind:"exact",path:"/api/hub/"+action,handler:async(req:any,res:any)=>{
+  const off=["activity","artifacts","conversations","helper"].map(action=>ctx.webServer.register({kind:"exact",path:"/api/hub/"+action,handler:async(req:any,res:any)=>{
     const send=(code:number,value:any)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};
     const reject=ctx.connection.requestRejection(req);if(reject||req.headers["sec-fetch-site"]==="cross-site"){send(reject??403,{error:"unauthorized"});return;}
     if(req.method!=="GET"){send(405,{error:"read-only"});return;}
@@ -39,6 +40,16 @@ export function installDailyUseWeb(ctx:any){
       const session=req.headers["x-hub-session"],id=req.headers["x-hub-artifact"];
       if(typeof session!=="string"||!/^[-\w.]{1,200}$/.test(session)){send(400,{error:"invalid-session"});return;}
       const query=ctx.get?.("sessionQuery")??ctx.sessionQuery,observe=()=>query.observeSession(session,{signal,projectionMode:"none"});
+      if(action==="helper"){
+        // Only a helper (sub-agent) session is readable here.
+        const {items}=await ctx.sessionController.list({},signal),item=items.find((s:any)=>s.sessionId===session);
+        if(!item||item.origin!=="subagent"){send(404,{error:"helper-unavailable"});return;}
+        const observation=await observe();
+        try{const work=helperWork([...observation.events]),running=item.running===true;
+          send(200,{sessionId:session,title:typeof item.projections?.values?.title==="string"?item.projections.values.title.slice(0,240):"Helper",...work,running,outcome:running?"running":work.outcome==="running"?"done":work.outcome});}
+        finally{observation[Symbol.dispose]();}
+        return;
+      }
       let observation=await observe();
       // The iPhone asks for the screenshot list as soon as its live stream
       // shows a screenshot, which can be a moment before that result is
