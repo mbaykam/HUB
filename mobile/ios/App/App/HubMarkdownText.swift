@@ -199,7 +199,7 @@ struct HubMarkdownBlocks: View {
                 Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary).frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Copy")
+            .accessibilityLabel("Copy code")
         }
         .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(HubWorkspacePalette.border.opacity(0.08)))
