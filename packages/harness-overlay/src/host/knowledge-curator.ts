@@ -20,6 +20,11 @@ export {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limits?:{maxTokens:number})=>Promise<string>;
 const defaults=defaultKnowledgeSettings;
+export const RELINK_EVERY=7*24*60*60*1000;
+/** Up to ten brain notes with at most one link, least linked and newest first. */
+export function pickForRelink(notes:{id:string;degree:number;modifiedAt:number}[]):string[]{
+  return notes.filter(n=>n.degree<=1).sort((a,b)=>a.degree-b.degree||b.modifiedAt-a.modifiedAt).slice(0,10).map(n=>n.id);
+}
 const day=()=>new Date().toISOString().slice(0,10);
 const quotaRetryDelay=15*60*1000;
 /** People and life details were added after the original four categories;
@@ -92,6 +97,26 @@ export class KnowledgeCurator {
     return {passId,queued:ids.length,jobIds:ids,automatic:this.settings.enabled&&this.settings.mode!=="manual"};
   }
   async repairProjections(){await this.store.organization.repairPending();for(const job of this.jobs.values())if(job.error?.code==="KNOWLEDGE_PROJECTION_PENDING"){job.error=undefined;job.reason="Saved organization and Obsidian projection repaired; no model call needed.";await this.saveJob(job);}this.status="ready";}
+  /** Once a week, the least-connected brain notes get one more organizing
+   * pass, so links between older notes are found after the fact. Same rules
+   * as any pass: links need evidence in both notes; prose is never rewritten. */
+  async relinkWeekly(now=Date.now()){
+    const file=join(this.store.root,"relink.json");
+    let last:number|undefined;try{last=JSON.parse(await readFile(file,"utf8")).at;}catch{}
+    // First sighting: start the clock so the first pass runs a day later, not at install.
+    if(last===undefined){await atomicJson(file,{at:now-RELINK_EVERY+24*60*60*1000,noteIds:[]});return {queued:0,skipped:"not-due" as const};}
+    if(now-last<RELINK_EVERY)return {queued:0,skipped:"not-due" as const};
+    // Only when Knowledge has nothing else to do.
+    if([...this.jobs.values()].some(j=>j.status==="queued"||j.status==="running"||j.status==="waiting-credit"))return {queued:0,skipped:"busy" as const};
+    const notes=(await this.store.scan()).filter(n=>n.kind!=="conversation"&&n.body.trim()&&n.body.length<=23500);
+    const graph=await this.store.graph(),degree=new Map<string,number>();
+    for(const e of graph.edges){degree.set(e.source,(degree.get(e.source)??0)+1);degree.set(e.target,(degree.get(e.target)??0)+1);}
+    const chosen=pickForRelink(notes.map(n=>({id:n.id,degree:degree.get(n.id)??0,modifiedAt:n.modifiedAt})));
+    await atomicJson(file,{at:now,noteIds:chosen});
+    if(!chosen.length)return {queued:0};
+    const result=await this.reorganize(chosen);
+    return {queued:result.queued};
+  }
   /** Read-only passes for admitted brain notes missing a domain. The source
    * version is the durable identity, so a skipped/reviewed/failed version is
    * not charged again on each scan or restart. Chat originals stay separate. */
@@ -191,6 +216,7 @@ export class KnowledgeCurator {
   }  private async run(force:boolean){
     await this.store.refreshInventory();
     if(!force&&this.settings.mode!=="manual")await this.enqueueUnassigned();
+    if(!force&&this.settings.enabled&&this.settings.mode!=="manual")await this.relinkWeekly().catch(()=>{});
     if([...this.jobs.values()].some(j=>j.status==="queued"||j.status==="waiting-credit")){
       if(this.blockedRoute?.quota&&this.blockedRoute.key===this.routeKey()){
         if(!await this.recoverQuota())return;
