@@ -1943,6 +1943,18 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubMailState.self, from: data)
     }
 
+    /// Scheduled jobs and the heartbeat (HUB 1.10.24+).
+    public func schedule() async throws -> HubSchedule {
+        let data = try await requestData("api/hub/schedule", headers: ["x-hub-schedule": "1"])
+        return try JSONDecoder().decode(HubSchedule.self, from: data)
+    }
+
+    public func changeSchedule(_ command: [String: Any]) async throws -> HubSchedule {
+        guard JSONSerialization.isValidJSONObject(command) else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONSerialization.data(withJSONObject: command)
+        let data = try await requestData("api/hub/schedule", headers: ["x-hub-schedule": "1"], body: body, operationTimeout: 30)
+        return try JSONDecoder().decode(HubSchedule.self, from: data)
+    }
     /// What a helper was asked, the steps it took and what it wrote.
     public func helperWork(sessionID: String) async throws -> HubHelperWork {
         guard HubVoiceAPI.validID(sessionID) else { throw HubAttachmentError.invalidResponse }
@@ -3947,5 +3959,118 @@ public final class HubConversationAPI {
         let receipt = try JSONDecoder().decode(Receipt.self, from: data)
         guard receipt.id == draft.id, receipt.sessionId == draft.sessionID, receipt.name == draft.name, receipt.bytes == draft.bytes else { throw HubAttachmentError.invalidResponse }
         return url
+    }
+}
+
+/// HUB's scheduled jobs and heartbeat, modelled on OpenClaw: a reminder sends
+/// the user's own words at a time, a task is run by HUB at a time, and the
+/// heartbeat checks a short checklist and stays silent unless something needs
+/// the user.
+public struct HubSchedule: Decodable, Equatable {
+    public struct When: Decodable, Equatable {
+        public let kind: String
+        public let at: Double?
+        public let minutes: Int?
+        public let hour: Int?
+        public let minute: Int?
+        public let days: [Int]?
+        public let timezone: String?
+        public let summary: String?
+    }
+    public struct Run: Decodable, Equatable {
+        public let at: Double
+        public let status: String
+        public let text: String?
+    }
+    public struct Job: Decodable, Equatable, Identifiable {
+        public let id: String
+        public let name: String
+        public let kind: String
+        public let text: String
+        public let when: When
+        public let enabled: Bool
+        public let state: String
+        public let status: String
+        public let nextAt: Double?
+        public let last: Run?
+        public let error: String?
+        public let sessionId: String?
+        public var isReminder: Bool { kind == "reminder" }
+    }
+    public struct Heartbeat: Decodable, Equatable {
+        public let enabled: Bool
+        public let everyMinutes: Int
+        public let start: String
+        public let end: String
+        public let timezone: String
+        public let checklist: String
+        public let nextAt: Double?
+        public let last: Run?
+        public let error: String?
+    }
+    public let revision: Int
+    public let heartbeat: Heartbeat
+    public let jobs: [Job]
+}
+
+/// One job as the phone edits it.
+public struct HubScheduleDraft: Equatable {
+    public enum Kind: String, CaseIterable, Identifiable { case reminder, task; public var id: String { rawValue } }
+    public enum Repeat: String, CaseIterable, Identifiable { case once, daily, every; public var id: String { rawValue } }
+    public var id: String?
+    public var name = ""
+    public var kind = Kind.reminder
+    public var text = ""
+    public var repeats = Repeat.once
+    public var at = Date().addingTimeInterval(3_600)
+    public var everyMinutes = 60
+    /// 0 is Sunday.
+    public var days: Set<Int> = Set(0...6)
+
+    public init() {}
+
+    public init(_ job: HubSchedule.Job, calendar: Calendar = .current) {
+        id = job.id
+        name = job.name
+        kind = job.isReminder ? .reminder : .task
+        text = job.text
+        switch job.when.kind {
+        case "every":
+            repeats = .every
+            everyMinutes = max(5, job.when.minutes ?? 60)
+        case "daily":
+            repeats = .daily
+            let today = calendar.startOfDay(for: Date())
+            at = calendar.date(byAdding: .minute, value: (job.when.hour ?? 9) * 60 + (job.when.minute ?? 0), to: today) ?? Date()
+            days = Set(job.when.days ?? Array(0...6))
+        default:
+            repeats = .once
+            if let ms = job.when.at { at = Date(timeIntervalSince1970: ms / 1_000) }
+        }
+    }
+
+    public var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            (repeats != .every || everyMinutes >= 5) && (repeats != .daily || !days.isEmpty)
+    }
+
+    /// The save command for the host.
+    public func command(calendar: Calendar = .current) -> [String: Any] {
+        var when: [String: Any]
+        switch repeats {
+        case .once:
+            when = ["kind": "once", "at": Int64(at.timeIntervalSince1970 * 1_000)]
+        case .every:
+            when = ["kind": "every", "minutes": everyMinutes]
+        case .daily:
+            let parts = calendar.dateComponents([.hour, .minute], from: at)
+            when = ["kind": "daily", "hour": parts.hour ?? 9, "minute": parts.minute ?? 0, "days": days.sorted(),
+                    "timezone": calendar.timeZone.identifier]
+        }
+        var job: [String: Any] = ["name": name.trimmingCharacters(in: .whitespacesAndNewlines), "kind": kind.rawValue,
+                                  "text": text.trimmingCharacters(in: .whitespacesAndNewlines), "when": when]
+        if let id { job["id"] = id }
+        return ["action": "save", "job": job]
     }
 }

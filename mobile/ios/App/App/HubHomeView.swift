@@ -486,7 +486,7 @@ struct HubHomeView: View {
             knowledgeFocusedDomain = nil
         }) { knowledgeScreen }
         .sheet(isPresented: $tasksOpen) {
-            if let api = chatAPI() { HubTasksView(load: readTasks, api: api, openChat: showChat) }
+            if let api = chatAPI() { HubScheduleView(api: api, load: readTasks, openChat: showChat) }
         }
         .sheet(isPresented: $plannerOpen) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1159,8 +1159,8 @@ struct HubHomeView: View {
                     closePanel()
                     tasksOpen = true
                 } label: {
-                    section("Tasks") {
-                        Text("Goals, schedules & conditions").font(.subheadline).foregroundStyle(.secondary)
+                    section("Schedule") {
+                        Text("Reminders, scheduled jobs and the heartbeat").font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
                 .buttonStyle(.plain)
@@ -3335,5 +3335,403 @@ struct HubConversationPicturesStrip: View {
             }
             if !Task.isCancelled { pictures = Array(found.prefix(30)) }
         }
+    }
+}
+/// Reminders, scheduled jobs and the heartbeat: the whole "do something at a
+/// time" system on one screen, modelled on OpenClaw. HUB adds jobs here when
+/// asked in any chat; the user can add, edit, run, pause or delete them.
+@MainActor
+struct HubScheduleView: View {
+    let api: HubConversationAPI
+    var load: () async throws -> HubWorkspaceTasks
+    let openChat: (HubConversationChoice) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var schedule: HubSchedule?
+    @State private var failed = false
+    @State private var attempt = 0
+    @State private var busy = false
+    @State private var notice: String?
+    @State private var editing: Editing?
+    @State private var heartbeatOpen = false
+    @State private var olderOpen = false
+
+    private struct Editing: Identifiable {
+        let id = UUID()
+        let draft: HubScheduleDraft
+    }
+
+    var body: some View {
+        NavigationView {
+            HubList {
+                if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                if let schedule {
+                    Section {
+                        heartbeatRow(schedule.heartbeat)
+                    } header: {
+                        Text("Heartbeat")
+                    } footer: {
+                        Text("Every so often HUB goes through this list and messages you only when something needs you. An empty list costs nothing.")
+                    }
+                    Section("Scheduled") {
+                        if schedule.jobs.isEmpty {
+                            Text("Nothing scheduled. Ask HUB in any chat (\"remind me tomorrow at 9…\") or tap + to add one.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        ForEach(schedule.jobs) { jobRow($0) }
+                    }
+                    Section {
+                        Button { olderOpen = true } label: {
+                            Label("Older goals and automations", systemImage: "archivebox")
+                        }
+                    }
+                } else if failed {
+                    Button("Retry loading the schedule") { failed = false; attempt += 1 }
+                } else {
+                    ProgressView("Loading the schedule…")
+                }
+            }
+            .disabled(busy)
+            .navigationTitle("Schedule")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { editing = Editing(draft: HubScheduleDraft()) } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add a reminder or job")
+                        .disabled(schedule == nil)
+                }
+            }
+            .refreshable { await reload() }
+            .task(id: attempt) { await reload() }
+            .sheet(item: $editing) { target in
+                HubScheduleJobEditor(draft: target.draft) { await change($0.command()) }
+            }
+            .sheet(isPresented: $heartbeatOpen) {
+                if let schedule {
+                    HubHeartbeatEditor(heartbeat: schedule.heartbeat) { await change($0) }
+                }
+            }
+            .sheet(isPresented: $olderOpen) { HubTasksView(load: load, api: api, openChat: openChat) }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private func heartbeatRow(_ heartbeat: HubSchedule.Heartbeat) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: Binding(get: { heartbeat.enabled }, set: { on in
+                if on && heartbeat.checklist.isEmpty { heartbeatOpen = true; return }
+                Task { await change(["action": "heartbeat", "heartbeat": ["enabled": on]]) }
+            })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(heartbeat.enabled ? "On" : "Off").font(.body.weight(.semibold))
+                    Text("Every \(Self.interval(heartbeat.everyMinutes)), \(heartbeat.start)–\(heartbeat.end)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("hub.schedule.heartbeat")
+            Button { heartbeatOpen = true } label: {
+                Text(heartbeat.checklist.isEmpty ? "Add things to check…" : heartbeat.checklist)
+                    .font(.subheadline)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(heartbeat.checklist.isEmpty ? HubWorkspacePalette.accent : Color.primary)
+            if let last = heartbeat.last {
+                Text("Last check \(Self.ago(last.at)): \(last.text ?? last.status)")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func jobRow(_ job: HubSchedule.Job) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: job.isReminder ? "bell" : "sparkles")
+                .foregroundStyle(job.enabled ? HubWorkspacePalette.accent : Color.secondary)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(job.name).font(.body.weight(.semibold))
+                Text(Self.when(job)).font(.caption).foregroundStyle(.secondary)
+                if !job.isReminder, let last = job.last {
+                    Text("Last run \(Self.ago(last.at)): \(last.text ?? last.status)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                if let error = job.error, job.status == "failed" || job.state == "paused" {
+                    Text(error).font(.caption).foregroundStyle(.orange).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if job.when.kind != "other" { editing = Editing(draft: HubScheduleDraft(job)) } }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) { Task { await change(["action": "delete", "id": job.id]) } } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            Button { Task { await change(["action": job.enabled ? "pause" : "resume", "id": job.id]) } } label: {
+                Label(job.enabled ? "Pause" : "Resume", systemImage: job.enabled ? "pause" : "play")
+            }
+            .tint(.gray)
+        }
+        .contextMenu {
+            if job.when.kind != "other" {
+                Button { editing = Editing(draft: HubScheduleDraft(job)) } label: { Label("Edit", systemImage: "pencil") }
+            }
+            Button { Task { await change(["action": "run-once", "id": job.id]) } } label: {
+                Label(job.isReminder ? "Send now" : "Run now", systemImage: "play.circle")
+            }
+            Button { Task { await change(["action": job.enabled ? "pause" : "resume", "id": job.id]) } } label: {
+                Label(job.enabled ? "Pause" : "Resume", systemImage: job.enabled ? "pause" : "play")
+            }
+            if let session = job.sessionId {
+                Button {
+                    dismiss()
+                    openChat(HubConversationChoice(sessionId: session, title: job.name, updatedAt: 0))
+                } label: { Label("Open last run", systemImage: "text.bubble") }
+            }
+            Button(role: .destructive) { Task { await change(["action": "delete", "id": job.id]) } } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("hub.schedule.job.\(job.id)")
+    }
+
+    private func reload() async {
+        do {
+            let value = try await api.schedule()
+            if !Task.isCancelled { schedule = value; failed = false }
+        } catch {
+            if !Task.isCancelled && schedule == nil { failed = true }
+        }
+    }
+
+    /// Sends one change; the reply is the whole new schedule.
+    @discardableResult
+    private func change(_ command: [String: Any]) async -> Bool {
+        busy = true
+        defer { busy = false }
+        do {
+            schedule = try await api.changeSchedule(command)
+            notice = nil
+            return true
+        } catch {
+            notice = "Could not save that change. Check that HUB is online, then try again."
+            await reload()
+            return false
+        }
+    }
+
+    static func interval(_ minutes: Int) -> String {
+        if minutes % 1_440 == 0 { return minutes == 1_440 ? "day" : "\(minutes / 1_440) days" }
+        if minutes % 60 == 0 { return minutes == 60 ? "hour" : "\(minutes / 60) hours" }
+        return "\(minutes) min"
+    }
+
+    static func ago(_ milliseconds: Double) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: Date(timeIntervalSince1970: milliseconds / 1_000), relativeTo: Date())
+    }
+
+    static func when(_ job: HubSchedule.Job) -> String {
+        let next = job.nextAt.map { Date(timeIntervalSince1970: $0 / 1_000) }
+        let paused = job.enabled ? "" : " · paused"
+        switch job.when.kind {
+        case "once":
+            let at = Date(timeIntervalSince1970: (job.when.at ?? 0) / 1_000)
+            let done = job.state == "completed" ? " · done" : ""
+            return at.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()) + done + paused
+        case "every":
+            return "Every \(interval(job.when.minutes ?? 60))" + (next.map { " · next " + $0.formatted(.dateTime.hour().minute()) } ?? "") + paused
+        case "daily":
+            let time = String(format: "%02d:%02d", job.when.hour ?? 0, job.when.minute ?? 0)
+            return days(job.when.days ?? Array(0...6)) + " at " + time + paused
+        default:
+            return (job.when.summary ?? "Automation") + paused
+        }
+    }
+
+    static func days(_ days: [Int]) -> String {
+        let set = Set(days)
+        if set.count == 7 { return "Every day" }
+        if set == [1, 2, 3, 4, 5] { return "Weekdays" }
+        if set == [0, 6] { return "Weekends" }
+        let names = Calendar.current.shortWeekdaySymbols
+        return days.sorted().compactMap { names.indices.contains($0) ? names[$0] : nil }.joined(separator: ", ")
+    }
+}
+
+/// Add or change one reminder or job.
+@MainActor
+private struct HubScheduleJobEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var draft: HubScheduleDraft
+    let save: (HubScheduleDraft) async -> Bool
+    @State private var saving = false
+
+    private static let everyChoices = [15, 30, 60, 120, 240, 480, 720, 1_440]
+
+    var body: some View {
+        NavigationView {
+            HubForm {
+                Section {
+                    Picker("Kind", selection: $draft.kind) {
+                        Text("Reminder").tag(HubScheduleDraft.Kind.reminder)
+                        Text("HUB does it").tag(HubScheduleDraft.Kind.task)
+                    }
+                    .pickerStyle(.segmented)
+                } footer: {
+                    Text(draft.kind == .reminder
+                         ? "At the time, your phone gets this text as a notification."
+                         : "At the time, HUB does this in the background and tells you only if something needs you.")
+                }
+                Section {
+                    TextField("Name", text: $draft.name)
+                    TextEditor(text: $draft.text)
+                        .frame(minHeight: 90)
+                        .accessibilityLabel(draft.kind == .reminder ? "Reminder text" : "What HUB should do")
+                } header: { Text(draft.kind == .reminder ? "Reminder" : "What HUB should do") }
+                Section("When") {
+                    Picker("Repeat", selection: $draft.repeats) {
+                        Text("Once").tag(HubScheduleDraft.Repeat.once)
+                        Text("Daily").tag(HubScheduleDraft.Repeat.daily)
+                        Text("Every…").tag(HubScheduleDraft.Repeat.every)
+                    }
+                    .pickerStyle(.segmented)
+                    switch draft.repeats {
+                    case .once:
+                        DatePicker("Date and time", selection: $draft.at, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    case .daily:
+                        DatePicker("Time", selection: $draft.at, displayedComponents: .hourAndMinute)
+                        dayPicker
+                    case .every:
+                        Picker("Every", selection: $draft.everyMinutes) {
+                            ForEach(Self.everyChoices, id: \.self) { Text(HubScheduleView.interval($0)).tag($0) }
+                        }
+                    }
+                }
+            }
+            .disabled(saving)
+            .navigationTitle(draft.id == nil ? "New" : "Edit")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saving = true
+                        Task {
+                            if await save(draft) { dismiss() }
+                            saving = false
+                        }
+                    }
+                    .disabled(!draft.isValid || saving)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private var dayPicker: some View {
+        let names = Calendar.current.veryShortWeekdaySymbols
+        return HStack(spacing: 6) {
+            ForEach(0..<7, id: \.self) { day in
+                let on = draft.days.contains(day)
+                Button {
+                    if on { draft.days.remove(day) } else { draft.days.insert(day) }
+                } label: {
+                    Text(names.indices.contains(day) ? names[day] : "\(day)")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background(on ? HubWorkspacePalette.accent.opacity(0.25) : HubWorkspacePalette.border.opacity(0.06),
+                                    in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Calendar.current.weekdaySymbols.indices.contains(day) ? Calendar.current.weekdaySymbols[day] : "\(day)")
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+    }
+}
+
+/// The heartbeat: how often, between which hours, and what to check.
+@MainActor
+private struct HubHeartbeatEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let save: ([String: Any]) async -> Bool
+    @State private var enabled: Bool
+    @State private var every: Int
+    @State private var start: Date
+    @State private var end: Date
+    @State private var checklist: String
+    @State private var saving = false
+
+    private static let everyChoices = [30, 60, 120, 240, 480]
+
+    init(heartbeat: HubSchedule.Heartbeat, save: @escaping ([String: Any]) async -> Bool) {
+        self.save = save
+        _enabled = State(initialValue: heartbeat.enabled || heartbeat.checklist.isEmpty)
+        _every = State(initialValue: Self.everyChoices.contains(heartbeat.everyMinutes) ? heartbeat.everyMinutes : 60)
+        _start = State(initialValue: Self.time(heartbeat.start) ?? Self.time("08:00")!)
+        _end = State(initialValue: Self.time(heartbeat.end) ?? Self.time("23:00")!)
+        _checklist = State(initialValue: heartbeat.checklist)
+    }
+
+    var body: some View {
+        NavigationView {
+            HubForm {
+                Section {
+                    Toggle("Heartbeat on", isOn: $enabled)
+                    Picker("Check every", selection: $every) {
+                        ForEach(Self.everyChoices, id: \.self) { Text(HubScheduleView.interval($0)).tag($0) }
+                    }
+                    DatePicker("From", selection: $start, displayedComponents: .hourAndMinute)
+                    DatePicker("Until", selection: $end, displayedComponents: .hourAndMinute)
+                } footer: {
+                    Text("Outside these hours HUB does not check at all.")
+                }
+                Section {
+                    TextEditor(text: $checklist).frame(minHeight: 140).accessibilityLabel("Things to check")
+                } header: {
+                    Text("Things to check")
+                } footer: {
+                    Text("One per line, for example \"anything due today in my planner I haven't done\". HUB stays quiet when there is nothing to tell you.")
+                }
+            }
+            .disabled(saving)
+            .navigationTitle("Heartbeat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saving = true
+                        let list = checklist.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let command: [String: Any] = ["action": "heartbeat", "heartbeat": [
+                            "enabled": enabled && !list.isEmpty, "everyMinutes": every,
+                            "start": Self.text(start), "end": Self.text(end), "checklist": list,
+                            "timezone": TimeZone.current.identifier]]
+                        Task {
+                            if await save(command) { dismiss() }
+                            saving = false
+                        }
+                    }
+                    .disabled(saving || Self.text(start) == Self.text(end))
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private static func time(_ text: String) -> Date? {
+        let parts = text.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2 else { return nil }
+        return Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: Date())
+    }
+
+    private static func text(_ date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
     }
 }

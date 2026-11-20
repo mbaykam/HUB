@@ -1360,6 +1360,20 @@ private final class HubWorkspaceFixtureProtocol: URLProtocol {
                  "checkpoint":{"summary":"Changes from the last three weeks are collected.","nextAction":"Draft the release notes."}}]}
             """#.utf8)
         }
+        if request.httpMethod == "GET", url.path == "/api/hub/schedule",
+           request.value(forHTTPHeaderField: "x-hub-schedule") == "1" {
+            return Data(#"""
+            {"revision":4,"heartbeat":{"enabled":true,"everyMinutes":60,"start":"08:00","end":"23:00","timezone":"Europe/Istanbul",
+              "checklist":"Anything due today in my planner I have not done\nReplies I am waiting for in mail","nextAt":1763445600000,
+              "last":{"at":1763442000000,"status":"completed","text":"Nothing needed your attention."}},
+             "jobs":[
+              {"id":"job-reminder","name":"Test screen sharing","kind":"reminder","text":"Start a call and share your screen with HUB.",
+               "when":{"kind":"once","at":1763449200000},"enabled":true,"state":"active","status":"scheduled","nextAt":1763449200000},
+              {"id":"job-task","name":"Weekday news brief","kind":"task","text":"Find the three most important tech headlines and summarize them.",
+               "when":{"kind":"daily","hour":8,"minute":30,"days":[1,2,3,4,5],"timezone":"Europe/Istanbul"},"enabled":true,"state":"active",
+               "status":"scheduled","nextAt":1763530200000,"last":{"at":1763443800000,"status":"completed","text":"Sent three headlines."}}]}
+            """#.utf8)
+        }
         if request.httpMethod == "GET", url.path == "/api/hub/automations",
            request.value(forHTTPHeaderField: "x-hub-automations") == "1" {
             return Data(#"""

@@ -405,11 +405,11 @@ final class HubWorkspaceUITests: XCTestCase {
         let tools = app.buttons["Workspace tools"]
         guard tools.waitForExistence(timeout: 20) else { return }
         tools.tap()
-        let tasks = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tasks")).firstMatch
+        let tasks = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Schedule")).firstMatch
         if waitUntilHittable(tasks, timeout: 6) {
             tasks.tap()
             sleep(3)
-            capture("Tasks")
+            capture("Schedule")
             let done = app.buttons["Done"].firstMatch
             guard done.exists, done.isHittable else { return }
             done.tap()

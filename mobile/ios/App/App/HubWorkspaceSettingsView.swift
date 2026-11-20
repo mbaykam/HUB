@@ -1002,8 +1002,8 @@ private struct HubKnowledgeProfileReviewView: View {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
             if busy { ProgressView() }
             if let review {
-                Section("Profile suggestions") {
-                    if review.suggestions.isEmpty { Text("No profile suggestions yet.").foregroundStyle(.secondary) }
+                Section {
+                    if review.suggestions.isEmpty { Text("No profile changes yet.").foregroundStyle(.secondary) }
                     ForEach(review.suggestions.reversed()) { suggestion in
                         DisclosureGroup(suggestion.target == "USER.md" ? "Shared user profile" : "Character profile") {
                             Text(suggestion.text).textSelection(.enabled)
@@ -1021,6 +1021,10 @@ private struct HubKnowledgeProfileReviewView: View {
                             }
                         }
                     }
+                } header: {
+                    Text("Profile changes")
+                } footer: {
+                    Text("HUB adds what you tell it about yourself to your profile by itself, dated and with its source. Undo any change here.")
                 }
                 Section("Sourced reflections") {
                     if review.reflections.isEmpty { Text("No reflections yet.").foregroundStyle(.secondary) }

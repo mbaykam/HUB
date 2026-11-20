@@ -784,6 +784,15 @@ struct HubLiveChatView: View {
                                     helpersOpen = true
                                 }, stop: { Task { await stopHelper(helper) } })
                             }
+                            // HUB asked to see the screen or camera: one tap starts the call.
+                            if let request = shareRequest(in: snapshot, messages: messages) {
+                                HubShareRequestCard(camera: request.camera, reason: request.reason) {
+                                    composerFocused = false
+                                    dictation.cancel()
+                                    voice()
+                                }
+                                .disabled(connectionLost)
+                            }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
                             if snapshot.running && !connectionLost {
@@ -1174,6 +1183,15 @@ struct HubLiveChatView: View {
             if dictation.isActive { draft = HubDictationTranscript.join(dictationBase, spoken) }
         }
         .onDisappear { dictation.cancel() }
+    }
+
+    /// HUB's latest hub_request_share since the user last wrote, if any.
+    private func shareRequest(in snapshot: HubChatSnapshot, messages: [HubChatMessage]) -> (camera: Bool, reason: String)? {
+        let asked = messages.last(where: { $0.role == "user" }).flatMap { Int($0.id) } ?? -1
+        guard let call = snapshot.activity.last(where: { $0.title == "hub_request_share" && $0.sequence > asked && !$0.failed }) else { return nil }
+        let arguments = call.detail.flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        return (arguments["kind"] as? String == "camera", (arguments["reason"] as? String) ?? "")
     }
 
     /// A sent message HUB has not taken in yet: drawn like the user's other
@@ -2914,5 +2932,33 @@ struct HubModelSpeedView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .navigationViewStyle(.stack)
+    }
+}
+/// HUB asked to see the user's screen or camera. iOS lets only the user start
+/// a share, so the card starts the call and says where to tap.
+struct HubShareRequestCard: View {
+    let camera: Bool
+    let reason: String
+    let start: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(camera ? "HUB asks to see your camera" : "HUB asks to see your screen",
+                  systemImage: camera ? "camera" : "rectangle.on.rectangle")
+                .font(.subheadline.weight(.semibold))
+            if !reason.isEmpty { Text(reason).font(.subheadline).foregroundStyle(.secondary) }
+            Button(action: start) {
+                Label("Start a call to share", systemImage: "phone.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 40)
+            }
+            .hubGlassButton(prominent: true)
+            Text(camera ? "In the call, tap Camera." : "In the call, tap Share screen.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("hub.chat.shareRequest")
     }
 }
