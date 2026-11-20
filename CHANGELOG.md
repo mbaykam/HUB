@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.22
+
+- Several Gmail accounts: search one or all of them; a draft names the account it should be sent from.
+- A voice call in a chat switched to Unrestricted keeps the unrestricted model.
+- Replies can show real photos as a swipeable strip and small SVG diagrams inline (iPhone build 22).
+- Knowledge: a weekly pass looks for links between the least-connected notes; chat archives name their chat so the phone can show its photos and screenshots.
+
 ## 1.10.21
 
 - One assistant, three models: Smart (chat), Fast (voice) and Unrestricted. A chat switches between them with one button; every mode keeps HUB's personality and memory.
