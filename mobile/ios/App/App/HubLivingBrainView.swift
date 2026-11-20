@@ -34,6 +34,8 @@ final class HubBrainSimulation: @unchecked Sendable {
         let length: Double
         let strength: Double
         let visible: Bool
+        /// A "similar topic" link from meaning, not a stated relationship: drawn fainter.
+        var similar = false
     }
 
     private(set) var nodes: [Node] = []
@@ -87,9 +89,9 @@ final class HubBrainSimulation: @unchecked Sendable {
             x.append(point.x + Self.unit(point.id + "x") * 4); y.append(point.y + Self.unit(point.id + "y") * 4)
         }
         var seen = Set<Int>()
-        func link(_ a: Int, _ b: Int, length: Double, strength: Double, visible: Bool = true) {
+        func link(_ a: Int, _ b: Int, length: Double, strength: Double, visible: Bool = true, similar: Bool = false) {
             guard a != b, seen.insert(min(a, b) * 100_000 + max(a, b)).inserted else { return }
-            links.append(Link(a: a, b: b, length: length, strength: strength, visible: visible))
+            links.append(Link(a: a, b: b, length: length, strength: strength, visible: visible, similar: similar))
         }
         // Notes hang close to their domain; links across domains are long and loose,
         // so each domain stays a group.
@@ -115,11 +117,11 @@ final class HubBrainSimulation: @unchecked Sendable {
             for member in members { link(at, member, length: 34, strength: 0.08) }
         }
         var similar: [Int: Int] = [:]
-        for item in (graph.similarities ?? []).sorted(by: { $0.score > $1.score }) where item.score >= 0.8 {
+        for item in (graph.similarities ?? []).sorted(by: { $0.score > $1.score }) where item.score >= 0.62 {
             guard let a = index[item.source], let b = index[item.target],
-                  similar[a, default: 0] < 2, similar[b, default: 0] < 2 else { continue }
+                  similar[a, default: 0] < 3, similar[b, default: 0] < 3 else { continue }
             similar[a, default: 0] += 1; similar[b, default: 0] += 1
-            link(a, b, length: 70, strength: 0.012)
+            link(a, b, length: 70, strength: 0.01, similar: true)
         }
         neighbors = Array(repeating: [], count: nodes.count)
         for item in links { neighbors[item.a].append(item.b); neighbors[item.b].append(item.a) }
@@ -358,12 +360,14 @@ struct HubLivingBrainView: View {
         let dim = focus != nil
 
         // Links: domain spokes in their domain's color, the rest as a fine mesh.
-        var mesh = Path(), highlighted = Path()
+        var mesh = Path(), highlighted = Path(), similarPath = Path()
         var spokes: [Int: Path] = [:]
         for link in simulation.links where link.visible {
             let a = points[link.a], b = points[link.b]
             if let focus, link.a == focus || link.b == focus {
                 highlighted.move(to: a); highlighted.addLine(to: b)
+            } else if link.similar {
+                similarPath.move(to: a); similarPath.addLine(to: b)
             } else if simulation.nodes[link.b].kind == .hub {
                 spokes[link.b, default: Path()].move(to: a)
                 spokes[link.b, default: Path()].addLine(to: b)
@@ -372,6 +376,8 @@ struct HubLivingBrainView: View {
             }
         }
         canvas.stroke(mesh, with: .color(HubWorkspacePalette.border.opacity(dim ? 0.06 : 0.14)), lineWidth: 0.6)
+        canvas.stroke(similarPath, with: .color(HubWorkspacePalette.border.opacity(dim ? 0.03 : 0.08)),
+                      style: StrokeStyle(lineWidth: 0.6, dash: [2.5, 3]))
         for (hub, path) in spokes {
             canvas.stroke(path, with: .color(simulation.nodes[hub].tone.opacity(dim ? 0.08 : 0.28)), lineWidth: 0.7)
         }
