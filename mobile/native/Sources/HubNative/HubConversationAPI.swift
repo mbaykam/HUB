@@ -42,10 +42,31 @@ public struct HubChatCharacterPicker: Decodable {
     public let characters: [Character]
     /// The chat's normal model and the unrestricted one (HUB 1.10.21+).
     public let mainId: String?
+    public let voiceId: String?
     public let unrestrictedId: String?
 
     /// This chat is switched to the unrestricted model.
     public var unlocked: Bool { unrestrictedId != nil && selectedId == unrestrictedId }
+
+    /// The three ways a chat can answer, one tap apart.
+    public enum Mode: String, CaseIterable, Identifiable {
+        case smart, fast, unrestricted
+        public var id: String { rawValue }
+    }
+
+    public var mode: Mode {
+        if unlocked { return .unrestricted }
+        if voiceId != nil && selectedId == voiceId && selectedId != mainId { return .fast }
+        return .smart
+    }
+
+    public func characterID(for mode: Mode) -> String? {
+        switch mode {
+        case .smart: return mainId
+        case .fast: return voiceId
+        case .unrestricted: return unrestrictedId
+        }
+    }
 
     /// A short, typical refusal at the start of a reply, in English or Turkish.
     public static func looksLikeRefusal(_ text: String) -> Bool {

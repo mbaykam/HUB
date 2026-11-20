@@ -313,21 +313,31 @@ struct HubLiveChatView: View {
                 Spacer(minLength: 4)
                 // Unlock: the whole chat answers with the unrestricted model
                 // until it is locked again.
-                if let modelSlots, modelSlots.unrestrictedId != nil, modelSlots.mainId != nil {
-                    Button {
-                        composerFocused = false
-                        Task { await setUnlocked(!modelSlots.unlocked) }
+                // One tap: Smart, Fast or Unrestricted for this chat.
+                if let modelSlots, modelSlots.mainId != nil {
+                    let current = modelSlots.mode
+                    Menu {
+                        ForEach(HubChatCharacterPicker.Mode.allCases) { mode in
+                            if modelSlots.characterID(for: mode) != nil {
+                                Button {
+                                    composerFocused = false
+                                    Task { await setMode(mode) }
+                                } label: {
+                                    Label(Self.modeTitle(mode), systemImage: mode == current ? "checkmark" : Self.modeIcon(mode))
+                                }
+                            }
+                        }
                     } label: {
-                        Image(systemName: modelSlots.unlocked ? "lock.open.fill" : "lock.fill")
+                        Image(systemName: Self.modeIcon(current))
                             .font(.body.weight(.semibold))
-                            .foregroundColor(modelSlots.unlocked ? .orange : nil)
+                            .foregroundColor(current == .unrestricted ? .orange : nil)
                             .frame(width: 40, height: 40)
-                            .hubGlass(Circle(), interactive: true, tint: modelSlots.unlocked ? Color.orange.opacity(0.35) : nil)
+                            .hubGlass(Circle(), interactive: true, tint: current == .unrestricted ? Color.orange.opacity(0.35) : nil)
                     }
-                    .disabled(slotBusy || !modelSlots.canSelect)
-                    .accessibilityLabel(modelSlots.unlocked ? "Unrestricted model on" : "Unrestricted model off")
-                    .accessibilityHint(modelSlots.unlocked ? "Switches this chat back to the normal model." : "Switches this whole chat to the unrestricted model.")
-                    .accessibilityIdentifier("hub.chat.unlock")
+                    .disabled(slotBusy || !modelSlots.canSelect || snapshot?.running == true)
+                    .accessibilityLabel("Model: \(Self.modeTitle(current))")
+                    .accessibilityHint("Choose Smart, Fast or Unrestricted for this chat.")
+                    .accessibilityIdentifier("hub.chat.mode")
                 }
                 // The step-by-step view of the turn, one tap away instead of a
                 // second screen with its own tab bar.
@@ -872,15 +882,36 @@ struct HubLiveChatView: View {
         modelSlots = value
     }
 
-    /// Switches the chat between its normal model and the unrestricted one.
+    static func modeTitle(_ mode: HubChatCharacterPicker.Mode) -> String {
+        switch mode {
+        case .smart: return "Smart"
+        case .fast: return "Fast"
+        case .unrestricted: return "Unrestricted"
+        }
+    }
+
+    static func modeIcon(_ mode: HubChatCharacterPicker.Mode) -> String {
+        switch mode {
+        case .smart: return "sparkles"
+        case .fast: return "bolt"
+        case .unrestricted: return "lock.open.fill"
+        }
+    }
+
     @discardableResult
     private func setUnlocked(_ unlocked: Bool) async -> Bool {
+        await setMode(unlocked ? .unrestricted : .smart)
+    }
+
+    /// Switches which model answers in this chat.
+    @discardableResult
+    private func setMode(_ mode: HubChatCharacterPicker.Mode) async -> Bool {
         guard !slotBusy else { return false }
         slotBusy = true
         defer { slotBusy = false }
         do {
             let current = try await api.chatCharacters(sessionID: chat.sessionId)
-            guard let target = unlocked ? current.unrestrictedId : current.mainId else { return false }
+            guard let target = current.characterID(for: mode) else { return false }
             if current.selectedId != target {
                 _ = try await api.selectChatCharacter(sessionID: chat.sessionId, id: target, revision: current.revision)
             }

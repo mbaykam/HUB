@@ -9,6 +9,17 @@ final class HubModelSlotTests: XCTestCase {
         XCTAssertEqual(picker.mainId, "a")
     }
 
+    func testTheChatModeFollowsTheSelectedModel() throws {
+        func picker(_ selected: String) throws -> HubChatCharacterPicker {
+            let json = #"{"revision":3,"selectedId":"\#(selected)","pending":false,"canSelect":true,"mainId":"a","voiceId":"v","unrestrictedId":"b","characters":[]}"#
+            return try JSONDecoder().decode(HubChatCharacterPicker.self, from: Data(json.utf8))
+        }
+        XCTAssertEqual(try picker("a").mode, .smart)
+        XCTAssertEqual(try picker("v").mode, .fast)
+        XCTAssertEqual(try picker("b").mode, .unrestricted)
+        XCTAssertEqual(try picker("a").characterID(for: .fast), "v")
+    }
+
     func testOlderHostsWithoutSlotsStillDecode() throws {
         let json = #"{"revision":1,"selectedId":"a","pending":false,"canSelect":true,"characters":[]}"#
         let picker = try JSONDecoder().decode(HubChatCharacterPicker.self, from: Data(json.utf8))
