@@ -54,6 +54,105 @@ struct HubCharactersSettingsView: View {
     }
 }
 
+/// One assistant, three models: the normal chat model, a fast one for voice
+/// and an unrestricted one a chat switches to when unlocked. Each opens the
+/// model settings behind it; the personality is the Chat model's.
+@MainActor
+struct HubModelSlotsView: View {
+    let api: HubConversationAPI
+    @State private var settings: HubCharacterSettings?
+    @State private var failed = false
+    @State private var attempt = 0
+    @State private var notice: String?
+
+    var body: some View {
+        HubList {
+            if let settings {
+                if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                Section {
+                    slot("Chat", icon: "text.bubble", note: "Text chats, Telegram and helpers. Its instructions are HUB's personality.", id: settings.mainId, in: settings)
+                    slot("Voice", icon: "waveform", note: "Voice calls. Pick a fast model.", id: settings.voiceId, in: settings)
+                    if let id = settings.unrestrictedId {
+                        slot("Unrestricted", icon: "lock.open", note: "Used only in a chat you unlock, or when you tap Retry unrestricted.", id: id, in: settings)
+                    }
+                } footer: {
+                    Text("It is the same assistant with one memory in every mode; only the model that answers changes.")
+                }
+                Section("Unrestricted model") {
+                    let options = settings.characters.filter { $0.route != nil && $0.id != settings.mainId }
+                    if options.isEmpty {
+                        Text("Add a model first, then choose it here.").foregroundStyle(.secondary)
+                    }
+                    ForEach(options) { option in
+                        Button {
+                            Task { await makeUnrestricted(option, settings: settings) }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(option.name)
+                                    Text(Self.model(option)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if option.id == settings.unrestrictedId { Image(systemName: "checkmark").foregroundStyle(HubWorkspacePalette.accent) }
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                    NavigationLink("Add a model", destination: HubCharacterEditor(api: api, settings: settings, existing: nil) {
+                        self.settings = $0
+                    })
+                }
+            } else if failed {
+                Button("Retry loading models") { failed = false; attempt += 1 }
+            } else {
+                ProgressView("Loading models…")
+            }
+        }
+        .navigationTitle("Models")
+        .task(id: attempt) { await load() }
+        .refreshable { await load() }
+    }
+
+    @ViewBuilder
+    private func slot(_ title: String, icon: String, note: String, id: String, in settings: HubCharacterSettings) -> some View {
+        if let character = settings.characters.first(where: { $0.id == id }) {
+            NavigationLink(destination: HubCharacterEditor(api: api, settings: settings, existing: character) { self.settings = $0 }) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.headline)
+                        Text(Self.model(character)).font(.subheadline)
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: icon) }
+            }
+            .accessibilityIdentifier("hub.settings.models.\(title.lowercased())")
+        }
+    }
+
+    static func model(_ character: HubCharacterSettings.Character) -> String {
+        guard let route = character.route else { return "No model chosen" }
+        return route.model
+    }
+
+    private func load() async {
+        do {
+            let value = try await api.characterSettings()
+            if !Task.isCancelled { settings = value; failed = false }
+        } catch {
+            if !Task.isCancelled { failed = true }
+        }
+    }
+
+    private func makeUnrestricted(_ option: HubCharacterSettings.Character, settings: HubCharacterSettings) async {
+        do {
+            self.settings = try await api.changeCharacterRole(.unrestricted, id: option.id, revision: settings.revision)
+            notice = nil
+        } catch {
+            notice = "Could not change the unrestricted model. Reload and try again."
+        }
+    }
+}
+
 /// Shows the complete request HUB last sent to a model for one character.
 /// Reading it makes no model call.
 @MainActor

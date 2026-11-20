@@ -212,6 +212,8 @@ public struct HubCharacterSettings: Decodable {
     public let revision: Int
     public let mainId: String
     public let voiceId: String
+    /// The model a chat switches to when unlocked (HUB 1.10.21+).
+    public let unrestrictedId: String?
     public let characters: [Character]
     public let tools: [Tool]?
     public let warning: String?
@@ -293,7 +295,7 @@ public struct HubSpeechDownload: Decodable {
 }
 
 public enum HubCharacterRoleAction: String {
-    case main, voice, delete
+    case main, voice, unrestricted, delete
 }
 
 public struct HubKnowledgeSettings: Codable, Equatable {

@@ -193,27 +193,15 @@ final class HubWorkspaceUITests: XCTestCase {
         capture("General settings")
 
         app.navigationBars["General"].buttons["Settings"].tap()
-        let personalities = app.descendants(matching: .any)["hub.settings.voice-personalities"].firstMatch
-        if !personalities.isHittable { app.swipeUp() }
-        XCTAssertTrue(personalities.waitForExistence(timeout: 5))
-        personalities.tap()
-        let menu = app.buttons["Options for Fixture Vera"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        menu.tap()
-        let edit = app.buttons["Edit"].firstMatch
-        XCTAssertTrue(edit.waitForExistence(timeout: 5))
-        edit.tap()
-        let name = app.textFields["Name"]
-        XCTAssertTrue(name.waitForExistence(timeout: 5))
-        XCTAssertEqual(name.value as? String, "Fixture Vera")
-        let model = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@ OR value == %@", "Fixture Voice Model", "Fixture Voice Model")).firstMatch
-        XCTAssertTrue(model.waitForExistence(timeout: 5))
-        XCTAssertEqual(app.webViews.count, 0)
-        capture("Voice personality")
-
-        app.navigationBars["Edit personality"].buttons["Cancel"].tap()
-        app.navigationBars["Voice personalities"].buttons["Settings"].tap()
+        // One assistant with three models instead of characters and personalities.
+        XCTAssertFalse(app.descendants(matching: .any)["hub.settings.voice-personalities"].exists)
+        let models = app.descendants(matching: .any)["hub.settings.models"].firstMatch
+        XCTAssertTrue(models.waitForExistence(timeout: 5))
+        models.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["hub.settings.models.chat"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["hub.settings.models.voice"].exists)
+        capture("Models")
+        app.navigationBars["Models"].buttons["Settings"].tap()
         let usage = app.descendants(matching: .any)["hub.settings.usage"].firstMatch
         if !usage.isHittable { app.swipeUp() }
         XCTAssertTrue(usage.waitForExistence(timeout: 5))
@@ -447,7 +435,7 @@ final class HubWorkspaceUITests: XCTestCase {
             guard general.waitForExistence(timeout: 5) else { return }
         }
         // Characters last: it goes three screens deep.
-        let characters = app.buttons["Characters"].firstMatch
+        let characters = app.buttons["Models"].firstMatch
         guard characters.exists, characters.isHittable else { return }
         characters.tap()
         let mira = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Mira")).firstMatch

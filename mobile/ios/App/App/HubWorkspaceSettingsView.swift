@@ -16,9 +16,10 @@ struct HubWorkspaceSettingsView: View {
                         Label("General", systemImage: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("hub.settings.general")
-                    NavigationLink(destination: HubCharactersSettingsView(api: api)) {
-                        Label("Characters", systemImage: "person.2")
+                    NavigationLink(destination: HubModelSlotsView(api: api)) {
+                        Label("Models", systemImage: "square.stack.3d.up")
                     }
+                    .accessibilityIdentifier("hub.settings.models")
                     NavigationLink(destination: HubModelsView(api: api)) {
                         Label("Models & providers", systemImage: "cpu")
                     }
@@ -31,10 +32,6 @@ struct HubWorkspaceSettingsView: View {
                     NavigationLink(destination: HubSpeechSettingsView(api: api)) {
                         Label("Speech", systemImage: "waveform")
                     }
-                    NavigationLink(destination: HubVoiceProfilesView(api: api)) {
-                        Label("Voice personalities", systemImage: "person.wave.2")
-                    }
-                    .accessibilityIdentifier("hub.settings.voice-personalities")
                     NavigationLink(destination: HubKnowledgeSettingsView(api: api)) {
                         Label("Knowledge AI", systemImage: "circle.hexagongrid")
                     }
