@@ -58,3 +58,8 @@ test("the IMAP worker turns an HTML email into readable text and lists attachmen
   assert.equal(out.subject, "Stand fiyatı");
   assert.deepEqual(out.att, [{name: "teklif.pdf", type: "application/pdf"}]);
 });
+
+test('the release includes the mail reader', async () => {
+  const staged = new URL('../runtime/host/node_modules/@lencx/minke-harness-overlay/voice/mail_imap.py', import.meta.url);
+  assert.deepEqual(await readFile(staged), await readFile(new URL('../packages/harness-overlay/voice/mail_imap.py', import.meta.url)));
+});
