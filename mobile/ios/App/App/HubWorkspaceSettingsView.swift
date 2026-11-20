@@ -1005,7 +1005,7 @@ private struct HubKnowledgeProfileReviewView: View {
                 Section {
                     if review.suggestions.isEmpty { Text("No profile changes yet.").foregroundStyle(.secondary) }
                     ForEach(review.suggestions.reversed()) { suggestion in
-                        DisclosureGroup(suggestion.target == "USER.md" ? "Shared user profile" : "Character profile") {
+                        DisclosureGroup {
                             Text(suggestion.text).textSelection(.enabled)
                             Text(suggestion.evidence).italic().textSelection(.enabled)
                             Text(suggestion.status.capitalized).font(.footnote).foregroundStyle(.secondary)
@@ -1018,6 +1018,13 @@ private struct HubKnowledgeProfileReviewView: View {
                             } else if suggestion.status == "applied" {
                                 Button("Undo profile change") { request = Pending(suggestion: suggestion, decision: .undo) }
                                     .disabled(needsRefresh)
+                            }
+                        } label: {
+                            // Each change is named by the fact itself, not "profile".
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(suggestion.text).lineLimit(2)
+                                Text(suggestion.target == "USER.md" ? "Your profile · \(suggestion.status)" : "Character · \(suggestion.status)")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
