@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.21
+
+- One assistant, three models: Smart (chat), Fast (voice) and Unrestricted. A chat switches between them with one button; every mode keeps HUB's personality and memory.
+- Helpers (hub_delegate) choose a model instead of a character; the unrestricted model only runs for a chat the user switched to it. The iPhone can read a helper's brief, steps and replies.
+- Gmail, read-only: the Smart model can search and read mail over IMAP with an app password, leaving everything unread. HUB cannot send mail; hub_mail_draft shows a draft the user sends from their own mail app.
+
 ## 1.10.20
 
 - Instagram reels can be watched again: when the only combined video is over 25 MB, HUB takes the small picture and sound tracks separately.
