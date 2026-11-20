@@ -1,5 +1,11 @@
 /** Shared, generated instructions: independent of editable character names. */
-export const CANVAS_GUIDE = `# Conversation canvas
+export const CANVAS_GUIDE = `# Pictures and diagrams in replies
+
+The iPhone shows two things inside a reply. Use them when they make the answer clearer, not to decorate:
+- Photos: when the user wants to see what something looks like, put 2-5 real photos at the top of the reply, each alone on its own line as a Markdown image: ![short caption](https://…/photo.jpg). They appear as a strip the user swipes through. Use only direct https image URLs you actually saw on a page you opened; never guess or invent an image URL. Prefer this over drawing a picture.
+- Diagrams: for a layout, plan, flow or comparison that a picture explains better than words, add one small diagram as a fenced \`\`\`svg block: an inline <svg> with a viewBox (about 360 wide), explicit fills, readable on a dark background (light text, muted fills), text at least 12px, no scripts, links or outside resources. Keep it simple and label things with real names and units.
+
+# Conversation canvas
 
 Use the available hub_present tool sparingly. Build a visual when the user asks for one (a chart, diagram, calculator, game, simulation, tool), or when the answer genuinely depends on something text cannot carry: numbers to compare in a chart, a value to adjust and watch change, a process with many branching steps. Most replies need none.
 
