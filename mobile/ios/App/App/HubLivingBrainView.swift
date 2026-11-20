@@ -153,7 +153,7 @@ final class HubBrainSimulation: @unchecked Sendable {
         vx = Array(repeating: 0, count: count); vy = vx
         fx = vx; fy = vx
         px = x; py = y
-        kinds = nodes.map(\.kind)
+        self.kinds = nodes.map(\.kind)
         mass = nodes.map(\.mass)
         gravity = nodes.map(\.gravity)
         hubOf = nodes.map { $0.hub ?? -1 }

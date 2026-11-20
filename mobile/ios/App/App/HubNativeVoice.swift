@@ -26,6 +26,15 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     private let pendingAdmission: HubVoiceAdmission?
     private static let sharedFactory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
+        // WebRTC sets the audio session up again when audio starts. Without
+        // this it picks phone-call audio: the quiet earpiece. Calls play out
+        // loud through the speaker like a video call instead; headphones and
+        // Bluetooth still take over when connected.
+        let audio = RTCAudioSessionConfiguration.webRTC()
+        audio.category = AVAudioSession.Category.playAndRecord.rawValue
+        audio.mode = AVAudioSession.Mode.videoChat.rawValue
+        audio.categoryOptions = [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP]
+        RTCAudioSessionConfiguration.setWebRTC(audio)
         return RTCPeerConnectionFactory()
     }()
     private let factory = HubNativeVoice.sharedFactory
@@ -189,9 +198,17 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
 
     private func configureAudio() throws {
         let audio = AVAudioSession.sharedInstance()
-        try audio.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .defaultToSpeaker])
+        try audio.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
         try audio.setActive(true)
         ownsAudio = true
+        Self.preferSpeaker()
+    }
+
+    /// Never the earpiece: if audio lands there, move it to the speaker.
+    private static func preferSpeaker() {
+        let audio = AVAudioSession.sharedInstance()
+        guard audio.currentRoute.outputs.contains(where: { $0.portType == .builtInReceiver }) else { return }
+        try? audio.overrideOutputAudioPort(.speaker)
     }
 
     private func connect(_ admitted: HubVoiceLease, restart: Bool, recoveredPeer: String? = nil) async throws {
@@ -359,6 +376,9 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
             let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             Task { @MainActor [weak self] in self?.handleInterruption(raw: raw, options: options) }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in HubNativeVoice.preferSpeaker() }
         })
     }
     private func handleInterruption(raw: UInt?, options: UInt) {

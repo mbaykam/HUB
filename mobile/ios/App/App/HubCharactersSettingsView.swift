@@ -71,37 +71,11 @@ struct HubModelSlotsView: View {
             if let settings {
                 if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 Section {
-                    slot("Chat", icon: "text.bubble", note: "Text chats, Telegram and helpers. Its instructions are HUB's personality.", id: settings.mainId, in: settings)
-                    slot("Voice", icon: "waveform", note: "Voice calls. Pick a fast model.", id: settings.voiceId, in: settings)
-                    if let id = settings.unrestrictedId {
-                        slot("Unrestricted", icon: "lock.open", note: "Used only in a chat you unlock, or when you tap Retry unrestricted.", id: id, in: settings)
-                    }
+                    slot(.chat, id: settings.mainId, in: settings)
+                    slot(.voice, id: settings.voiceId, in: settings)
+                    slot(.unrestricted, id: settings.unrestrictedId, in: settings)
                 } footer: {
-                    Text("It is the same assistant with one memory in every mode; only the model that answers changes.")
-                }
-                Section("Unrestricted model") {
-                    let options = settings.characters.filter { $0.route != nil && $0.id != settings.mainId }
-                    if options.isEmpty {
-                        Text("Add a model first, then choose it here.").foregroundStyle(.secondary)
-                    }
-                    ForEach(options) { option in
-                        Button {
-                            Task { await makeUnrestricted(option, settings: settings) }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(option.name)
-                                    Text(Self.model(option)).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if option.id == settings.unrestrictedId { Image(systemName: "checkmark").foregroundStyle(HubWorkspacePalette.accent) }
-                            }
-                        }
-                        .foregroundStyle(.primary)
-                    }
-                    NavigationLink("Add a model", destination: HubCharacterEditor(api: api, settings: settings, existing: nil) {
-                        self.settings = $0
-                    })
+                    Text("It is the same assistant with one memory in every mode; only the model that answers changes. Switch between them in any chat from the model button at the top.")
                 }
             } else if failed {
                 Button("Retry loading models") { failed = false; attempt += 1 }
@@ -121,20 +95,21 @@ struct HubModelSlotsView: View {
         .refreshable { await load() }
     }
 
-    @ViewBuilder
-    private func slot(_ title: String, icon: String, note: String, id: String, in settings: HubCharacterSettings) -> some View {
-        if let character = settings.characters.first(where: { $0.id == id }) {
-            NavigationLink(destination: HubCharacterEditor(api: api, settings: settings, existing: character) { self.settings = $0 }) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title).font(.headline)
-                        Text(Self.model(character)).font(.subheadline)
-                        Text(note).font(.caption).foregroundStyle(.secondary)
-                    }
-                } icon: { Image(systemName: icon) }
-            }
-            .accessibilityIdentifier("hub.settings.models.\(title.lowercased())")
+    private func slot(_ kind: HubModelSlotEditor.Slot, id: String?, in settings: HubCharacterSettings) -> some View {
+        let character = id.flatMap { id in settings.characters.first { $0.id == id } }
+        return NavigationLink(destination: HubModelSlotEditor(api: api, settings: settings, slot: kind, existing: character) {
+            self.settings = $0
+        }) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(kind.title).font(.headline)
+                    Text(character.map(Self.model) ?? "Not set up").font(.subheadline)
+                        .foregroundStyle(character == nil ? .secondary : .primary)
+                    Text(kind.note).font(.caption).foregroundStyle(.secondary)
+                }
+            } icon: { Image(systemName: kind.icon) }
         }
+        .accessibilityIdentifier("hub.settings.models.\(kind.title.lowercased())")
     }
 
     static func model(_ character: HubCharacterSettings.Character) -> String {
@@ -151,12 +126,166 @@ struct HubModelSlotsView: View {
         }
     }
 
-    private func makeUnrestricted(_ option: HubCharacterSettings.Character, settings: HubCharacterSettings) async {
+}
+
+/// One model slot: which model answers, how hard it thinks, and the extra
+/// instructions that model gets. No names, portraits or tool lists: HUB is
+/// one assistant whatever model is answering.
+@MainActor
+struct HubModelSlotEditor: View {
+    enum Slot {
+        case chat, voice, unrestricted
+        var title: String {
+            switch self {
+            case .chat: return "Chat"
+            case .voice: return "Voice"
+            case .unrestricted: return "Unrestricted"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .chat: return "text.bubble"
+            case .voice: return "waveform"
+            case .unrestricted: return "lock.open"
+            }
+        }
+        var note: String {
+            switch self {
+            case .chat: return "Text chats and helpers. Pick the smartest model you can afford."
+            case .voice: return "Voice calls. Pick a fast model."
+            case .unrestricted: return "Only in a chat you switch to Unrestricted, or when you tap Retry unrestricted."
+            }
+        }
+        var instructionsHint: String {
+            switch self {
+            case .chat: return "Extra rules for every chat. HUB's identity, tone and your profile are added by HUB itself."
+            case .voice: return "How to speak on calls, for example: short sentences, no lists."
+            case .unrestricted: return "Setup this model needs, such as an uncensored model's system prompt. HUB keeps its own name and memory."
+            }
+        }
+    }
+
+    let api: HubConversationAPI
+    let slot: Slot
+    let didChange: (HubCharacterSettings) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var settings: HubCharacterSettings
+    @State private var character: HubCharacterSettings.Character
+    @State private var creating: Bool
+    @State private var models: HubModelCatalog?
+    @State private var selectedModel: String
+    @State private var effort: String
+    @State private var busy = false
+    @State private var notice: String?
+
+    init(api: HubConversationAPI, settings: HubCharacterSettings, slot: Slot, existing: HubCharacterSettings.Character?,
+         didChange: @escaping (HubCharacterSettings) -> Void) {
+        self.api = api
+        self.slot = slot
+        self.didChange = didChange
+        var value = existing ?? HubCharacterSettings.Character(delegateTo: settings.mainId)
+        if existing == nil { value.name = slot.title }
+        _settings = State(initialValue: settings)
+        _character = State(initialValue: value)
+        _creating = State(initialValue: existing == nil)
+        _selectedModel = State(initialValue: value.route.map { $0.provider + "/" + $0.model } ?? "")
+        _effort = State(initialValue: value.route?.reasoningEffort ?? "")
+    }
+
+    var body: some View {
+        HubForm {
+            if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+            Section {
+                if let models {
+                    NavigationLink {
+                        HubCatalogModelPicker(catalog: models, selection: $selectedModel)
+                    } label: {
+                        let current = models.models.first { $0.id == selectedModel }
+                        HStack {
+                            Text("Model")
+                            Spacer(minLength: 8)
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(current?.name ?? (selectedModel.isEmpty ? "Choose" : selectedModel)).lineLimit(1)
+                                if let current {
+                                    Text(models.providers.first { $0.id == current.provider }?.name ?? current.provider)
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("hub.slot.model")
+                    .onChange(of: selectedModel) { _ in effort = "" }
+                    if let selected = models.models.first(where: { $0.id == selectedModel }), !(selected.efforts ?? []).isEmpty {
+                        Picker("Thinking", selection: $effort) {
+                            Text("Model default").tag("")
+                            ForEach(selected.efforts ?? []) { Text($0.name).tag($0.id) }
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("Model")
+                        Spacer()
+                        Text(character.route?.model ?? "Loading…").foregroundStyle(.secondary)
+                    }
+                }
+            } footer: { Text(slot.note) }
+            if slot == .voice, character.speech != nil {
+                Section("Speaking voice") {
+                    TextField("Voice", text: Binding(get: { character.speech?.tts.voice ?? "" }, set: {
+                        character.speech?.tts.voice = $0
+                    }))
+                }
+            }
+            Section {
+                TextEditor(text: $character.instructions).frame(minHeight: 140).accessibilityLabel("Instructions")
+            } header: { Text("Instructions") } footer: { Text(slot.instructionsHint) }
+            if !creating {
+                Section {
+                    NavigationLink("Last model request",
+                                   destination: HubCharacterRequestView(api: api, characterID: character.id))
+                } footer: {
+                    Text("Exactly what HUB last sent to this model.")
+                }
+            }
+        }
+        .disabled(busy)
+        .navigationTitle(slot.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") { Task { await save() } }.disabled(busy || selectedModel.isEmpty)
+            }
+        }
+        .task { if models == nil { models = try? await api.modelCatalog() } }
+    }
+
+    private func save() async {
+        guard !busy, let model = models?.models.first(where: { $0.id == selectedModel }) else {
+            notice = "Choose a model first."
+            return
+        }
+        guard character.instructions.utf16.count <= 12_000 else {
+            notice = "The instructions are too long."
+            return
+        }
+        var candidate = character
+        let old = character.route.map { $0.provider + "/" + $0.model } == selectedModel ? character.route : nil
+        candidate.route = HubCharacterSettings.Character.Route(provider: model.provider, model: model.modelID,
+            reasoningEffort: effort.isEmpty ? nil : effort, temperature: old?.temperature, maxTokens: old?.maxTokens)
+        busy = true
+        defer { busy = false }
         do {
-            self.settings = try await api.changeCharacterRole(.unrestricted, id: option.id, revision: settings.revision)
-            notice = nil
+            let known = Set(settings.characters.map(\.id))
+            var updated = try await api.saveCharacter(candidate, revision: settings.revision, creating: creating)
+            if creating, slot == .unrestricted,
+               let made = updated.characters.first(where: { !known.contains($0.id) }) {
+                updated = try await api.changeCharacterRole(.unrestricted, id: made.id, revision: updated.revision)
+            }
+            didChange(updated)
+            dismiss()
         } catch {
-            notice = "Could not change the unrestricted model. Reload and try again."
+            notice = "Could not confirm the save. Go back and open it again to check."
         }
     }
 }
