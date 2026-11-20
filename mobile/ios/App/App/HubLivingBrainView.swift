@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 import HubNative
 
 /// A living "second brain": a force-directed graph that keeps drifting, like
@@ -19,7 +20,13 @@ final class HubBrainSimulation: @unchecked Sendable {
         let hub: Int?
     }
 
-    enum Kind { case hub, note, chat }
+    enum Kind { case hub, note, chat, project }
+
+    /// The Knowledge id of a HUB chat's archive.
+    static func conversationID(sessionID: String) -> String {
+        let digest = SHA256.hash(data: Data(("hub:" + sessionID).utf8))
+        return "conversation-" + digest.map { String(format: "%02x", $0) }.joined().prefix(32)
+    }
 
     struct Link {
         let a: Int
@@ -43,7 +50,7 @@ final class HubBrainSimulation: @unchecked Sendable {
 
     static let nodeLimit = 420
 
-    init(graph: HubHomeKnowledge, layout: HubKnowledgeLayout.Layout, limit: Int = HubBrainSimulation.nodeLimit) {
+    init(graph: HubHomeKnowledge, layout: HubKnowledgeLayout.Layout, limit: Int = HubBrainSimulation.nodeLimit, projects: [HubProject] = []) {
         let titles = Dictionary(graph.nodes.map { ($0.id, $0.title ?? "Untitled") }, uniquingKeysWith: { a, _ in a })
         let kinds = Dictionary(graph.nodes.map { ($0.id, $0.kind) }, uniquingKeysWith: { a, _ in a })
         let roots = layout.groups.filter { $0.parentID == nil && $0.id != HubKnowledgeLayout.archiveID }
@@ -84,11 +91,28 @@ final class HubBrainSimulation: @unchecked Sendable {
             guard a != b, seen.insert(min(a, b) * 100_000 + max(a, b)).inserted else { return }
             links.append(Link(a: a, b: b, length: length, strength: strength, visible: visible))
         }
+        // Notes hang close to their domain; links across domains are long and loose,
+        // so each domain stays a group.
         for (offset, node) in nodes.enumerated() where node.kind == .note {
-            if let hub = node.hub { link(offset, hub, length: 34 + Self.unit(node.id + "l") * 26, strength: 0.05) }
+            if let hub = node.hub { link(offset, hub, length: 26 + Self.unit(node.id + "l") * 16, strength: 0.09) }
         }
         for edge in graph.edges {
-            if let a = index[edge.source], let b = index[edge.target] { link(a, b, length: 42, strength: 0.06) }
+            guard let a = index[edge.source], let b = index[edge.target] else { continue }
+            let same = nodes[a].hub != nil && nodes[a].hub == nodes[b].hub
+            let chat = nodes[a].kind == .chat || nodes[b].kind == .chat
+            link(a, b, length: same || chat ? 30 : 90, strength: same || chat ? 0.07 : 0.015)
+        }
+        // Projects: their own marker, tied to the chats grouped in them.
+        for project in projects {
+            let members = project.sessionIds.compactMap { index[Self.conversationID(sessionID: $0)] }
+            guard !members.isEmpty else { continue }
+            let at = nodes.count
+            let cx = members.map { x[$0] }.reduce(0, +) / Double(members.count)
+            let cy = members.map { y[$0] }.reduce(0, +) / Double(members.count)
+            nodes.append(Node(id: "project:" + project.id, title: project.name, tone: HubWorkspacePalette.accent,
+                              radius: 6.5, mass: 3, gravity: 0.016, kind: .project, phase: Self.unit(project.id) * 6.28, hub: nil))
+            x.append(cx + 8); y.append(cy - 8)
+            for member in members { link(at, member, length: 34, strength: 0.08) }
         }
         var similar: [Int: Int] = [:]
         for item in (graph.similarities ?? []).sorted(by: { $0.score > $1.score }) where item.score >= 0.8 {
@@ -116,8 +140,11 @@ final class HubBrainSimulation: @unchecked Sendable {
         for _ in 0..<steps { tick() }
     }
 
-    /// Wakes the graph after a drag, so neighbors follow and settle again.
-    func reheat() { alpha = max(alpha, 0.5) }
+    /// Wakes the graph for a drag, so neighbors follow and then settle again.
+    func reheat() { alpha = max(alpha, 0.35) }
+
+    /// Nothing is moving: the view can stop redrawing.
+    var settled: Bool { pinned == nil && alpha < 0.02 }
 
     private func tick() {
         let count = nodes.count
@@ -152,16 +179,19 @@ final class HubBrainSimulation: @unchecked Sendable {
         for i in 0..<count {
             if i == pinned { vx[i] = 0; vy[i] = 0; continue }
             let node = nodes[i]
-            // A slow, individual drift keeps the graph alive after it settles.
-            let driftX = sin(clock * 0.45 + node.phase) * 0.018
-            let driftY = cos(clock * 0.37 + node.phase * 1.3) * 0.018
-            vx[i] = (vx[i] + (fx[i] / node.mass - x[i] * node.gravity) * alpha + driftX) * 0.84
-            vy[i] = (vy[i] + (fy[i] / node.mass - y[i] * node.gravity) * alpha + driftY) * 0.84
+            // Notes are drawn toward their own domain, domains toward the middle.
+            var gx = x[i] * node.gravity, gy = y[i] * node.gravity
+            if let hub = node.hub { gx = (x[i] - x[hub]) * 0.03 + x[i] * 0.003; gy = (y[i] - y[hub]) * 0.03 + y[i] * 0.003 }
+            vx[i] = (vx[i] + (fx[i] / node.mass - gx) * alpha) * 0.72
+            vy[i] = (vy[i] + (fy[i] / node.mass - gy) * alpha) * 0.72
+            // A capped step: nothing ever flies off.
             let speed = (vx[i] * vx[i] + vy[i] * vy[i]).squareRoot()
-            if speed > 9 { vx[i] *= 9 / speed; vy[i] *= 9 / speed }
+            if speed > 6 { vx[i] *= 6 / speed; vy[i] *= 6 / speed }
             x[i] += vx[i]; y[i] += vy[i]
         }
-        alpha = max(0.06, alpha * 0.985)
+        // Cools to a full stop; a drag warms it up again.
+        alpha = pinned == nil ? alpha * 0.975 : max(alpha, 0.25)
+        if alpha < 0.005 { alpha = 0 }
     }
 
     /// Eases the camera toward showing every node inside `size`.
@@ -228,7 +258,10 @@ struct HubLivingBrainView: View {
     var active = true
     /// How many dots at most; chats that touch no note are dropped first.
     var nodeLimit = 220
+    /// HUB projects, drawn as their own markers next to their chats.
+    var projects: [HubProject] = []
     var openRecord: (String) -> Void
+    var openProject: ((String) -> Void)? = nil
     var openDomain: ((String) -> Void)? = nil
     var openExplorer: (() -> Void)? = nil
 
@@ -238,6 +271,11 @@ struct HubLivingBrainView: View {
     @State private var pan: CGSize = .zero
     @GestureState private var pinch: CGFloat = 1
     @State private var dragStart: CGSize?
+    /// Redraws only while something moves, so a still graph costs nothing.
+    @State private var awake = true
+    @State private var wakeToken = 0
+    /// Once the user has moved or zoomed, the camera stops refitting.
+    @State private var userMoved = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -245,10 +283,10 @@ struct HubLivingBrainView: View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
                 if let simulation = holder.simulation {
-                    gestures(TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active || scenePhase != .active)) { context in
+                    gestures(TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active || !awake || scenePhase != .active)) { context in
                         Canvas { canvas, size in
-                            simulation.advance(to: context.date, moving: !reduceMotion || simulation.pinned != nil)
-                            simulation.fit(size, padding: interactive ? 36 : 22, immediate: false)
+                            simulation.advance(to: context.date, moving: true)
+                            if !userMoved { simulation.fit(size, padding: interactive ? 36 : 22, immediate: false) }
                             draw(simulation, in: &canvas, size: size)
                         }
                     }
@@ -261,6 +299,16 @@ struct HubLivingBrainView: View {
                 }
             }
             .task(id: signature) { await build() }
+            // After a touch the graph settles within a few seconds; then it stops redrawing.
+            .task(id: wakeToken) {
+                awake = true
+                for _ in 0..<20 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    if Task.isCancelled { return }
+                    if holder.simulation?.settled ?? true { break }
+                }
+                awake = false
+            }
         }
         .frame(height: height)
         .clipped()
@@ -278,6 +326,7 @@ struct HubLivingBrainView: View {
         for node in graph.nodes.prefix(600) { hasher.combine(node.id) }
         for domain in graph.domains ?? [] { hasher.combine(domain.id); hasher.combine(domain.title); hasher.combine(domain.status) }
         for member in (graph.memberships ?? []).prefix(2_000) { hasher.combine(member.nodeId); hasher.combine(member.domainId) }
+        for project in projects { hasher.combine(project.id); hasher.combine(project.name); hasher.combine(project.sessionIds) }
         return hasher.finalize()
     }
 
@@ -287,16 +336,17 @@ struct HubLivingBrainView: View {
         let graph = graph
         let steps = reduceMotion ? 420 : 160
         let notes = scope != .archive, archive = scope != .notes
-        let limit = nodeLimit
+        let limit = nodeLimit, projects = archive ? projects : []
         let built = await Task.detached(priority: .userInitiated) { () -> HubBrainSimulation in
             let layout = HubKnowledgeLayout.project(graph, includesNotes: notes, includesArchive: archive, overview: false, aspect: 1)
-            let simulation = HubBrainSimulation(graph: graph, layout: layout, limit: limit)
+            let simulation = HubBrainSimulation(graph: graph, layout: layout, limit: limit, projects: projects)
             simulation.warmUp(steps)
             return simulation
         }.value
         guard !Task.isCancelled else { return }
         holder.signature = key
         holder.simulation = built
+        wakeToken += 1
         if let selected, !built.nodes.contains(where: { $0.id == selected }) { self.selected = nil }
     }
 
@@ -330,7 +380,7 @@ struct HubLivingBrainView: View {
         // Few dots: draw them larger and name every note.
         let few = simulation.nodes.count <= 40
         let grow = min(1.6, max(0.75, sqrt(scale))) * (few ? 1.5 : 1)
-        for (i, node) in simulation.nodes.enumerated() where node.kind != .hub {
+        for (i, node) in simulation.nodes.enumerated() where node.kind != .hub && node.kind != .project {
             let p = points[i]
             guard p.x > -20, p.y > -20, p.x < size.width + 20, p.y < size.height + 20 else { continue }
             let r = node.radius * grow * (i == focus ? 1.8 : 1)
@@ -360,6 +410,24 @@ struct HubLivingBrainView: View {
             label.shading = .color(node.tone.opacity(faded ? 0.35 : 1))
             let measured = label.measure(in: CGSize(width: 160, height: 30))
             let box = CGRect(x: p.x - measured.width / 2, y: p.y + r + 4, width: measured.width, height: measured.height)
+            if taken.contains(where: { $0.intersects(box) }) { continue }
+            taken.append(box)
+            canvas.draw(label, in: box)
+        }
+        // Projects: a rounded square in a ring, named in bold, so they read as
+        // something other than a note or a domain.
+        for (i, node) in simulation.nodes.enumerated() where node.kind == .project {
+            let p = points[i]
+            let r = node.radius * grow
+            let faded = dim && !lit.contains(i)
+            let ring = CGRect(x: p.x - r * 1.9, y: p.y - r * 1.9, width: r * 3.8, height: r * 3.8)
+            canvas.stroke(Path(roundedRect: ring, cornerRadius: r * 1.1), with: .color(node.tone.opacity(faded ? 0.2 : 0.6)), lineWidth: 1.2)
+            let square = CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
+            canvas.fill(Path(roundedRect: square, cornerRadius: r * 0.5), with: .color(node.tone.opacity(faded ? 0.3 : 1)))
+            var label = canvas.resolve(Text(Image(systemName: "folder.fill")).font(.caption2) + Text(" " + node.title).font(.caption.weight(.bold)))
+            label.shading = .color(Color.primary.opacity(faded ? 0.35 : 0.95))
+            let measured = label.measure(in: CGSize(width: 180, height: 30))
+            let box = CGRect(x: p.x - measured.width / 2, y: p.y + r * 1.9 + 4, width: measured.width, height: measured.height)
             if taken.contains(where: { $0.intersects(box) }) { continue }
             taken.append(box)
             canvas.draw(label, in: box)
@@ -401,6 +469,8 @@ struct HubLivingBrainView: View {
         if node.kind == .hub {
             let domain = String(node.id.dropFirst(4))
             if let openDomain { openDomain(domain) } else { openExplorer?() }
+        } else if node.kind == .project {
+            openProject?(String(node.id.dropFirst(8)))
         } else {
             openRecord(node.id)
         }
@@ -410,9 +480,11 @@ struct HubLivingBrainView: View {
         let scale = zoom * pinch
         if dragStart == nil {
             dragStart = pan
+            userMoved = true
             if let index = simulation.nearest(to: value.startLocation, size: size, zoom: scale, pan: pan, within: 26) {
                 simulation.pinned = index
                 simulation.reheat()
+                wakeToken += 1
             }
         }
         if let index = simulation.pinned {
@@ -429,7 +501,7 @@ struct HubLivingBrainView: View {
             Circle().fill(node.tone).frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 1) {
                 Text(node.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(node.kind == .hub ? "Domain" : node.kind == .chat ? "Chat" : "Note")
+                Text(node.kind == .hub ? "Domain" : node.kind == .chat ? "Chat" : node.kind == .project ? "Project" : "Note")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
@@ -464,13 +536,13 @@ extension HubLivingBrainView {
                     }
                     .onEnded { value in
                         if dragStart == nil { tap(at: value.location, simulation: simulation, size: size) }
-                        simulation.pinned = nil
-                        simulation.reheat()
+                        // Only a real drag wakes the neighbours; a tap leaves the graph still.
+                        if simulation.pinned != nil { simulation.pinned = nil; simulation.reheat(); wakeToken += 1 }
                         dragStart = nil
                     })
                 .simultaneousGesture(MagnificationGesture()
                     .updating($pinch) { value, state, _ in state = value }
-                    .onEnded { zoom = min(5, max(0.4, zoom * $0)) })
+                    .onEnded { zoom = min(5, max(0.4, zoom * $0)); userMoved = true })
         } else if #available(iOS 16.0, *) {
             content.gesture(SpatialTapGesture().onEnded { tap(at: $0.location, simulation: simulation, size: size) })
         } else {

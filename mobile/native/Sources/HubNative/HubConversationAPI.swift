@@ -613,6 +613,8 @@ public struct HubKnowledgeNote: Decodable {
     public let backlinks: [HubHomeKnowledge.Node]?
     public let links: [HubHomeKnowledge.Node]?
     public let sources: [Source]?
+    /// For a HUB chat archive: the chat it came from, to show its pictures.
+    public let sessionId: String?
 }
 
 public struct HubKnowledgeOriginalSource: Decodable {
@@ -1152,6 +1154,8 @@ public struct HubWorkspaceDirectory: Decodable {
 public struct HubChatArtifacts: Decodable {
     public let screenshots: [HubChatScreenshot]
     public let artifacts: [HubConversationApp]?
+    /// Photos shared in the chat's messages (HUB 1.10.22+).
+    public let photos: [HubChatMessage.Photo]?
 }
 
 public struct HubChatPhoto {

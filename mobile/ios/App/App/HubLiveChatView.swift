@@ -1969,7 +1969,7 @@ struct HubChatCharacterView: View {
 }
 
 @MainActor
-private struct HubChatImageView: View {
+struct HubChatImageView: View {
     let name: String
     var canSave = false
     let load: () async throws -> Data

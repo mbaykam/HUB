@@ -775,7 +775,9 @@ struct HubHomeView: View {
                                 Text("Notes appear here as HUB learns from your chats.")
                                     .font(.caption).foregroundStyle(.secondary)
                             } else {
-                                HubLivingBrainView(graph: value, height: Self.brainHeight, active: homeVisible, openRecord: selectKnowledgeNode,
+                                HubLivingBrainView(graph: value, height: Self.brainHeight, interactive: true, active: homeVisible,
+                                                   projects: projects ?? [], openRecord: selectKnowledgeNode,
+                                                   openProject: { id in projectToEdit = projects?.first { $0.id == id } },
                                                    openDomain: { id in
                                                        showKnowledge()
                                                        focusKnowledgeDomain(id)
@@ -806,7 +808,6 @@ struct HubHomeView: View {
                                     .accessibilityIdentifier("hub.knowledge.chip.\(domain.id)")
                                 }
                             }
-                            knowledgeAppsRow
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1879,6 +1880,9 @@ struct HubHomeView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        if let sessionID = note.sessionId, let api = chatAPI() {
+                            HubConversationPicturesStrip(api: api, sessionID: sessionID)
+                        }
                         HubMarkdownText(source: note.content)
                         noteFiles(note.content)
                         Button {
@@ -3258,6 +3262,48 @@ struct HubProjectSettingsView: View {
             dismiss()
         } catch {
             failure = "Could not save. Check the connection and try again; your text is still here."
+        }
+    }
+}
+/// The pictures of a chat archive in Knowledge: photos shared in the chat and
+/// screenshots HUB took, side by side. Each opens full size.
+struct HubConversationPicturesStrip: View {
+    let api: HubConversationAPI
+    let sessionID: String
+    @State private var photos: [HubChatMessage.Photo] = []
+    @State private var screenshots: [HubChatScreenshot] = []
+
+    var body: some View {
+        Group {
+            if !photos.isEmpty || !screenshots.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Pictures · \(photos.count + screenshots.count)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(photos) { photo in
+                                HubChatImageView(name: photo.name ?? "Photo", canSave: true) {
+                                    try await api.chatPhoto(sessionID: sessionID, photo: photo)
+                                }
+                                .frame(width: 220, height: 165)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                            ForEach(screenshots) { shot in
+                                HubChatImageView(name: shot.name, canSave: true) {
+                                    try await api.chatScreenshot(sessionID: sessionID, id: shot.id)
+                                }
+                                .frame(width: 220, height: 165)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                        }
+                    }
+                }
+                .accessibilityIdentifier("hub.knowledge.pictures")
+            }
+        }
+        .task(id: sessionID) {
+            guard let artifacts = try? await api.chatArtifacts(sessionID: sessionID), !Task.isCancelled else { return }
+            photos = artifacts.photos ?? []
+            screenshots = artifacts.screenshots
         }
     }
 }
