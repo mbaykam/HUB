@@ -84,6 +84,8 @@ public struct HubChatCharacterPicker: Decodable {
 public struct HubMailState: Decodable, Equatable {
     public struct Draft: Decodable, Equatable, Identifiable {
         public let id: String
+        /// The account it should be sent from, when the user has several.
+        public let from: String?
         public let to: String
         public let cc: String
         public let subject: String
@@ -92,7 +94,11 @@ public struct HubMailState: Decodable, Equatable {
     }
     public let configured: Bool
     public let address: String?
+    /// Every connected Gmail account (HUB 1.10.22+).
+    public let accounts: [String]?
     public let drafts: [Draft]?
+
+    public var connected: [String] { accounts ?? address.map { [$0] } ?? [] }
 }
 
 /// A helper's work, read-only (HUB 1.10.21+).

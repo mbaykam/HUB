@@ -2777,6 +2777,7 @@ struct HubMailDraftCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Email draft · not sent", systemImage: "envelope")
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            if let from = draft.from { Text("From: \(from) · choose it in your mail app").font(.footnote).foregroundStyle(.secondary) }
             Text("To: \(draft.to)").font(.footnote)
             if !draft.cc.isEmpty { Text("Cc: \(draft.cc)").font(.footnote) }
             Text(draft.subject).font(.subheadline.weight(.semibold))

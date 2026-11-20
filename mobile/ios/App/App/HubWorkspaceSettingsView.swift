@@ -1371,23 +1371,32 @@ struct HubMailSettingsView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var notice: String?
-    @State private var confirmRemove = false
+    @State private var confirmRemove: String?
 
     var body: some View {
         HubList {
             if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
-            if let state, state.configured, let connected = state.address {
-                Section {
-                    Label(connected, systemImage: "checkmark.circle.fill")
-                    Text("HUB can search and read this mailbox. It never marks mail as read, moves or deletes it, and it cannot send: when it writes an email, you send it yourself from your mail app.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Text("Only the Smart model can read mail. Helpers, Fast and Unrestricted cannot.")
-                        .font(.footnote).foregroundStyle(.secondary)
+            if let state {
+                if !state.connected.isEmpty {
+                    Section {
+                        ForEach(state.connected, id: \.self) { account in
+                            HStack {
+                                Label(account, systemImage: "checkmark.circle.fill")
+                                Spacer()
+                                Button(role: .destructive) { confirmRemove = account } label: {
+                                    Image(systemName: "minus.circle").frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.red)
+                                .accessibilityLabel("Disconnect \(account)")
+                            }
+                        }
+                    } header: {
+                        Text("Connected")
+                    } footer: {
+                        Text("HUB can search and read these mailboxes. It never marks mail as read, moves or deletes it, and it cannot send: when it writes an email, you send it yourself from your mail app. Only the Smart model can read mail; helpers, Fast and Unrestricted cannot.")
+                    }
                 }
-                Section {
-                    Button("Disconnect Gmail", role: .destructive) { confirmRemove = true }
-                }
-            } else if state != nil {
                 Section {
                     TextField("Gmail address", text: $address)
                         .textContentType(.emailAddress).keyboardType(.emailAddress)
@@ -1395,8 +1404,10 @@ struct HubMailSettingsView: View {
                     SecureField("App password (16 letters)", text: $password)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("hub.mail.password")
-                    Button(busy ? "Checking…" : "Connect") { Task { await connect() } }
+                    Button(busy ? "Checking…" : state.connected.isEmpty ? "Connect" : "Add account") { Task { await connect() } }
                         .disabled(busy || address.isEmpty || password.filter { !$0.isWhitespace }.count != 16)
+                } header: {
+                    Text(state.connected.isEmpty ? "Connect Gmail" : "Add another Gmail account")
                 } footer: {
                     Text("Create an app password at myaccount.google.com/apppasswords (it needs 2-Step Verification). HUB stores it only on your PC and uses it to read mail.")
                 }
@@ -1409,10 +1420,10 @@ struct HubMailSettingsView: View {
         }
         .navigationTitle("Email")
         .task { await load() }
-        .alert("Disconnect Gmail?", isPresented: $confirmRemove) {
-            Button("Disconnect", role: .destructive) { Task { await remove() } }
+        .alert("Disconnect \(confirmRemove ?? "Gmail")?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } })) {
+            Button("Disconnect", role: .destructive) { if let account = confirmRemove { Task { await remove(account) } } }
         } message: {
-            Text("HUB forgets the app password. You can also revoke it in your Google account.")
+            Text("HUB forgets this app password. You can also revoke it in your Google account.")
         }
     }
 
@@ -1427,14 +1438,15 @@ struct HubMailSettingsView: View {
         do {
             state = try await api.changeMail(["action": "save", "address": address.trimmingCharacters(in: .whitespaces), "password": password])
             password = ""
+            address = ""
             notice = nil
         } catch {
             notice = "Gmail did not accept that. Check the address and the 16-letter app password, and that HUB is online."
         }
     }
 
-    private func remove() async {
-        do { state = try await api.changeMail(["action": "remove"]); notice = nil }
+    private func remove(_ account: String) async {
+        do { state = try await api.changeMail(["action": "remove", "address": account]); notice = nil }
         catch { notice = "Could not disconnect. Try again." }
     }
 }
