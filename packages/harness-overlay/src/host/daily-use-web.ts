@@ -77,7 +77,13 @@ export function installDailyUseWeb(ctx:any){
           if(!file){send(404,{error:"artifact-unavailable"});return;}
           send(200,{...metadata(file),data:Buffer.from(file.content).toString("base64")});return;
         }
-        if(id===undefined){send(200,{artifacts:apps.map(({content,...item})=>item),screenshots:screenshots.map(({attachment,...item})=>item)});return;}
+        if(id===undefined){
+          // Photos shared in messages, so Knowledge can show a chat's pictures.
+          const seen=new Set<string>(),photos:any[]=[];
+          for(const event of events){if(event.type!=="user/message"&&event.type!=="assistant/message")continue;
+            for(const block of event.data?.message?.content??[]){const a=block?.type==="image"?block.attachment:undefined;
+              if(a&&typeof a.attachmentId==="string"&&!seen.has(a.attachmentId)&&photos.length<60){seen.add(a.attachmentId);photos.push({attachmentId:a.attachmentId,mediaType:a.mediaType,bytes:a.bytes,...(typeof a.name==="string"?{name:a.name}:{})});}}}
+          send(200,{artifacts:apps.map(({content,...item})=>item),screenshots:screenshots.map(({attachment,...item})=>item),photos});return;}
         const app=apps.find(f=>f.id===id);if(!app){send(404,{error:"artifact-unavailable"});return;}
         send(200,{document:artifactDocument(app,files),name:app.name,at:app.at});
       }finally{observation[Symbol.dispose]();}

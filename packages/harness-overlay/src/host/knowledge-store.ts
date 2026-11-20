@@ -188,10 +188,12 @@ export class KnowledgeStore {
     const sourceMap = await this.sourcedMetadata();
     const incoming=new Set<string>(),outgoing=new Set<string>();for(const edge of graph.edges){if(edge.target===id)incoming.add(edge.source);if(edge.source===id)outgoing.add(edge.target);}
     await this.admission.assert({conversationId:id});
-    let assets:import("../knowledge-contract.ts").KnowledgeAsset[]|undefined;
-    if(found.kind==="conversation")try{assets=[...new Map((await this.archive.read(id)).messages.flatMap(m=>m.assets??[]).map(a=>[a.id,a])).values()];}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+    let assets:import("../knowledge-contract.ts").KnowledgeAsset[]|undefined,sessionId:string|undefined;
+    if(found.kind==="conversation")try{const archived=await this.archive.read(id);assets=[...new Map(archived.messages.flatMap(m=>m.assets??[]).map(a=>[a.id,a])).values()];
+      // A HUB chat's photos and screenshots live in its session; the phone loads them from there.
+      if(typeof (archived as any).sessionId==="string"&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test((archived as any).sessionId))sessionId=(archived as any).sessionId;}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
     return { id, title: found.title, permalink: found.permalink, hash: found.hash, modifiedAt: found.modifiedAt,kind:found.kind,protected:found.protected, content: found.body,
-      ...(assets?{assets}:{}),
+      ...(assets?{assets}:{}),...(sessionId?{sessionId}:{}),
       backlinks: graph.nodes.filter(n => incoming.has(n.id)),
       links: graph.nodes.filter(n => outgoing.has(n.id)), sources: (sourceMap[id]?.sources??[]).map(({conversationId,...ref})=>({...ref,...(conversationId&&graph.nodes.some(n=>n.id===conversationId&&n.kind==="conversation")?{conversationId}:{})})) };
   }
