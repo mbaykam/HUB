@@ -42,6 +42,24 @@ import {installChatQuestions} from "./host/chat-questions.ts";
 import {installClaudeCodeProvider} from "./host/claude-code-provider.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
+/**
+ * Which configured model a helper runs on. "chat" is the model this chat uses
+ * (the unrestricted one while the chat is unlocked), "fast" the voice model.
+ * The unrestricted model is only for a chat the user unlocked.
+ */
+export function helperCharacter(s:HubCharactersState,args:{model?:unknown;character?:unknown},current:HubCharacter):HubCharacter|undefined{
+  if(typeof args.character==="string"&&args.character.trim()&&args.model===undefined){
+    const key=args.character.trim().toLowerCase();
+    return s.characters.find(c=>c.id===args.character||c.name.toLowerCase()===key);
+  }
+  if(args.model==="fast")return s.characters.find(c=>c.id===s.voiceId);
+  if(args.model==="unrestricted"){
+    if(!s.unrestrictedId||current.id!==s.unrestrictedId)throw new Error("The unrestricted model is only for a chat the user unlocked. Ask them to tap the lock in this chat first.");
+    return s.characters.find(c=>c.id===s.unrestrictedId);
+  }
+  return current;
+}
+
 export const name="hub-characters";
 export const inject=["subprocess","llm","agents","agentPresets","tools","subagents","sessionProjections","sessionPersistence","sessionTitle","sessions","systemPrompt","agentDefaultModel","storageDomain","sessionController","connection","webServer","goals","attachments","credentials"];
 declare module "@deepseek-ai/cordis" { interface Context { hubCharacters:HubCharacters; } }
@@ -167,18 +185,19 @@ export class HubCharacters extends Service {
         if(!character)throw new Error("Unknown character");
         return this.handoff(agent,character);
       }});
-      agent.ctx.tools.register({name:"hub_delegate",description:"Ask a configured character to perform work in the background while you remain available. Resolve the requested role or editable display name from the current roster and pass its stable character ID. An unconfigured character cannot run. The result identifies the native child task; never claim completion before its notification.",parameters:{type:"object",properties:{character:{type:"string",description:"Stable character ID from the current roster (preferred); a current display name is also accepted."},description:{type:"string"},prompt:{type:"string"}},required:["character","description","prompt"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
+      agent.ctx.tools.register({name:"hub_delegate",description:"Start a helper: a background worker that does one self-contained task (research, comparing options, drafting, longer PC work) while you stay available. The user sees each helper as a card in the chat and can open its work or stop it. description is a short title (under 60 characters); prompt is a complete brief, since the helper cannot see this chat. model: \"chat\" (default: the model this chat uses), \"fast\" (quick lookups) or \"unrestricted\" (only when this chat is unlocked or the user asks). Run at most three helpers at once. The result identifies the helper; never claim it finished before its notification.",parameters:{type:"object",properties:{model:{enum:["chat","fast","unrestricted"]},character:{type:"string",description:"Legacy: a character ID or name instead of model."},description:{type:"string"},prompt:{type:"string"}},required:["description","prompt"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
         if(exec.agent?.id!==agent.id || !exec.token || !exec.callId)throw new Error("Use this conversation's native character delegation");
         if((this.voiceCalls.has(agent.id)||agent.id.startsWith("minke-im-"))&&!currentTurnHasUserRequest(agent)){
           exec.concludeTurn();throw new Error(TASK_NOTIFICATION_RULE);
         }
-        await this.ready;const s=mount.snapshot??this.store.snapshot();const character=s.characters.find(c=>c.id===args.character || c.name.toLowerCase()===String(args.character).toLowerCase());
-        if(!character?.route)throw new Error("This character has no model configured. Choose one in HUB → Characters.");
+        await this.ready;const s=mount.snapshot??this.store.snapshot();
+        const character=helperCharacter(s,args,this.store.selected(agent.id,mount.turnSnapshot??s));
+        if(!character?.route)throw new Error(args.model==="unrestricted"?"No unrestricted model is set up. Choose one in Settings → Models.":"That model is not set up. Choose one in Settings → Models.");
         if(typeof args.description!=="string" || !args.description.trim() || typeof args.prompt!=="string" || !args.prompt.trim())throw new Error("A task needs a description and prompt");
         await this.prepare(agent,s);const toolName=mount.names.get(character.id);if(!toolName)throw new Error("Character delegation is unavailable");
         const callId=`${exec.callId}:character`;this.dispatches.set(callId,exec.token);
         try{
-          const result=await agent.ctx.tools.execute({name:toolName,callId,rootCallId:exec.rootCallId,parent:exec.token,agent:exec.agent,signal:exec.signal,arguments:{description:`${character.name} · ${args.description}`,prompt:args.prompt,run_in_background:true}});
+          const result=await agent.ctx.tools.execute({name:toolName,callId,rootCallId:exec.rootCallId,parent:exec.token,agent:exec.agent,signal:exec.signal,arguments:{description:String(args.description).trim().slice(0,80),prompt:args.prompt,run_in_background:true}});
           for(const extra of result.additionalContexts??[])exec.deferContext(extra);
           if(result.isError)throw new Error(result.error.message);
           if(this.voiceCalls.has(agent.id))exec.concludeTurn();
