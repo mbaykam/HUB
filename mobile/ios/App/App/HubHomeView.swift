@@ -3918,7 +3918,7 @@ struct HubScreenFullView: View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
             if let image {
-                HubZoomableImage(image: image).ignoresSafeArea()
+                HubLiveScreenImage(image: image).ignoresSafeArea()
             } else if failed {
                 Text("The PC screen could not be captured.").foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3950,7 +3950,7 @@ struct HubScreenFullView: View {
 }
 
 /// A picture you can pinch to zoom and drag, keeping its zoom between updates.
-struct HubZoomableImage: UIViewRepresentable {
+struct HubLiveScreenImage: UIViewRepresentable {
     let image: UIImage
 
     func makeUIView(context: Context) -> UIScrollView {
