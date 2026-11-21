@@ -12,7 +12,7 @@ import {readFile,mkdir,writeFile,rename,stat} from "node:fs/promises";
 import {readFileSync} from "node:fs";
 import {homedir} from "node:os";
 import {join} from "node:path";
-import {randomUUID} from "node:crypto";
+import {randomUUID,createHash} from "node:crypto";
 import type {IncomingMessage,ServerResponse} from "node:http";
 
 export interface HubProject {
@@ -264,7 +264,53 @@ function installChatTools(ctx: any, characters: any, store: ProjectsStore, ready
       return {opened: true, sessionId, project: target?.name ?? null};
     },
   });
-  const offProjects = ctx.tools.register({
+  // "We talked about this before": find that chat and send the user back to it
+  // instead of starting over. Read-only; opening only shows a button in the chat.
+  const offFind = ctx.tools.register({
+    name: "hub_find_chat",
+    description: "Find an earlier chat when the user refers to something you talked about before (\"we discussed X\", \"that chat about Y\", \"continue where we left off\"). query searches chat titles and the saved chat archive and returns up to 5 matches, newest first. When one clearly matches (or the user picks one), call again with open set to its sessionId and title set to its title: the chat then shows a button that takes the user back to that chat so the conversation continues there. You can also read it with hub_knowledge_read using its archiveId to pick up the details. Do not open a chat the user did not mean.",
+    parameters: {type: "object", properties: {query: {type: "string"}, open: {type: "string"}, title: {type: "string"}}, additionalProperties: false},
+    output,
+    async execute(args: any, exec: any) {
+      const header = exec.agent?.session?.header;
+      if (!header || header.origin === "subagent" || typeof header.id !== "string" || header.id.startsWith("hub-")) throw Error("Only a chat with the user can do this.");
+      const sessions = controller();
+      if (!sessions?.list) throw Error("This HUB cannot list chats.");
+      const {items} = await sessions.list({}, AbortSignal.timeout(15_000));
+      const chats = items.filter((s: any) => !s.blank && s.origin !== "subagent" && typeof s.sessionId === "string" && !s.sessionId.startsWith("hub-") && s.sessionId !== header.id)
+        .map((s: any) => ({sessionId: s.sessionId as string, title: typeof s.projections?.values?.title === "string" && s.projections.values.title.trim() ? String(s.projections.values.title).slice(0, 200) : "Untitled conversation", updatedAt: Number(s.updatedAt) || 0}));
+      if (typeof args.open === "string" && args.open.trim()) {
+        const chat = chats.find((c: any) => c.sessionId === args.open.trim());
+        if (!chat) throw Error("No such chat; search first and use a returned sessionId.");
+        return {open: true, sessionId: chat.sessionId, title: chat.title, notice: "The user now sees a button that opens this chat. Tell them in one line."};
+      }
+      const query = typeof args.query === "string" ? args.query.trim().slice(0, 300) : "";
+      if (!query) throw Error("Say what the earlier chat was about.");
+      const words = query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 2);
+      const score = new Map<string, number>();
+      for (const chat of chats) {
+        const title = chat.title.toLocaleLowerCase(), hits = words.filter(w => title.includes(w)).length;
+        if (hits) score.set(chat.sessionId, hits * 2);
+      }
+      // The archive knows what was said, not only the title.
+      const archiveOf = new Map(chats.map((c: any) => ["conversation-" + createHash("sha256").update("hub:" + c.sessionId).digest("hex").slice(0, 32), c.sessionId]));
+      try {
+        const result = await exec.agent.ctx.tools.execute({agent: exec.agent, name: "hub_knowledge_search", arguments: {query}, callId: `${exec.callId ?? "find"}:archive`, signal: exec.signal ?? AbortSignal.timeout(15_000)});
+        const text = (result.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+        const parsed = text ? JSON.parse(text) : [];
+        const records: any[] = Array.isArray(parsed) ? parsed : parsed.records ?? [];
+        records.forEach((r: any, i: number) => {
+          const session = archiveOf.get(r?.id);
+          if (session) score.set(session, (score.get(session) ?? 0) + Math.max(1, 5 - i));
+        });
+      } catch {}
+      const matches = chats.filter((c: any) => score.has(c.sessionId))
+        .sort((a: any, b: any) => score.get(b.sessionId)! - score.get(a.sessionId)! || b.updatedAt - a.updatedAt).slice(0, 5)
+        .map((c: any) => ({sessionId: c.sessionId, title: c.title, updated: new Date(c.updatedAt).toISOString().slice(0, 10),
+          archiveId: "conversation-" + createHash("sha256").update("hub:" + c.sessionId).digest("hex").slice(0, 32)}));
+      return {matches, notice: matches.length ? "Open the one the user means with open and title." : "No earlier chat matched; ask the user for another detail."};
+    },
+  });  const offProjects = ctx.tools.register({
     name: "hub_projects",
     description: "Organise the user's projects (named groups of chats with shared instructions and a note), when the user asks. Actions: list; create (name, optional instructions; add_this_chat to put this chat in it); add (project, optional sessionId — default this chat — moves the chat into the project); detach (optional sessionId, default this chat — takes it out of its project); rename (project, name); instructions (project, instructions — replaces them). project is a name or id. Removing a whole project is left to the user in the app.",
     parameters: {type: "object", properties: {action: {enum: ["list", "create", "add", "detach", "rename", "instructions"]}, project: {type: "string"}, name: {type: "string"}, instructions: {type: "string"}, sessionId: {type: "string"}, add_this_chat: {type: "boolean"}}, required: ["action"], additionalProperties: false},
@@ -291,5 +337,5 @@ function installChatTools(ctx: any, characters: any, store: ProjectsStore, ready
       }
     },
   });
-  return () => { offNew(); offProjects(); };
+  return () => { offNew(); offFind(); offProjects(); };
 }

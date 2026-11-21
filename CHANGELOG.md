@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.25
+
+- hub_find_chat: when you mention something discussed before, HUB finds that chat (titles and the chat archive) and offers a button back to it; voice can use it too.
+- Research reads pages with a fast plain fetch first and uses the browser only for blocked or script-only pages (a browser read takes about 5 s, a fetch about 0.5 s).
+
 ## 1.10.24
 
 - Schedule replaces Tasks, modelled on OpenClaw: reminders (your own words sent at a time, no AI run), jobs HUB runs at a time, and a heartbeat that checks a short list during your active hours and stays silent unless something needs you. HUB manages them with one tool, hub_schedule.
