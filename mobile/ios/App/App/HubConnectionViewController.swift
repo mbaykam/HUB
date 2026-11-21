@@ -48,6 +48,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
     private var deviceState: HubDeviceState?
     private var openChatWhenVoiceConnects = false
     private var openCameraWhenVoiceConnects = false
+    /// Screen or camera to share as soon as a call started from a chat connects.
+    private var shareWhenVoiceConnects: HubVoiceCallControl?
     private var cameraVision: HubCameraVision?
     private var cameraHost: UIViewController?
     private var keyboardObserver: NSObjectProtocol?
@@ -185,7 +187,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 guard generation == self.connectionGeneration else { throw CancellationError() }
                 return tasks
             }, appearanceChanged: { [weak self] in self?.applyWorkspaceAppearance($0) },
-            voiceControl: { [weak self] control in self?.controlVoice(control) })
+            voiceControl: { [weak self] control in self?.controlVoice(control) },
+            voiceInChat: { [weak self] id, share in self?.startVoiceInChat(id, share: share) })
         let controller = UIHostingController(rootView: screen)
         homeController = controller
         addChild(controller)
@@ -923,6 +926,7 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         if !model.isActive {
             openChatWhenVoiceConnects = false
             openCameraWhenVoiceConnects = false
+            shareWhenVoiceConnects = nil
             if cameraHost != nil { closeCamera() }
         }
         guard openChatWhenVoiceConnects, model.connectedSessionID != nil,
@@ -930,14 +934,16 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         openChatWhenVoiceConnects = false
         let camera = openCameraWhenVoiceConnects
         openCameraWhenVoiceConnects = false
+        let share = shareWhenVoiceConnects
+        shareWhenVoiceConnects = nil
         if let sheet, presentedViewController === sheet, sheet.presentedViewController == nil {
             dismiss(animated: true) { [weak self] in
                 self?.openNotification(destination)
-                if camera { self?.presentCamera() }
+                if camera { self?.presentCamera() } else if let share { self?.controlVoice(share) }
             }
         } else if presentedViewController == nil {
             openNotification(destination)
-            if camera { presentCamera() }
+            if camera { presentCamera() } else if let share { controlVoice(share) }
         }
     }
 
@@ -1021,9 +1027,22 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         }
     }
 
-    private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false) {
+    /// A call that speaks into an open chat (its messages stay), optionally
+    /// opening screen or camera sharing as soon as it connects.
+    private func startVoiceInChat(_ sessionID: String, share: HubVoiceCallControl?) {
+        if let voice, voice.isActive {
+            if voice.activeSessionID == sessionID, let share { controlVoice(share) } else { showVoice() }
+            return
+        }
+        guard let api, let server, let deviceState else { showConnection(); return }
+        guard connected else { showConnection(error: "Complete HUB sign-in before starting voice."); return }
+        shareWhenVoiceConnects = share
+        presentVoice(api: api, server: server, deviceState: deviceState, checkpoint: nil, sessionID: sessionID)
+    }
+
+    private func presentVoice(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, checkpoint: HubVoiceCheckpoint?, pending: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false, sessionID: String? = nil) {
         let startsNewCall = voice?.isActive != true
-        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending, resumeOnlyIfActive: resumeOnlyIfActive)
+        let model = voice?.isActive == true ? voice! : HubNativeVoice(api: api, server: server, deviceState: deviceState, resume: checkpoint, pendingAdmission: pending, resumeOnlyIfActive: resumeOnlyIfActive, sessionID: sessionID)
         voice = model
         if startsNewCall { openChatWhenVoiceConnects = true }
         let sheet = HubVoiceViewController(voice: model, restart: { [weak self] in

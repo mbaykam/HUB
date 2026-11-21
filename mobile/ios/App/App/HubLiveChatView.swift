@@ -19,6 +19,8 @@ struct HubLiveChatView: View {
     let voice: () -> Void
     /// Starts a video call in this chat (a voice call with the live camera).
     let videoCall: () -> Void
+    /// Starts a call that speaks into this chat, sharing the screen or camera when asked.
+    var voiceInChat: (HubVoiceCallControl?) -> Void = { _ in }
     let openChat: (HubConversationChoice) -> Void
     let attachments: () -> HubChatAttachmentContext?
     let requestID: UUID
@@ -107,6 +109,8 @@ struct HubLiveChatView: View {
     /// The message just sent, shown at once until HUB's copy of it arrives,
     /// so a sent message never seems to vanish while HUB gets ready.
     @State private var echo: SentEcho?
+    /// This chat as it was last time, shown at once until the live copy arrives.
+    @State private var cachedMessages: [HubChatMessage]?
     @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
 
     private struct SentEcho: Equatable {
@@ -412,11 +416,6 @@ struct HubLiveChatView: View {
                     .accessibilityIdentifier("hub.chat.video")
                 }
                 Menu {
-                    Button {
-                        composerFocused = false
-                        modelPickerOpen = true
-                    } label: { Label("Model & reasoning", systemImage: "cpu") }
-                    .disabled(connectionLost || snapshot?.running == true || awaitingAfter != nil)
                     Button {
                         composerFocused = false
                         speedOpen = true
@@ -789,9 +788,16 @@ struct HubLiveChatView: View {
                                 HubShareRequestCard(camera: request.camera, reason: request.reason) {
                                     composerFocused = false
                                     dictation.cancel()
-                                    voice()
+                                    voiceInChat(request.camera ? .camera : .screen)
                                 }
                                 .disabled(connectionLost)
+                            }
+                            // HUB found the earlier chat the user meant: continue there.
+                            if let earlier = earlierChat(in: snapshot, messages: messages) {
+                                HubEarlierChatCard(title: earlier.title) {
+                                    composerFocused = false
+                                    openChat(HubConversationChoice(sessionId: earlier.id, title: earlier.title, updatedAt: 0))
+                                }
                             }
                             if !snapshot.partial.isEmpty { Text(snapshot.partial) }
                             if let failure = snapshot.failure { Text(failure).font(.footnote).foregroundStyle(.red) }
@@ -816,6 +822,8 @@ struct HubLiveChatView: View {
                                               caption: sending ? "Sending…" : "Sent", item: nil)
                                 if !snapshot.running && awaitingAfter != nil && !connectionLost { HubThinkingIndicator() }
                             }
+                        } else if let cachedMessages {
+                            cachedTranscript(cachedMessages)
                         } else if !connectionLost {
                             ProgressView("Loading chat…")
                         }
@@ -850,6 +858,14 @@ struct HubLiveChatView: View {
                 }
                 .onChange(of: echo) { _ in
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
+                }
+                .onChange(of: snapshot?.running) { running in
+                    // Keep the finished state of this chat on the phone for next time.
+                    if running == false, let messages = snapshot?.messages { api.cacheChat(messages, sessionID: chat.sessionId) }
+                }
+                .task(id: chat.sessionId) {
+                    if cachedMessages == nil { cachedMessages = api.cachedChat(sessionID: chat.sessionId) }
+                    if cachedMessages != nil { scroll.scrollTo("latest", anchor: .bottom) }
                 }
                 .onChange(of: queuedMessages?.count) { _ in
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
@@ -992,7 +1008,9 @@ struct HubLiveChatView: View {
         do {
             let current = try await api.chatCharacters(sessionID: chat.sessionId)
             guard let target = current.characterID(for: mode) else { return false }
-            if current.selectedId != target {
+            // Switch whenever the chosen model is not the one answering: after a
+            // voice call the fast voice model can still be answering this chat.
+            if !current.isAnswering(target) {
                 _ = try await api.selectChatCharacter(sessionID: chat.sessionId, id: target, revision: current.revision)
             }
             modelSlots = try await api.chatCharacters(sessionID: chat.sessionId)
@@ -1183,6 +1201,41 @@ struct HubLiveChatView: View {
             if dictation.isActive { draft = HubDictationTranscript.join(dictationBase, spoken) }
         }
         .onDisappear { dictation.cancel() }
+    }
+
+    /// The earlier chat HUB offered to go back to since the user last wrote.
+    private func earlierChat(in snapshot: HubChatSnapshot, messages: [HubChatMessage]) -> (id: String, title: String)? {
+        let asked = messages.last(where: { $0.role == "user" }).flatMap { Int($0.id) } ?? -1
+        for call in snapshot.activity.reversed() where call.title == "hub_find_chat" && call.sequence > asked && !call.failed {
+            guard let data = call.detail?.data(using: .utf8),
+                  let arguments = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let id = (arguments["open"] as? String)?.trimmingCharacters(in: .whitespaces), !id.isEmpty,
+                  id != chat.sessionId else { continue }
+            let title = (arguments["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Earlier chat"
+            return (id, title)
+        }
+        return nil
+    }
+
+    /// The saved copy of this chat: plain bubbles, marked as updating.
+    @ViewBuilder
+    private func cachedTranscript(_ messages: [HubChatMessage]) -> some View {
+        ForEach(messages.filter { $0.role == "user" || $0.role == "assistant" }) { message in
+            if message.role == "user" {
+                HStack {
+                    Spacer(minLength: 48)
+                    Text(message.text.isEmpty ? "Photo" : message.text)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                }
+            } else if !message.text.isEmpty {
+                HubMarkdownText(source: message.text)
+            }
+        }
+        Label(connectionLost ? "Offline · showing the saved copy" : "Updating…", systemImage: connectionLost ? "wifi.slash" : "arrow.triangle.2.circlepath")
+            .font(.caption).foregroundStyle(.secondary)
+            .accessibilityIdentifier("hub.chat.cached")
     }
 
     /// HUB's latest hub_request_share since the user last wrote, if any.
@@ -2948,17 +3001,40 @@ struct HubShareRequestCard: View {
                 .font(.subheadline.weight(.semibold))
             if !reason.isEmpty { Text(reason).font(.subheadline).foregroundStyle(.secondary) }
             Button(action: start) {
-                Label("Start a call to share", systemImage: "phone.fill")
+                Label(camera ? "Share camera" : "Share screen", systemImage: camera ? "camera.fill" : "rectangle.on.rectangle")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 40)
             }
             .hubGlassButton(prominent: true)
-            Text(camera ? "In the call, tap Camera." : "In the call, tap Share screen.")
+            Text("Starts a call in this chat and opens sharing.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(14)
         .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("hub.chat.shareRequest")
+    }
+}
+/// HUB found the earlier chat the user was talking about.
+struct HubEarlierChatCard: View {
+    let title: String
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.uturn.backward.circle.fill").font(.title2).foregroundStyle(HubWorkspacePalette.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Continue in the earlier chat").font(.caption).foregroundStyle(.secondary)
+                    Text(title).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hub.chat.earlierChat")
     }
 }

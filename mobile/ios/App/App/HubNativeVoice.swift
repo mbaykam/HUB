@@ -63,8 +63,12 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
     var hasOwnedActiveCall: Bool { isActive && lease != nil && !ending }
     private var listeningStatus: String { changingAttention ? "Changing listening mode…" : listeningInBackground ? "Background listening · say “\(wakePhrase)”" : inputPaused ? "Resuming listening…" : "Listening" }
 
-    init(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, resume: HubVoiceCheckpoint? = nil, pendingAdmission: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false) {
+    /// The chat a new call speaks into; nil starts a new conversation.
+    private let targetSessionID: String?
+
+    init(api: HubVoiceAPI, server: HubServer, deviceState: HubDeviceState, resume: HubVoiceCheckpoint? = nil, pendingAdmission: HubVoiceAdmission? = nil, resumeOnlyIfActive: Bool = false, sessionID: String? = nil) {
         self.api = api; self.server = server; self.deviceState = deviceState; self.resume = resume
+        self.targetSessionID = sessionID
         self.pendingAdmission = pendingAdmission
         self.resumeOnlyIfActive = resumeOnlyIfActive
         super.init()
@@ -166,7 +170,7 @@ final class HubNativeVoice: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
                     }
                 } else {
                     guard !state.busy else { throw HubVoiceAPIError.busy }
-                    admitted = try await admitTracked()
+                    admitted = try await admitTracked(sessionID: targetSessionID)
                 }
                 lease = admitted
                 try deviceState.rememberVoice(HubVoiceCheckpoint(server: server, lease: admitted, peerID: recoveredPeer))

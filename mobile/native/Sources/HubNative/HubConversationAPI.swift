@@ -37,6 +37,8 @@ public struct HubChatCharacterPicker: Decodable {
     }
     public let revision: Int
     public let selectedId: String
+    /// The character actually answering right now (a voice call can differ from the selection).
+    public let currentId: String?
     public let pending: Bool
     public let canSelect: Bool
     public let characters: [Character]
@@ -48,6 +50,9 @@ public struct HubChatCharacterPicker: Decodable {
     /// This chat is switched to the unrestricted model.
     public var unlocked: Bool { unrestrictedId != nil && selectedId == unrestrictedId }
 
+    /// Whether `id` is both chosen and actually answering.
+    public func isAnswering(_ id: String) -> Bool { selectedId == id && (currentId ?? selectedId) == id }
+
     /// The three ways a chat can answer, one tap apart.
     public enum Mode: String, CaseIterable, Identifiable {
         case smart, fast, unrestricted
@@ -56,7 +61,8 @@ public struct HubChatCharacterPicker: Decodable {
 
     public var mode: Mode {
         if unlocked { return .unrestricted }
-        if voiceId != nil && selectedId == voiceId && selectedId != mainId { return .fast }
+        let answering = currentId ?? selectedId
+        if voiceId != nil && answering == voiceId && answering != mainId { return .fast }
         return .smart
     }
 
@@ -4072,5 +4078,68 @@ public struct HubScheduleDraft: Equatable {
                                   "text": text.trimmingCharacters(in: .whitespacesAndNewlines), "when": when]
         if let id { job["id"] = id }
         return ["action": "save", "job": job]
+    }
+}
+/// The latest messages of recently opened chats, kept on the phone so a chat
+/// shows at once while HUB sends its live copy. Only text and photo references
+/// are stored (no photo bytes), in the app's caches folder.
+struct HubChatCacheFile: Codable {
+    struct Photo: Codable { let attachmentId: String; let name: String?; let bytes: Int; let mediaType: String }
+    struct Message: Codable { let id: String; let role: String; let text: String; let turn: Int?; let photos: [Photo] }
+    let savedAt: Date
+    let messages: [Message]
+}
+
+extension HubConversationAPI {
+    static let cachedChatLimit = 40
+    static let cachedMessageLimit = 80
+
+    private static var chatCacheFolder: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("hub-chats", isDirectory: true)
+    }
+
+    private func chatCacheURL(_ sessionID: String) -> URL? {
+        guard HubVoiceAPI.validID(sessionID) else { return nil }
+        // One file per server and chat; the name reveals neither.
+        var hash: UInt64 = 1_469_598_103_934_665_603
+        for byte in (server.origin.absoluteString + "\n" + sessionID).utf8 { hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211 }
+        return Self.chatCacheFolder.appendingPathComponent(String(hash, radix: 16) + ".json")
+    }
+
+    /// The messages saved the last time this chat was open, if any.
+    public func cachedChat(sessionID: String) -> [HubChatMessage]? {
+        guard let url = chatCacheURL(sessionID), let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(HubChatCacheFile.self, from: data), !file.messages.isEmpty else { return nil }
+        return file.messages.map { message in
+            HubChatMessage(id: message.id, role: message.role, text: message.text, turn: message.turn,
+                           photos: message.photos.map { HubChatMessage.Photo(attachmentId: $0.attachmentId, name: $0.name, bytes: $0.bytes, mediaType: $0.mediaType) })
+        }
+    }
+
+    /// Saves the newest messages of a chat and keeps only the most recent chats.
+    public func cacheChat(_ messages: [HubChatMessage], sessionID: String) {
+        guard let url = chatCacheURL(sessionID), !messages.isEmpty else { return }
+        let file = HubChatCacheFile(savedAt: Date(), messages: messages.suffix(Self.cachedMessageLimit).map { message in
+            HubChatCacheFile.Message(id: message.id, role: message.role, text: message.text, turn: message.turn,
+                                     photos: message.photos.map { HubChatCacheFile.Photo(attachmentId: $0.attachmentId, name: $0.name, bytes: $0.bytes, mediaType: $0.mediaType) })
+        })
+        let folder = Self.chatCacheFolder
+        DispatchQueue.global(qos: .utility).async {
+            let manager = FileManager.default
+            try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
+            guard let data = try? JSONEncoder().encode(file) else { return }
+            #if os(iOS)
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            #else
+            try? data.write(to: url, options: [.atomic])
+            #endif
+            let files = ((try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+                .sorted { a, b in
+                    let x = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    let y = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    return x > y
+                }
+            for old in files.dropFirst(HubConversationAPI.cachedChatLimit) { try? manager.removeItem(at: old) }
+        }
     }
 }

@@ -301,6 +301,8 @@ struct HubHomeView: View {
     var readTasks: () async throws -> HubWorkspaceTasks
     var appearanceChanged: (HubChatPreferences.Appearance) -> Void
     var voiceControl: (HubVoiceCallControl) -> Void = { _ in }
+    /// Starts a call inside a chat (its messages stay), optionally sharing the screen or camera.
+    var voiceInChat: (String, HubVoiceCallControl?) -> Void = { _, _ in }
 
     private enum Panel {
         case history
@@ -449,7 +451,8 @@ struct HubHomeView: View {
                                 back: { unsent in
                                     if selectedChat.request.composerAction != nil, model.draft.isEmpty { model.draft = unsent }
                                     self.selectedChat = nil
-                                }, voice: voice, videoCall: { voiceControl(.camera) }, openChat: showChat, attachments: attachments,
+                                }, voice: { voiceInChat(selectedChat.request.choice.sessionId, nil) }, videoCall: { voiceControl(.camera) },
+                                voiceInChat: { share in voiceInChat(selectedChat.request.choice.sessionId, share) }, openChat: showChat, attachments: attachments,
                                 requestID: selectedChat.request.id, initialDraft: selectedChat.request.initialDraft,
                                 composerAction: selectedChat.request.composerAction, preferences: chatPreferences,
                                 callActive: model.voiceCall != nil) { name in
