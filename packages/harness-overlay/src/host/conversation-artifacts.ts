@@ -61,3 +61,32 @@ export function containedAppDocument(title:string,source:string){
   const policy="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data: blob:; style-src 'unsafe-inline' data:; img-src data: blob:; media-src data: blob:; font-src data:; object-src 'none'; frame-src about:; connect-src 'none'; form-action 'none'; base-uri 'none'";
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)}</title><style>html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#0b1020;color:#edf1fc;font:14px system-ui}iframe{display:block;box-sizing:border-box;width:100%;height:100%;border:0;background:#0b1020}</style></head><body><iframe title="${escape(title)}" sandbox="allow-scripts" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" referrerpolicy="no-referrer" srcdoc="${escape(isolatedAppDocument(source))}"></iframe></body></html>`;
 }
+
+/** Files HUB sent to the phone with hub_send_file. Only a successful call
+ * whose result recorded the file's name, size and hash counts; the bytes are
+ * read from disk when the phone asks and must still match that hash. */
+export interface SentFile {id:string;callId:string;path:string;name:string;bytes:number;sha256:string;at:number;seq:number}
+export function sentFiles(events:readonly any[]):SentFile[]{
+  const pending=new Set<string>(),files:SentFile[]=[];
+  for(const event of events){
+    if(event.type==="tool/call"&&event.data?.name==="hub_send_file"&&typeof event.data.callId==="string")pending.add(event.data.callId);
+    if(event.type!=="tool/result")continue;
+    const result=event.data?.message?.content?.[0],meta=event.data?.meta;
+    if(result?.type!=="tool-result"||!pending.delete(result.toolCallId)||result.isError!==false||meta?.kind!=="hub-file")continue;
+    if(typeof meta.path!=="string"||typeof meta.name!=="string"||!Number.isSafeInteger(meta.bytes)||!/^[a-f0-9]{64}$/.test(meta.sha256??""))continue;
+    files.push({id:createHash("sha256").update("sent:"+result.toolCallId).digest("hex"),callId:result.toolCallId,path:meta.path,name:meta.name,bytes:meta.bytes,sha256:meta.sha256,at:event.time,seq:event.seq});
+  }
+  return files;
+}
+export const SENT_FILE_LIMIT=20*1024*1024;
+const PRIVATE_PATH=/(^|[\\/])(\.ssh|\.cloudflared|\.gnupg|\.aws)([\\/]|$)|\.credentials|auth\.json$|\.env$|id_(rsa|ed25519)|\.(pem|key|p12|pfx)$/i;
+/** Reads a file for hub_send_file: a regular file, not a secret, at most 20 MB. */
+export async function readSendableFile(path:string){
+  const {realpath,lstat,readFile}=await import("node:fs/promises");
+  const real=await realpath(path),info=await lstat(real);
+  if(!info.isFile())throw Error("Send a regular file.");
+  if(PRIVATE_PATH.test(real))throw Error("That file holds private keys or credentials and cannot be sent.");
+  if(info.size<1||info.size>SENT_FILE_LIMIT)throw Error("Files up to 20 MB can be sent.");
+  const data=await readFile(real);
+  return {path:real,name:basename(real),data,sha256:createHash("sha256").update(data).digest("hex")};
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.26
+
+- Backend for the iPhone's live Your work: running items report the tool in use and when they started; /api/hub/screen-view serves the PC screen while the phone's live view is open; Camofox runs with a visible window so browsing shows on that screen.
+- hub_send_file sends any file HUB made (up to 20 MB) to the phone through the chat's outputs; 3D models open in the phone's 3D viewer.
+- Skill learning: HUB saves a skill by itself after a reusable multi-step task and the skill list says when to use each one. A 3D-modeling skill is included.
+- Calls use the voice chosen in Speech settings; a voice stored on the voice model no longer overrides it.
+
 ## 1.10.25
 
 - hub_find_chat: when you mention something discussed before, HUB finds that chat (titles and the chat archive) and offers a button back to it; voice can use it too.

@@ -109,7 +109,7 @@ test("workspace screenshot persists in the settled chat turn and renders through
   const stored = new Map();
   let tool;
   const ctx = {
-    tools: {register(value) { tool = value; return () => {}; }},
+    tools: {register(value) { if (value.name === "hub_show_screenshot") tool = value; return () => {}; }},
     webServer: {register(value) { routes.set(value.path, value.handler); return () => routes.delete(value.path); }},
     connection: {requestRejection(req) { return req.headers.authorization === "fixture" ? undefined : 401; }},
     sessionQuery: {async observeSession(session) { return {events: session === "session-a" ? events : [], [Symbol.dispose]() {}}; }},

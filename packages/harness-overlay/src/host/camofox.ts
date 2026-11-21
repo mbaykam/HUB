@@ -29,7 +29,9 @@ export class CamofoxRuntime {
       // Let the native launcher quote each argument. An embedded quoted CMD
       // command is escaped a second time by Node and fails on Windows.
       const command=process.platform==="win32"?executable.replaceAll("/","\\"):executable;
-      const child=this.subprocess.spawn({argv:[command,"/d","/c",c.launcher,"server","start"],cwd:this.root,stdio:{stdin:"ignore",stdout:"pipe",stderr:{maxBytes:16000}},graceMs:2000,signal:this.signal,env:{...voiceRuntimeEnvironment(process.env),CAMOFOX_HOST:"127.0.0.1",CAMOFOX_PORT:"9377",CAMOFOX_AUTH_MODE:"auto"}});
+      const child=this.subprocess.spawn({argv:[command,"/d","/c",c.launcher,"server","start"],cwd:this.root,stdio:{stdin:"ignore",stdout:"pipe",stderr:{maxBytes:16000}},graceMs:2000,signal:this.signal,env:{...voiceRuntimeEnvironment(process.env),CAMOFOX_HOST:"127.0.0.1",CAMOFOX_PORT:"9377",CAMOFOX_AUTH_MODE:"auto",
+        // A visible window, so the user can watch HUB browse in the live PC screen view.
+        CAMOFOX_HEADLESS:"false"}});
       void child.done.catch(()=>{});
       for(let i=0;i<30;i++){if((await this.status()).ready)return;await new Promise(r=>setTimeout(r,500));this.signal.throwIfAborted();}
       throw new Error("Camofox did not become ready");

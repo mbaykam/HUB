@@ -1,5 +1,6 @@
 import {conversationScreenshots,installScreenshotDelivery} from "./screenshot-delivery.ts";
-import {conversationArtifacts,artifactDocument} from "./conversation-artifacts.ts";
+import {conversationArtifacts,artifactDocument,sentFiles,readSendableFile} from "./conversation-artifacts.ts";
+import {isAbsolute,resolve} from "node:path";
 import {isKnowledgeEvaluation} from "./knowledge-evidence.ts";
 import {createHash} from "node:crypto";
 import {helperWork} from "./helper-work.ts";
@@ -7,6 +8,17 @@ import {helperWork} from "./helper-work.ts";
  * new PWA process. No task is resumed, repeated or cancelled by these reads. */
 export function installDailyUseWeb(ctx:any){
   const offScreenshot=installScreenshotDelivery(ctx);
+  // Files HUB makes on this PC reach the phone through the chat's outputs.
+  const offSend=ctx.tools?.register?.({name:"hub_send_file",description:"Send a file you made to the user's phone: a 3D model (STL, OBJ, PLY, USDZ), PDF, image, spreadsheet, archive and so on. It appears in this chat's outputs, where the phone previews what it can (3D models open in a 3D viewer) and can save or share it. Up to 20 MB. path is absolute or relative to the working directory. Send what the user asked for; never secrets or credentials.",
+    parameters:{type:"object",properties:{path:{type:"string",maxLength:1024}},required:["path"],additionalProperties:false},
+    output:{schema:{type:"object"},render:(_a:any,v:any)=>[{type:"text",text:`Sent ${v.name} (${v.bytes} bytes) to the phone: it is in this chat's outputs.`}],presentationMeta:(_a:any,v:any)=>v},
+    async execute(args:any,exec:any){
+      const header=exec.agent?.session?.header;
+      if(!header||exec.parent||header.origin==="subagent")throw Error("Send files from the conversation itself.");
+      if(typeof args.path!=="string"||!args.path.trim()||/[\u0000-\u001f]/.test(args.path))throw Error("Give the file's path.");
+      const file=await readSendableFile(isAbsolute(args.path)?args.path:resolve(header.cwd??process.cwd(),args.path));
+      return {kind:"hub-file",path:file.path,name:file.name,bytes:file.data.length,sha256:file.sha256};
+    }});
   const ended=new Map<string,{version:number;kind:string}>();
   const off=["activity","artifacts","conversations","helper"].map(action=>ctx.webServer.register({kind:"exact",path:"/api/hub/"+action,handler:async(req:any,res:any)=>{
     const send=(code:number,value:any)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};
@@ -29,13 +41,16 @@ export function installDailyUseWeb(ctx:any){
       if(action==="activity"){
         const {items}=await ctx.sessionController.list({},signal),now=Date.now(),byId:Record<string,unknown>={},query=ctx.get?.("sessionQuery")??ctx.sessionQuery,archived=new Set(ctx.get?.("workspaceRegistry")?.archivedSessionIds??[]);
         const headers=items.some((s:any)=>s.origin==="subagent"&&(s.running||now-s.updatedAt<24*60*60000))&&query?.listSessions?await query.listSessions(signal):[],parents=new Map<string,string>(headers.map(({header}:any)=>[header.id,header.parentSession]));
-        let inspected=0;
+        let inspected=0,running=0;
         for(const s of items){if(isKnowledgeEvaluation(s.sessionId)||s.blank||archived.has(s.sessionId))continue;const v=s.projections?.values??{},parentId=parents.get(s.sessionId)??v.subagent?.parentSessionId??v.subagent?.parentSession;
           // Any chat used in the last day counts as recent work, not only ones that ran tools.
           const recent=!s.running&&now-s.updatedAt<24*60*60000;
           if(recent&&ended.get(s.sessionId)?.version!==s.updatedAt&&inspected++<25){const observation=await query.observeSession(s.sessionId,{signal,projectionMode:"none"});try{const end=[...observation.events].reverse().find((e:any)=>e.type==="turn/end");ended.set(s.sessionId,{version:s.updatedAt,kind:end?.data?.reason?.kind??"unknown"});if(ended.size>2000)ended.delete(ended.keys().next().value!);}finally{observation[Symbol.dispose]();}}
           const kind=ended.get(s.sessionId)?.kind,completed=recent&&kind==="completed",failed=recent&&kind==="error",stopped=recent&&["aborted","interrupted"].includes(kind??"");
-          if(s.running||recent||s.origin==="subagent")byId[s.sessionId]={title:v.title,running:s.running,completed,failed,stopped,origin:s.origin,parentId,updatedAt:s.updatedAt,blank:s.blank};
+          // Running work: the tool in use right now and when the turn began, for the phone's Your work.
+          let doing:string|undefined,since:number|undefined;
+          if(s.running&&running++<8&&query?.observeSession){try{const observation=await query.observeSession(s.sessionId,{signal,projectionMode:"none"});try{const events=[...observation.events];for(let i=events.length-1;i>=0;i--){const e:any=events[i];if(!doing&&e.type==="tool/call"&&typeof e.data?.name==="string")doing=e.data.name.slice(0,80);if(e.type==="turn/start"){since=e.time;break;}}}finally{observation[Symbol.dispose]();}}catch{}}
+          if(s.running||recent||s.origin==="subagent")byId[s.sessionId]={title:v.title,running:s.running,completed,failed,stopped,origin:s.origin,parentId,updatedAt:s.updatedAt,blank:s.blank,...(doing?{doing}:{}),...(since?{since}:{})};
         }send(200,{byId,at:now});return;
       }
       const session=req.headers["x-hub-session"],id=req.headers["x-hub-artifact"];
@@ -69,14 +84,20 @@ export function installDailyUseWeb(ctx:any){
         }
         const files=conversationArtifacts(events),apps=files.filter(f=>/\.html?$/i.test(f.name));
         if(req.headers["x-hub-artifact-format"]==="file"){
-          const transferable=files.filter(file=>file.name&&file.name!=="."&&file.name!==".."&&
-            file.name.length<=255&&!/[\\/\u0000-\u001f\u007f-\u009f]/u.test(file.name));
+          const safeName=(name:string)=>name&&name!=="."&&name!==".."&&name.length<=255&&!/[\\/\u0000-\u001f\u007f-\u009f]/u.test(name);
+          const transferable=files.filter(file=>safeName(file.name)),sent=sentFiles(events).filter(file=>safeName(file.name));
           const metadata=(file:typeof files[number])=>({id:file.id,name:file.name,at:file.at,bytes:Buffer.byteLength(file.content),
             sha256:createHash("sha256").update(file.content).digest("hex")});
-          if(id===undefined){send(200,{files:transferable.sort((first,second)=>second.seq-first.seq).slice(0,250).map(metadata)});return;}
+          if(id===undefined){send(200,{files:[...transferable.map(f=>({seq:f.seq,item:metadata(f)})),...sent.map(f=>({seq:f.seq,item:{id:f.id,name:f.name,at:f.at,bytes:f.bytes,sha256:f.sha256}}))]
+            .sort((first,second)=>second.seq-first.seq).slice(0,250).map(entry=>entry.item)});return;}
           const file=transferable.find(item=>item.id===id);
-          if(!file){send(404,{error:"artifact-unavailable"});return;}
-          send(200,{...metadata(file),data:Buffer.from(file.content).toString("base64")});return;
+          if(file){send(200,{...metadata(file),data:Buffer.from(file.content).toString("base64")});return;}
+          const delivered=sent.find(item=>item.id===id);
+          if(!delivered){send(404,{error:"artifact-unavailable"});return;}
+          // The file must still be exactly what was sent.
+          let current;try{current=await readSendableFile(delivered.path);}catch{send(410,{error:"file-changed-or-removed"});return;}
+          if(current.sha256!==delivered.sha256){send(410,{error:"file-changed-or-removed"});return;}
+          send(200,{id:delivered.id,name:delivered.name,at:delivered.at,bytes:delivered.bytes,sha256:delivered.sha256,data:current.data.toString("base64")});return;
         }
         if(id===undefined){
           // Photos shared in messages, so Knowledge can show a chat's pictures.
@@ -94,7 +115,7 @@ export function installDailyUseWeb(ctx:any){
         send(200,{document:artifactDocument(app,files),name:app.name,at:app.at});
       }finally{observation[Symbol.dispose]();}
     }catch{send(503,{error:"native-state-unavailable"});}
-  }}));return()=>{offScreenshot();ended.clear();off.forEach((f:any)=>f());};
+  }}));return()=>{offSend?.();offScreenshot();ended.clear();off.forEach((f:any)=>f());};
 }
 
 const SCREENSHOT_TOOLS=new Set(["hub_capture_desktop","hub_show_screenshot"]);
