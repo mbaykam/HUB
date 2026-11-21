@@ -101,11 +101,29 @@ struct HubSpeechSettingsView: View {
     }
 
     private func voiceSection(_ catalog: HubSpeechCatalog) -> some View {
-        Section("Spoken voice") {
+        Section {
+            if let selected = catalog.tts.first(where: { $0.id == ttsID }) {
+                NavigationLink {
+                    HubVoicePickerView(engine: selected.engine, voices: selected.voices ?? [], selection: voice,
+                                       canPreview: selected.available, bilingual: ["supertonic", "bilingual"].contains(selected.engine)) { language, choice in
+                        await preview(language, voice: choice)
+                    } choose: { choice in
+                        voice = choice
+                        await save()
+                    }
+                } label: {
+                    HStack {
+                        Text("Voice")
+                        Spacer()
+                        Text(HubVoicePickerView.name(voice, engine: selected.engine).title).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("hub.speech.voice")
+            }
             Picker("Engine", selection: $ttsID) {
                 if !catalog.tts.contains(where: { $0.id == ttsID }) { Text(ttsID).tag(ttsID) }
                 ForEach(catalog.tts) { option in
-                    Text(option.available ? option.id : "\(option.id) · install first").tag(option.id)
+                    Text(Self.engineName(option) + (option.available ? "" : " · install first")).tag(option.id)
                 }
             }
             .onChange(of: ttsID) { id in
@@ -113,34 +131,38 @@ struct HubSpeechSettingsView: View {
                 if !voices.contains(voice) { voice = voices.contains("F5") ? "F5" : (voices.first ?? "") }
             }
             if let selected = catalog.tts.first(where: { $0.id == ttsID }) {
-                Picker("Default voice", selection: $voice) {
-                    if !(selected.voices ?? []).contains(voice) { Text(voice).tag(voice) }
-                    ForEach(selected.voices ?? [], id: \.self) { Text($0).tag($0) }
-                }
                 if ["supertonic", "bilingual"].contains(selected.engine) {
                     Picker("Spoken language", selection: $spoken) {
-                        Text("Automatic").tag("auto")
+                        Text("Follow the conversation").tag("auto")
                         Text("English").tag("en")
                         Text("Türkçe").tag("tr")
                     }
                 }
                 if selected.engine == "supertonic" {
-                    Picker("Voice quality", selection: $quality) {
-                        ForEach(4...8, id: \.self) { Text("\($0) steps").tag($0) }
-                    }
-                }
-                if selected.available {
-                    if selected.engine != "piper" || !selected.model.hasPrefix("tr_") {
-                        Button("Listen in English") { previewTask = Task { await preview("en") } }
-                    }
-                    if ["supertonic", "bilingual"].contains(selected.engine) || selected.model.hasPrefix("tr_") {
-                        Button("Türkçe dinle") { previewTask = Task { await preview("tr") } }
+                    Picker("Quality", selection: $quality) {
+                        Text("Fastest").tag(4)
+                        Text("Balanced").tag(6)
+                        Text("Clearest").tag(8)
+                        if ![4, 6, 8].contains(quality) { Text("\(quality) steps").tag(quality) }
                     }
                 }
             }
+        } header: {
+            Text("Spoken voice")
+        } footer: {
+            Text("Every call uses this voice. Higher quality sounds clearer but starts talking a little later.")
         }
     }
 
+    static func engineName(_ option: HubSpeechCatalog.Option) -> String {
+        switch option.engine {
+        case "supertonic": return "Supertonic · English and Turkish"
+        case "kokoro": return "Kokoro · English"
+        case "bilingual": return "Kokoro + Piper · English and Turkish"
+        case "piper": return "Piper · " + option.model
+        default: return option.id
+        }
+    }
     private var backgroundSection: some View {
         Section("Background listening") {
             Picker("Switch to background", selection: $idle) {
@@ -215,7 +237,8 @@ struct HubSpeechSettingsView: View {
         }
     }
 
-    private func synthesis() -> Engine? {
+    private func synthesis(voice: String? = nil) -> Engine? {
+        let voice = voice ?? self.voice
         guard let option = catalog?.tts.first(where: { $0.id == ttsID && $0.available }),
               option.voices?.contains(voice) == true else { return nil }
         let isBilingual = option.engine == "bilingual"
@@ -250,8 +273,8 @@ struct HubSpeechSettingsView: View {
         }
     }
 
-    private func preview(_ language: String) async {
-        guard !busy, let tts = synthesis() else { return }
+    private func preview(_ language: String, voice choice: String? = nil) async {
+        guard !busy, let tts = synthesis(voice: choice ?? voice) else { return }
         busy = true
         defer { busy = false }
         do {
@@ -294,5 +317,89 @@ struct HubSpeechSettingsView: View {
             catalog = try await api.speechCatalog()
             notice = soniox == true ? "Soniox connection settings updated." : "HUB did not confirm the new API key."
         } catch { notice = "Could not confirm the connection update." }
+    }
+}
+
+/// Choose the voice HUB speaks with: plain names, tap to hear it, the chosen
+/// one is saved at once.
+@MainActor
+struct HubVoicePickerView: View {
+    let engine: String
+    let voices: [String]
+    @State var selection: String
+    let canPreview: Bool
+    let bilingual: Bool
+    let preview: (String, String) async -> Void
+    let choose: (String) async -> Void
+    @State private var language = "en"
+    @State private var playing: String?
+
+    var body: some View {
+        HubList {
+            if bilingual {
+                Picker("Sample language", selection: $language) {
+                    Text("English").tag("en")
+                    Text("Türkçe").tag("tr")
+                }
+                .pickerStyle(.segmented)
+            }
+            ForEach(Self.groups(voices, engine: engine), id: \.title) { group in
+                Section(group.title) {
+                    ForEach(group.voices, id: \.self) { voice in
+                        let name = Self.name(voice, engine: engine)
+                        Button {
+                            selection = voice
+                            Task {
+                                playing = voice
+                                if canPreview { await preview(language, voice) }
+                                playing = nil
+                                await choose(voice)
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: playing == voice ? "speaker.wave.2.fill" : "play.circle")
+                                    .foregroundStyle(HubWorkspacePalette.accent)
+                                    .frame(width: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(name.title)
+                                    if !name.detail.isEmpty { Text(name.detail).font(.caption).foregroundStyle(.secondary) }
+                                }
+                                Spacer()
+                                if voice == selection { Image(systemName: "checkmark").foregroundStyle(HubWorkspacePalette.accent) }
+                            }
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("hub.voice.\(voice)")
+                    }
+                }
+            }
+        }
+        .navigationTitle("Voice")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// A readable name for an engine's voice id.
+    static func name(_ voice: String, engine: String) -> (title: String, detail: String) {
+        if engine == "supertonic", let kind = voice.first, let number = Int(voice.dropFirst()) {
+            return (kind == "M" ? "Male voice \(number)" : "Female voice \(number)", "")
+        }
+        let parts = voice.split(separator: "_", maxSplits: 1).map(String.init)
+        if parts.count == 2, parts[0].count == 2 {
+            let accents: [Character: String] = ["a": "American", "b": "British", "j": "Japanese", "z": "Chinese", "e": "Spanish", "f": "French", "h": "Hindi", "i": "Italian", "p": "Portuguese"]
+            let accent = accents[parts[0].first!] ?? ""
+            let gender = parts[0].last == "m" ? "male" : "female"
+            return (parts[1].replacingOccurrences(of: "_", with: " ").capitalized, "\(accent) \(gender)".trimmingCharacters(in: .whitespaces))
+        }
+        if voice.hasPrefix("tr_") { return (voice.split(separator: "-").dropFirst().first.map { String($0).capitalized } ?? voice, "Turkish") }
+        return (voice, "")
+    }
+
+    static func groups(_ voices: [String], engine: String) -> [(title: String, voices: [String])] {
+        let female = voices.filter { name($0, engine: engine).title.hasPrefix("Female") || name($0, engine: engine).detail.hasSuffix("female") }
+        let male = voices.filter { name($0, engine: engine).title.hasPrefix("Male") || name($0, engine: engine).detail.hasSuffix(" male") || name($0, engine: engine).detail == "male" }
+        let other = voices.filter { !female.contains($0) && !male.contains($0) }
+        return [("Female", female), ("Male", male), ("Other", other)].filter { !$0.voices.isEmpty }
     }
 }

@@ -354,6 +354,8 @@ struct HubHomeView: View {
     @State private var knowledgeSearchRetry = 0
     @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
     @State private var tasksOpen = false
+    @State private var screenLiveOpen = false
+    @State private var doneOpen = false
     @State private var usageOpen = false
     @State private var settingsOpen = false
     @State private var chatPreferences = HubChatPreferences.defaults
@@ -459,6 +461,7 @@ struct HubHomeView: View {
                     if chatAPI() === selectedChat.api { updateChatTitle(selectedChat.request.choice.sessionId, name: name) }
                 }
                     .id(selectedChat.request.choice.sessionId)
+                    .background(HubChatPalette.background.ignoresSafeArea())
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -826,15 +829,24 @@ struct HubHomeView: View {
 
                     }
                     if let work = model.work {
-                        section("Your work", icon: "bolt.fill", collapsed: $workCollapsed) { workSummary(work) }
+                        section("Your work", icon: "bolt.fill", collapsed: $workCollapsed) {
+                            workSummary(work)
+                                // Live while Home is on screen: every few seconds when
+                                // something runs, slowly otherwise.
+                                .task(id: homeVisible) {
+                                    guard homeVisible else { return }
+                                    while !Task.isCancelled {
+                                        let busy = model.work?.byId.values.contains { $0.running } == true
+                                        try? await Task.sleep(nanoseconds: busy ? 3_000_000_000 : 15_000_000_000)
+                                        if Task.isCancelled { return }
+                                        refreshWork()
+                                    }
+                                }
+                        }
                     } else if model.workUnavailable {
                         section("Your work") {
                             Button("Retry loading work", action: connect)
                         }
-                    }
-                    if model.connection == .connected, let api = chatAPI() {
-                        HubBrowserPreviewView(api: api, conversations: model.conversations ?? [], visible: homeVisible)
-                            .id(ObjectIdentifier(api))
                     }
                 }
                 .padding(.top, 5)
@@ -1024,44 +1036,124 @@ struct HubHomeView: View {
         }
     }
 
+    /// Your work, live: what needs you, what is running (helpers under the chat
+    /// that started them) and what finished recently, plus a live view of the
+    /// PC's screen that opens only when tapped.
     private func workSummary(_ work: HubHomeWork) -> some View {
-        let entries = work.byId.filter { _, item in
-            item.origin != "subagent" && (item.running || item.completed || item.failed || item.stopped)
-        }.sorted { $0.value.updatedAt > $1.value.updatedAt }
-        return VStack(alignment: .leading, spacing: 8) {
-            let stale = model.connection != .connected || model.workUnavailable
-            if stale {
-                Text("Status unavailable. Showing last observed work.").font(.footnote).foregroundStyle(.secondary)
+        let now = Date().timeIntervalSince1970 * 1_000
+        let all = work.byId.map { (id: $0.key, item: $0.value) }
+        let top = all.filter { $0.item.origin != "subagent" }
+        let helpers = all.filter { $0.item.origin == "subagent" }
+        let needsYou = top.filter { $0.item.failed && now - $0.item.updatedAt < 2 * 3_600_000 }.sorted { $0.item.updatedAt > $1.item.updatedAt }
+        let running = all.filter { $0.item.running && ($0.item.origin != "subagent" || $0.item.parentId == nil || work.byId[$0.item.parentId!]?.running != true) }
+            .sorted { ($0.item.since ?? $0.item.updatedAt) > ($1.item.since ?? $1.item.updatedAt) }
+        let done = top.filter { !$0.item.running && ($0.item.completed || $0.item.stopped) && now - $0.item.updatedAt < 2 * 3_600_000 }
+            .sorted { $0.item.updatedAt > $1.item.updatedAt }
+        let stale = model.connection != .connected || model.workUnavailable
+        return VStack(alignment: .leading, spacing: 10) {
+            if stale { Text("Status unavailable. Showing the last known work.").font(.footnote).foregroundStyle(.secondary) }
+            if let api = chatAPI(), model.connection == .connected {
+                HubScreenLiveCard(api: api, open: $screenLiveOpen, visible: homeVisible)
             }
-            if entries.isEmpty { Text("No recent work").foregroundStyle(.secondary) }
-            ForEach([true, false], id: \.self) { running in
-                let matches = entries.filter { $0.value.running == running }
-                if !matches.isEmpty {
-                    Text(running ? "In progress" : "Recently ended").font(.caption.bold()).foregroundStyle(.secondary)
-                }
-                ForEach(matches.prefix(4).map { $0.key }, id: \.self) { id in
-                    if let item = work.byId[id] {
-                    Button {
-                        showChat(HubConversationChoice(sessionId: id, title: item.title ?? "Conversation",
-                                                       updatedAt: item.updatedAt))
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title ?? "Conversation").lineLimit(2)
-                            if !stale {
-                                Text(running ? "Working" : (item.completed ? "Completed" : (item.stopped ? "Stopped" : "Failed")))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(minHeight: 44, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(model.connection != .connected)
+            if !needsYou.isEmpty {
+                workGroup("Needs you", tint: .orange)
+                ForEach(needsYou, id: \.id) { entry in workRow(entry.id, entry.item, status: "Failed · open to see why", stop: false) }
+            }
+            if !running.isEmpty {
+                workGroup("Working", tint: HubWorkspacePalette.accent)
+                ForEach(running, id: \.id) { entry in
+                    workRow(entry.id, entry.item, status: Self.doing(entry.item), stop: true)
+                    ForEach(helpers.filter { $0.item.parentId == entry.id && $0.item.running }, id: \.id) { helper in
+                        workRow(helper.id, helper.item, status: Self.doing(helper.item), stop: true, nested: true)
                     }
                 }
+            }
+            if needsYou.isEmpty && running.isEmpty {
+                Text(done.isEmpty ? "Nothing running right now." : "Nothing running right now.").font(.subheadline).foregroundStyle(.secondary)
+            }
+            if !done.isEmpty {
+                DisclosureGroup(isExpanded: $doneOpen) {
+                    ForEach(done.prefix(8), id: \.id) { entry in
+                        workRow(entry.id, entry.item, status: entry.item.stopped ? "Stopped" : "Done · " + Self.ago(entry.item.updatedAt), stop: false)
+                    }
+                } label: {
+                    Text("Done · \(done.count)").font(.caption.bold()).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("hub.work.done")
             }
         }
     }
 
+    private func workGroup(_ title: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(tint).frame(width: 7, height: 7)
+            Text(title).font(.caption.bold()).foregroundStyle(.secondary)
+        }
+        .padding(.top, 2)
+    }
+
+    private func workRow(_ id: String, _ item: HubHomeWork.Item, status: String, stop: Bool, nested: Bool = false) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            if nested { Image(systemName: "arrow.turn.down.right").font(.caption).foregroundStyle(.secondary) }
+            Button {
+                showChat(HubConversationChoice(sessionId: id, title: item.title ?? "Conversation", updatedAt: item.updatedAt))
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title?.isEmpty == false ? item.title! : (nested ? "Helper" : "Conversation")).lineLimit(2)
+                    Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if stop, item.running, let api = chatAPI() {
+                Button {
+                    Task { try? await api.cancelChat(sessionID: id); refreshWork() }
+                } label: {
+                    Image(systemName: "stop.circle").font(.title3).frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Stop \(item.title ?? "this work")")
+            }
+        }
+        .padding(.leading, nested ? 14 : 0)
+        .disabled(model.connection != .connected)
+    }
+
+    /// What a running item is doing, in plain words, and for how long.
+    static func doing(_ item: HubHomeWork.Item) -> String {
+        let since = item.since.map { " · " + Self.duration(Date().timeIntervalSince1970 * 1_000 - $0) } ?? ""
+        guard let tool = item.doing else { return "Working" + since }
+        let text: String
+        switch true {
+        case tool.hasPrefix("camofox_") || tool == "web_fetch": text = "Browsing the web"
+        case tool.hasPrefix("hub_desktop") || tool == "hub_capture_desktop": text = "Using the PC screen"
+        case tool == "pwsh" || tool.hasPrefix("job_"): text = "Running a command"
+        case ["read", "write", "edit", "glob", "grep"].contains(tool): text = "Working on files"
+        case tool.hasPrefix("hub_knowledge") || tool == "hub_memory_index": text = "Checking Knowledge"
+        case tool.hasPrefix("hub_research"): text = "Researching"
+        case tool == "hub_delegate" || tool.hasPrefix("hub_character_"): text = "Starting a helper"
+        case tool.hasPrefix("hub_mail"): text = "Reading mail"
+        case tool == "hub_present": text = "Building a visual"
+        case tool == "hub_send_file": text = "Sending you a file"
+        case tool.hasPrefix("hub_skill"): text = "Using a skill"
+        case tool.hasPrefix("hub_schedule") || tool == "hub_planner": text = "Planning"
+        default: text = "Working"
+        }
+        return text + since
+    }
+
+    static func duration(_ milliseconds: Double) -> String {
+        let seconds = max(0, Int(milliseconds / 1_000))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3_600 { return "\(seconds / 60)m" }
+        return "\(seconds / 3_600)h \(seconds % 3_600 / 60)m"
+    }
+
+    static func ago(_ milliseconds: Double) -> String {
+        duration(Date().timeIntervalSince1970 * 1_000 - milliseconds) + " ago"
+    }
     private func showPanel(_ destination: Panel) {
         hideKeyboard()
         withAnimation(Self.panelSpring) { panelDrag = 0; panel = destination }
@@ -3736,5 +3828,158 @@ private struct HubHeartbeatEditor: View {
     private static func text(_ date: Date) -> String {
         let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
+    }
+}
+/// The PC's whole screen, live: closed until tapped, about one picture a
+/// second while open and the app is in front, full screen with pinch zoom.
+@MainActor
+struct HubScreenLiveCard: View {
+    let api: HubConversationAPI
+    @Binding var open: Bool
+    let visible: Bool
+    @ObservedObject private var activity = HubAppActivity.shared
+    @State private var image: UIImage?
+    @State private var updated: Date?
+    @State private var failed = false
+    @State private var fullScreen = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { open.toggle() }
+                if !open { image = nil; failed = false }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "display").foregroundStyle(HubWorkspacePalette.accent)
+                    Text("PC screen").font(.subheadline.weight(.semibold))
+                    if open, updated != nil {
+                        Circle().fill(Color.red).frame(width: 6, height: 6).accessibilityHidden(true)
+                        Text("Live").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(open ? "Hide" : "Watch").font(.footnote).foregroundStyle(HubWorkspacePalette.accent)
+                }
+                .frame(minHeight: 40)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("hub.work.screen")
+            if open {
+                Button { fullScreen = true } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black.opacity(0.35))
+                        if let image {
+                            Image(uiImage: image).resizable().scaledToFit()
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        } else if failed {
+                            Text("The PC screen could not be captured. HUB may be restarting.")
+                                .font(.footnote).foregroundStyle(.secondary).padding()
+                        } else {
+                            ProgressView()
+                        }
+                    }
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("PC screen. Tap for full screen.")
+            }
+        }
+        .task(id: open && visible && activity.isActive && !fullScreen) { await stream(open && visible && activity.isActive && !fullScreen) }
+        .fullScreenCover(isPresented: $fullScreen) {
+            HubScreenFullView(api: api)
+        }
+    }
+
+    private func stream(_ running: Bool) async {
+        guard running else { return }
+        while !Task.isCancelled {
+            do {
+                let data = try await api.screenFrame()
+                if let picture = UIImage(data: data) { image = picture; updated = Date(); failed = false }
+            } catch {
+                if Task.isCancelled { return }
+                failed = image == nil
+            }
+            try? await Task.sleep(nanoseconds: 900_000_000)
+        }
+    }
+}
+
+/// Full-screen live PC screen with pinch zoom; turn the phone for a bigger view.
+@MainActor
+struct HubScreenFullView: View {
+    let api: HubConversationAPI
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var activity = HubAppActivity.shared
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            if let image {
+                HubZoomableImage(image: image).ignoresSafeArea()
+            } else if failed {
+                Text("The PC screen could not be captured.").foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Button { dismiss() } label: {
+                Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .padding(16)
+            .accessibilityLabel("Close")
+        }
+        .preferredColorScheme(.dark)
+        .task(id: activity.isActive) {
+            guard activity.isActive else { return }
+            while !Task.isCancelled {
+                do {
+                    let data = try await api.screenFrame()
+                    if let picture = UIImage(data: data) { image = picture; failed = false }
+                } catch {
+                    if Task.isCancelled { return }
+                    failed = image == nil
+                }
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+        }
+    }
+}
+
+/// A picture you can pinch to zoom and drag, keeping its zoom between updates.
+struct HubZoomableImage: UIViewRepresentable {
+    let image: UIImage
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scroll = UIScrollView()
+        scroll.minimumZoomScale = 1
+        scroll.maximumZoomScale = 6
+        scroll.backgroundColor = .black
+        scroll.showsVerticalScrollIndicator = false
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.delegate = context.coordinator
+        let view = UIImageView(image: image)
+        view.contentMode = .scaleAspectFit
+        view.tag = 7
+        scroll.addSubview(view)
+        return scroll
+    }
+
+    func updateUIView(_ scroll: UIScrollView, context: Context) {
+        guard let view = scroll.viewWithTag(7) as? UIImageView else { return }
+        view.image = image
+        if scroll.zoomScale == 1 { view.frame = scroll.bounds; scroll.contentSize = scroll.bounds.size }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { scrollView.viewWithTag(7) }
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            if scale <= 1, let view { view.frame = scrollView.bounds; scrollView.contentSize = scrollView.bounds.size }
+        }
     }
 }

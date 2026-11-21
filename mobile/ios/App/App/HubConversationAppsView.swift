@@ -1,5 +1,8 @@
 import SwiftUI
 import WebKit
+import SceneKit
+import SceneKit.ModelIO
+import ModelIO
 import HubNative
 import UniformTypeIdentifiers
 
@@ -140,7 +143,10 @@ struct HubConversationAppsView: View {
                 HubShareFileButton(bytes: fileBytes, name: file.name, label: "Share output")
             }.padding(.horizontal, 16)
             if exportError { Text("Could not save this output.").font(.footnote) }
-            if fileBytes.count <= 400_000, let preview = String(data: fileBytes, encoding: .utf8) {
+            if HubModel3DView.canShow(file.name) {
+                HubModel3DView(bytes: fileBytes, name: file.name)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if fileBytes.count <= 400_000, let preview = String(data: fileBytes, encoding: .utf8) {
                 ScrollView { Text(preview).font(.system(.body, design: .monospaced)).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16) }
             } else {
@@ -224,5 +230,48 @@ struct HubContainedDocumentView: UIViewRepresentable {
                      decisionHandler: @escaping (WKPermissionDecision) -> Void) {
             decisionHandler(.deny)
         }
+    }
+}
+
+/// A 3D model HUB sent: drag to turn it, pinch to zoom, two fingers to move.
+struct HubModel3DView: UIViewRepresentable {
+    let bytes: Data
+    let name: String
+
+    static let extensions: Set<String> = ["stl", "obj", "ply", "usdz", "usd", "usdc", "usda"]
+    static func canShow(_ name: String) -> Bool { extensions.contains((name as NSString).pathExtension.lowercased()) }
+
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.backgroundColor = UIColor(white: 0.12, alpha: 1)
+        view.allowsCameraControl = true
+        view.autoenablesDefaultLighting = true
+        view.antialiasingMode = .multisampling4X
+        view.scene = Self.scene(bytes, name: name)
+        return view
+    }
+
+    func updateUIView(_ view: SCNView, context: Context) {}
+
+    private static func scene(_ bytes: Data, name: String) -> SCNScene {
+        let ext = (name as NSString).pathExtension.lowercased()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard (try? bytes.write(to: url)) != nil else { return SCNScene() }
+        let asset = MDLAsset(url: url)
+        asset.loadTextures()
+        let scene = SCNScene(mdlAsset: asset)
+        // Plain printable meshes come without materials: give them a soft matte one.
+        scene.rootNode.enumerateHierarchy { node, _ in
+            guard let geometry = node.geometry else { return }
+            if geometry.materials.isEmpty || ["stl", "ply"].contains(ext) {
+                let material = SCNMaterial()
+                material.diffuse.contents = UIColor(red: 0.62, green: 0.70, blue: 0.95, alpha: 1)
+                material.lightingModel = .physicallyBased
+                material.roughness.contents = 0.6
+                geometry.materials = [material]
+            }
+        }
+        return scene
     }
 }

@@ -792,6 +792,28 @@ struct HubLiveChatView: View {
                                 }
                                 .disabled(connectionLost)
                             }
+                            // Files HUB sent to the phone this turn: one tap to open them.
+                            ForEach(sentFiles(in: snapshot, messages: messages), id: \.self) { name in
+                                Button {
+                                    composerFocused = false
+                                    appsOpen = true
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: HubModel3DView.canShow(name) ? "cube.transparent" : "doc.fill")
+                                            .font(.title3).foregroundStyle(HubWorkspacePalette.accent)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("HUB sent you a file").font(.caption).foregroundStyle(.secondary)
+                                            Text(name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                        }
+                                        Spacer(minLength: 0)
+                                        Text("Open").font(.footnote.weight(.semibold)).foregroundStyle(HubWorkspacePalette.accent)
+                                    }
+                                    .padding(14)
+                                    .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("hub.chat.sentFile")
+                            }
                             // HUB found the earlier chat the user meant: continue there.
                             if let earlier = earlierChat(in: snapshot, messages: messages) {
                                 HubEarlierChatCard(title: earlier.title) {
@@ -836,6 +858,7 @@ struct HubLiveChatView: View {
                             }
                     }
                     .font(.system(size: CGFloat(preferences.fontSize) * transcriptScale))
+                    .foregroundStyle(HubChatPalette.text)
                     .padding(16)
                 }
                 .coordinateSpace(name: "chatViewport")
@@ -870,7 +893,7 @@ struct HubLiveChatView: View {
                 .onChange(of: queuedMessages?.count) { _ in
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
                 }
-                .onChange(of: bottomRequest) { _ in scroll.scrollTo("latest", anchor: .bottom) }
+                .onChange(of: bottomRequest) { _ in settleAtLatest(scroll) }
                 .onChange(of: historyAnchor) { anchor in
                     if let anchor { scroll.scrollTo(anchor, anchor: .top); historyAnchor = nil }
                 }
@@ -1203,6 +1226,30 @@ struct HubLiveChatView: View {
         .onDisappear { dictation.cancel() }
     }
 
+    /// Jumps to the newest message. The chat list builds rows lazily, so the
+    /// first jump from far up lands on estimated heights and overshoots; two
+    /// quick corrections settle it on the real bottom.
+    private func settleAtLatest(_ scroll: ScrollViewProxy) {
+        scroll.scrollTo("latest", anchor: .bottom)
+        for delay in [0.15, 0.4] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
+            }
+        }
+    }
+    /// Names of files HUB sent with hub_send_file since the user last wrote.
+    private func sentFiles(in snapshot: HubChatSnapshot, messages: [HubChatMessage]) -> [String] {
+        let asked = messages.last(where: { $0.role == "user" }).flatMap { Int($0.id) } ?? -1
+        var names: [String] = []
+        for call in snapshot.activity where call.title == "hub_send_file" && call.sequence > asked && !call.failed {
+            guard let data = call.detail?.data(using: .utf8),
+                  let arguments = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let path = arguments["path"] as? String else { continue }
+            let name = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? path
+            if !names.contains(name) { names.append(name) }
+        }
+        return names
+    }
     /// The earlier chat HUB offered to go back to since the user last wrote.
     private func earlierChat(in snapshot: HubChatSnapshot, messages: [HubChatMessage]) -> (id: String, title: String)? {
         let asked = messages.last(where: { $0.role == "user" }).flatMap { Int($0.id) } ?? -1
@@ -3037,4 +3084,16 @@ struct HubEarlierChatCard: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("hub.chat.earlierChat")
     }
+}
+/// The chat's own colours: a softer charcoal than the app's near-black, with
+/// off-white text, so long reading is easier on the eyes.
+enum HubChatPalette {
+    static let background = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0x1E / 255, green: 0x20 / 255, blue: 0x26 / 255, alpha: 1)
+            : UIColor(red: 0xF4 / 255, green: 0xF5 / 255, blue: 0xF8 / 255, alpha: 1)
+    })
+    static let text = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(white: 0.86, alpha: 1) : UIColor(white: 0.13, alpha: 1)
+    })
 }

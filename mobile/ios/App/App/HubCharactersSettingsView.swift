@@ -230,12 +230,10 @@ struct HubModelSlotEditor: View {
                     }
                 }
             } footer: { Text(slot.note) }
-            if slot == .voice, character.speech != nil {
-                Section("Speaking voice") {
-                    TextField("Voice", text: Binding(get: { character.speech?.tts.voice ?? "" }, set: {
-                        character.speech?.tts.voice = $0
-                    }))
-                }
+            if slot == .voice {
+                Section {
+                    NavigationLink("Speaking voice", destination: HubSpeechSettingsView(api: api))
+                } footer: { Text("One voice for every call, chosen in Speech.") }
             }
             Section {
                 TextEditor(text: $character.instructions).frame(minHeight: 140).accessibilityLabel("Instructions")

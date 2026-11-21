@@ -137,6 +137,9 @@ public struct HubHomeWork: Decodable {
         public let updatedAt: Double
         /// The chat that started this helper.
         public let parentId: String?
+        /// While running: the tool in use now, and when this turn began (HUB 1.10.26+).
+        public let doing: String?
+        public let since: Double?
     }
     public let byId: [String: Item]
 
@@ -1949,6 +1952,11 @@ public final class HubConversationAPI {
         return try JSONDecoder().decode(HubMailState.self, from: data)
     }
 
+    /// One fresh picture of the PC's whole screen, for the live view (HUB 1.10.26+).
+    public func screenFrame() async throws -> Data {
+        try await requestData("api/hub/screen-view", headers: ["x-hub-screen-view": "1"], mediaTypes: ["image/png"],
+                              maxBytes: 12_000_000, operationTimeout: 15)
+    }
     /// Scheduled jobs and the heartbeat (HUB 1.10.24+).
     public func schedule() async throws -> HubSchedule {
         let data = try await requestData("api/hub/schedule", headers: ["x-hub-schedule": "1"])
@@ -3397,7 +3405,7 @@ public final class HubConversationAPI {
         guard HubVoiceAPI.validID(sessionID), Self.validConversationFile(file) else { throw HubAttachmentError.invalidResponse }
         let data = try await requestData("api/hub/artifacts", headers: [
             "x-hub-daily-use": "1", "x-hub-session": sessionID, "x-hub-artifact-format": "file", "x-hub-artifact": file.id,
-        ], maxBytes: 4_100_000)
+        ], maxBytes: 28_500_000, operationTimeout: 90)
         let receipt = try JSONDecoder().decode(Receipt.self, from: data)
         guard receipt.id == file.id, receipt.name == file.name, receipt.bytes == file.bytes, receipt.sha256 == file.sha256,
               let bytes = Data(base64Encoded: receipt.data), bytes.count == file.bytes,
@@ -3406,7 +3414,7 @@ public final class HubConversationAPI {
     }
 
     private static func validConversationFile(_ file: HubConversationFile) -> Bool {
-        Self.isScreenshotID(file.id) && Self.isScreenshotID(file.sha256) && (0...3_000_000).contains(file.bytes) &&
+        Self.isScreenshotID(file.id) && Self.isScreenshotID(file.sha256) && (0...20_971_520).contains(file.bytes) &&
             !file.name.isEmpty && file.name.utf8.count <= 1_024 && file.name != "." && file.name != ".." &&
             !file.name.contains("/") && !file.name.contains("\\") &&
             file.name.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
