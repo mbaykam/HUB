@@ -49,8 +49,18 @@ export class KnowledgeSkills {
     // the header as YAML (bare strings, "- item" lists, nested keys). Read both.
     const field=(key:string)=>{
       const line=new RegExp(`^${key}:[ \\t]*(.*)$`,"m").exec(front);if(!line)return undefined;
-      const value=line[1]!.trim(),unquote=(v:string)=>v.trim().replace(/^(["'])(.*)\1$/,"$2");
-      if(value){try{return JSON.parse(value);}catch{return unquote(value);}}
+      let value=line[1]!.trim();const unquote=(v:string)=>v.trim().replace(/^'(.*)'$/s,(_m,inner)=>inner.replace(/''/g,"'")).replace(/^"(.*)"$/s,"$1");
+      // YAML folds long values onto indented lines that follow.
+      const rest=front.slice(line.index+line[0].length).split(/\r?\n/).slice(1);
+      if(value){
+        const quote=/^["']/.test(value)?value[0]!:"";
+        for(const l of rest){
+          if(quote&&value.length>1&&value.endsWith(quote))break;
+          if(!/^\s+\S/.test(l)||!quote&&/^\s*-\s/.test(l))break;
+          value+=" "+l.trim();
+        }
+        try{return JSON.parse(value);}catch{return unquote(value);}
+      }
       const block:string[]=[];
       for(const l of front.slice(line.index+line[0].length).split(/\r?\n/).slice(1)){if(/^(\s+\S|-\s)/.test(l))block.push(l);else break;}
       if(!block.length)return undefined;
