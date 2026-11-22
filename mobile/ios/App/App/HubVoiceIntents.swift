@@ -80,5 +80,7 @@ struct HUBVoiceShortcuts: AppShortcutsProvider {
         AppShortcut(intent: StartHUBVoiceIntent(), phrases: ["Talk to \(.applicationName)", "Start voice in \(.applicationName)"], shortTitle: "Talk to HUB", systemImageName: "waveform")
         AppShortcut(intent: AskHUBIntent(), phrases: ["Ask \(.applicationName)", "Message \(.applicationName)", "Send a message to \(.applicationName)"], shortTitle: "Ask HUB", systemImageName: "bubble.left.and.text.bubble.right")
         AppShortcut(intent: EndHUBVoiceIntent(), phrases: ["End voice in \(.applicationName)"], shortTitle: "End HUB voice", systemImageName: "stop.circle")
+        AppShortcut(intent: HubNewNoteIntent(), phrases: ["New note in \(.applicationName)", "Take a note in \(.applicationName)"], shortTitle: "New Note", systemImageName: "square.and.pencil")
+        AppShortcut(intent: HubOpenNotesIntent(), phrases: ["Open my notes in \(.applicationName)", "Show notes in \(.applicationName)"], shortTitle: "Notes", systemImageName: "note.text")
     }
 }

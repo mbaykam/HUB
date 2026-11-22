@@ -24,6 +24,16 @@ final class HubHomeModel: ObservableObject {
     @Published var openNativeChat: HubNativeChatRequest?
     /// Set by a reminder or the morning brief: show today's agenda.
     @Published var openAgenda = false
+    /// Set by a widget, Lock Screen control or Siri: open Notes (or a new note).
+    @Published var notesRequest: HubNotesRequest?
+    /// Set by the New Chat shortcut: show Home with the composer ready.
+    @Published var composerRequest = 0
+}
+
+struct HubNotesRequest: Identifiable, Equatable {
+    let id = UUID()
+    var startNew = false
+    var noteID: String?
 }
 
 /// What the chat's voice bar shows while a call is running.
@@ -316,6 +326,7 @@ struct HubHomeView: View {
     @State private var homeScrollOffset: CGFloat?
     @AppStorage("hub.home.dayCollapsed") private var dayCollapsed = false
     @AppStorage("hub.home.workCollapsed") private var workCollapsed = false
+    @AppStorage("hub.home.notesCollapsed") private var notesCollapsed = false
     @State private var keyboardShownAt = Date.distantPast
     @State private var panelDrag: CGFloat = 0
     @StateObject private var dictation = HubDictation()
@@ -353,6 +364,8 @@ struct HubHomeView: View {
     @State private var knowledgeSearchResponse: KnowledgeSearchResponse?
     @State private var knowledgeSearchRetry = 0
     @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
+    @State private var notesOpen: HubNotesRequest?
+    @ObservedObject private var notes = HubNotesModel.shared
     @State private var tasksOpen = false
     @State private var screenLiveOpen = false
     @State private var doneOpen = false
@@ -386,7 +399,6 @@ struct HubHomeView: View {
     @State private var newProjectName = ""
     @State private var projectToEdit: HubProject?
     @State private var projectToRemove: HubProject?
-    @State private var voiceHistoryOpen = false
     @State private var todoDraft = ""
     @State private var todoDraftID = UUID()
     @State private var todoHorizon = HubHomePlanner.Horizon.near
@@ -555,9 +567,21 @@ struct HubHomeView: View {
         .task(id: KnowledgeAppsRequest(connected: model.connection == .connected, notes: model.knowledge?.nodes.count ?? -1)) {
             await loadKnowledgeApps()
         }
-        .sheet(isPresented: $voiceHistoryOpen) {
-            if let api = chatAPI() { HubVoiceHistoryView(api: api, recent: model.conversations ?? [], open: showChat) }
+        .fullScreenCover(item: $notesOpen) { request in
+            HubNotesView(model: HubNotesModel.shared, close: { notesOpen = nil }, startNew: request.startNew, openID: request.noteID)
         }
+        .onChange(of: model.notesRequest) { request in
+            guard let request else { return }
+            model.notesRequest = nil
+            notesOpen = request
+        }
+        .onChange(of: model.composerRequest) { _ in
+            notesOpen = nil
+            selectedChat = nil
+            closePanel()
+            composerFocused = true
+        }
+        .task { await notes.reload() }
         .sheet(item: $projectToEdit) { project in
             HubProjectSettingsView(project: project) { change in
                 try await changeProjects(change)
@@ -633,7 +657,6 @@ struct HubHomeView: View {
                 knowledgeActivityOpen = false
                 selectedChat = nil
                 bookmarks = nil
-                voiceHistoryOpen = false
                 settingsOpen = false
                 plannerOpen = false
                 plannerEditor = nil
@@ -819,6 +842,13 @@ struct HubHomeView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // Your own notes: next to Knowledge, but kept apart from it.
+                    section("Notes", icon: "note.text", actionLabel: "Open ↗", open: {
+                        hideKeyboard()
+                        notesOpen = HubNotesRequest()
+                    }, collapsed: $notesCollapsed) {
+                        homeNotes
+                    }
                     section("Your day", icon: "calendar", actionLabel: "Open ↗", open: {
                         hideKeyboard()
                         plannerOpen = true
@@ -1333,15 +1363,8 @@ struct HubHomeView: View {
                     }
                 }
             }
-            Divider()
-            HStack(spacing: 8) {
-                historyFooterButton("Voice calls", icon: "waveform") {
-                    closePanel()
-                    voiceHistoryOpen = true
-                }
-            }
-            .disabled(model.connection != .connected)
-            .padding(.bottom, 4)
+            // Voice chats are ordinary chats: they are in this list, not in a
+            // separate Voice History.
         }
         .task(id: model.connection == .connected) { await loadBookmarks() }
         .task(id: WorkspaceRequest(connected: model.connection == .connected, attempt: workspaceAttempt)) {
@@ -1633,17 +1656,6 @@ struct HubHomeView: View {
             .accessibilityAddTraits(.isHeader)
     }
 
-    private func historyFooterButton(_ title: LocalizedStringKey, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.footnote.weight(.medium))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(HubWorkspacePalette.border.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
     private func historyTime(_ updatedAt: Double) -> String? {
         guard updatedAt > 0 else { return nil }
         let date = Date(timeIntervalSince1970: updatedAt / 1_000)
@@ -1816,7 +1828,6 @@ struct HubHomeView: View {
             tasksOpen = false
             usageOpen = false
             settingsOpen = false
-            voiceHistoryOpen = false
             plannerOpen = false
             plannerEditor = nil
             knowledgeActivityOpen = false
@@ -2869,6 +2880,45 @@ struct HubHomeView: View {
     /// The Knowledge graph on Home: about half the screen.
     static var brainHeight: CGFloat { max(300, min(520, UIScreen.main.bounds.height * 0.46)) }
 
+    /// Pinned notes first, then the latest, with a button for a new one.
+    @ViewBuilder private var homeNotes: some View {
+        let shown = Array(notes.index.notes.prefix(3))
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(shown) { note in
+                Button {
+                    hideKeyboard()
+                    notesOpen = HubNotesRequest(noteID: note.id)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: note.pinned ? "pin.fill" : note.checklist.total > 0 ? "checklist" : "note.text")
+                            .font(.caption).foregroundStyle(.secondary).frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(note.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text(note.snippet.isEmpty ? HubNotesView.when(note.updatedAt) : note.snippet)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("hub.home.note.\(note.id)")
+            }
+            Button {
+                hideKeyboard()
+                notesOpen = HubNotesRequest(startNew: true)
+            } label: {
+                Label("New Note", systemImage: "square.and.pencil").font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .background(HubWorkspacePalette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(HubWorkspacePalette.accent)
+            .accessibilityIdentifier("hub.home.newNote")
+        }
+    }
+
     private func section<Content: View>(_ title: LocalizedStringKey, icon: String? = nil, actionLabel: LocalizedStringKey = "Open", open: (() -> Void)? = nil,
                                         collapsed: Binding<Bool>? = nil,
                                         @ViewBuilder content: () -> Content) -> some View {
@@ -2917,90 +2967,6 @@ struct HubHomeView: View {
         .hubCard()
     }
 
-}
-
-@MainActor
-private struct HubVoiceHistoryView: View {
-    let api: HubConversationAPI
-    let recent: [HubConversationChoice]
-    let open: (HubConversationChoice) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var items: [HubVoiceHistoryItem]?
-    @State private var busy = false
-    @State private var failed = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Voice History").font(.headline)
-                Spacer()
-                Button("Done") { dismiss() }
-            }
-            .padding(.horizontal, 16)
-            if failed {
-                Button("Retry voice history") { Task { await load() } }.padding(.horizontal, 16)
-            }
-            if let items {
-                if items.isEmpty {
-                    Text("No voice conversations yet.").foregroundStyle(.secondary).padding(.horizontal, 16)
-                    Spacer()
-                } else {
-                    List(items) { item in
-                        row(item)
-                    }
-                    .listStyle(.plain)
-                }
-            } else if !failed {
-                ProgressView("Loading voice conversations…").padding(.horizontal, 16)
-                Spacer()
-            }
-        }
-        .padding(.top, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .hubBackdrop()
-        .task { await load() }
-    }
-
-    private func row(_ item: HubVoiceHistoryItem) -> some View {
-        let choice = recent.first(where: { $0.sessionId == item.sessionId })
-            ?? HubConversationChoice(sessionId: item.sessionId, title: "Voice conversation", updatedAt: item.createdAt)
-        return HStack {
-            Button {
-                open(choice)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(choice.title).lineLimit(2)
-                    Text(Date(timeIntervalSince1970: item.createdAt / 1000).formatted()).font(.caption).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            }
-            .buttonStyle(.borderless)
-            if !item.saved {
-                Button("Save") { Task { await save(item.sessionId) } }
-                    .buttonStyle(.borderless)
-                    .disabled(busy)
-            }
-        }
-    }
-
-    private func load() async {
-        guard !busy else { return }
-        busy = true
-        defer { busy = false }
-        do { items = try await api.voiceHistory(); failed = false }
-        catch { if !Task.isCancelled { failed = true } }
-    }
-
-    private func save(_ id: String) async {
-        guard !busy else { return }
-        busy = true
-        defer { busy = false }
-        do {
-            try await api.saveVoiceConversation(sessionID: id)
-            items = try await api.voiceHistory()
-            failed = false
-        } catch { failed = true }
-    }
 }
 
 @MainActor

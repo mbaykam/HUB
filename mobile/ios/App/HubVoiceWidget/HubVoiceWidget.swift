@@ -28,5 +28,8 @@ struct HubVoiceWidget: Widget {
 
 @main
 struct HubVoiceWidgetBundle: WidgetBundle {
-    var body: some Widget { HubVoiceWidget() }
+    var body: some Widget {
+        HubVoiceWidget()
+        HubQuickWidgetBundle().body
+    }
 }

@@ -100,6 +100,14 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: HubSiriInbox.arrived, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.deliverSiriMessage() }
         })
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: HubQuickActions.arrived, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.deliverQuickAction() }
+        })
+        // Notes work from the phone's copy; HUB is used whenever it is connected.
+        HubNotesModel.shared.api = { [weak self] in
+            guard let self, self.connected else { return nil }
+            return self.conversationAPI
+        }
         message.font = .preferredFont(forTextStyle: .caption1)
         message.adjustsFontForContentSizeCategory = true
         message.textColor = .secondaryLabel
@@ -540,6 +548,8 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
                 self.home.refreshing = true
                 self.message.text = "Connected"
                 self.deliverSiriMessage()
+                self.deliverQuickAction()
+                HubNotesModel.shared.sync()
                 self.openPendingNotification()
                 guard self.showingHome else { return }
                 async let knowledge: Void = self.loadHomeKnowledge(conversationAPI, attempt: attempt)
@@ -780,6 +790,25 @@ final class HubConnectionViewController: UIViewController, WKNavigationDelegate,
             home.sendError = nil
         }
         openNotification(destination)
+    }
+
+    /// A widget, Lock Screen control or Siri asked for a new note, the notes,
+    /// a voice chat or a new chat. Notes open at once (they work offline);
+    /// voice waits until HUB is connected.
+    private func deliverQuickAction() {
+        guard showingHome, let action = HubQuickActions.pending else { return }
+        switch action {
+        case .newNote, .notes:
+            _ = HubQuickActions.take()
+            home.notesRequest = HubNotesRequest(startNew: action == .newNote)
+        case .newChat:
+            _ = HubQuickActions.take()
+            home.composerRequest += 1
+        case .voice:
+            guard home.connection == .connected || voice?.isActive == true else { return }
+            _ = HubQuickActions.take()
+            showVoice()
+        }
     }
 
     /// Sends a message spoken to Siri ("Ask HUB") once HUB is connected.

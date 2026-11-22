@@ -33,6 +33,17 @@
 	     Reassess before cryptography or distribution-country changes. -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.mbaykam.hub.quick</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mbhub</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Share a camera image, or your live camera during a video call, with your assistant when you choose to.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

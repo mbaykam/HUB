@@ -1897,7 +1897,7 @@ public final class HubConversationAPI {
         session = URLSession(configuration: config, delegate: HubNoRedirects(), delegateQueue: nil)
     }
     deinit { session.invalidateAndCancel() }
-    private func requestData(_ path: String, headers: [String: String], query: [URLQueryItem] = [], body: Data? = nil,
+    func requestData(_ path: String, headers: [String: String], query: [URLQueryItem] = [], body: Data? = nil,
                              mediaTypes: Set<String> = ["application/json"], maxBytes: Int = 1_048_576,
                              operationTimeout: TimeInterval? = nil, contentType: String = "application/json") async throws -> Data {
         var components = URLComponents(url: server.origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!

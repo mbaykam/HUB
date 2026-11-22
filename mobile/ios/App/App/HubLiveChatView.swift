@@ -221,10 +221,15 @@ struct HubLiveChatView: View {
         .task(id: ScreenshotLoad(sequence: snapshot?.latestScreenshotSequence, retry: screenshotRetry)) {
             await loadScreenshots()
         }
+        .onChange(of: draft) { text in
+            if openedInitialAction { HubChatDrafts.save(text, for: chat.sessionId) }
+        }
+        .onChange(of: chat.sessionId) { id in draft = HubChatDrafts.load(id) }
         .task(id: requestID) {
             if !openedInitialAction {
                 openedInitialAction = true
-                draft = initialDraft
+                // What you typed and left unsent is still here when you come back.
+                draft = initialDraft.isEmpty ? HubChatDrafts.load(chat.sessionId) : initialDraft
                 openComposerAction(composerAction)
             }
             await loadFileDrafts()
@@ -3144,4 +3149,20 @@ enum HubChatPalette {
     static let text = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark ? UIColor(white: 0.86, alpha: 1) : UIColor(white: 0.13, alpha: 1)
     })
+}
+
+/// Unsent text per chat, kept on the phone so leaving a chat and coming back
+/// does not lose it. Cleared when the message is sent (the draft becomes empty).
+enum HubChatDrafts {
+    private static func key(_ sessionID: String) -> String { "hub.chat.draft." + sessionID }
+    static func load(_ sessionID: String) -> String {
+        UserDefaults.standard.string(forKey: key(sessionID)) ?? ""
+    }
+    static func save(_ text: String, for sessionID: String) {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UserDefaults.standard.removeObject(forKey: key(sessionID))
+        } else {
+            UserDefaults.standard.set(String(text.prefix(20_000)), forKey: key(sessionID))
+        }
+    }
 }

@@ -24,10 +24,18 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
+        // Opened from a widget or Lock Screen shortcut while HUB was closed.
+        for context in connectionOptions.urlContexts {
+            if let action = HubQuickAction(url: context.url) { HubQuickActions.request(action) }
+        }
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-        SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
+        var others = Set<UIOpenURLContext>()
+        for context in URLContexts {
+            if let action = HubQuickAction(url: context.url) { HubQuickActions.request(action) } else { others.insert(context) }
+        }
+        if !others.isEmpty { SceneDelegateProxy.shared.scene(scene, openURLContexts: others) }
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
