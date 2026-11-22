@@ -115,7 +115,7 @@ test("chat prompts lose contradictions and tools the chat does not have", ()=>{
   assert.match(out,/HUB iPhone app/);
   assert.match(out,/Working directory: C:\\Users\\Mete\\\.dsh\./);
   assert.match(out,/HUB's own source code is at C:\\HUB\\host\\/);
-  assert.match(out,/camofox_search is your main web search/);
+  assert.match(out,/search with hub_web_search/);
   assert.match(out,/Use the web_fetch tool/);
   for(const name of ["ask_user_question","hub_switch_character","web_search","browser_click","mcp__windows__Shell","hub_character_77c0fa08500040029595132ccc612a4a","hub_automation_manage"])assert.equal(hiddenInChat(name),true,name);
   for(const name of ["hub_delegate","camofox_search","web_fetch","hub_schedule","hub_planner","pwsh","hub_request_share"])assert.equal(hiddenInChat(name),false,name);

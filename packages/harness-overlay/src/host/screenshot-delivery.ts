@@ -10,6 +10,7 @@ import pngjs from "pngjs";
 import {AGENT_BROWSER_IPC_VERSION_ENV, AGENT_BROWSER_PROTOCOL_VERSION, type AgentDesktopScreenshotResult} from "../agent-browser-contract.ts";
 import {AgentBrowserProcessClient, type AgentBrowserProcessPort} from "./agent-browser-process.ts";
 import {currentTurnHasUserRequest} from "./task-turn.ts";
+import {markScreenWatched} from "./camofox.ts";
 
 const toolName = "hub_show_screenshot";
 const desktopToolName = "hub_capture_desktop";
@@ -163,6 +164,7 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
     const rejection = ctx.connection?.requestRejection?.(req);
     if (rejection || req.headers["sec-fetch-site"] === "cross-site" || req.headers["x-hub-screen-view"] !== "1") { reply(rejection ?? 403, {error: "unauthorized"}); return; }
     if (req.method !== "GET") { reply(405, {error: "method-not-allowed"}); return; }
+    markScreenWatched();
     try {
       const data = await frame();
       res.writeHead(200, {"content-type": "image/png", "content-length": data.length, "cache-control": "no-store, private", "x-content-type-options": "nosniff"});

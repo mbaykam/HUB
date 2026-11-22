@@ -118,7 +118,7 @@ export class AutomationsStore {
 export function validateAutomation(value:any):AutomationInput {
   if(!value||typeof value.title!=="string"||!value.title.trim()||value.title.length>160||typeof value.prompt!=="string"||!value.prompt.trim()||value.prompt.length>12000||typeof value.characterId!=="string"||value.characterId.length>100)throw Error("Task needs a title, purpose and configured character");
   if(!["skip","catch-up"].includes(value.missed)||typeof value.allowWrites!=="boolean"||!Array.isArray(value.tools)||value.tools.length>50||value.tools.some((n:any)=>typeof n!=="string"||!n||n.length>160))throw Error("Invalid task permissions");
-  const readOnly=new Set(["web_search","web_fetch","camofox_search","camofox_open","camofox_snapshot","camofox_close","hub_knowledge_search","hub_knowledge_read"]);
+  const readOnly=new Set(["hub_web_search","web_search","web_fetch","camofox_search","camofox_open","camofox_snapshot","camofox_close","hub_knowledge_search","hub_knowledge_read"]);
   if(!value.allowWrites&&value.tools.some((n:string)=>!readOnly.has(n)))throw Error("Additional tools require explicit external-action permission");
   for(const [key,min,max]of [["maxOutputTokens",256,8192],["maxSteps",1,6],["dailyMaxRuns",1,48]] as const)if(!Number.isInteger(value[key])||value[key]<min||value[key]>max)throw Error("Invalid task limit: "+key);
   for(const key of ["dailyBudget","inputPrice","outputPrice"])if(!Number.isFinite(value[key])||value[key]<=0||value[key]>100)throw Error("Invalid usage estimate");

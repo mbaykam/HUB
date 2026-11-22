@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.27
+
+- hub_web_search: fast search without a browser (DuckDuckGo, then Bing); pages are read with web_fetch first. Camofox is used only when a fetch fails, a page needs clicking, or the user is watching the PC screen, and its window is visible only while they watch.
+- Skill headers whose long values were folded onto several lines by the vault sync are read whole.
+
 ## 1.10.26
 
 - Backend for the iPhone's live Your work: running items report the tool in use and when they started; /api/hub/screen-view serves the PC screen while the phone's live view is open; Camofox runs with a visible window so browsing shows on that screen.
