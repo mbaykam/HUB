@@ -186,7 +186,13 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
         public let nodeId: String
         public let domainId: String
     }
-    public struct Similarity: Decodable, Equatable, Sendable {
+    /// A picture or file from a chat (HUB 1.10.28+), linked to the chats it came from.
+    public struct Asset: Decodable, Equatable, Sendable {
+        public let id: String
+        public let title: String
+        public let kind: String
+        public let conversationIds: [String]
+    }    public struct Similarity: Decodable, Equatable, Sendable {
         public let source: String
         public let target: String
         public let score: Double
@@ -205,6 +211,8 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
     public let memberships: [Membership]?
     public let similarities: [Similarity]?
     public let communityCandidates: Communities?
+    /// Pictures and files from chats (HUB 1.10.28+), for the graph only.
+    public var assets: [Asset]? = nil
 
     public func neighborhood(of id: String) -> HubHomeKnowledge? {
         guard nodes.contains(where: { $0.id == id }) else { return nil }
@@ -241,7 +249,8 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
             domains: domains,
             memberships: memberships?.filter { known.contains($0.nodeId) },
             similarities: similarities?.filter { known.contains($0.source) && known.contains($0.target) },
-            communityCandidates: nil
+            communityCandidates: nil,
+            assets: assets?.filter { $0.conversationIds.contains(where: known.contains) }
         )
     }
 }

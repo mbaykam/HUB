@@ -23,7 +23,7 @@ final class HubBrainSimulation: @unchecked Sendable {
         let hub: Int?
     }
 
-    enum Kind { case hub, note, chat, project }
+    enum Kind { case hub, note, chat, project, image, file }
 
     /// The Knowledge id of a HUB chat's archive.
     static func conversationID(sessionID: String) -> String {
@@ -127,7 +127,14 @@ final class HubBrainSimulation: @unchecked Sendable {
             let chat = nodes[a].kind == .chat || nodes[b].kind == .chat
             link(a, b, length: same || chat ? 30 : 90, strength: same || chat ? 0.07 : 0.015)
         }
-        // Projects: their own marker, tied to the chats grouped in them.
+        // Notes learned from each chat, so a project also reaches the notes its chats produced.
+        var derived: [String: [Int]] = [:]
+        for edge in graph.edges {
+            if kinds[edge.target] == "conversation", kinds[edge.source] != "conversation", let note = index[edge.source] { derived[edge.target, default: []].append(note) }
+            if kinds[edge.source] == "conversation", kinds[edge.target] != "conversation", let note = index[edge.target] { derived[edge.source, default: []].append(note) }
+        }
+        // Projects: their own marker, tied to the chats grouped in them and to
+        // the notes those chats produced.
         for project in projects {
             let members = project.sessionIds.compactMap { index[Self.conversationID(sessionID: $0)] }
             guard !members.isEmpty else { continue }
@@ -137,7 +144,22 @@ final class HubBrainSimulation: @unchecked Sendable {
             nodes.append(Node(id: "project:" + project.id, title: project.name, tone: HubWorkspacePalette.accent,
                               radius: 6.5, mass: 3, gravity: 0.016, kind: .project, phase: Self.unit(project.id) * 6.28, hub: nil))
             x.append(cx + 8); y.append(cy - 8)
-            for member in members { link(at, member, length: 34, strength: 0.08) }
+            for member in members { link(at, member, length: 30, strength: 0.1) }
+            let notes = Set(project.sessionIds.flatMap { derived[Self.conversationID(sessionID: $0)] ?? [] })
+            for note in notes.sorted() { link(at, note, length: 60, strength: 0.03) }
+        }
+        // Pictures and files from chats: small tiles next to the chat they came from.
+        for asset in (graph.assets ?? []).prefix(60) {
+            let anchors = asset.conversationIds.compactMap { index[$0] }
+            guard let first = anchors.first else { continue }
+            let at = nodes.count
+            let image = asset.kind == "image"
+            nodes.append(Node(id: asset.id, title: asset.title,
+                              tone: image ? Color(red: 0.36, green: 0.80, blue: 0.74) : Color(red: 0.80, green: 0.72, blue: 0.52),
+                              radius: 3.4, mass: 0.5, gravity: 0.012, kind: image ? .image : .file,
+                              phase: Self.unit(asset.id) * 6.28, hub: nodes[first].hub))
+            x.append(x[first] + Self.unit(asset.id + "x") * 16 - 8); y.append(y[first] + Self.unit(asset.id + "y") * 16 - 8)
+            for anchor in anchors.prefix(4) { link(at, anchor, length: 16, strength: 0.1) }
         }
         var similar: [Int: Int] = [:]
         for item in (graph.similarities ?? []).sorted(by: { $0.score > $1.score }) where item.score >= 0.62 {
@@ -302,7 +324,8 @@ final class HubBrainSimulation: @unchecked Sendable {
         // Frame the bulk of the graph: a few far-off dots must not shrink everything else to a speck.
         let xs = x.filter(\.isFinite).sorted(), ys = y.filter(\.isFinite).sorted()
         guard !xs.isEmpty, !ys.isEmpty else { return false }
-        let cut = xs.count > 40 ? xs.count / 40 : 0
+        // Every dot in view; only with many dots are the farthest 1% left out.
+        let cut = xs.count > 150 ? xs.count / 100 : 0
         let minX = xs[cut], maxX = xs[xs.count - 1 - cut], minY = ys[cut], maxY = ys[ys.count - 1 - cut]
         let raw = min((size.width - padding * 2) / CGFloat(max(60, maxX - minX)),
                       (size.height - padding * 2) / CGFloat(max(60, maxY - minY)))
@@ -434,6 +457,11 @@ struct HubLivingBrainView: View {
             if let openDomain { openDomain(domain) } else { openExplorer?() }
         } else if node.kind == .project {
             openProject?(String(node.id.dropFirst(8)))
+        } else if node.kind == .image || node.kind == .file {
+            // A picture or file opens the chat it came from.
+            guard let simulation = holder.simulation, let index = simulation.nodes.firstIndex(where: { $0.id == node.id }),
+                  let chat = simulation.neighbors[index].first(where: { simulation.kinds[$0] == .chat }) else { return }
+            openRecord(simulation.nodes[chat].id)
         } else {
             openRecord(node.id)
         }
@@ -444,7 +472,8 @@ struct HubLivingBrainView: View {
             Circle().fill(node.tone).frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 1) {
                 Text(node.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(node.kind == .hub ? "Domain" : node.kind == .chat ? "Chat" : node.kind == .project ? "Project" : "Note")
+                Text(node.kind == .hub ? "Domain" : node.kind == .chat ? "Chat" : node.kind == .project ? "Project"
+                     : node.kind == .image ? "Picture · opens its chat" : node.kind == .file ? "File · opens its chat" : "Note")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
@@ -561,6 +590,12 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
         recognizer.delegate = self
         return recognizer
     }()
+    private lazy var doubleTap: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
+        recognizer.numberOfTapsRequired = 2
+        recognizer.delegate = self
+        return recognizer
+    }()
     private lazy var tapper: UITapGestureRecognizer = {
         let recognizer = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         recognizer.delegate = self
@@ -590,14 +625,18 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
         if self.interactive != interactive || self.allowsPan != allowsPan || gestureRecognizers?.contains(hold) != true && interactive {
             self.interactive = interactive
             self.allowsPan = allowsPan
-            for recognizer in [hold, panner, pinch] { removeGestureRecognizer(recognizer) }
+            for recognizer in [hold, panner, pinch, doubleTap] { removeGestureRecognizer(recognizer) }
             if interactive {
                 // Inside the scrolling Home page a dot is picked up after a short
                 // touch, so a quick swipe that starts on one still scrolls the page.
                 hold.minimumPressDuration = allowsPan ? 0 : 0.09
                 addGestureRecognizer(hold)
                 addGestureRecognizer(pinch)
-                if allowsPan { addGestureRecognizer(panner) }
+                // Panning like a map: always in full screen; on Home once zoomed in,
+                // so at normal size a swipe still scrolls the page.
+                addGestureRecognizer(panner)
+                addGestureRecognizer(doubleTap)
+                tapper.require(toFail: doubleTap)
             }
         }
         guard simulation !== self.simulation else { return }
@@ -680,6 +719,7 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
             pan.x += glide.x * CGFloat(elapsed); pan.y += glide.y * CGFloat(elapsed)
             let keep = CGFloat(pow(0.04, elapsed))
             glide.x *= keep; glide.y *= keep
+            clampPan()
             if hypot(glide.x, glide.y) < 8 { glide = .zero } else { gliding = true }
         }
         var framing = false
@@ -715,7 +755,7 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         // Draw order: chats, notes, then projects and domains on top.
-        let order: [HubBrainSimulation.Kind] = [.chat, .note, .project, .hub]
+        let order: [HubBrainSimulation.Kind] = [.chat, .image, .file, .note, .project, .hub]
         dots = simulation.nodes.map { _ in CALayer() }
         for kind in order {
             for (i, node) in simulation.nodes.enumerated() where node.kind == kind {
@@ -733,6 +773,36 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
                     dot.addSublayer(Self.circle(node.radius * 2.2, tone.withAlphaComponent(0.14)))
                     dot.addSublayer(Self.circle(node.radius, tone))
                     dot.addSublayer(Self.circle(node.radius * 0.4, UIColor.white.withAlphaComponent(0.75)))
+                case .image:
+                    // A picture: a small photo tile with a light frame.
+                    let tile = CALayer()
+                    let side = node.radius * 2.4
+                    tile.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+                    tile.cornerRadius = node.radius * 0.45
+                    tile.backgroundColor = tone.withAlphaComponent(0.9).cgColor
+                    tile.borderColor = UIColor.white.withAlphaComponent(0.75).cgColor
+                    tile.borderWidth = 0.8
+                    tile.position = .zero
+                    dot.addSublayer(tile)
+                    let sun = Self.circle(node.radius * 0.35, UIColor.white.withAlphaComponent(0.85))
+                    sun.position = CGPoint(x: side * 0.18, y: -side * 0.18)
+                    dot.addSublayer(sun)
+                case .file:
+                    // A file: a page with a folded corner.
+                    let page = CAShapeLayer()
+                    let w = node.radius * 2, h = node.radius * 2.6, fold = node.radius * 0.8
+                    let path = UIBezierPath()
+                    path.move(to: CGPoint(x: -w / 2, y: -h / 2))
+                    path.addLine(to: CGPoint(x: w / 2 - fold, y: -h / 2))
+                    path.addLine(to: CGPoint(x: w / 2, y: -h / 2 + fold))
+                    path.addLine(to: CGPoint(x: w / 2, y: h / 2))
+                    path.addLine(to: CGPoint(x: -w / 2, y: h / 2))
+                    path.close()
+                    page.path = path.cgPath
+                    page.fillColor = tone.withAlphaComponent(0.85).cgColor
+                    page.strokeColor = UIColor.white.withAlphaComponent(0.55).cgColor
+                    page.lineWidth = 0.6
+                    dot.addSublayer(page)
                 case .project:
                     let ring = CAShapeLayer()
                     let side = node.radius * 3.8
@@ -964,10 +1034,14 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
             return node(at: touchStart, within: allowsPan ? 26 : 22) != nil
         }
         if gestureRecognizer === panner {
-            return node(at: touchStart, within: 26) == nil
+            return (allowsPan || zoom > 1.05) && node(at: touchStart, within: 26) == nil
         }
         // While a dot is held, the page behind must not scroll.
         if gestureRecognizer is UIPanGestureRecognizer, hold.state == .began || hold.state == .changed {
+            return false
+        }
+        // Zoomed in, the graph is a map: dragging on it moves the map, not the page.
+        if interactive, zoom > 1.05, gestureRecognizer is UIPanGestureRecognizer, gestureRecognizer.view !== self {
             return false
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
@@ -1032,6 +1106,7 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
         case .changed:
             let move = recognizer.translation(in: self)
             pan = CGPoint(x: panStart.x + move.x, y: panStart.y + move.y)
+            clampPan()
             wake()
         case .ended:
             // Flicks keep gliding and slow down, like scrolling.
@@ -1051,7 +1126,7 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
             userMoved = true
         case .changed:
             let next = min(5, max(0.4, pinchStartZoom * recognizer.scale))
-            if allowsPan, recognizer.numberOfTouches >= 2 {
+            if recognizer.numberOfTouches >= 2 {
                 // Zoom around the fingers: the point under them stays put.
                 let anchor = recognizer.location(in: self)
                 let ratio = next / zoom
@@ -1062,10 +1137,25 @@ final class HubBrainLayerView: UIView, UIGestureRecognizerDelegate {
                 if panner.state == .changed { panner.setTranslation(.zero, in: self) }
             }
             zoom = next
+            clampPan()
             wake()
         default:
             wake()
         }
+    }
+
+    /// Double tap: back to the whole graph.
+    @objc private func doubleTapped(_ recognizer: UITapGestureRecognizer) {
+        zoom = 1; pan = .zero; glide = .zero; userMoved = false
+        simulation?.nudge()
+        wake()
+    }
+
+    /// The graph can be moved around but never dragged out of view: some of it
+    /// always stays on screen, like a map that stops at its edges.
+    private func clampPan() {
+        let limitX = bounds.width * max(zoom, 1) * 0.55, limitY = bounds.height * max(zoom, 1) * 0.55
+        pan.x = min(limitX, max(-limitX, pan.x)); pan.y = min(limitY, max(-limitY, pan.y))
     }
 }
 
