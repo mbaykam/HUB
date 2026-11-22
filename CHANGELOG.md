@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.29
+
+- Pictures HUB showed in a chat (web photos in its replies) appear in the Home graph as pictures linked to that chat, next to the files.
+
 ## 1.10.28
 
 - Smart (Claude Code) no longer compacts the chat before nearly every reply. The CLI reports the sum of all model calls in a turn (about 700k tokens for a six-step turn on a 100k chat), which HUB read as a full context and compacted twice, about 60 s, before 13 of the last 33 Smart replies. Each step now reports its own call.

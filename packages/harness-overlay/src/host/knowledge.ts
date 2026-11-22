@@ -35,7 +35,7 @@ import {installVoiceMediaContext} from "./voice-media.ts";
 /** Pictures and files from chats, for the phone's graph: each with the chats
  * it came from. Read from chat archives (cached by version), at most 80. */
 const assetCache=new Map<string,{version:number;assets:{id:string;name:string;mediaType:string}[]}>();
-async function graphAssets(store:any,graph:any){
+export async function graphAssets(store:any,graph:any){
   const byAsset=new Map<string,{id:string;title:string;kind:"image"|"file";conversationIds:string[];at:number}>();
   const add=(asset:{id:string;name:string;mediaType:string},conversationId:string,at:number)=>{
     if(!/^[a-f0-9]{64}$/.test(asset.id))return;
@@ -49,7 +49,12 @@ async function graphAssets(store:any,graph:any){
       let cached=assetCache.get(node.id);
       if(!cached||cached.version!==node.modifiedAt){
         const archived=await store.archive.read(node.id);
-        cached={version:node.modifiedAt,assets:[...new Map(archived.messages.flatMap((m:any)=>m.assets??[]).map((a:any)=>[a.id,{id:a.id,name:a.name,mediaType:a.mediaType??""}])).values()] as any};
+        // Pictures HUB showed in its replies (web photos as Markdown images)
+        // are pictures of that chat too, up to six per chat.
+        const shown=archived.messages.filter((m:any)=>m.role==="assistant"&&typeof m.text==="string").flatMap((m:any)=>[...m.text.matchAll(/!\[([^\]\n]{0,200})\]\((https:\/\/[^)\s]{1,2000})\)/g)])
+          .slice(0,6).map((match:any)=>{let host="";try{host=new URL(match[2]).hostname.replace(/^www\./,"");}catch{}
+            return {id:createHash("sha256").update(match[2]).digest("hex"),name:(match[1].trim()||host||"Picture").slice(0,120),mediaType:"image/web"};});
+        cached={version:node.modifiedAt,assets:[...new Map([...archived.messages.flatMap((m:any)=>m.assets??[]).map((a:any)=>({id:a.id,name:a.name,mediaType:a.mediaType??""})),...shown].map((a:any)=>[a.id,a])).values()] as any};
         assetCache.set(node.id,cached);
       }
       for(const asset of cached.assets)add(asset,node.id,node.modifiedAt??0);
