@@ -214,6 +214,34 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
     public let communityCandidates: Communities?
     /// Pictures and files from chats (HUB 1.10.28+), for the graph only.
     public var assets: [Asset]? = nil
+    /// The user's own notes (Notes), shown in Knowledge as their own section (HUB 1.10.32+).
+    public struct MyNote: Decodable, Equatable, Sendable {
+        public let id: String
+        public let title: String
+        public let folder: String
+        public let updatedAt: Double
+        public let pinned: Bool
+    }
+    public var myNotes: [MyNote]? = nil
+    /// The library review (HUB 1.10.32+): a plan waiting for the user and the last change made.
+    public struct Library: Decodable, Equatable, Sendable {
+        public struct Plan: Decodable, Equatable, Identifiable, Sendable {
+            public let id: String
+            public let at: Double
+            public let note: String
+            public let changes: [String]
+        }
+        public struct Last: Decodable, Equatable, Sendable {
+            public let at: Double
+            public let status: String
+            public let note: String
+            public let changes: [String]
+        }
+        public let approved: Bool
+        public let plan: Plan?
+        public let last: Last?
+    }
+    public var library: Library? = nil
 
     public func neighborhood(of id: String) -> HubHomeKnowledge? {
         guard nodes.contains(where: { $0.id == id }) else { return nil }
@@ -2911,6 +2939,13 @@ public final class HubConversationAPI {
         let command = ["action": "profile-review", "id": suggestion.id, "decision": decision.rawValue]
         let body = try JSONSerialization.data(withJSONObject: command)
         _ = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body)
+    }
+
+    /// Applies (or sets aside) the library plan Knowledge AI proposed.
+    public func decideLibraryPlan(id: String, approve: Bool) async throws {
+        guard !id.isEmpty, id.utf8.count <= 100 else { throw HubAttachmentError.invalidResponse }
+        let body = try JSONSerialization.data(withJSONObject: ["action": "library-decide", "id": id, "approve": approve] as [String: Any])
+        _ = try await requestData("api/hub/memory", headers: ["x-hub-memory": "1"], body: body, operationTimeout: 60)
     }
 
     public func processKnowledgeQueue() async throws -> HubKnowledgeStatus {

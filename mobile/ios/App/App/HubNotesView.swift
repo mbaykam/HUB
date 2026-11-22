@@ -139,6 +139,7 @@ struct HubNotesView: View {
     @State private var deleted: [HubNoteSummary]?
     @State private var movingNote: HubNoteSummary?
     @State private var startedNew = false
+    @AppStorage("hub.notes.gallery") private var gallery = true
 
     private var shown: [HubNoteSummary] {
         if let results = model.searchResults, !query.trimmingCharacters(in: .whitespaces).isEmpty { return results }
@@ -148,7 +149,7 @@ struct HubNotesView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                if folder == .deleted { deletedList } else { list }
+                if folder == .deleted { deletedList } else if gallery { galleryView } else { list }
                 NavigationLink(isActive: Binding(get: { open != nil }, set: { if !$0 { open = nil } })) {
                     if let open {
                         HubNoteEditorView(model: model, noteID: open.id, isNew: open.isNew,
@@ -166,6 +167,11 @@ struct HubNotesView: View {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button { foldersOpen = true } label: { Image(systemName: "folder") }
                         .accessibilityLabel("Folders")
+                    Menu {
+                        Button { gallery = true } label: { Label("View as Gallery", systemImage: "square.grid.2x2") }
+                        Button { gallery = false } label: { Label("View as List", systemImage: "list.bullet") }
+                    } label: { Image(systemName: gallery ? "square.grid.2x2" : "list.bullet") }
+                    .accessibilityLabel("View")
                     Button { newNote() } label: { Image(systemName: "square.and.pencil") }
                         .accessibilityLabel("New note")
                         .accessibilityIdentifier("hub.notes.new")
@@ -190,6 +196,52 @@ struct HubNotesView: View {
         }
         .onChange(of: folder) { value in
             if value == .deleted { Task { deleted = try? await model.connectedAPI?.deletedNotes() } }
+        }
+    }
+
+    /// Notes as a gallery of previews, like the iPhone Notes app.
+    private var galleryView: some View {
+        ScrollView {
+            let notes = shown
+            let pinned = notes.filter(\.pinned)
+            let rest = query.isEmpty ? notes.filter { !$0.pinned } : notes
+            let columns = [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 14)]
+            VStack(alignment: .leading, spacing: 18) {
+                if !pinned.isEmpty && query.isEmpty {
+                    Label("Pinned", systemImage: "pin.fill").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    LazyVGrid(columns: columns, spacing: 18) { ForEach(pinned) { card($0) } }
+                    if !rest.isEmpty { Text("Notes").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary) }
+                }
+                LazyVGrid(columns: columns, spacing: 18) { ForEach(rest) { card($0) } }
+                syncFooter(count: notes.count).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+            }
+            .padding(16)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .searchable(text: $query, prompt: "Search")
+        .onChange(of: query) { value in Task { await model.search(value) } }
+        .refreshable { model.sync() }
+        .overlay {
+            if model.index.notes.isEmpty, query.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "note.text").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("No notes yet").font(.headline)
+                    Button("New Note") { newNote() }
+                }
+            }
+        }
+    }
+
+    private func card(_ note: HubNoteSummary) -> some View {
+        Button { open = HubOpenNote(id: note.id, isNew: false) } label: {
+            HubNotePreviewCard(summary: note, model: model, showFolder: folder == .all)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hub.notes.card.\(note.id)")
+        .contextMenu {
+            Button { Task { await model.setPinned(note, !note.pinned) } } label: { Label(note.pinned ? "Unpin Note" : "Pin Note", systemImage: "pin") }
+            Button { movingNote = note } label: { Label("Move", systemImage: "folder") }
+            Button(role: .destructive) { Task { await model.delete(note.id) } } label: { Label("Delete", systemImage: "trash") }
         }
     }
 
@@ -443,5 +495,88 @@ struct HubNoteHistoryView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+}
+
+/// One note in the gallery: a small rendering of its first lines (headings,
+/// to-dos, lists), its first picture as a cover, then the title and date.
+@MainActor
+struct HubNotePreviewCard: View {
+    let summary: HubNoteSummary
+    @ObservedObject var model: HubNotesModel
+    var showFolder = false
+    @State private var lines: [HubNoteLine] = []
+    @State private var cover: UIImage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
+                if let cover {
+                    Image(uiImage: cover).resizable().scaledToFill()
+                        .frame(maxWidth: .infinity).frame(height: 78).clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .padding(.bottom, 3)
+                }
+                ForEach(Array(lines.prefix(cover == nil ? 13 : 7).enumerated()), id: \.offset) { _, line in preview(line) }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: 190)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+            .overlay(alignment: .topTrailing) {
+                if summary.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange).padding(8) }
+            }
+            Text(summary.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+            HStack(spacing: 4) {
+                Text(HubNotesView.when(summary.updatedAt))
+                if showFolder, !summary.folder.isEmpty { Text("· " + summary.folder).lineLimit(1) }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+        .task(id: summary.version + String(summary.updatedAt)) { await load() }
+    }
+
+    @ViewBuilder private func preview(_ line: HubNoteLine) -> some View {
+        let text = HubNoteInline.plain(line.text)
+        let pad = CGFloat(line.indent) * 8
+        switch line.kind {
+        case .title: Text(text).font(.system(size: 12, weight: .bold)).lineLimit(1)
+        case .heading: Text(text).font(.system(size: 10.5, weight: .bold)).lineLimit(1)
+        case .subheading: Text(text).font(.system(size: 9.5, weight: .semibold)).lineLimit(1)
+        case .checklist:
+            HStack(spacing: 4) {
+                Image(systemName: line.checked ? "checkmark.circle.fill" : "circle").font(.system(size: 8))
+                    .foregroundStyle(line.checked ? HubWorkspacePalette.accent : Color.secondary)
+                Text(text).font(.system(size: 9)).strikethrough(line.checked).foregroundStyle(line.checked ? .secondary : .primary).lineLimit(1)
+            }
+            .padding(.leading, pad)
+        case .bullet, .dashed, .numbered:
+            Text((line.kind == .dashed ? "– " : line.kind == .numbered ? "· " : "• ") + text).font(.system(size: 9)).lineLimit(1).padding(.leading, pad)
+        case .quote: Text(text).font(.system(size: 9).italic()).foregroundStyle(.secondary).lineLimit(1)
+        case .monospaced: Text(text).font(.system(size: 8.5, design: .monospaced)).lineLimit(1)
+        case .body:
+            if line.object?.hasPrefix("|") == true {
+                Label("Table", systemImage: "tablecells").font(.system(size: 9)).foregroundStyle(.secondary)
+            } else if line.object == nil {
+                Text(text.isEmpty ? " " : text).font(.system(size: 9)).foregroundStyle(Color.primary.opacity(0.85)).lineLimit(2)
+            }
+        }
+    }
+
+    private func load() async {
+        let body = await model.library?.cachedNote(summary.id)?.body ?? summary.snippet
+        var parsed = HubNoteMarkdown.parse(body)
+        // The first line is the title: shown bold even when written as body text.
+        if let first = parsed.firstIndex(where: { $0.object == nil && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }),
+           parsed[first].kind == .body { parsed[first].kind = .title }
+        lines = parsed.filter { !($0.object?.hasPrefix("![") ?? false) }
+        if let picture = parsed.compactMap({ $0.object.flatMap(HubNoteMarkdown.image) }).first,
+           let data = await model.library?.attachment(picture.path, api: model.api()),
+           let image = UIImage(data: data) {
+            cover = image.preparingThumbnail(of: CGSize(width: 440, height: 240)) ?? image
+        }
     }
 }

@@ -163,14 +163,18 @@ struct HubNativeChatRequest: Equatable {
 
 enum HubWorkspacePalette {
     /// A plain modern charcoal in dark mode, a cool off-white in light mode.
-    static let background = dynamic(light: 0xF2F3F8, dark: 0x0B0C0F)
+    static let background = UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        return HubThemeSettings.background(dark: dark, base: dark ? 0x0B0C0F : 0xF2F3F8)
+    }
     /// Solid surfaces: list rows, sheets, chips.
     static let panel = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x16181D))
     /// Home cards: one step lighter than the background.
     static let card = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x14161B, lightAlpha: 0.9, darkAlpha: 0.96))
-    static let accentUIColor = dynamic(light: 0x3D4FD6, dark: 0xA3B1FF)
+    /// The accent from the Theme page (indigo unless the user picked another).
+    static let accentUIColor = UIColor { traits in HubThemeSettings.accent(dark: traits.userInterfaceStyle == .dark) }
     static let accent = Color(uiColor: accentUIColor)
-    static let onAccent = Color(uiColor: dynamic(light: 0xFFFFFF, dark: 0x0A0D1F))
+    static let onAccent = Color(uiColor: UIColor { traits in HubThemeSettings.onAccent(dark: traits.userInterfaceStyle == .dark) })
     static let muted = Color(uiColor: dynamic(light: 0x5A6275, dark: 0x8D94A7))
     static let border = Color(uiColor: dynamic(light: 0x172233, dark: 0xFFFFFF))
 
@@ -365,7 +369,11 @@ struct HubHomeView: View {
     @State private var knowledgeSearchRetry = 0
     @State private var selectedChat: (request: HubNativeChatRequest, api: HubConversationAPI)?
     @State private var notesOpen: HubNotesRequest?
-    @ObservedObject private var notes = HubNotesModel.shared
+    @ObservedObject private var notesModel = HubNotesModel.shared
+    @ObservedObject private var theme = HubThemeStore.shared
+    @State private var libraryPlanOpen: HubHomeKnowledge.Library.Plan?
+    @State private var libraryDeciding = false
+    @State private var libraryError: String?
     @State private var tasksOpen = false
     @State private var screenLiveOpen = false
     @State private var doneOpen = false
@@ -443,6 +451,8 @@ struct HubHomeView: View {
         }
         .foregroundStyle(.primary)
         .tint(accent)
+        // The Theme page's font style; reading the theme here also redraws Home at once when it changes.
+        .hubThemeFont(theme.choice.font)
         .preferredColorScheme(chatPreferences.appearance.colorScheme)
         .environment(\.locale, chatPreferences.interfaceLanguage.map(Locale.init(identifier:)) ?? .autoupdatingCurrent)
     }
@@ -567,6 +577,10 @@ struct HubHomeView: View {
         .task(id: KnowledgeAppsRequest(connected: model.connection == .connected, notes: model.knowledge?.nodes.count ?? -1)) {
             await loadKnowledgeApps()
         }
+        .sheet(item: $libraryPlanOpen) { plan in
+            HubLibraryPlanView(plan: plan, busy: libraryDeciding, error: libraryError,
+                               apply: { decideLibrary(plan, approve: true) }, notNow: { decideLibrary(plan, approve: false) })
+        }
         .fullScreenCover(item: $notesOpen) { request in
             HubNotesView(model: HubNotesModel.shared, close: { notesOpen = nil }, startNew: request.startNew, openID: request.noteID)
         }
@@ -581,7 +595,7 @@ struct HubHomeView: View {
             closePanel()
             composerFocused = true
         }
-        .task { await notes.reload() }
+        .task { await notesModel.reload() }
         .sheet(item: $projectToEdit) { project in
             HubProjectSettingsView(project: project) { change in
                 try await changeProjects(change)
@@ -839,6 +853,18 @@ struct HubHomeView: View {
                                     .accessibilityIdentifier("hub.knowledge.chip.\(domain.id)")
                                 }
                             }
+                            // Chats and your own notes are their own sections, not knowledge domains.
+                            HStack(spacing: 8) {
+                                knowledgeSectionChip("Chats", icon: "bubble.left.and.bubble.right", count: value.nodes.count - notes.count) {
+                                    showKnowledge()
+                                    focusKnowledgeDomain(HubKnowledgeLayout.archiveID)
+                                }
+                                knowledgeSectionChip("My Notes", icon: "note.text", count: value.myNotes?.count ?? notesModel.index.notes.count) {
+                                    hideKeyboard()
+                                    notesOpen = HubNotesRequest()
+                                }
+                            }
+                            if let plan = value.library?.plan { libraryPlanCard(plan) }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1018,7 +1044,7 @@ struct HubHomeView: View {
     private func knowledgeSummary(_ graph: HubHomeKnowledge, notes: Int) -> some View {
         let domains = graph.domains?.filter { $0.status == "active" && $0.parentId == nil }.count ?? 0
         let stats = [(notes, "Brain notes"), (domains, "Domains"), (graph.edges.count, "Connections"),
-                     (graph.nodes.count - notes, "Chat archive")]
+                     (graph.nodes.count - notes, "Chats"), (graph.myNotes?.count ?? 0, "My Notes")]
         return Group {
             if #available(iOS 16.0, *) {
                 ViewThatFits(in: .horizontal) {
@@ -2880,9 +2906,58 @@ struct HubHomeView: View {
     /// The Knowledge graph on Home: about half the screen.
     static var brainHeight: CGFloat { max(300, min(520, UIScreen.main.bounds.height * 0.46)) }
 
+    private func knowledgeSectionChip(_ title: LocalizedStringKey, icon: String, count: Int, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.caption)
+                Text(title).font(.caption).lineLimit(1)
+                Text(count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: 32)
+            .overlay(Capsule().strokeBorder(HubWorkspacePalette.border.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Knowledge AI's proposal for the whole library, waiting for the user.
+    private func libraryPlanCard(_ plan: HubHomeKnowledge.Library.Plan) -> some View {
+        Button { libraryPlanOpen = plan } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "books.vertical").font(.title3).foregroundStyle(HubWorkspacePalette.accent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Knowledge AI has a plan for your library").font(.subheadline.weight(.semibold))
+                    Text("\(plan.changes.count) changes · review before anything moves").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(HubWorkspacePalette.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hub.knowledge.libraryPlan")
+    }
+
+    private func decideLibrary(_ plan: HubHomeKnowledge.Library.Plan, approve: Bool) {
+        guard let api = chatAPI(), !libraryDeciding else { return }
+        libraryDeciding = true
+        libraryError = nil
+        Task {
+            defer { libraryDeciding = false }
+            do {
+                try await api.decideLibraryPlan(id: plan.id, approve: approve)
+                libraryPlanOpen = nil
+                await refreshKnowledgeGraph()
+            } catch {
+                libraryError = "HUB could not save your answer. Check the connection and try again."
+            }
+        }
+    }
+
     /// Pinned notes first, then the latest, with a button for a new one.
     @ViewBuilder private var homeNotes: some View {
-        let shown = Array(notes.index.notes.prefix(3))
+        let shown = Array(notesModel.index.notes.prefix(3))
         VStack(alignment: .leading, spacing: 8) {
             ForEach(shown) { note in
                 Button {
@@ -3947,5 +4022,49 @@ struct HubLiveScreenImage: UIViewRepresentable {
         func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
             if scale <= 1, let view { view.frame = scrollView.bounds; scrollView.contentSize = scrollView.bounds.size }
         }
+    }
+}
+
+/// Knowledge AI's plan for the whole library, in plain sentences, with the
+/// choice to apply it. Approving also lets later reviews apply directly.
+struct HubLibraryPlanView: View {
+    let plan: HubHomeKnowledge.Library.Plan
+    let busy: Bool
+    let error: String?
+    let apply: () -> Void
+    let notNow: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    Text(plan.note).font(.body)
+                } header: { Text("Knowledge AI") } footer: {
+                    Text("Nothing changes until you apply. Every change is saved in the domain history and can be undone. After you approve this once, Knowledge AI keeps the library in order by itself.")
+                }
+                Section("Changes") {
+                    ForEach(plan.changes.indices, id: \.self) { index in
+                        Text(plan.changes[index]).font(.subheadline)
+                    }
+                }
+                if let error { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("Library Plan")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button("Not Now", role: .destructive) { notNow() }.disabled(busy)
+                    Spacer()
+                    Button { apply() } label: {
+                        if busy { ProgressView() } else { Text("Apply Plan").font(.body.weight(.semibold)) }
+                    }
+                    .disabled(busy)
+                    .accessibilityIdentifier("hub.knowledge.libraryPlan.apply")
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
     }
 }

@@ -129,7 +129,7 @@ public enum HubKnowledgeLayout {
                 guard overlaps else { break }
                 center = vector(archiveID + ":anchor:" + String(attempt), radius: Double(380 + attempt * 12))
             }
-            clouds.append(Cloud(id: archiveID, title: "Chat archive", parentID: nil, level: 0, hue: 194 / 360.0, radius: 112, center: center))
+            clouds.append(Cloud(id: archiveID, title: "Chats", parentID: nil, level: 0, hue: 194 / 360.0, radius: 112, center: center))
         }
         let cloudIndices = Dictionary(clouds.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
         var world: [(id: String, cloud: String, position: Vector, hue: Double)] = []

@@ -713,7 +713,7 @@ struct HubLiveChatView: View {
                                         }
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 10)
-                                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                        .background(HubChatPalette.userBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                                         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(accent.opacity(0.18)))
                                         .contextMenu {
                                             if !message.text.isEmpty {
@@ -1326,7 +1326,7 @@ struct HubLiveChatView: View {
                     Text(message.text.isEmpty ? "Photo" : message.text)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .background(HubChatPalette.userBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 }
             } else if !message.text.isEmpty {
                 HubMarkdownText(source: message.text)
@@ -3141,11 +3141,19 @@ struct HubEarlierChatCard: View {
 /// The chat's own colours: a softer charcoal than the app's near-black, with
 /// off-white text, so long reading is easier on the eyes.
 enum HubChatPalette {
+    /// The chat background from the Theme page: soft (default), the app's own, or warm paper.
     static let background = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0x1E / 255, green: 0x20 / 255, blue: 0x26 / 255, alpha: 1)
-            : UIColor(red: 0xF4 / 255, green: 0xF5 / 255, blue: 0xF8 / 255, alpha: 1)
+        let dark = traits.userInterfaceStyle == .dark
+        switch HubThemeSettings.current.chatTone {
+        case .soft: return HubThemeSettings.rgb(dark ? 0x1E2026 : 0xF4F5F8)
+        case .app: return HubWorkspacePalette.background.resolvedColor(with: traits)
+        case .paper: return HubThemeSettings.rgb(dark ? 0x24211C : 0xFBF7EE)
+        }
     })
+    /// Your own messages: tinted with the accent, or neutral grey.
+    static var userBubble: Color {
+        HubThemeSettings.current.bubble == .neutral ? Color(uiColor: .tertiarySystemFill) : HubWorkspacePalette.accent.opacity(0.16)
+    }
     static let text = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark ? UIColor(white: 0.86, alpha: 1) : UIColor(white: 0.13, alpha: 1)
     })

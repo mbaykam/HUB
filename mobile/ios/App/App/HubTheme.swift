@@ -126,12 +126,143 @@ extension EnvironmentValues {
     }
 }
 
-/// A plain, modern dark backdrop: one solid color behind every screen, no
-/// glows or moving color. Cards and glass controls sit on it.
+/// The backdrop behind every screen: one solid color (plain or tinted with
+/// the accent), or with a soft accent glow, as chosen on the Theme page.
 struct HubBackdrop: View {
+    @ObservedObject private var theme = HubThemeStore.shared
+
     var body: some View {
-        Color(uiColor: HubWorkspacePalette.background)
-            .ignoresSafeArea()
-            .accessibilityHidden(true)
+        ZStack {
+            Color(uiColor: HubWorkspacePalette.background)
+            if theme.choice.background == .glow {
+                let accent = Color(uiColor: HubWorkspacePalette.accentUIColor)
+                RadialGradient(colors: [accent.opacity(0.10 + theme.choice.strength * 0.26), .clear], center: .topLeading, startRadius: 20, endRadius: 560)
+                RadialGradient(colors: [accent.opacity(0.06 + theme.choice.strength * 0.18), .clear], center: .bottomTrailing, startRadius: 20, endRadius: 500)
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - The user's theme
+
+/// Everything the Theme page sets, kept on the phone.
+struct HubThemeChoice: Codable, Hashable {
+    enum Accent: String, Codable, CaseIterable { case indigo, blue, teal, green, orange, pink, purple, red, graphite, custom }
+    enum Background: String, Codable, CaseIterable { case plain, tinted, glow }
+    enum ChatTone: String, Codable, CaseIterable { case soft, app, paper }
+    enum Bubble: String, Codable, CaseIterable { case accent, neutral }
+    enum FontStyle: String, Codable, CaseIterable { case standard, rounded, serif }
+
+    var accent: Accent = .indigo
+    var customAccent: UInt32 = 0x3D4FD6
+    var background: Background = .plain
+    var strength: Double = 0.5
+    var chatTone: ChatTone = .soft
+    var bubble: Bubble = .accent
+    var font: FontStyle = .standard
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let v = try decoder.container(keyedBy: CodingKeys.self)
+        accent = (try? v.decode(Accent.self, forKey: .accent)) ?? .indigo
+        customAccent = (try? v.decode(UInt32.self, forKey: .customAccent)) ?? 0x3D4FD6
+        background = (try? v.decode(Background.self, forKey: .background)) ?? .plain
+        strength = min(1, max(0, (try? v.decode(Double.self, forKey: .strength)) ?? 0.5))
+        chatTone = (try? v.decode(ChatTone.self, forKey: .chatTone)) ?? .soft
+        bubble = (try? v.decode(Bubble.self, forKey: .bubble)) ?? .accent
+        font = (try? v.decode(FontStyle.self, forKey: .font)) ?? .standard
+    }
+
+    /// Light and dark shades of each accent.
+    static func shades(_ accent: Accent, custom: UInt32) -> (light: UInt32, dark: UInt32) {
+        switch accent {
+        case .indigo: return (0x3D4FD6, 0xA3B1FF)
+        case .blue: return (0x0A6CFF, 0x6AAEFF)
+        case .teal: return (0x0E8A8A, 0x5ED6CC)
+        case .green: return (0x2E8B57, 0x6EDBA4)
+        case .orange: return (0xD9730D, 0xFFB05C)
+        case .pink: return (0xD6336C, 0xFF94B8)
+        case .purple: return (0x7B3FE4, 0xC09CFF)
+        case .red: return (0xD64545, 0xFF8585)
+        case .graphite: return (0x4A5568, 0xB4BECC)
+        case .custom: return (custom, custom)
+        }
+    }
+}
+
+/// The current theme for colors resolved anywhere (also by dynamic UIColors).
+enum HubThemeSettings {
+    private static let key = "hub.theme.choice"
+    private(set) static var current: HubThemeChoice = {
+        guard let data = UserDefaults.standard.data(forKey: key), let value = try? JSONDecoder().decode(HubThemeChoice.self, from: data) else { return HubThemeChoice() }
+        return value
+    }()
+
+    static func set(_ value: HubThemeChoice) {
+        current = value
+        if let data = try? JSONEncoder().encode(value) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    static func rgb(_ hex: UInt32, alpha: CGFloat = 1) -> UIColor {
+        UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
+    }
+
+    static func accent(dark: Bool) -> UIColor {
+        let shades = HubThemeChoice.shades(current.accent, custom: current.customAccent)
+        return rgb(dark ? shades.dark : shades.light)
+    }
+
+    /// Black or white, whichever reads better on the accent.
+    static func onAccent(dark: Bool) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        accent(dark: dark).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return 0.299 * r + 0.587 * g + 0.114 * b > 0.6 ? UIColor(white: 0.05, alpha: 1) : .white
+    }
+
+    /// The app background: plain, or tinted with the accent by the chosen strength.
+    static func background(dark: Bool, base: UInt32) -> UIColor {
+        let plain = rgb(base)
+        guard current.background == .tinted else { return plain }
+        return blend(plain, accent(dark: dark), amount: (dark ? 0.06 : 0.05) + current.strength * (dark ? 0.16 : 0.12))
+    }
+
+    static func blend(_ a: UIColor, _ b: UIColor, amount: CGFloat) -> UIColor {
+        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0, br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+        a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa); b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+        return UIColor(red: ar + (br - ar) * amount, green: ag + (bg - ag) * amount, blue: ab + (bb - ab) * amount, alpha: aa)
+    }
+
+    /// A fresh tint so UIKit windows pick up a changed accent.
+    static func windowTint() -> UIColor { UIColor { traits in accent(dark: traits.userInterfaceStyle == .dark) } }
+}
+
+/// Publishes theme changes so screens redraw at once.
+@MainActor
+final class HubThemeStore: ObservableObject {
+    static let shared = HubThemeStore()
+    @Published private(set) var choice = HubThemeSettings.current
+
+    func update(_ change: (inout HubThemeChoice) -> Void) {
+        var value = choice
+        change(&value)
+        guard value != choice else { return }
+        HubThemeSettings.set(value)
+        choice = value
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows { window.tintColor = HubThemeSettings.windowTint() }
+        }
+    }
+
+    func reset() { update { $0 = HubThemeChoice() } }
+}
+
+extension View {
+    /// The chosen font style for the whole app (iOS 16.1+).
+    @ViewBuilder func hubThemeFont(_ style: HubThemeChoice.FontStyle) -> some View {
+        if #available(iOS 16.1, *) {
+            fontDesign(style == .rounded ? .rounded : style == .serif ? .serif : .default)
+        } else { self }
     }
 }

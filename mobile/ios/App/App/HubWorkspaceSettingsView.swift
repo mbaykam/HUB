@@ -11,6 +11,10 @@ struct HubWorkspaceSettingsView: View {
     var body: some View {
         NavigationView {
             HubList {
+                NavigationLink(destination: HubThemeSettingsView(api: api, changed: preferencesChanged)) {
+                    Label("Theme", systemImage: "paintpalette")
+                }
+                .accessibilityIdentifier("hub.settings.theme")
                 if let api {
                     NavigationLink(destination: HubGeneralSettingsView(api: api, changed: preferencesChanged)) {
                         Label("General", systemImage: "slider.horizontal.3")
@@ -1459,5 +1463,163 @@ struct HubMailSettingsView: View {
     private func remove(_ account: String) async {
         do { state = try await api.changeMail(["action": "remove", "address": account]); notice = nil }
         catch { notice = "Could not disconnect. Try again." }
+    }
+}
+
+/// Theme: everything about how HUB looks, changed in one place and shown live.
+@MainActor
+struct HubThemeSettingsView: View {
+    let api: HubConversationAPI?
+    let changed: (HubChatPreferences) -> Void
+    @ObservedObject private var store = HubThemeStore.shared
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var preferences: HubChatPreferences?
+    @State private var busy = false
+    @State private var error: String?
+
+    private var choice: HubThemeChoice { store.choice }
+
+    var body: some View {
+        Form {
+            Section { preview.listRowInsets(EdgeInsets()) } footer: { Text("Changes apply at once and are saved on this iPhone.") }
+            if let preferences {
+                Section("Mode") {
+                    Picker("Mode", selection: Binding(get: { preferences.appearance }, set: { update(.appearance($0)) })) {
+                        Text("System").tag(HubChatPreferences.Appearance.system)
+                        Text("Light").tag(HubChatPreferences.Appearance.light)
+                        Text("Dark").tag(HubChatPreferences.Appearance.dark)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(busy || !preferences.writable)
+                }
+            }
+            Section {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 12)], spacing: 12) {
+                    ForEach(HubThemeChoice.Accent.allCases.filter { $0 != .custom }, id: \.self) { accent in
+                        swatch(accent)
+                    }
+                }
+                .padding(.vertical, 6)
+                ColorPicker("Custom color", selection: Binding(get: {
+                    Color(uiColor: HubThemeSettings.rgb(choice.customAccent))
+                }, set: { color in
+                    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+                    UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+                    let hex = (UInt32(max(0, min(1, r)) * 255) << 16) | (UInt32(max(0, min(1, g)) * 255) << 8) | UInt32(max(0, min(1, b)) * 255)
+                    store.update { $0.accent = .custom; $0.customAccent = hex }
+                }), supportsOpacity: false)
+            } header: { Text("Accent color") } footer: { Text("Buttons, links, your messages and highlights use this color.") }
+            Section {
+                Picker("Background", selection: Binding(get: { choice.background }, set: { value in store.update { $0.background = value } })) {
+                    Text("Plain").tag(HubThemeChoice.Background.plain)
+                    Text("Tinted").tag(HubThemeChoice.Background.tinted)
+                    Text("Glow").tag(HubThemeChoice.Background.glow)
+                }
+                .pickerStyle(.segmented)
+                if choice.background != .plain {
+                    HStack {
+                        Text("Subtle").font(.caption).foregroundStyle(.secondary)
+                        Slider(value: Binding(get: { choice.strength }, set: { value in store.update { $0.strength = value } }), in: 0...1)
+                        Text("Strong").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: { Text("Background") }
+            Section {
+                Picker("Chat background", selection: Binding(get: { choice.chatTone }, set: { value in store.update { $0.chatTone = value } })) {
+                    Text("Soft").tag(HubThemeChoice.ChatTone.soft)
+                    Text("Same as app").tag(HubThemeChoice.ChatTone.app)
+                    Text("Paper").tag(HubThemeChoice.ChatTone.paper)
+                }
+                Picker("Your messages", selection: Binding(get: { choice.bubble }, set: { value in store.update { $0.bubble = value } })) {
+                    Text("Accent").tag(HubThemeChoice.Bubble.accent)
+                    Text("Neutral").tag(HubThemeChoice.Bubble.neutral)
+                }
+                if let preferences {
+                    Stepper("Text size · \(preferences.fontSize)", value: Binding(get: { preferences.fontSize }, set: { update(.fontSize($0)) }), in: 12...17)
+                        .disabled(busy || !preferences.writable)
+                }
+            } header: { Text("Chats") }
+            Section("Font") {
+                Picker("Font", selection: Binding(get: { choice.font }, set: { value in store.update { $0.font = value } })) {
+                    Text("Default").tag(HubThemeChoice.FontStyle.standard)
+                    Text("Rounded").tag(HubThemeChoice.FontStyle.rounded)
+                    Text("Serif").tag(HubThemeChoice.FontStyle.serif)
+                }
+                .pickerStyle(.segmented)
+            }
+            if let error { Section { Text(error).font(.footnote).foregroundStyle(.secondary) } }
+            Section {
+                Button("Reset to Default", role: .destructive) { store.reset() }
+                    .disabled(choice == HubThemeChoice())
+            }
+        }
+        .navigationTitle("Theme")
+        .task { await load() }
+    }
+
+    /// A small Home and chat drawn with the current choices.
+    private var preview: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Circle().fill(HubWorkspacePalette.accent).frame(width: 30, height: 30)
+                    .overlay(Image(systemName: "sparkles").font(.caption.weight(.bold)).foregroundStyle(HubWorkspacePalette.onAccent))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("HUB").font(.headline)
+                    Text("Good evening").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("New Note").font(.caption.weight(.semibold)).padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(HubWorkspacePalette.accent.opacity(0.14), in: Capsule()).foregroundStyle(HubWorkspacePalette.accent)
+            }
+            VStack(spacing: 8) {
+                HStack {
+                    Spacer(minLength: 40)
+                    Text("Can you plan my week?").font(.subheadline).padding(10)
+                        .background(HubChatPalette.userBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                HStack {
+                    Text("Sure. Monday is free in the morning, so the noodle stand visit fits there.").font(.subheadline)
+                        .foregroundStyle(HubChatPalette.text)
+                    Spacer(minLength: 30)
+                }
+            }
+            .padding(12)
+            .background(HubChatPalette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .padding(14)
+        .background(HubBackdrop())
+        .clipShape(RoundedRectangle(cornerRadius: 0))
+        .hubThemeFont(choice.font)
+        .id(choice)
+    }
+
+    private func swatch(_ accent: HubThemeChoice.Accent) -> some View {
+        let shades = HubThemeChoice.shades(accent, custom: choice.customAccent)
+        let color = Color(uiColor: HubThemeSettings.rgb(colorScheme == .dark ? shades.dark : shades.light))
+        return Button { store.update { $0.accent = accent } } label: {
+            Circle().fill(color).frame(width: 36, height: 36)
+                .overlay { if choice.accent == accent { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white) } }
+                .overlay(Circle().strokeBorder(Color.primary.opacity(choice.accent == accent ? 0.5 : 0.1), lineWidth: 2).padding(-4))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accent.rawValue.capitalized)
+    }
+
+    private func load() async {
+        guard let api, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do { let value = try await api.chatPreferences(); preferences = value; changed(value); error = nil }
+        catch { if !Task.isCancelled { self.error = "Mode and text size need HUB to be connected." } }
+    }
+
+    private func update(_ change: HubChatPreferences.Change) {
+        guard let api, !busy, let preferences, preferences.writable else { return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do { let value = try await api.updateChatPreferences(change, from: preferences); self.preferences = value; changed(value); error = nil }
+            catch { self.error = "Could not save this on HUB. Try again." }
+        }
     }
 }
