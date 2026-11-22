@@ -316,7 +316,8 @@ export class HubCharacters extends Service {
     ctx.effect(()=>installApps(ctx,this,effectiveKnowledgeCharacter),"HUB Apps page and app sharing");
     ctx.effect(()=>installCraftGuide(ctx),"HUB craft standards");
     ctx.effect(()=>installChatQuestions(ctx),"HUB questions in the conversation");
-    ctx.effect(()=>installClaudeCodeProvider(ctx),"Claude Code model provider");
+    // While Smart's Claude subscription is used up, the fast model answers.
+    ctx.effect(()=>installClaudeCodeProvider(ctx,()=>{const s=this.store.snapshot();return s.characters.find(c=>c.id===s.voiceId)?.route??undefined;}),"Claude Code model provider");
     ctx.effect(()=>installOpenRouterSpeed(),"OpenRouter fastest-host routing");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
     ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");

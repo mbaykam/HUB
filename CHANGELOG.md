@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.30
+
+- When Smart's Claude subscription reaches its limit (for example the 5-hour window), the fast model answers the message instead of the chat showing an error, and says Smart is back at the reset time. Claude Code is not started again until then.
+
 ## 1.10.29
 
 - Pictures HUB showed in a chat (web photos in its replies) appear in the Home graph as pictures linked to that chat, next to the files.
