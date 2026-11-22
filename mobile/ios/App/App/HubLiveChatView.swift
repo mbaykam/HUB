@@ -72,6 +72,10 @@ struct HubLiveChatView: View {
     @State private var speedModel: String?
     @State private var speedOpen = false
     @State private var latestVisible = false
+    /// Height of the chat's content and whether a finger is on it, to catch a
+    /// view left scrolled past its end when content gets shorter.
+    @State private var contentHeight: CGFloat = 0
+    @State private var dragging = false
     @State private var bottomRequest = 0
     @State private var characterPickerOpen = false
     @State private var character: String?
@@ -873,16 +877,36 @@ struct HubLiveChatView: View {
                     .font(.system(size: CGFloat(preferences.fontSize) * transcriptScale))
                     .foregroundStyle(HubChatPalette.text)
                     .padding(16)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(key: ChatContentHeight.self, value: geometry.size.height)
+                        }
+                    }
                 }
                 .coordinateSpace(name: "chatViewport")
                 .onPreferenceChange(LatestChatOffset.self) { offset in
                     latestVisible = offset.map { $0 <= viewport.size.height + 24 && $0 >= 0 } ?? false
+                    // When content gets shorter (the "Sending…" bubble, the steps or
+                    // the thinking dots go away), the view can stay scrolled past
+                    // its end and show an empty screen. Settle back on the last line.
+                    if let offset, !dragging, contentHeight > viewport.size.height,
+                       offset < viewport.size.height - 40 {
+                        scroll.scrollTo("latest", anchor: .bottom)
+                    }
+                }
+                .onPreferenceChange(ChatContentHeight.self) { height in
+                    let changed = abs(height - contentHeight) > 1
+                    contentHeight = height
+                    // Rows are measured as they appear; keep the newest line in view.
+                    if changed, readingLatest, !dragging { scroll.scrollTo("latest", anchor: .bottom) }
                 }
                 .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { value in
+                    dragging = true
                     readingLatest = false
                     // Scrolling back through the chat puts the keyboard away.
                     if value.translation.height > 12, composerFocused { composerFocused = false }
                 }.onEnded { _ in
+                    dragging = false
                     if latestVisible { readingLatest = true } else { autoLoadEarlier() }
                 })
                 .onChange(of: snapshot?.messages.last?.id) { _ in
@@ -894,8 +918,11 @@ struct HubLiveChatView: View {
                 .onChange(of: screenshots.map(\.id)) { _ in
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
                 }
-                .onChange(of: echo) { _ in
-                    if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
+                .onChange(of: echo) { sent in
+                    // Sending always brings the newest line into view, settled
+                    // twice so estimated row heights cannot leave it off.
+                    if sent != nil { readingLatest = true; settleAtLatest(scroll) }
+                    else if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
                 }
                 .onChange(of: snapshot?.running) { running in
                     // Keep the finished state of this chat on the phone for next time.
@@ -973,6 +1000,11 @@ struct HubLiveChatView: View {
     private struct LatestChatOffset: PreferenceKey {
         static let defaultValue: CGFloat? = nil
         static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
+    }
+
+    private struct ChatContentHeight: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
     }
 
     private func chatPhotos(_ message: HubChatMessage) -> some View {
