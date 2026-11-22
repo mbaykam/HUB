@@ -111,6 +111,8 @@ struct HubLiveChatView: View {
     @State private var echo: SentEcho?
     /// This chat as it was last time, shown at once until the live copy arrives.
     @State private var cachedMessages: [HubChatMessage]?
+    /// The live PC screen, shown above the chat while the user wants it.
+    @State private var screenOpen = false
     @ScaledMetric(relativeTo: .body) private var transcriptScale: CGFloat = 1
 
     private struct SentEcho: Equatable {
@@ -154,6 +156,11 @@ struct HubLiveChatView: View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 chatHeader
+                if screenOpen {
+                    HubScreenLiveCard(api: api, open: $screenOpen, visible: true)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
+                }
                 if tab == .chat { transcript }
                 else { trajectory }
             }
@@ -416,6 +423,11 @@ struct HubLiveChatView: View {
                     .accessibilityIdentifier("hub.chat.video")
                 }
                 Menu {
+                    Button {
+                        composerFocused = false
+                        withAnimation(.easeOut(duration: 0.2)) { screenOpen.toggle() }
+                    } label: { Label(screenOpen ? "Hide PC screen" : "Watch PC screen", systemImage: "display") }
+                    .disabled(connectionLost)
                     Button {
                         composerFocused = false
                         speedOpen = true
@@ -865,8 +877,10 @@ struct HubLiveChatView: View {
                 .onPreferenceChange(LatestChatOffset.self) { offset in
                     latestVisible = offset.map { $0 <= viewport.size.height + 24 && $0 >= 0 } ?? false
                 }
-                .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
+                .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { value in
                     readingLatest = false
+                    // Scrolling back through the chat puts the keyboard away.
+                    if value.translation.height > 12, composerFocused { composerFocused = false }
                 }.onEnded { _ in
                     if latestVisible { readingLatest = true } else { autoLoadEarlier() }
                 })
