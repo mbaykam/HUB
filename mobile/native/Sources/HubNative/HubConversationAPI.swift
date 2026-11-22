@@ -192,7 +192,8 @@ public struct HubHomeKnowledge: Decodable, Equatable, Sendable {
         public let title: String
         public let kind: String
         public let conversationIds: [String]
-    }    public struct Similarity: Decodable, Equatable, Sendable {
+    }
+    public struct Similarity: Decodable, Equatable, Sendable {
         public let source: String
         public let target: String
         public let score: Double
