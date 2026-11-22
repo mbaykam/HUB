@@ -3827,6 +3827,11 @@ public final class HubConversationAPI {
             }
             var timeline = HubChatTimeline()
             var opened = false
+            // Text arrives a few characters at a time; redrawing the whole chat
+            // for every piece made long answers stutter. Text pieces are shown
+            // at most ~16 times a second; every other event shows at once.
+            let clock = ContinuousClock()
+            var lastShown = clock.now - .seconds(1)
             struct Envelope: Decodable { let streamId: String? }
             let decoder = JSONDecoder()
             while !Task.isCancelled {
@@ -3850,9 +3855,11 @@ public final class HubConversationAPI {
                     deadline.cancel()
                 } else if opened, value.type == "event", let event = value.event {
                     timeline.apply(event)
+                    if event.delta != nil, clock.now - lastShown < .milliseconds(60) { continue }
                 } else {
                     continue
                 }
+                lastShown = clock.now
                 await update(timeline.snapshot)
             }
             throw CancellationError()

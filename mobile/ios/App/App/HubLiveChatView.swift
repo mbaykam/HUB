@@ -735,6 +735,7 @@ struct HubLiveChatView: View {
                                     }
                                     if !message.text.isEmpty {
                                         HubMarkdownText(source: message.text)
+                                            .equatable()
                                             .contextMenu {
                                                 Button { UIPasteboard.general.string = message.text } label: {
                                                     Label("Copy message", systemImage: "doc.on.doc")
@@ -1292,6 +1293,7 @@ struct HubLiveChatView: View {
                 }
             } else if !message.text.isEmpty {
                 HubMarkdownText(source: message.text)
+                    .equatable()
             }
         }
         Label(connectionLost ? "Offline · showing the saved copy" : "Updating…", systemImage: connectionLost ? "wifi.slash" : "arrow.triangle.2.circlepath")

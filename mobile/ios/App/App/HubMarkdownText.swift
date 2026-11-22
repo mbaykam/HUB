@@ -5,7 +5,9 @@ import WebKit
 /// An assistant reply, laid out for reading: Markdown in native text, plus two
 /// things a chat needs to show rather than tell. Lines that are only images
 /// become a swipeable photo strip, and a ```svg block becomes an inline diagram.
-struct HubMarkdownText: View {
+/// Equatable so SwiftUI skips re-parsing a message whose text did not change
+/// while another reply streams in.
+struct HubMarkdownText: View, Equatable {
     let source: String
 
     enum Segment {
