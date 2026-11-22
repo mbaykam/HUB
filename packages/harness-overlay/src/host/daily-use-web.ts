@@ -20,6 +20,20 @@ export function installDailyUseWeb(ctx:any){
       return {kind:"hub-file",path:file.path,name:file.name,bytes:file.data.length,sha256:file.sha256};
     }});
   const ended=new Map<string,{version:number;kind:string}>();
+  // Listing every stored conversation takes over a second, and the phone asks
+  // for the chat list and Your work at the same moment. Requests share a
+  // listing, and a finished one is reused until any chat changes (a session
+  // event) or 30 s pass, so reopening the app or the list is instant while
+  // nothing has happened. Without session events only running listings are shared.
+  let listing:{value:Promise<any>;generation:number;at:number;done:boolean}|undefined,generation=0;
+  const observes=typeof ctx.on==="function";
+  const offEvents=observes?ctx.on("session/event",()=>{generation++;},{global:true}):undefined;
+  const listSessions=()=>{
+    if(listing&&listing.generation===generation&&(!listing.done||observes&&Date.now()-listing.at<30000))return listing.value;
+    const entry={value:ctx.sessionController.list({},AbortSignal.timeout(20000)),generation,at:Date.now(),done:false};listing=entry;
+    entry.value.then(()=>{entry.done=true;},()=>{if(listing===entry)listing=undefined;});
+    return entry.value;
+  };
   const off=["activity","artifacts","conversations","helper"].map(action=>ctx.webServer.register({kind:"exact",path:"/api/hub/"+action,handler:async(req:any,res:any)=>{
     const send=(code:number,value:any)=>{res.writeHead(code,{"content-type":"application/json","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(value));};
     const reject=ctx.connection.requestRejection(req);if(reject||req.headers["sec-fetch-site"]==="cross-site"){send(reject??403,{error:"unauthorized"});return;}
@@ -32,14 +46,14 @@ export function installDailyUseWeb(ctx:any){
         if(raw!==undefined&&(typeof raw!=="string"||raw.length>600)){send(400,{error:"invalid-search"});return;}
         let search:string;try{search=decodeURIComponent(raw??"").trim().toLocaleLowerCase();}catch{send(400,{error:"invalid-search"});return;}
         if(search.length>120){send(400,{error:"invalid-search"});return;}
-        const {items}=await ctx.sessionController.list({},signal),archived=new Set(ctx.get?.("workspaceRegistry")?.archivedSessionIds??[]);
+        const {items}=await listSessions(),archived=new Set(ctx.get?.("workspaceRegistry")?.archivedSessionIds??[]);
         const all=items.filter((s:any)=>!s.blank&&s.origin!=="subagent"&&!isKnowledgeEvaluation(s.sessionId)&&!archived.has(s.sessionId)&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(s.sessionId))
           .map((s:any)=>({sessionId:s.sessionId,title:typeof s.projections?.values?.title==="string"&&s.projections.values.title.trim()?s.projections.values.title.slice(0,240):"Untitled conversation",updatedAt:Number.isFinite(s.updatedAt)&&s.updatedAt>=0?s.updatedAt:0}))
           .filter((s:any)=>!search||s.title.toLocaleLowerCase().includes(search)).sort((a:any,b:any)=>b.updatedAt-a.updatedAt);
         send(200,{conversations:all.slice(0,50),hasMore:all.length>50});return;
       }
       if(action==="activity"){
-        const {items}=await ctx.sessionController.list({},signal),now=Date.now(),byId:Record<string,unknown>={},query=ctx.get?.("sessionQuery")??ctx.sessionQuery,archived=new Set(ctx.get?.("workspaceRegistry")?.archivedSessionIds??[]);
+        const {items}=await listSessions(),now=Date.now(),byId:Record<string,unknown>={},query=ctx.get?.("sessionQuery")??ctx.sessionQuery,archived=new Set(ctx.get?.("workspaceRegistry")?.archivedSessionIds??[]);
         const headers=items.some((s:any)=>s.origin==="subagent"&&(s.running||now-s.updatedAt<24*60*60000))&&query?.listSessions?await query.listSessions(signal):[],parents=new Map<string,string>(headers.map(({header}:any)=>[header.id,header.parentSession]));
         let inspected=0,running=0;
         for(const s of items){if(isKnowledgeEvaluation(s.sessionId)||s.blank||archived.has(s.sessionId))continue;const v=s.projections?.values??{},parentId=parents.get(s.sessionId)??v.subagent?.parentSessionId??v.subagent?.parentSession;
@@ -58,7 +72,7 @@ export function installDailyUseWeb(ctx:any){
       const query=ctx.get?.("sessionQuery")??ctx.sessionQuery,observe=()=>query.observeSession(session,{signal,projectionMode:"none"});
       if(action==="helper"){
         // Only a helper (sub-agent) session is readable here.
-        const {items}=await ctx.sessionController.list({},signal),item=items.find((s:any)=>s.sessionId===session);
+        const {items}=await listSessions(),item=items.find((s:any)=>s.sessionId===session);
         if(!item||item.origin!=="subagent"){send(404,{error:"helper-unavailable"});return;}
         const observation=await observe();
         try{const work=helperWork([...observation.events]),running=item.running===true;
@@ -115,7 +129,7 @@ export function installDailyUseWeb(ctx:any){
         send(200,{document:artifactDocument(app,files),name:app.name,at:app.at});
       }finally{observation[Symbol.dispose]();}
     }catch{send(503,{error:"native-state-unavailable"});}
-  }}));return()=>{offSend?.();offScreenshot();ended.clear();off.forEach((f:any)=>f());};
+  }}));return()=>{offSend?.();offScreenshot();offEvents?.();ended.clear();off.forEach((f:any)=>f());};
 }
 
 const SCREENSHOT_TOOLS=new Set(["hub_capture_desktop","hub_show_screenshot"]);

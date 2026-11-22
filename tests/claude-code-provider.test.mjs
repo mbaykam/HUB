@@ -16,9 +16,13 @@ let input='';process.stdin.on('data',d=>input+=d);process.stdin.on('end',async()
   await rpc({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18'}});
   const tools=(await rpc({jsonrpc:'2.0',id:2,method:'tools/list'})).result.tools;
   if(prompt.includes('use the tool')){
+    out({type:'stream_event',event:{type:'message_start',message:{usage:{input_tokens:10,cache_read_input_tokens:90000,cache_creation_input_tokens:5000,output_tokens:1}}}});
     out({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Checking. '}}});
+    out({type:'stream_event',event:{type:'message_delta',usage:{output_tokens:40}}});
     const result=await rpc({jsonrpc:'2.0',id:3,method:'tools/call',params:{name:tools[0].name,arguments:{q:1}}});
+    out({type:'stream_event',event:{type:'message_start',message:{usage:{input_tokens:20,cache_read_input_tokens:95000,cache_creation_input_tokens:0,output_tokens:1}}}});
     out({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Got: '+result.result.content[0].text}}});
+    out({type:'stream_event',event:{type:'message_delta',usage:{output_tokens:30}}});
   }else if(prompt.includes('crash')){process.stderr.write('boom');process.exit(3);}
   else out({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Echo: '+prompt+' | args: '+args.filter(a=>a.startsWith('--')).join(',')}}});
   out({type:'result',subtype:'success',is_error:false,result:'done',usage:{input_tokens:5,output_tokens:7,cache_read_input_tokens:100}});
@@ -61,6 +65,9 @@ test('a tool call goes to HUB, and its result goes back to the waiting CLI',asyn
    {role:'user',source:{kind:'tool',callId:call.id},content:[{type:'tool-result',toolCallId:call.id,content:[{type:'text',text:'Moda'}]}]}];
   const second=await collect(adapter.stream({model:'haiku',sessionId:'s2',messages:history,tools}));
   assert.equal(text(second),'Got: Moda');assert.equal(second.at(-1).reason.kind,'stop');
+  // Each step reports its own model call, not the CLI's running total for the run.
+  assert.deepEqual(first.find(c=>c.type==='usage').usage,{inputTokens:95010,outputTokens:40,cacheReadTokens:90000,cacheWriteTokens:5000});
+  assert.deepEqual(second.find(c=>c.type==='usage').usage,{inputTokens:95020,outputTokens:30,cacheReadTokens:95000});
  }finally{adapter.dispose();await rm(dir,{recursive:true,force:true});}
 });
 

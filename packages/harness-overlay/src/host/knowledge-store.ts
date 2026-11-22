@@ -101,7 +101,23 @@ export class KnowledgeStore {
     await this.refreshInventory();
     await this.organization.repairPending();
   }
-  async scan(coverage?:ScanCoverage,includeHeld=false): Promise<Stored[]> {
+  private scanning=new Map<boolean,Promise<{notes:Stored[];seen:ScanCoverage}>>();
+  /** Searches that ask at the same moment share one pass over the vault (an
+   * automatic recall asks three times before every reply, ~110 ms each).
+   * Writers always read the vault themselves. */
+  async scan(coverage?:ScanCoverage,includeHeld=false,share=false): Promise<Stored[]> {
+    if(!share)return this.scanOnce(coverage??{files:0,noteSize:0,recordSize:0},includeHeld);
+    let pending=this.scanning.get(includeHeld);
+    if(!pending){
+      const seen:ScanCoverage={files:0,noteSize:0,recordSize:0},started=this.scanOnce(seen,includeHeld).then(notes=>({notes,seen}));
+      pending=started;this.scanning.set(includeHeld,started);
+      void started.finally(()=>{if(this.scanning.get(includeHeld)===started)this.scanning.delete(includeHeld);}).catch(()=>{});
+    }
+    const {notes,seen}=await pending;
+    if(coverage){coverage.files=seen.files;coverage.noteSize=seen.noteSize;coverage.recordSize=seen.recordSize;}
+    return [...notes];
+  }
+  private async scanOnce(coverage:ScanCoverage,includeHeld:boolean): Promise<Stored[]> {
     const notes: Stored[] = [];
     const held=includeHeld?new Set<string>():await this.admission.blocked();
     if(coverage){coverage.files=0;coverage.noteSize=0;coverage.recordSize=0;}
@@ -210,7 +226,7 @@ export class KnowledgeStore {
   }
   async organizationSource(id:string,offset=0){const source=(await this.scan()).find(n=>n.id===id);if(!source)throw Error("Source is not admitted or available");if(!Number.isSafeInteger(offset)||offset<0||offset>=source.body.length)throw Error("Choose an existing source passage");let start=offset;if(start&&/[\uDC00-\uDFFF]/.test(source.body[start]!))start--;let end=Math.min(source.body.length,start+12000);if(end<source.body.length&&/[\uDC00-\uDFFF]/.test(source.body[end]!))end--;return {nodeId:id,title:source.title,hash:digest(source.body),totalChars:source.body.length,start,end,content:source.body.slice(start,end),nextOffset:end<source.body.length?end:null};}
   async search(query: string, limit = 12,coverage?:ScanCoverage,scope:KnowledgeRecordScope="all") {
-    const notes=(await this.scan(coverage)).filter(n=>n.body.trim()&&matchesKnowledgeScope(n,scope)),registry=await this.organization.domains();if(coverage)coverage.indexed=notes.length;let semantic:KnowledgeSemanticHit[]=[];
+    const notes=(await this.scan(coverage,false,true)).filter(n=>n.body.trim()&&matchesKnowledgeScope(n,scope)),registry=await this.organization.domains();if(coverage)coverage.indexed=notes.length;let semantic:KnowledgeSemanticHit[]=[];
     if(this.rank)try{semantic=await boundedKnowledgeRecall(this.rank(query,notes,Math.max(24,limit)),AbortSignal.timeout(850));}catch{/* Lexical fallback is bounded independently of a late local index. */}
     const result=await this.lexicalIndex.withSnapshot(notes,()=>fuseKnowledgeRanks(notes,query,registry,semantic,limit,this.lexicalIndex)),blocked=await this.admission.blocked();return result.filter(n=>!blocked.has(n.id));
   }
@@ -224,7 +240,7 @@ export class KnowledgeStore {
   }
   /** Small relevant memory, stable human preferences and one-hop real links. */
   async recall(query:string,topicContext="",coverage?:ScanCoverage){
-    const [direct,context,notes,meta]=await Promise.all([this.search(query,4,coverage),topicContext.trim()?this.search(topicContext,3):Promise.resolve([]),this.scan(),this.metadata()]);
+    const [direct,context,notes,meta]=await Promise.all([this.search(query,4,coverage),topicContext.trim()?this.search(topicContext,3):Promise.resolve([]),this.scan(undefined,false,true),this.metadata()]);
     const selected:{note:Stored;reason:string}[]=[];
     const add=(note:Stored,reason:string)=>{if(note.body.trim()&&!selected.some(n=>n.note.id===note.id))selected.push({note,reason});};
     for(const n of notes.filter(n=>meta[n.id]?.category==="preferences"&&!meta[n.id]?.deleted).sort((a,b)=>(meta[b.id]?.completedAt??0)-(meta[a.id]?.completedAt??0)).slice(0,2))add(n,"personal-preference");

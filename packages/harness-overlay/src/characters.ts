@@ -41,6 +41,7 @@ import {effectiveKnowledgeCharacter} from "./host/knowledge-identity.ts";
 import {installCraftGuide} from "./host/craft-guide.ts";
 import {installChatQuestions} from "./host/chat-questions.ts";
 import {installClaudeCodeProvider} from "./host/claude-code-provider.ts";
+import {installOpenRouterSpeed} from "./host/openrouter-speed.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
 /**
@@ -58,7 +59,7 @@ const HIDDEN_IN_CHAT=new Set(["ask_user_question","hub_switch_character","hub_ta
 export function hiddenInChat(name:string){
   return HIDDEN_IN_CHAT.has(name)||/^hub_character_[0-9a-f]+$/.test(name)||name.startsWith("mcp__windows__")||name.startsWith("browser_");
 }
-const WEB_SEARCH_GUIDE="Web: search with hub_web_search (fast, no browser) and read pages with web_fetch. Use Camofox (camofox_open, camofox_snapshot, click, type) only when a fetch fails or is blocked, the page needs clicking or forms, or the user is watching the PC screen; while they watch, hub_web_search itself uses the visible browser. For substantial research use hub_research. Cite what you actually read.";
+const WEB_SEARCH_GUIDE="Web: search with hub_web_search (fast, no browser) and read pages with web_fetch. Use Camofox (camofox_open, camofox_snapshot, click, type) only when a fetch fails or is blocked, the page needs clicking or forms, or the user is watching the PC screen; while they watch, hub_web_search itself uses the visible browser. Be quick: a simple question needs one search, then the two or three best pages fetched together in one step (several web_fetch calls at once), then the answer; do not fetch pages one by one or repeat a search that already answered it. For substantial research use hub_research. Cite what you actually read.";
 /** Rewrites the harness's own prompt paragraphs that contradict how HUB is
  * used: one identity, the iPhone app as "this app", one working folder, and
  * no guidance for tools this chat does not have. */
@@ -79,6 +80,27 @@ export function tidyPrompt(text:string,hidden:Set<string>){
     if(m&&hidden.has(m[1]))return [];
     return [paragraph];
   }).join("\n\n");
+}
+
+/** Stops a tool that keeps failing in the same turn: after four failures in a
+ * row (or 40 calls of one tool in a turn) the model is told to stop and report,
+ * instead of retrying the same broken call (one chat once called a tool 1,528
+ * times in three minutes). */
+export function repeatedToolFailure(agent:{session:{snapshotEvents():readonly any[]}},name:string){
+  const events=agent.session.snapshotEvents();let failures=0,calls=0,lastError="",streak=true;const names=new Map<string,string>();
+  for(let i=events.length-1,seen=0;i>=0&&seen<1500;i--,seen++){
+    const e=events[i];if(e.type==="turn/start")break;
+    if(e.type==="tool/call"){names.set(e.data?.callId,e.data?.name);if(e.data?.name===name)calls++;}
+  }
+  for(let i=events.length-1,seen=0;i>=0&&seen<1500;i--,seen++){
+    const e=events[i];if(e.type==="turn/start")break;if(e.type!=="tool/result")continue;
+    const r=e.data?.message?.content?.[0];if(names.get(r?.toolCallId)!==name)continue;
+    if(r?.isError&&streak){failures++;if(!lastError)lastError=(r.content??[]).map((b:any)=>b.text??"").join(" ").slice(0,300);}
+    else streak=false;
+  }
+  if(failures>=4)return `Stopped: ${name} failed ${failures} times in a row this turn (last error: ${lastError||"unknown"}). Do not call it again now. Tell the user in one or two lines what failed and what you need, or use another way.`;
+  if(calls>=40)return `Stopped: ${name} was called ${calls} times this turn. Summarize what you have for the user instead of calling it again.`;
+  return undefined;
 }
 
 export function helperCharacter(s:HubCharactersState,args:{model?:unknown;character?:unknown},current:HubCharacter):HubCharacter|undefined{
@@ -217,6 +239,7 @@ export class HubCharacters extends Service {
         return {...base,...selected.route};
       },{prepend:true});
       agent.ctx.tools.guard((exec:any)=>{
+        if(exec.agent===agent){const stop=repeatedToolFailure(agent,exec.name);if(stop)return stop;}
         if(exec.agent!==agent || this.voiceCalls.has(agent.id) || (this.dispatches.has(exec.callId) && this.dispatches.get(exec.callId)===exec.parent))return;
         if(exec.name==="hub_switch_character"||exec.name==="hub_research"||exec.name==="hub_find_chat")return; // Explicit user navigation has its own authorization check.
         const policy=selected?.tools;
@@ -294,6 +317,7 @@ export class HubCharacters extends Service {
     ctx.effect(()=>installCraftGuide(ctx),"HUB craft standards");
     ctx.effect(()=>installChatQuestions(ctx),"HUB questions in the conversation");
     ctx.effect(()=>installClaudeCodeProvider(ctx),"Claude Code model provider");
+    ctx.effect(()=>installOpenRouterSpeed(),"OpenRouter fastest-host routing");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
     ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");
   }

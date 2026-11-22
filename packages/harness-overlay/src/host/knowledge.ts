@@ -32,6 +32,41 @@ import {installVoiceMediaContext} from "./voice-media.ts";
 
 // Native hooks/tool registries remain the permission boundary. Curator itself
 // has no tools; ordinary recall goes through the conversation-owned registry.
+/** Pictures and files from chats, for the phone's graph: each with the chats
+ * it came from. Read from chat archives (cached by version), at most 80. */
+const assetCache=new Map<string,{version:number;assets:{id:string;name:string;mediaType:string}[]}>();
+async function graphAssets(store:any,graph:any){
+  const byAsset=new Map<string,{id:string;title:string;kind:"image"|"file";conversationIds:string[];at:number}>();
+  const add=(asset:{id:string;name:string;mediaType:string},conversationId:string,at:number)=>{
+    if(!/^[a-f0-9]{64}$/.test(asset.id))return;
+    const item=byAsset.get(asset.id)??{id:"asset-"+asset.id.slice(0,32),title:String(asset.name).slice(0,120),kind:asset.mediaType.startsWith("image/")?"image" as const:"file" as const,conversationIds:[],at};
+    if(!item.conversationIds.includes(conversationId))item.conversationIds.push(conversationId);
+    item.at=Math.max(item.at,at);byAsset.set(asset.id,item);
+  };
+  const conversations=graph.nodes.filter((n:any)=>n.kind==="conversation").sort((a:any,b:any)=>(b.modifiedAt??0)-(a.modifiedAt??0)).slice(0,120);
+  for(const node of conversations){
+    try{
+      let cached=assetCache.get(node.id);
+      if(!cached||cached.version!==node.modifiedAt){
+        const archived=await store.archive.read(node.id);
+        cached={version:node.modifiedAt,assets:[...new Map(archived.messages.flatMap((m:any)=>m.assets??[]).map((a:any)=>[a.id,{id:a.id,name:a.name,mediaType:a.mediaType??""}])).values()] as any};
+        assetCache.set(node.id,cached);
+      }
+      for(const asset of cached.assets)add(asset,node.id,node.modifiedAt??0);
+    }catch{}
+  }
+  // Files HUB made in a chat point back to that chat.
+  try{
+    const present=new Set(conversations.map((n:any)=>n.id));
+    for(const asset of await store.assets.list()){
+      const session=asset.createdIn?.sessionId;if(typeof session!=="string")continue;
+      const conversationId="conversation-"+createHash("sha256").update("hub:"+session).digest("hex").slice(0,32);
+      if(present.has(conversationId))add(asset,conversationId,asset.createdIn.at??0);
+    }
+  }catch{}
+  return [...byAsset.values()].sort((a,b)=>b.at-a.at).slice(0,80).map(({at,...item})=>item);
+}
+
 /** Read and write the profile targets (USER.md, a character's instructions). */
 function profilePorts(characters:any){
   return {
@@ -270,7 +305,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
         if(view==="domain-preview"){send(res,200,await store.organization.domainPreview(query.get("id")??""));return;}
         if(view==="conversation"){const id=query.get("id")??"";await store.admission.assert({conversationId:id});send(res,200,await store.archive.read(id));return;}
         if(view==="instructions"){send(res,200,{provider:curator.settings.provider,model:curator.settings.model,reasoningEffort:curator.settings.reasoningEffort,path:join(store.root,"settings.json"),instructions:curator.settings.instructions,hash:digest(JSON.stringify(curator.settings)),builtIn:organizationPrompt({id:"preview",completedAt:Date.now(),channel:"pwa",content:"<Original conversation>"},[],curator.settings,await store.organization.domains())});return;}
-        if(view==="graph"){send(res,200,await store.graph());return;}
+        if(view==="graph"){const graph=await store.graph();send(res,200,{...graph,assets:await graphAssets(store,graph)});return;}
         if(view==="neighbors"){send(res,200,await store.neighbors(query.get("id")??"",query.get("cursor")??"",Number(query.get("limit")??30)));return;}
         if(view==="path"){send(res,200,await store.connectionPath(query.get("id")??"",query.get("target")??""));return;}
         if(view==="evidence"){send(res,200,await store.inspectEvidence(query.get("relation")??"",Number(query.get("index")??0)));return;}

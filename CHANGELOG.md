@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.10.28
+
+- Smart (Claude Code) no longer compacts the chat before nearly every reply. The CLI reports the sum of all model calls in a turn (about 700k tokens for a six-step turn on a 100k chat), which HUB read as a full context and compacted twice, about 60 s, before 13 of the last 33 Smart replies. Each step now reports its own call.
+- Smart gets every tool call of one answer at once (three web pages fetched together instead of one per round trip).
+- Every reply starts about 0.7 s sooner, with any model: the automatic note recall before each answer re-read and decoded all 34 MB of stored note vectors on every search (~0.75 s, past its own deadline, so its results were dropped). Vectors now stay in memory (a search takes ~0.1 s, recall ~0.4 s, same notes found), and the recall's three vault scans share one pass.
+- Models through OpenRouter (GLM 5.3 Flash, Fable) go to the model's fastest hosts instead of the cheapest: GLM was writing about 22 tokens a second with ~2.8 s before the first word; its fastest hosts write 120-200 a second. This costs a little more per token (about $2-3 a month at current use).
+- The chat list and Your work reuse the last listing until a chat changes, instead of listing every conversation (1.4 s) on each request.
+- Smart shows a finished paragraph at once instead of holding its last words until the next tool call.
+- Web guidance: a simple question is one search, then the best two or three pages read together, then the answer.
+- A tool that fails four times in a row, or is called 40 times in one turn, stops with a message instead of looping; hub_research explains what it needs when called without a question.
+- The Home knowledge graph lists pictures and files with the chats they came from.
+- Closing a browser tab no longer holds a turn up (it finishes in the background after 5 s).
+
 ## 1.10.27
 
 - hub_web_search: fast search without a browser (DuckDuckGo, then Bing); pages are read with web_fetch first. Camofox is used only when a fetch fails, a page needs clicking, or the user is watching the PC screen, and its window is visible only while they watch.

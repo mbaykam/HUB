@@ -4,6 +4,7 @@ import {join} from "node:path";
 import {knowledgeEmbeddingModel,knowledgeEmbeddingScript} from "./knowledge-embedding-runtime.ts";
 import type {KnowledgeSemanticHit,KnowledgeSimilarityCoverage} from "../knowledge-contract.ts";
 type Note={id:string;hash:string;title:string;body:string};
+const slim=(n:Note):Note=>({id:n.id,hash:n.hash,title:n.title,body:n.body});
 export class KnowledgeEmbeddings {
   private child?:ChildProcessWithoutNullStreams;private ready?:Promise<void>;private sequence=0;
   private pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void}>();
@@ -23,7 +24,8 @@ export class KnowledgeEmbeddings {
     await this.start();if(this.pending.size>=2)throw Error("Local semantic indexing is busy; lexical search remains available");const id=++this.sequence;
     return new Promise<T>((resolve,reject)=>{const timer=setTimeout(()=>{reject(Error("Embedding deadline; local indexing may still finish"));},15000);this.pending.set(id,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});this.child!.stdin.write(JSON.stringify({id,...payload as object})+"\n");});
   }
-  rank(query:string,notes:Note[],limit:number){return this.request<KnowledgeSemanticHit[]>({query,notes,limit});}
-  layout(notes:Note[]){return this.request<{edges:{source:string;target:string;score:number}[];coverage:KnowledgeSimilarityCoverage}>({op:"layout",notes:[...notes].sort((a,b)=>a.id.localeCompare(b.id)).slice(0,1500),total:notes.length});}
+  // Only what the index needs crosses to Python: stored notes also carry their raw file and path.
+  rank(query:string,notes:Note[],limit:number){return this.request<KnowledgeSemanticHit[]>({query,notes:notes.map(slim),limit});}
+  layout(notes:Note[]){return this.request<{edges:{source:string;target:string;score:number}[];coverage:KnowledgeSimilarityCoverage}>({op:"layout",notes:[...notes].sort((a,b)=>a.id.localeCompare(b.id)).slice(0,1500).map(slim),total:notes.length});}
   dispose(){this.child?.kill();}
 }
