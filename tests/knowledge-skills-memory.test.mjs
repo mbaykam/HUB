@@ -14,7 +14,7 @@ const input={name:'check-a-source',title:'Check a source',description:'Verify a 
 
 test('skills survive restart as readable vault records, with a domain and stale edit protection',async t=>{
   const {root,store,skills}=await fixture(t),saved=await skills.save(input),registry=await store.organization.domains();
-  assert.equal(registry.maxActiveDomains,7);assert.equal(registry.domains.length,1);assert.equal(registry.domains[0].title,'Skills');
+  assert.equal(registry.maxActiveDomains,10);assert.equal(registry.domains.length,1);assert.equal(registry.domains[0].title,'Skills');
   assert.ok(registry.memberships.some(m=>m.nodeId===saved.id&&m.domainId===registry.domains[0].id));
   assert.equal((await store.note(saved.id)).content,input.content+'\n');
   assert.ok((await store.search('Verify a source')).some(n=>n.id===saved.id));

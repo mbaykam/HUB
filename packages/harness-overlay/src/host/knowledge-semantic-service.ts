@@ -26,6 +26,8 @@ export class KnowledgeEmbeddings {
   }
   // Only what the index needs crosses to Python: stored notes also carry their raw file and path.
   rank(query:string,notes:Note[],limit:number){return this.request<KnowledgeSemanticHit[]>({query,notes:notes.map(slim),limit});}
+  /** Domain centers, typical notes, nearest domain of unfiled notes and groups of unfiled notes. */
+  digest(notes:Note[],groups:Record<string,string[]>,threshold=0.6){return this.request<{domains:Record<string,{typical:string[];coherence:number}>;nearest:Record<string,{domain:string|null;score:number}>;clusters:string[][]}>({op:"digest",notes:notes.slice(0,3000).map(slim),groups,threshold});}
   layout(notes:Note[]){return this.request<{edges:{source:string;target:string;score:number}[];coverage:KnowledgeSimilarityCoverage}>({op:"layout",notes:[...notes].sort((a,b)=>a.id.localeCompare(b.id)).slice(0,1500).map(slim),total:notes.length});}
   dispose(){this.child?.kill();}
 }

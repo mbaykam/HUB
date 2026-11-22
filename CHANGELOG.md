@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.32
+
+- Library review: Knowledge AI looks at the whole library, not one chat at a time, and keeps it in order: a few broad main domains (up to 10), specific topics as subdomains, every note filed, domains renamed when what they hold changes. The local embedding model summarizes the library first (typical and newest notes per domain, groups of unfiled notes with their nearest domain), so a review reads about 4-5k tokens whatever the library's size. The first plan waits for the user's approval on the phone; later reviews apply directly and stay undoable in the domain history.
+- Chats and the user's own notes (My Notes) are their own sections in Knowledge, apart from the knowledge domains.
+- Automatic recall also offers the user's own notes that share words with the message (read-only).
+
 ## 1.10.31
 
 - Notes: your own notes in HUB, apart from Knowledge. Each note is a Markdown file in Documents\HUB Notes, folders are folders, deleted notes stay in Recently Deleted for 30 days, and every change keeps the earlier version. The iPhone app reads and writes them (and works offline); an edit made on an older version is kept as a second note instead of overwriting.

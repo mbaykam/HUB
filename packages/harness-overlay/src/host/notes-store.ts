@@ -154,6 +154,16 @@ export class NotesStore {
     return hits.sort((a,b)=>b.score-a.score||b.note.updatedAt-a.note.updatedAt).slice(0,limit).map(h=>h.note);
   }
 
+  /** Notes that share words with a message, for automatic recall: words of
+   * four letters or more, title matches count triple, at least two hits. */
+  async related(text:string,limit=2){
+    const words=[...new Set(text.toLocaleLowerCase("tr").match(/[\p{L}\p{N}]{4,}/gu)??[])].slice(0,40);if(!words.length)return [];
+    const hits:{note:Note;score:number}[]=[];
+    for(const [id,{path,folder}] of await this.files()){try{const note=await this.load(id,path,folder),title=note.title.toLocaleLowerCase("tr"),body=note.body.toLocaleLowerCase("tr");
+      const score=words.reduce((s,w)=>s+(title.includes(w)?3:body.includes(w)?1:0),0);if(score>=2)hits.push({note,score});}catch{}}
+    return hits.sort((a,b)=>b.score-a.score||b.note.updatedAt-a.note.updatedAt).slice(0,limit).map(h=>h.note);
+  }
+
   async putAttachment(data:Buffer,extension:string){
     const ext=extension.toLowerCase().replace(/^\./,"");if(!/^(png|jpe?g|heic|gif|webp|pdf|m4a|mp3|wav|drawing)$/.test(ext))throw Error("This kind of file cannot be attached to a note.");
     if(!data.length||data.length>40_000_000)throw Error("Attachments can be up to 40 MB.");

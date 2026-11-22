@@ -53,6 +53,36 @@ for line in sys.stdin:
     entry={'chunks':[{k:v for k,v in c.items() if k!='text'} for c in chunks],'vectors':values}
     db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(n['id'],version,json.dumps(entry)));db.commit()
    vectors.append((n['id'],)+loaded(n['id'],version,entry))
+  if r.get('op')=='digest':
+   # The whole library in a few numbers, computed here for free: each domain's
+   # most typical notes and how tightly they belong together, the nearest
+   # domain of every unfiled note, and groups of unfiled notes about the same thing.
+   groups=r.get('groups',{});threshold=float(r.get('threshold',0.6));centers={}
+   for note_id,chunks,matrix,norms in vectors:
+    v=matrix.mean(axis=0);centers[note_id]=v/(np.linalg.norm(v)+1e-9)
+   members={}
+   for note_id,ids in groups.items():
+    if note_id in centers:
+     for d in ids:members.setdefault(d,[]).append(note_id)
+   domains={};dcenter={}
+   for d,ids in members.items():
+    m=np.asarray([centers[i] for i in ids]);c=m.mean(axis=0);c=c/(np.linalg.norm(c)+1e-9);dcenter[d]=c
+    sims=m@c;order=np.argsort(-sims)
+    domains[d]={'typical':[ids[int(k)] for k in order[:5]],'coherence':round(float(sims.mean()),3)}
+   loose=[i for i in centers if i not in groups];nearest={}
+   for i in loose:
+    best=None;score=-1.0
+    for d,c in dcenter.items():
+     s=float(centers[i]@c)
+     if s>score:best=d;score=s
+    nearest[i]={'domain':best,'score':round(score,3)}
+   clusters=[];left=list(loose)
+   while left:
+    seed=left.pop(0);group=[seed]
+    for j in list(left):
+     if float(centers[seed]@centers[j])>=threshold:group.append(j);left.remove(j)
+    clusters.append(group)
+   print(json.dumps({'id':r['id'],'scores':{'domains':domains,'nearest':nearest,'clusters':clusters}}),flush=True);continue
   if layout:
    centers=[]
    for note_id,chunks,matrix,norms in vectors:

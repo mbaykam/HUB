@@ -16,6 +16,7 @@ import {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 import {withKnowledgeAssetExcerpts} from "./knowledge-assets.ts";
 import {isArchivedConversation} from "../knowledge-record-scope.ts";
 import {parseStewardPlan,stewardDue,stewardPrompt,stewardSnapshot,type StewardReview} from "./knowledge-steward.ts";
+import {describeLibraryPlan,libraryDue,libraryPrompt,librarySnapshot,parseLibraryPlan,type LibraryPlan,type LibraryState} from "./knowledge-library.ts";
 export {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limits?:{maxTokens:number})=>Promise<string>;
@@ -194,6 +195,57 @@ export class KnowledgeCurator {
   tick(force=false){if(this.restoredWork?.state==="needs-review"){this.status="restored-work-paused";return;}if(this.running||!this.settings.enabled||this.settings.mode==="manual"&&!force||this.lifetime.signal.aborted)return;const release=this.admit?.();if(this.admit&&!release)return;this.running=this.run(force).catch(()=>{this.status="needs-attention";}).finally(()=>{release?.();this.running=undefined;});return this.running;}
   /** Saved domain reviews, newest last. */
   async domainReviews():Promise<StewardReview[]>{try{const value=JSON.parse(await readFile(join(this.store.root,"domain-reviews.json"),"utf8"));return Array.isArray(value.reviews)?value.reviews:[];}catch(e:any){if(e.code!=="ENOENT")throw e;return [];}}
+  private libraryFile(){return join(this.store.root,"library.json");}
+  /** The library review's state: whether its first plan was approved, the plan waiting for approval, recent runs. */
+  async library():Promise<LibraryState>{try{const value=JSON.parse(await readFile(this.libraryFile(),"utf8"));return {history:[],...value};}catch(e:any){if(e.code!=="ENOENT")throw e;return {history:[]};}}
+  private async saveLibrary(state:LibraryState){state.history=state.history.slice(-20);await atomicJson(this.libraryFile(),state);}
+  /** When the queue is empty: look at the whole library and keep it in order.
+   * The first plan waits for the user's approval; later ones apply directly
+   * and stay undoable in the domain history. */
+  private async reviewLibraryIfDue(){
+    const settings={...this.settings};
+    if(!settings.enabled||settings.mode!=="automatic"||this.lifetime.signal.aborted)return;
+    const library=await this.library(),state=await this.store.organization.domains();
+    const notes=(await this.store.scan()).filter(n=>!isArchivedConversation(n)&&n.kind!=="conversation"&&n.body.trim());
+    const live=new Set(state.domains.filter(d=>d.status!=="merged").map(d=>d.id));
+    const filed=new Set(state.memberships.filter(m=>live.has(m.domainId)).map(m=>m.nodeId)),unfiled=notes.filter(n=>!filed.has(n.id)).length;
+    const organized=[...this.jobs.values()].filter(j=>j.outcome==="organized"&&(j.finishedAt??j.updatedAt)>(library.lastRunAt??0)).length;
+    if(!libraryDue(library,{notes:notes.length,unfiled,organizedSince:organized}))return;
+    if(await this.gate?.reason(settings.provider))return;
+    const groups:Record<string,string[]>={};for(const m of state.memberships)if(live.has(m.domainId))(groups[m.nodeId]??=[]).push(m.domainId);
+    const digest=await this.store.digest?.(notes,groups).catch(()=>undefined);
+    const list=notes.map(n=>({id:n.id,title:n.title,modifiedAt:n.modifiedAt}));
+    const {snapshot,keys}=librarySnapshot(state,list,digest);
+    const prompt=libraryPrompt(snapshot,settings.language,library.lastError);
+    const reserve=((Buffer.byteLength(prompt)+4000)*settings.inputPrice+6000*settings.outputPrice)/1e6;
+    if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget)return;
+    this.costs[day()]=(this.costs[day()]??0)+reserve;await atomicJson(join(this.store.root,"costs.json"),this.costs);
+    library.lastRunAt=Date.now();
+    const plan:LibraryPlan={id:randomUUID(),at:Date.now(),note:"",operations:[],changes:[],basedOnRevision:state.revision,status:library.approvedAt?"applied":"proposed"};
+    try{
+      const text=await this.generate(prompt,settings,this.lifetime.signal,{maxTokens:8000});
+      const parsed=parseLibraryPlan(text,state,keys);plan.note=parsed.note;plan.operations=parsed.operations;plan.changes=describeLibraryPlan(parsed.operations,state,list);
+      if(!parsed.operations.length){plan.status="applied";library.lastError=undefined;}
+      else if(library.approvedAt){await this.store.organization.stewardDomains(state.revision,parsed.operations,plan.id);library.lastError=undefined;}
+      else library.plan=plan;
+    }catch(e:any){plan.status="failed";plan.error=redactKnowledgeSecrets(String(e?.message??e)).slice(0,300);library.lastError=plan.error;}
+    if(plan.status!=="proposed")library.history.push(plan);
+    await this.saveLibrary(library);
+  }
+  /** The user's answer to the plan waiting for approval. Approving also lets
+   * later library reviews apply their changes directly. */
+  async decideLibrary(id:string,approve:boolean){
+    const library=await this.library(),plan=library.plan;
+    if(!plan||plan.id!==id||plan.status!=="proposed")throw Error("This plan is no longer waiting for approval");
+    library.plan=undefined;
+    if(approve){
+      library.approvedAt=Date.now();
+      try{const state=await this.store.organization.domains();await this.store.organization.stewardDomains(state.revision,plan.operations,plan.id);plan.status="applied";library.lastError=undefined;}
+      catch(e:any){plan.status="failed";plan.error=redactKnowledgeSecrets(String(e?.message??e)).slice(0,300);library.lastError=plan.error;library.lastRunAt=undefined;}
+    }else{plan.status="rejected";library.lastRunAt=Date.now();}
+    library.history.push(plan);await this.saveLibrary(library);this.tick();
+    return plan;
+  }
   /** After the queue is empty, at most about once a day and only when new notes were filed, tidy the domains. */
   private async reviewDomainsIfDue(){
     const settings={...this.settings};
@@ -227,7 +279,7 @@ export class KnowledgeCurator {
     const family=(j:KnowledgeJob)=>j.source.id.split("-turn-")[0]!;
     const latest=new Map<string,number>();for(const j of this.jobs.values())latest.set(family(j),Math.max(latest.get(family(j))??0,j.queuedAt??j.updatedAt));
     const job=[...this.jobs.values()].filter(j=>j.status==="queued" && (force||Date.now()-(latest.get(family(j))??j.updatedAt)>=this.settings.idleSeconds*1000)).sort((a,b)=>a.source.completedAt-b.source.completedAt)[0];
-    if(!job){await this.reviewDomainsIfDue().catch(()=>undefined);return;}const settings={...this.settings};
+    if(!job){await this.reviewLibraryIfDue().catch(()=>undefined);return;}const settings={...this.settings};
     if(!await this.store.admission.allows(job.source)){job.status="done";job.outcome="skipped";job.reason="Source admission was withdrawn or replaced; no model call made.";job.updatedAt=Date.now();await this.saveJob(job);return;}
     if(job.pass){const current=(await this.store.scan()).find(n=>n.id===job.source.conversationId);if(!current||digest(current.body)!==job.pass.sourceHash){job.status="failed";job.reason="Selected source changed; queue a fresh pass after reading it.";job.error={phase:"source validation",code:"KNOWLEDGE_SOURCE_CHANGED",message:job.reason};job.updatedAt=Date.now();await this.saveJob(job);this.status="needs-attention";return;}}
     if(this.blockedRoute?.key===this.routeKey()){this.status=this.blockedRoute.quota?"waiting-credit":"model-unavailable";return;}

@@ -54,6 +54,8 @@ export class KnowledgeStore {
   readonly mutations=new KnowledgeMutationGate();
   rank?: (query:string,notes:Stored[],limit:number)=>Promise<KnowledgeSemanticHit[]>;
   similarities?:(notes:Stored[])=>Promise<NonNullable<KnowledgeGraph["similarities"]>|SemanticLayout>;
+  /** The whole library in numbers from the local embeddings (see knowledge-library.ts). */
+  digest?:(notes:Stored[],groups:Record<string,string[]>)=>Promise<import("./knowledge-library.ts").LibraryDigest>;
   private topicCache?:{key:string;at:number;retryable:boolean;value:Promise<SemanticLayout>};
   private readonly lexicalIndex=new KnowledgeLexicalIndex();
   private communityIndex?:KnowledgeCommunities;

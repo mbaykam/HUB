@@ -77,3 +77,14 @@ test('the phone API needs its header; the assistant can find, read and change no
  }finally{off();await rm(root,{recursive:true,force:true});}
  assert.equal(tools.size,0);assert.equal(routes.size,0);
 });
+
+test('recall finds the user notes that share real words with a message',async()=>{
+ const root=await temp();const store=new NotesStore(root);
+ try{
+  await store.save({body:'Noodle tedarikçileri\nIndomie ve Nissin fiyatları, toptan alım'});
+  await store.save({body:'Market\n- [ ] süt'});
+  const found=await store.related('Noodle standı için tedarikçi fiyatları ne kadar?');
+  assert.equal(found.length,1);assert.equal(found[0].title,'Noodle tedarikçileri');
+  assert.deepEqual(await store.related('ok'),[],'short words alone find nothing');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
