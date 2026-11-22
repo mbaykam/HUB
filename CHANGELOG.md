@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.31
+
+- Notes: your own notes in HUB, apart from Knowledge. Each note is a Markdown file in Documents\HUB Notes, folders are folders, deleted notes stay in Recently Deleted for 30 days, and every change keeps the earlier version. The iPhone app reads and writes them (and works offline); an edit made on an older version is kept as a second note instead of overwriting.
+- The assistant can find and read your notes (hub_notes_find, hub_note_read) and creates or changes one only when you ask (hub_note_write); its change can be undone from the note's history. Voice can use them too.
+
 ## 1.10.30
 
 - When Smart's Claude subscription reaches its limit (for example the 5-hour window), the fast model answers the message instead of the chat showing an error, and says Smart is back at the reset time. Claude Code is not started again until then.
