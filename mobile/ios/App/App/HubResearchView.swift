@@ -8,6 +8,7 @@ struct HubResearchView: View {
     let api: HubConversationAPI
     let didStart: (String) -> Void
     let openChat: (HubConversationChoice) -> Void
+    var pushed = false
     @Environment(\.dismiss) private var dismiss
     @State private var draft: HubResearchDraft
     @State private var requestID = UUID()
@@ -19,7 +20,8 @@ struct HubResearchView: View {
     @State private var confirmStop = false
 
     init(sessionID: String, api: HubConversationAPI, question: String, showJobs: Bool,
-         didStart: @escaping (String) -> Void, openChat: @escaping (HubConversationChoice) -> Void) {
+         didStart: @escaping (String) -> Void, openChat: @escaping (HubConversationChoice) -> Void, pushed: Bool = false) {
+        self.pushed = pushed
         self.sessionID = sessionID
         self.api = api
         self.didStart = didStart
@@ -29,7 +31,7 @@ struct HubResearchView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if let error { Text(error).foregroundStyle(.secondary) }
@@ -50,10 +52,9 @@ struct HubResearchView: View {
             .navigationTitle(job != nil ? "Research progress" : (showJobs ? "Research tasks" : "Research"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { dismiss() }.disabled(busy) } }
             }
         }
-        .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy)
         .task { await loadCatalog() }
         .onChange(of: draft) { _ in requestID = UUID() }

@@ -3,6 +3,7 @@ import UIKit
 import HubNative
 import UniformTypeIdentifiers
 import PhotosUI
+import AVFoundation
 import ImageIO
 
 struct HubChatAttachmentContext {
@@ -214,9 +215,9 @@ struct HubLiveChatView: View {
             }
             speedSentAt = nil; speedFirstAt = nil
         }
-        .sheet(isPresented: $speedOpen) { HubModelSpeedView() }
-        .sheet(isPresented: $helpersOpen) {
-            HubHelpersSheet(api: api, helpers: helpers, opened: openHelper, stop: stopHelper)
+        .hubPage(isPresented: $speedOpen) { pushed in HubModelSpeedView(pushed: pushed) }
+        .hubPage(isPresented: $helpersOpen) { pushed in
+            HubHelpersSheet(api: api, helpers: helpers, opened: openHelper, stop: stopHelper, pushed: pushed)
         }
         .task(id: ScreenshotLoad(sequence: snapshot?.latestScreenshotSequence, retry: screenshotRetry)) {
             await loadScreenshots()
@@ -244,8 +245,9 @@ struct HubLiveChatView: View {
         .sheet(isPresented: $photoPickerOpen) {
             HubChatPhotoPicker { result in
                 switch result {
-                case .success(let data): Task { await stagePhoto(data) }
-                case .failure: error = "Could not add this photo."
+                case .success(.photo(let data)): Task { await stagePhoto(data) }
+                case .success(.video(let url)): Task { await stageVideo(url) }
+                case .failure: error = "Could not add this photo or video."
                 }
             }
         }
@@ -254,16 +256,15 @@ struct HubLiveChatView: View {
                 character = name
             }
         }
-        .sheet(isPresented: $instructionsOpen) {
-            NavigationView {
+        .hubPage(isPresented: $instructionsOpen) { pushed in
+            HubNavigation(pushed: pushed) {
                 HubInstructionsView(api: api, sessionID: chat.sessionId)
                     .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Done") { instructionsOpen = false } }
+                        ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { instructionsOpen = false } } }
                     }
             }
-            .navigationViewStyle(.stack)
         }
-        .sheet(isPresented: $appsOpen) { HubConversationAppsView(api: api, sessionID: chat.sessionId) }
+        .hubPage(isPresented: $appsOpen) { pushed in HubConversationAppsView(api: api, sessionID: chat.sessionId, pushed: pushed) }
         .sheet(isPresented: $commandsOpen, onDismiss: {
             if focusAfterCommandPick {
                 focusAfterCommandPick = false
@@ -320,12 +321,12 @@ struct HubLiveChatView: View {
             .navigationViewStyle(.stack)
             .interactiveDismissDisabled(queueBusy)
         }
-        .sheet(item: $researchMode) { mode in
+        .hubPage(item: $researchMode) { mode, pushed in
             HubResearchView(sessionID: chat.sessionId, api: api, question: draft, showJobs: mode == .jobs,
                             didStart: { question in
                                 if draft.trimmingCharacters(in: .whitespacesAndNewlines) ==
                                     question.trimmingCharacters(in: .whitespacesAndNewlines) { draft = "" }
-                            }, openChat: openChat)
+                            }, openChat: openChat, pushed: pushed)
         }
         .foregroundStyle(.primary)
         .tint(accent)
@@ -1459,6 +1460,26 @@ struct HubLiveChatView: View {
         }
     }
 
+    /// A video from Photos, made small enough to send (the assistant watches it on the PC).
+    private func stageVideo(_ source: URL) async {
+        guard !attachmentBusy, !sending, fileDrafts.count < 8, let context = attachments() else { return }
+        attachmentBusy = true
+        defer {
+            attachmentBusy = false
+            try? FileManager.default.removeItem(at: source)
+        }
+        do {
+            let (video, shortened) = try await HubChatPhotoPicker.compressVideo(source)
+            defer { try? FileManager.default.removeItem(at: video) }
+            let file = try await context.store.stage(source: video, server: context.server,
+                                                     sessionID: chat.sessionId, callID: "text-composer")
+            fileDrafts.append(file)
+            error = shortened ? "This video is long, so only its beginning fits (25 MB). Send a shorter clip for the rest." : nil
+        } catch {
+            self.error = "Could not prepare this video. Try a shorter clip."
+        }
+    }
+
     private func stagePhoto(_ data: Data) async {
         guard !attachmentBusy, !sending, fileDrafts.count < 8, let context = attachments() else { return }
         attachmentBusy = true
@@ -2354,12 +2375,40 @@ private struct HubShareSheet: UIViewControllerRepresentable {
 
 @MainActor
 private struct HubChatPhotoPicker: UIViewControllerRepresentable {
-    let completion: (Result<Data, Error>) -> Void
+    enum Picked {
+        case photo(Data)
+        /// A private copy in the temporary folder; the receiver removes it.
+        case video(URL)
+    }
+
+    let completion: (Result<Picked, Error>) -> Void
     @Environment(\.dismiss) private var dismiss
+
+    /// Re-encodes a video at medium quality as MP4, at most 24 MB (longer
+    /// videos keep their beginning). Returns the file and whether it was cut.
+    nonisolated static func compressVideo(_ source: URL) async throws -> (URL, Bool) {
+        let asset = AVURLAsset(url: source)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetMediumQuality) else { throw HubAttachmentError.invalidFile }
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("Video-\(UUID().uuidString.prefix(8)).mp4")
+        export.outputURL = output
+        export.outputFileType = .mp4
+        export.shouldOptimizeForNetworkUse = true
+        export.fileLengthLimit = 24_000_000
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { done.resume() }
+        }
+        guard export.status == .completed else {
+            try? FileManager.default.removeItem(at: output)
+            throw HubAttachmentError.invalidFile
+        }
+        let full = CMTimeGetSeconds(asset.duration)
+        let kept = CMTimeGetSeconds(AVURLAsset(url: output).duration)
+        return (output, full.isFinite && kept.isFinite && kept + 1 < full)
+    }
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
-        configuration.filter = .images
+        configuration.filter = .any(of: [.images, .videos])
         configuration.selectionLimit = 1
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = context.coordinator
@@ -2374,9 +2423,9 @@ private struct HubChatPhotoPicker: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
         let dismiss: () -> Void
-        let completion: (Result<Data, Error>) -> Void
+        let completion: (Result<Picked, Error>) -> Void
 
-        init(dismiss: @escaping () -> Void, completion: @escaping (Result<Data, Error>) -> Void) {
+        init(dismiss: @escaping () -> Void, completion: @escaping (Result<Picked, Error>) -> Void) {
             self.dismiss = dismiss
             self.completion = completion
         }
@@ -2385,6 +2434,20 @@ private struct HubChatPhotoPicker: UIViewControllerRepresentable {
             dismiss()
             guard let provider = results.first?.itemProvider else { return }
             let completion = completion
+            if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+                provider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { url, _ in
+                    // The system deletes its copy when this returns: keep our own.
+                    let result = Result<Picked, Error> {
+                        guard let url else { throw HubAttachmentError.invalidFile }
+                        let copy = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("Picked-\(UUID().uuidString.prefix(8)).\(url.pathExtension.isEmpty ? "mov" : url.pathExtension)")
+                        try FileManager.default.copyItem(at: url, to: copy)
+                        return .video(copy)
+                    }
+                    DispatchQueue.main.async { completion(result) }
+                }
+                return
+            }
             provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, _ in
                 let result = Result {
                     guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -2398,7 +2461,7 @@ private struct HubChatPhotoPicker: UIViewControllerRepresentable {
                     else { throw HubAttachmentError.invalidFile }
                     CGImageDestinationAddImage(encoder, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
                     guard CGImageDestinationFinalize(encoder) else { throw HubAttachmentError.invalidFile }
-                    return data as Data
+                    return Picked.photo(data as Data)
                 }
                 DispatchQueue.main.async { completion(result) }
             }
@@ -2907,11 +2970,12 @@ struct HubHelpersSheet: View {
     let helpers: [HubHomeWork.Helper]
     var opened: HubHomeWork.Helper?
     let stop: (HubHomeWork.Helper) async -> Void
+    var pushed = false
     @Environment(\.dismiss) private var dismiss
     @State private var selection: String?
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             List {
                 if helpers.isEmpty { Text("This chat has not started any helpers.").foregroundStyle(.secondary) }
                 ForEach(helpers) { helper in
@@ -2931,10 +2995,9 @@ struct HubHelpersSheet: View {
             }
             .navigationTitle("Helpers")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { if !pushed { Button("Done") { dismiss() } } } }
             .onAppear { if selection == nil { selection = opened?.id } }
         }
-        .navigationViewStyle(.stack)
     }
 }
 
@@ -3049,9 +3112,10 @@ struct HubMailDraftCard: View {
 struct HubModelSpeedView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var speed = HubModelSpeed.load()
+    var pushed = false
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubList {
                 let summaries = speed.summaries
                 if summaries.isEmpty {
@@ -3082,9 +3146,8 @@ struct HubModelSpeedView: View {
             }
             .navigationTitle("Model speed")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { if !pushed { Button("Done") { dismiss() } } } }
         }
-        .navigationViewStyle(.stack)
     }
 }
 /// HUB asked to see the user's screen or camera. iOS lets only the user start

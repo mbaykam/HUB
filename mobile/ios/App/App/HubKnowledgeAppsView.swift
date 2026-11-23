@@ -242,6 +242,7 @@ private struct HubShareLinkSheet: UIViewControllerRepresentable {
 struct HubAppsView: View {
     let api: HubConversationAPI
     var webPage: URL?
+    var pushed = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var snapshot: HubAppsSnapshot?
@@ -261,7 +262,7 @@ struct HubAppsView: View {
     private static let durations: [(hours: Int, label: LocalizedStringKey)] = [(1, "1 hour"), (24, "1 day"), (168, "1 week"), (720, "30 days")]
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     if let notice {
@@ -309,7 +310,7 @@ struct HubAppsView: View {
             .navigationTitle("Apps")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { dismiss() } } }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         if let webPage { Button { openURL(webPage) } label: { Label("Open in browser", systemImage: "safari") } }
@@ -319,7 +320,6 @@ struct HubAppsView: View {
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .task { await load() }
         .fullScreenCover(item: $running) { HubAppRunner(run: $0) }
         .sheet(item: Binding(get: { sharing.map { IdentifiedURL(url: $0) } }, set: { sharing = $0?.url })) { HubShareLinkSheet(url: $0.url) }

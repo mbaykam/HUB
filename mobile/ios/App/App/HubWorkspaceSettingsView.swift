@@ -4,18 +4,28 @@ import HubNative
 @MainActor
 struct HubWorkspaceSettingsView: View {
     let api: HubConversationAPI?
+    var pushed = false
     let preferencesChanged: (HubChatPreferences) -> Void
     let iPhoneSettings: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(HubAssistantName.key) private var assistantName = "HUB"
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubList {
                 NavigationLink(destination: HubThemeSettingsView(api: api, changed: preferencesChanged)) {
                     Label("Theme", systemImage: "paintpalette")
                 }
                 .accessibilityIdentifier("hub.settings.theme")
                 if let api {
+                    NavigationLink(destination: HubAssistantNameView(api: api)) {
+                        HStack {
+                            Label("Assistant", systemImage: "person.crop.circle")
+                            Spacer()
+                            Text(assistantName).foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("hub.settings.assistant")
                     NavigationLink(destination: HubGeneralSettingsView(api: api, changed: preferencesChanged)) {
                         Label("General", systemImage: "slider.horizontal.3")
                     }
@@ -69,10 +79,9 @@ struct HubWorkspaceSettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { dismiss() } } }
             }
         }
-        .navigationViewStyle(.stack)
     }
 }
 
@@ -818,7 +827,7 @@ private struct HubKnowledgeSettingsView: View {
                 number("Monthly budget (USD)", key: \.monthlyBudget, fallback: draft.monthlyBudget)
                 number("Input price per 1M tokens", key: \.inputPrice, fallback: draft.inputPrice)
                 number("Output price per 1M tokens", key: \.outputPrice, fallback: draft.outputPrice)
-                NavigationLink("Knowledge AI Activity", destination: HubKnowledgeActivityView(api: api))
+                NavigationLink("Knowledge AI Activity", destination: HubKnowledgeActivityView(api: api, pushed: true))
                 if let recalls = status.recalls {
                     NavigationLink("Notes recalled in chats", destination: HubKnowledgeRecallsView(api: api, records: recalls))
                 }
@@ -1620,6 +1629,84 @@ struct HubThemeSettingsView: View {
             defer { busy = false }
             do { let value = try await api.updateChatPreferences(change, from: preferences); self.preferences = value; changed(value); error = nil }
             catch { self.error = "Could not save this on HUB. Try again." }
+        }
+    }
+}
+
+
+/// Settings → Assistant: the assistant's own name. HUB stays the name of the
+/// app and the PC system; the assistant answers to this name everywhere.
+struct HubAssistantNameView: View {
+    let api: HubConversationAPI
+    @AppStorage(HubAssistantName.key) private var storedName = "HUB"
+    @State private var settings: HubCharacterSettings?
+    @State private var draft = ""
+    @State private var saving = false
+    @State private var message: String?
+    @State private var failed = false
+
+    private var currentName: String? {
+        guard let settings else { return nil }
+        return settings.characters.first { $0.id == settings.mainId }?.name
+    }
+
+    private var trimmed: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        HubForm {
+            Section {
+                TextField("Name", text: $draft)
+                    .textInputAutocapitalization(.words)
+                    .disableAutocorrection(true)
+                    .submitLabel(.done)
+                    .onSubmit { Task { await save() } }
+                    .accessibilityIdentifier("hub.settings.assistant.name")
+            } header: { Text("Name") } footer: {
+                Text("Your assistant introduces itself with this name in chats, voice and Telegram. HUB remains the name of the app and the PC system.")
+            }
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    if saving { ProgressView() } else { Text("Save name") }
+                }
+                .disabled(saving || settings == nil || trimmed.isEmpty || trimmed.count > 60 || trimmed == currentName)
+            }
+            if let message { Section { Text(message).font(.footnote).foregroundStyle(failed ? .red : .secondary) } }
+        }
+        .navigationTitle("Assistant")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            let value = try await api.characterSettings()
+            settings = value
+            if let name = value.characters.first(where: { $0.id == value.mainId })?.name {
+                if draft.isEmpty { draft = name }
+                storedName = name
+            }
+            failed = false
+        } catch {
+            failed = true
+            message = "Could not load the assistant's name. Check that HUB is online."
+        }
+    }
+
+    private func save() async {
+        guard let settings, !saving, !trimmed.isEmpty, trimmed != currentName else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            let value = try await api.renameAssistant(trimmed, revision: settings.revision)
+            self.settings = value
+            storedName = trimmed
+            failed = false
+            message = "Saved. New chats and replies use \(trimmed)."
+        } catch {
+            failed = true
+            message = "Could not save the name. Another screen may have changed the settings; go back and open this page again."
         }
     }
 }

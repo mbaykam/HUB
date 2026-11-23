@@ -331,6 +331,14 @@ struct HubHomeView: View {
     @AppStorage("hub.home.dayCollapsed") private var dayCollapsed = false
     @AppStorage("hub.home.workCollapsed") private var workCollapsed = false
     @AppStorage("hub.home.notesCollapsed") private var notesCollapsed = false
+    @AppStorage("hub.home.briefingCollapsed") private var briefingCollapsed = false
+    /// Card order on Home, as "notes,day,briefing,work".
+    @AppStorage("hub.home.order") private var widgetOrder = ""
+    @State private var draggingWidget: HomeWidget?
+    /// The knowledge graph has the screen; the cards are hidden.
+    @State private var graphMode = false
+    @State private var briefingTopicsOpen = false
+    @StateObject private var briefing = HubBriefingModel()
     @State private var keyboardShownAt = Date.distantPast
     @State private var panelDrag: CGFloat = 0
     @StateObject private var dictation = HubDictation()
@@ -461,7 +469,26 @@ struct HubHomeView: View {
     /// modifier chain its SwiftUI type nests so deeply that resolving it at
     /// launch overflowed the iPhone's 1 MB main-thread stack (build 13).
     private var mainLayers: some View {
-        presentationsAndListeners(sheets(AnyView(callLayers)))
+        // Pages slide in from the right over Home or a chat; the call bar
+        // stays at the bottom of every page.
+        HubNavigationRoot { presentationsAndListeners(sheets(AnyView(callLayers))) }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let call = model.voiceCall {
+                    HubVoiceCallBar(call: call, inThisChat: call.sessionID != nil && call.sessionID == selectedChat?.request.choice.sessionId) { control in
+                        composerFocused = false
+                        todoFocused = false
+                        voiceControl(control)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: model.voiceCall == nil)
+    }
+
+    /// A page is open over Home or the chat (the side panels stay closed then).
+    private var pageOpen: Bool {
+        knowledgeOpen || tasksOpen || plannerOpen || usageOpen || settingsOpen || knowledgeActivityOpen ||
+            knowledgeAppsOpen || notesOpen != nil || libraryPlanOpen != nil || projectToEdit != nil || briefingTopicsOpen
     }
 
     private var callLayers: some View {
@@ -486,17 +513,6 @@ struct HubHomeView: View {
                     .background(HubChatPalette.background.ignoresSafeArea())
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let call = model.voiceCall {
-                HubVoiceCallBar(call: call, inThisChat: call.sessionID != nil && call.sessionID == selectedChat?.request.choice.sessionId) { control in
-                    composerFocused = false
-                    todoFocused = false
-                    voiceControl(control)
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: model.voiceCall == nil)
         .foregroundStyle(.primary)
         .tint(accent)
         .hubBackdrop()
@@ -508,43 +524,50 @@ struct HubHomeView: View {
 
     private func sheets(_ content: AnyView) -> AnyView {
         AnyView(content
-        .sheet(isPresented: $knowledgeOpen, onDismiss: {
+        .hubPage(isPresented: $knowledgeOpen) { pushed in knowledgeScreen(pushed: pushed) }
+        .onChange(of: knowledgeOpen) { open in
+            guard !open else { return }
             clearKnowledgeSelection()
             knowledgeLocalCenter = nil
             knowledgeFocusedDomain = nil
-        }) { knowledgeScreen }
-        .sheet(isPresented: $tasksOpen) {
-            if let api = chatAPI() { HubScheduleView(api: api, load: readTasks, openChat: showChat) }
         }
-        .sheet(isPresented: $plannerOpen) {
+        .hubPage(isPresented: $tasksOpen) { pushed in
+            if let api = chatAPI() { HubScheduleView(api: api, pushed: pushed, load: readTasks, openChat: showChat) }
+        }
+        .hubPage(isPresented: $plannerOpen) { pushed in
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Your day").font(.title2.bold())
-                    Spacer()
-                    Button("Done") { plannerOpen = false }.hubGlassButton()
+                if !pushed {
+                    HStack {
+                        Text("Your day").font(.title2.bold())
+                        Spacer()
+                        Button("Done") { plannerOpen = false }.hubGlassButton()
+                    }
                 }
                 ScrollView {
                     if let planner = model.planner { personalPlanner(planner) }
                     else { connectionRow }
                 }
             }
-            .padding(18)
+            .padding(.horizontal, 18)
+            .padding(.vertical, pushed ? 0 : 18)
             .foregroundStyle(.primary)
             .hubBackdrop()
+            .navigationTitle("Your day")
             .sheet(item: $plannerEditor, content: plannerEditorView)
         }
         .sheet(item: Binding(get: { plannerOpen ? nil : plannerEditor }, set: { plannerEditor = $0 }), content: plannerEditorView)
-        .sheet(isPresented: $usageOpen) {
-            if let api = chatAPI() { HubUsageView(api: api) }
+        .hubPage(isPresented: $usageOpen) { pushed in
+            if let api = chatAPI() { HubUsageView(api: api, embedded: pushed).navigationTitle("Usage limits").navigationBarTitleDisplayMode(.inline) }
         }
-        .sheet(isPresented: $settingsOpen, onDismiss: {
-            if openPhoneOptions {
-                openPhoneOptions = false
-                options()
-            }
-        }) {
+        .onChange(of: settingsOpen) { open in
+            // "iPhone settings" opens once Settings has slid away.
+            guard !open, openPhoneOptions else { return }
+            openPhoneOptions = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { options() }
+        }
+        .hubPage(isPresented: $settingsOpen) { pushed in
             let api = chatAPI()
-            HubWorkspaceSettingsView(api: api, preferencesChanged: {
+            HubWorkspaceSettingsView(api: api, pushed: pushed, preferencesChanged: {
                 if let api, api === chatAPI() {
                     chatPreferences = $0
                     appearanceChanged($0.appearance)
@@ -554,9 +577,14 @@ struct HubHomeView: View {
                 settingsOpen = false
             }
         }
-        .sheet(isPresented: $knowledgeActivityOpen, onDismiss: openActivityDestination) {
+        .onChange(of: knowledgeActivityOpen) { open in
+            // A record or chat picked in Activity opens once Activity has slid away.
+            guard !open, activityDestination != nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openActivityDestination() }
+        }
+        .hubPage(isPresented: $knowledgeActivityOpen) { pushed in
             if let api = chatAPI() {
-                HubKnowledgeActivityView(api: api, openRecord: { id in
+                HubKnowledgeActivityView(api: api, pushed: pushed, openRecord: { id in
                     activityDestination = .record(id)
                     knowledgeActivityOpen = false
                 }, openConversation: { id in
@@ -565,8 +593,8 @@ struct HubHomeView: View {
                 })
             }
         }
-        .sheet(isPresented: $knowledgeAppsOpen) {
-            if let api = chatAPI() { HubAppsView(api: api, webPage: attachments()?.server.origin.appendingPathComponent("apps")) }
+        .hubPage(isPresented: $knowledgeAppsOpen) { pushed in
+            if let api = chatAPI() { HubAppsView(api: api, webPage: attachments()?.server.origin.appendingPathComponent("apps"), pushed: pushed) }
         }
         .fullScreenCover(item: $runningApp) { HubKnowledgeAppRunner(file: $0) }
         .fullScreenCover(item: $runningStoreApp) { HubAppRunner(run: $0) })
@@ -577,12 +605,15 @@ struct HubHomeView: View {
         .task(id: KnowledgeAppsRequest(connected: model.connection == .connected, notes: model.knowledge?.nodes.count ?? -1)) {
             await loadKnowledgeApps()
         }
-        .sheet(item: $libraryPlanOpen) { plan in
-            HubLibraryPlanView(plan: plan, busy: libraryDeciding, error: libraryError,
+        .hubPage(item: $libraryPlanOpen) { plan, pushed in
+            HubLibraryPlanView(plan: plan, busy: libraryDeciding, error: libraryError, pushed: pushed,
                                apply: { decideLibrary(plan, approve: true) }, notNow: { decideLibrary(plan, approve: false) })
         }
-        .fullScreenCover(item: $notesOpen) { request in
-            HubNotesView(model: HubNotesModel.shared, close: { notesOpen = nil }, startNew: request.startNew, openID: request.noteID)
+        .hubPage(item: $notesOpen) { request, pushed in
+            HubNotesView(model: HubNotesModel.shared, close: { notesOpen = nil }, startNew: request.startNew, openID: request.noteID, pushed: pushed)
+        }
+        .hubPage(isPresented: $briefingTopicsOpen) { pushed in
+            HubBriefingTopicsView(model: briefing, pushed: pushed)
         }
         .onChange(of: model.notesRequest) { request in
             guard let request else { return }
@@ -596,8 +627,8 @@ struct HubHomeView: View {
             composerFocused = true
         }
         .task { await notesModel.reload() }
-        .sheet(item: $projectToEdit) { project in
-            HubProjectSettingsView(project: project) { change in
+        .hubPage(item: $projectToEdit) { project, pushed in
+            HubProjectSettingsView(project: project, pushed: pushed) { change in
                 try await changeProjects(change)
             }
         }
@@ -686,6 +717,8 @@ struct HubHomeView: View {
                 knowledgeApps = nil
                 knowledgeAppsOpen = false
                 runningApp = nil
+                briefingTopicsOpen = false
+                graphMode = false
             }
         }
     }
@@ -733,7 +766,8 @@ struct HubHomeView: View {
             .onChanged { value in
                 let dx = value.translation.width, dy = value.translation.height
                 if panel == nil && draggingPanel == nil {
-                    guard abs(dx) > abs(dy) * 1.2 else { return }
+                    // On a page the left edge swipe goes back, and the graph takes its own drags.
+                    guard !pageOpen, !graphMode, abs(dx) > abs(dy) * 1.2 else { return }
                     if value.startLocation.x < Self.edgeWidth && dx > 0 { beginPanelDrag(.history) }
                     else if value.startLocation.x > size.width - Self.edgeWidth && dx < 0 { beginPanelDrag(.tools) }
                     else { return }
@@ -778,160 +812,304 @@ struct HubHomeView: View {
         draggingPanel = destination
     }
 
-    private var homeContent: some View {
-        VStack(spacing: 0) {
-            HubGlassGroup(spacing: 20) {
-                HStack {
-                    Button { showPanel(.history) } label: {
-                        Image(systemName: "sidebar.left").font(.body.weight(.medium))
-                            .frame(width: 44, height: 44)
-                            .hubGlassCircle()
-                    }
-                    .accessibilityLabel("Chat history")
-                    Spacer(minLength: 4)
-                    greeting
-                    Spacer(minLength: 4)
-                    Button { showPanel(.tools) } label: {
-                        Image(systemName: "square.grid.2x2").font(.body.weight(.medium))
-                            .frame(width: 44, height: 44)
-                            .hubGlassCircle()
-                    }
-                    .accessibilityLabel("Workspace tools")
-                }
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 4)
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
-                    connectionRow
-                    // Knowledge fills the top of Home with no card around it:
-                    // the graph runs edge to edge, the details sit below it.
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Knowledge").font(.headline).accessibilityAddTraits(.isHeader)
-                            Spacer()
-                            Button(action: showKnowledge) { Text("Explore knowledge").font(.footnote).foregroundStyle(accent).frame(minHeight: 40) }
-                                .buttonStyle(.plain)
-                        }
-                        if let value = model.knowledge {
-                            let notes = value.nodes.filter { $0.kind != "conversation" }
-                            if value.nodes.isEmpty {
-                                Text("Notes appear here as HUB learns from your chats.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            } else {
-                                HubLivingBrainView(graph: value, height: Self.brainHeight, interactive: true, active: homeVisible,
-                                                   projects: projects ?? [], allowsPan: false, openRecord: selectKnowledgeNode,
-                                                   openProject: { id in projectToEdit = projects?.first { $0.id == id } },
-                                                   openDomain: { id in
-                                                       showKnowledge()
-                                                       focusKnowledgeDomain(id)
-                                                   }, openExplorer: showKnowledge)
-                                    .padding(.horizontal, -16)
-                                    .accessibilityIdentifier("hub.home.brain")
-                            }
-                            knowledgeSummary(value, notes: notes.count)
-                            let domains = HubKnowledgeLayout.summary(value)
-                            if !domains.isEmpty {
-                                HubChipRow(items: Array(domains.prefix(8)), extra: max(0, domains.count - 8)) { domain in
-                                    Button {
-                                        showKnowledge()
-                                        focusKnowledgeDomain(domain.id)
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Circle().fill(HubKnowledgeGraphView.tone(domain.hue, id: domain.id)).frame(width: 8, height: 8)
-                                            Text(domain.title).font(.caption).lineLimit(1)
-                                            Text(domain.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .frame(minHeight: 32)
-                                        .background(HubWorkspacePalette.border.opacity(0.07), in: Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(domain.id == HubKnowledgeLayout.unassignedID)
-                                    .accessibilityLabel("\(domain.title), \(domain.count) notes")
-                                    .accessibilityIdentifier("hub.knowledge.chip.\(domain.id)")
-                                }
-                            }
-                            // Chats and your own notes are their own sections, not knowledge domains.
-                            HStack(spacing: 8) {
-                                knowledgeSectionChip("Chats", icon: "bubble.left.and.bubble.right", count: value.nodes.count - notes.count) {
-                                    showKnowledge()
-                                    focusKnowledgeDomain(HubKnowledgeLayout.archiveID)
-                                }
-                                knowledgeSectionChip("My Notes", icon: "note.text", count: value.myNotes?.count ?? notesModel.index.notes.count) {
-                                    hideKeyboard()
-                                    notesOpen = HubNotesRequest()
-                                }
-                            }
-                            if let plan = value.library?.plan { libraryPlanCard(plan) }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    // Your own notes: next to Knowledge, but kept apart from it.
-                    section("Notes", icon: "note.text", actionLabel: "Open ↗", open: {
-                        hideKeyboard()
-                        notesOpen = HubNotesRequest()
-                    }, collapsed: $notesCollapsed) {
-                        homeNotes
-                    }
-                    section("Your day", icon: "calendar", actionLabel: "Open ↗", open: {
-                        hideKeyboard()
-                        plannerOpen = true
-                    }, collapsed: $dayCollapsed) {
-                        if let planner = model.planner {
-                            personalPlanner(planner)
-                        }
+    /// Home's cards, in the order you arrange them by dragging their titles.
+    private enum HomeWidget: String, CaseIterable { case notes, day, briefing, work }
 
-                    }
-                    if let work = model.work {
-                        section("Your work", icon: "bolt.fill", collapsed: $workCollapsed) {
-                            workSummary(work)
-                                // Live while Home is on screen: every few seconds when
-                                // something runs, slowly otherwise.
-                                .task(id: homeVisible) {
-                                    guard homeVisible else { return }
-                                    while !Task.isCancelled {
-                                        let busy = model.work?.byId.values.contains { $0.running } == true
-                                        try? await Task.sleep(nanoseconds: busy ? 3_000_000_000 : 15_000_000_000)
-                                        if Task.isCancelled { return }
-                                        refreshWork()
-                                    }
-                                }
-                        }
-                    } else if model.workUnavailable {
-                        section("Your work") {
-                            Button("Retry loading work", action: connect)
-                        }
-                    }
-                }
-                .padding(.top, 5)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
-                .background(GeometryReader { geometry in
-                    Color.clear.preference(key: HomeScrollOffset.self, value: geometry.frame(in: .named("homeScroll")).minY)
-                })
-                .erased()
-            }
-            .coordinateSpace(name: "homeScroll")
-            // Scrolling the page puts the keyboard away, like Messages. The
-            // scroll position is the signal: it moves whichever way the page
-            // is dragged, and iOS's own scroll as the keyboard appears is
-            // ignored for a moment after focus.
-            .onPreferenceChange(HomeScrollOffset.self) { offset in
-                defer { homeScrollOffset = offset }
-                guard composerFocused || todoFocused, let offset, let last = homeScrollOffset, abs(offset - last) > 4,
-                      Date().timeIntervalSince(keyboardShownAt) > 0.7 else { return }
-                hideKeyboard()
-            }
-            .onChange(of: composerFocused || todoFocused) { focused in
-                if focused { keyboardShownAt = Date() }
-            }
-            .hubDismissesKeyboardOnScroll(hideKeyboard)
-            composer
+    private var orderedWidgets: [HomeWidget] {
+        var seen = Set<HomeWidget>(), list: [HomeWidget] = []
+        for key in widgetOrder.split(separator: ",") {
+            if let widget = HomeWidget(rawValue: String(key)), seen.insert(widget).inserted { list.append(widget) }
+        }
+        for widget in HomeWidget.allCases where !seen.contains(widget) { list.append(widget) }
+        return list
+    }
+
+    private func moveWidget(_ widget: HomeWidget, to target: HomeWidget) {
+        var list = orderedWidgets
+        guard let from = list.firstIndex(of: widget), let to = list.firstIndex(of: target), from != to else { return }
+        list.remove(at: from)
+        list.insert(widget, at: to)
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { widgetOrder = list.map(\.rawValue).joined(separator: ",") }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private struct HomeWidgetDrop: DropDelegate {
+        let target: HomeWidget
+        @Binding var dragging: HomeWidget?
+        let move: (HomeWidget, HomeWidget) -> Void
+
+        func validateDrop(info: DropInfo) -> Bool { dragging != nil }
+        func dropEntered(info: DropInfo) {
+            guard let dragging, dragging != target else { return }
+            move(dragging, target)
+        }
+        func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+        func performDrop(info: DropInfo) -> Bool {
+            dragging = nil
+            return true
         }
     }
 
+    /// A long press on a card's title lifts the card; dropping it on another card puts it there.
+    private struct HomeWidgetDragHandle: ViewModifier {
+        let widget: HomeWidget?
+        @Binding var dragging: HomeWidget?
+
+        @ViewBuilder func body(content: Content) -> some View {
+            if let widget {
+                content.onDrag {
+                    dragging = widget
+                    return NSItemProvider(object: widget.rawValue as NSString)
+                }
+            } else {
+                content
+            }
+        }
+    }
+
+    private struct HomeCardStyle: ViewModifier {
+        let glass: Bool
+        @ViewBuilder func body(content: Content) -> some View {
+            if glass { content.hubGlassCard() } else { content.hubCard() }
+        }
+    }
+
+    /// Knowledge fills the whole screen behind Home's glass cards. The Graph
+    /// button hides the cards and hands the graph your fingers; tap it again
+    /// to bring the cards back.
+    private var homeContent: some View {
+        ZStack {
+            homeGraphLayer
+            VStack(spacing: 0) {
+                homeHeader
+                ZStack(alignment: .bottom) {
+                    homeWidgets
+                        .opacity(graphMode ? 0 : 1)
+                        .allowsHitTesting(!graphMode)
+                        .accessibilityHidden(graphMode)
+                    if graphMode, let value = model.knowledge {
+                        graphOverlay(value)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                if !graphMode {
+                    composer.transition(.opacity)
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.28), value: graphMode)
+        .onChange(of: model.connection) { connection in
+            if connection != .connected { graphMode = false }
+        }
+        .task(id: BriefingLoad(api: model.connection == .connected ? chatAPI().map { ObjectIdentifier($0) } : nil, visible: homeVisible)) {
+            guard model.connection == .connected, homeVisible, let api = chatAPI() else { return }
+            briefing.api = api
+            await briefing.load()
+        }
+    }
+
+    private struct BriefingLoad: Equatable {
+        let api: ObjectIdentifier?
+        let visible: Bool
+    }
+
+    /// The graph behind the cards. It stands still while the cards are up (so
+    /// scrolling stays smooth) and comes alive in Graph mode.
+    @ViewBuilder private var homeGraphLayer: some View {
+        if let value = model.knowledge, !value.nodes.isEmpty {
+            GeometryReader { geometry in
+                HubLivingBrainView(graph: value, height: geometry.size.height, interactive: graphMode, active: homeVisible && graphMode,
+                                   projects: projects ?? [], allowsPan: graphMode, openRecord: selectKnowledgeNode,
+                                   openProject: { id in projectToEdit = projects?.first { $0.id == id } },
+                                   openDomain: { id in
+                                       showKnowledge()
+                                       focusKnowledgeDomain(id)
+                                   }, openExplorer: nil)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(graphMode)
+            .accessibilityHidden(!graphMode)
+            .accessibilityIdentifier("hub.home.brain")
+        }
+    }
+
+    private var homeHeader: some View {
+        HubGlassGroup(spacing: 20) {
+            HStack(spacing: 8) {
+                Button { showPanel(.history) } label: {
+                    Image(systemName: "sidebar.left").font(.body.weight(.medium))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
+                }
+                .accessibilityLabel("Chat history")
+                Spacer(minLength: 4)
+                greeting
+                Spacer(minLength: 4)
+                if model.knowledge?.nodes.isEmpty == false {
+                    Button {
+                        hideKeyboard()
+                        graphMode.toggle()
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    } label: {
+                        Label(graphMode ? "Cards" : "Graph", systemImage: graphMode ? "rectangle.stack" : "eye")
+                            .labelStyle(.titleAndIcon)
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 14)
+                            .frame(height: 44)
+                            .hubGlass(Capsule(), interactive: true)
+                    }
+                    .accessibilityLabel(graphMode ? "Show cards" : "Explore the knowledge graph")
+                    .accessibilityIdentifier("hub.home.graphToggle")
+                }
+                Button { showPanel(.tools) } label: {
+                    Image(systemName: "square.grid.2x2").font(.body.weight(.medium))
+                        .frame(width: 44, height: 44)
+                        .hubGlassCircle()
+                }
+                .accessibilityLabel("Workspace tools")
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 4)
+    }
+
+    /// In Graph mode: what the graph holds, its domains, and the way into Knowledge.
+    private func graphOverlay(_ value: HubHomeKnowledge) -> some View {
+        let notes = value.nodes.filter { $0.kind != "conversation" }
+        let domains = HubKnowledgeLayout.summary(value)
+        return VStack(alignment: .leading, spacing: 10) {
+            knowledgeSummary(value, notes: notes.count)
+            if !domains.isEmpty {
+                HubChipRow(items: Array(domains.prefix(8)), extra: max(0, domains.count - 8)) { domain in
+                    Button {
+                        showKnowledge()
+                        focusKnowledgeDomain(domain.id)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle().fill(HubKnowledgeGraphView.tone(domain.hue, id: domain.id)).frame(width: 8, height: 8)
+                            Text(domain.title).font(.caption).lineLimit(1)
+                            Text(domain.count, format: .number).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 32)
+                        .background(HubWorkspacePalette.border.opacity(0.08), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(domain.id == HubKnowledgeLayout.unassignedID)
+                    .accessibilityLabel("\(domain.title), \(domain.count) notes")
+                    .accessibilityIdentifier("hub.knowledge.chip.\(domain.id)")
+                }
+            }
+            HStack(spacing: 8) {
+                knowledgeSectionChip("Chats", icon: "bubble.left.and.bubble.right", count: value.nodes.count - notes.count) {
+                    showKnowledge()
+                    focusKnowledgeDomain(HubKnowledgeLayout.archiveID)
+                }
+                knowledgeSectionChip("My Notes", icon: "note.text", count: value.myNotes?.count ?? notesModel.index.notes.count) {
+                    notesOpen = HubNotesRequest()
+                }
+                Spacer(minLength: 0)
+                Button(action: showKnowledge) {
+                    Label("Explore", systemImage: "arrow.up.right").font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 12).frame(minHeight: 36)
+                        .background(HubWorkspacePalette.accent.opacity(0.18), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(accent)
+                .accessibilityLabel("Explore knowledge")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .hubGlassCard(padding: 14)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+    }
+
+    private var homeWidgets: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                connectionRow
+                if let plan = model.knowledge?.library?.plan { libraryPlanCard(plan) }
+                ForEach(orderedWidgets, id: \.self) { widget in
+                    homeWidget(widget)
+                        .onDrop(of: [UTType.plainText], delegate: HomeWidgetDrop(target: widget, dragging: $draggingWidget, move: moveWidget))
+                }
+            }
+            .padding(.top, 5)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+            .background(GeometryReader { geometry in
+                Color.clear.preference(key: HomeScrollOffset.self, value: geometry.frame(in: .named("homeScroll")).minY)
+            })
+            .erased()
+        }
+        .coordinateSpace(name: "homeScroll")
+        // Scrolling the page puts the keyboard away, like Messages. The
+        // scroll position is the signal: it moves whichever way the page
+        // is dragged, and iOS's own scroll as the keyboard appears is
+        // ignored for a moment after focus.
+        .onPreferenceChange(HomeScrollOffset.self) { offset in
+            defer { homeScrollOffset = offset }
+            guard composerFocused || todoFocused, let offset, let last = homeScrollOffset, abs(offset - last) > 4,
+                  Date().timeIntervalSince(keyboardShownAt) > 0.7 else { return }
+            hideKeyboard()
+        }
+        .onChange(of: composerFocused || todoFocused) { focused in
+            if focused { keyboardShownAt = Date() }
+        }
+        .hubDismissesKeyboardOnScroll(hideKeyboard)
+    }
+
+    @ViewBuilder private func homeWidget(_ widget: HomeWidget) -> some View {
+        switch widget {
+        case .notes:
+            // Your own notes, kept apart from Knowledge.
+            section("Notes", icon: "note.text", actionLabel: "Open ↗", open: {
+                hideKeyboard()
+                notesOpen = HubNotesRequest()
+            }, collapsed: $notesCollapsed, widget: .notes) {
+                homeNotes
+            }
+        case .day:
+            section("Your day", icon: "calendar", actionLabel: "Open ↗", open: {
+                hideKeyboard()
+                plannerOpen = true
+            }, collapsed: $dayCollapsed, widget: .day) {
+                if let planner = model.planner {
+                    personalPlanner(planner)
+                }
+            }
+        case .briefing:
+            section("Briefing", icon: "newspaper", actionLabel: "Topics", open: {
+                hideKeyboard()
+                briefingTopicsOpen = true
+            }, collapsed: $briefingCollapsed, widget: .briefing) {
+                HubBriefingCard(model: briefing) { briefingTopicsOpen = true }
+            }
+        case .work:
+            if let work = model.work {
+                section("Your work", icon: "bolt.fill", collapsed: $workCollapsed, widget: .work) {
+                    workSummary(work)
+                        // Live while Home is on screen: every few seconds when
+                        // something runs, slowly otherwise.
+                        .task(id: homeVisible) {
+                            guard homeVisible else { return }
+                            while !Task.isCancelled {
+                                let busy = model.work?.byId.values.contains { $0.running } == true
+                                try? await Task.sleep(nanoseconds: busy ? 3_000_000_000 : 15_000_000_000)
+                                if Task.isCancelled { return }
+                                refreshWork()
+                            }
+                        }
+                }
+            } else if model.workUnavailable {
+                section("Your work", widget: .work) {
+                    Button("Retry loading work", action: connect)
+                }
+            }
+        }
+    }
     /// "Good evening" with today's date and a small connection dot.
     private var greeting: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -958,7 +1136,8 @@ struct HubHomeView: View {
     /// Home is on screen with nothing covering it.
     private var homeVisible: Bool {
         selectedChat == nil && panel == nil && !knowledgeOpen && !plannerOpen && !tasksOpen &&
-            !settingsOpen && !usageOpen && !knowledgeActivityOpen && !knowledgeAppsOpen && runningApp == nil
+            !settingsOpen && !usageOpen && !knowledgeActivityOpen && !knowledgeAppsOpen && runningApp == nil &&
+            notesOpen == nil && !briefingTopicsOpen
     }
 
     /// The web apps Knowledge has saved, one tap from running.
@@ -1517,7 +1696,7 @@ struct HubHomeView: View {
                     Button { Task { await newChat(projectID: project.id) } } label: {
                         Label("New chat in project", systemImage: "square.and.pencil")
                     }
-                    Button { projectToEdit = project } label: {
+                    Button { closePanel(); projectToEdit = project } label: {
                         Label("Instructions and note", systemImage: "doc.text")
                     }
                     Button(role: .destructive) { projectToRemove = project } label: {
@@ -1880,9 +2059,23 @@ struct HubHomeView: View {
         noteAttempt += 1
     }
 
-    private var knowledgeScreen: some View {
+    private var knowledgeManageMenu: some View {
+        Menu {
+            Button("Domains") { knowledgeDomainsOpen = true }
+            Button("Backups") { knowledgeBackupsOpen = true }
+            Button("Conversation archives") { knowledgeArchivesOpen = true }
+            Button("Skills") { knowledgeSkillsOpen = true }
+            Button("Attachments") { knowledgeAssetsOpen = true }
+        } label: {
+            Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 36)
+        }
+        .accessibilityLabel("Manage Knowledge")
+        .disabled(model.connection != .connected)
+    }
+
+    private func knowledgeScreen(pushed: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            if !pushed { HStack {
                 if selectedNoteID != nil {
                     Button(action: clearKnowledgeSelection) { Label("Knowledge", systemImage: "chevron.left") }
                         .disabled(noteSaving || noteEditing)
@@ -1902,7 +2095,7 @@ struct HubHomeView: View {
                 }
                 Spacer()
                 Button("Done") { knowledgeOpen = false }.disabled(noteSaving || noteEditing)
-            }
+            } }
             if let id = selectedNoteID {
                 Group {
                     if let note = selectedNote {
@@ -1930,47 +2123,64 @@ struct HubHomeView: View {
                 }
             }
         }
-        .padding(18)
+        .padding(.horizontal, 18)
+        .padding(.top, pushed ? 4 : 18)
+        .padding(.bottom, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
         .tint(accent)
         .hubBackdrop()
         .interactiveDismissDisabled(noteSaving || noteEditing)
-        .sheet(isPresented: $knowledgeDomainsOpen) {
+        .navigationTitle("Knowledge")
+        .navigationBarTitleDisplayMode(.inline)
+        // A note opened inside Knowledge has its own way back to the overview.
+        .navigationBarBackButtonHidden(selectedNoteID != nil || noteSaving || noteEditing)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if selectedNoteID != nil {
+                    Button(action: clearKnowledgeSelection) { Label("Knowledge", systemImage: "chevron.left").labelStyle(.titleAndIcon) }
+                        .disabled(noteSaving || noteEditing)
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if selectedNoteID == nil { knowledgeManageMenu }
+            }
+        }
+        .hubPage(isPresented: $knowledgeDomainsOpen) { pushed in
             if let api = chatAPI() {
-                HubKnowledgeDomainsView(api: api, changed: refreshKnowledgeGraph, openNote: { id in
+                HubKnowledgeDomainsView(api: api, pushed: pushed, changed: refreshKnowledgeGraph, openNote: { id in
                     knowledgeDomainsOpen = false
                     selectKnowledgeNode(id)
                 })
             }
         }
-        .sheet(isPresented: $knowledgeBackupsOpen) {
-            if let api = chatAPI() { HubKnowledgeBackupsView(api: api) }
+        .hubPage(isPresented: $knowledgeBackupsOpen) { pushed in
+            if let api = chatAPI() { HubKnowledgeBackupsView(api: api, pushed: pushed) }
         }
-        .sheet(isPresented: $knowledgeArchivesOpen) {
-            if let api = chatAPI() { HubKnowledgeArchivesView(api: api, changed: refreshKnowledgeGraph) }
+        .hubPage(isPresented: $knowledgeArchivesOpen) { pushed in
+            if let api = chatAPI() { HubKnowledgeArchivesView(api: api, pushed: pushed, changed: refreshKnowledgeGraph) }
         }
-        .sheet(isPresented: $knowledgeSkillsOpen) {
-            if let api = chatAPI() { HubKnowledgeSkillsView(api: api, changed: refreshKnowledgeGraph) }
+        .hubPage(isPresented: $knowledgeSkillsOpen) { pushed in
+            if let api = chatAPI() { HubKnowledgeSkillsView(api: api, pushed: pushed, changed: refreshKnowledgeGraph) }
         }
-        .sheet(isPresented: $knowledgeAssetsOpen) {
+        .hubPage(isPresented: $knowledgeAssetsOpen) { pushed in
             if let api = chatAPI() {
-                HubKnowledgeAssetsView(api: api, note: selectedNote) { updated in
+                HubKnowledgeAssetsView(api: api, note: selectedNote, pushed: pushed) { updated in
                     if let updated, selectedNoteID == updated.id { selectedNote = updated }
                     await refreshKnowledgeGraph()
                 }
             }
         }
-        .sheet(isPresented: $knowledgeConnectionsOpen) {
+        .hubPage(isPresented: $knowledgeConnectionsOpen) { pushed in
             if let api = chatAPI(), let note = selectedNote {
-                HubKnowledgeConnectionsView(api: api, note: note) { id in
+                HubKnowledgeConnectionsView(api: api, note: note, pushed: pushed) { id in
                     knowledgeConnectionsOpen = false
                     selectKnowledgeNode(id)
                 }
             }
         }
-        .sheet(item: $selectedKnowledgeSource) { source in
-            if let api = chatAPI() { HubKnowledgeOriginalSourceView(api: api, source: source) }
+        .hubPage(item: $selectedKnowledgeSource) { source, pushed in
+            if let api = chatAPI() { HubKnowledgeOriginalSourceView(api: api, source: source, pushed: pushed) }
         }
         .sheet(isPresented: $knowledgeForgetOpen) {
             if let api = chatAPI(), let note = selectedNote {
@@ -2086,17 +2296,16 @@ struct HubHomeView: View {
                     Text("Could not open this file. Check the connection and try again.").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .sheet(item: $openedNoteFile) { file in
-                NavigationView {
+            .hubPage(item: $openedNoteFile) { file, pushed in
+                HubNavigation(pushed: pushed) {
                     HubKnowledgeFilePreview(name: file.asset.name, mediaType: file.asset.mediaType, data: file.data)
                         .navigationTitle(file.asset.name)
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
-                            ToolbarItem(placement: .cancellationAction) { Button("Done") { openedNoteFile = nil } }
+                            ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { openedNoteFile = nil } } }
                             ToolbarItem(placement: .primaryAction) { HubShareFileButton(bytes: file.data, name: file.asset.name, label: "Share or save file") }
                         }
                 }
-                .navigationViewStyle(.stack)
             }
         }
     }
@@ -2995,7 +3204,7 @@ struct HubHomeView: View {
     }
 
     private func section<Content: View>(_ title: LocalizedStringKey, icon: String? = nil, actionLabel: LocalizedStringKey = "Open", open: (() -> Void)? = nil,
-                                        collapsed: Binding<Bool>? = nil,
+                                        collapsed: Binding<Bool>? = nil, widget: HomeWidget? = nil,
                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -3036,10 +3245,11 @@ struct HubHomeView: View {
                         .accessibilityLabel(Text(actionLabel))
                 }
             }
+            .modifier(HomeWidgetDragHandle(widget: widget, dragging: $draggingWidget))
             if collapsed?.wrappedValue != true { content() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .hubCard()
+        .modifier(HomeCardStyle(glass: widget != nil))
     }
 
 }
@@ -3061,6 +3271,7 @@ private struct HubTasksView: View {
     var load: () async throws -> HubWorkspaceTasks
     let api: HubConversationAPI
     let openChat: (HubConversationChoice) -> Void
+    var pushed = false
 
     private struct PendingAction {
         let action: HubWorkspaceTaskAction
@@ -3079,10 +3290,12 @@ private struct HubTasksView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Tasks").font(.headline).accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button("Done") { dismiss() }
+            if !pushed {
+                HStack {
+                    Text("Tasks").font(.headline).accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    Button("Done") { dismiss() }
+                }
             }
             if let tasks {
                 ScrollView {
@@ -3112,6 +3325,8 @@ private struct HubTasksView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
         .hubBackdrop()
+        .navigationTitle("Tasks")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $taskEditor) { edit in
             if edit.routine {
                 HubRoutineEditorView(api: api, id: edit.taskID, goals: tasks?.goals ?? []) { attempt += 1 }
@@ -3327,6 +3542,7 @@ struct HubFileDocument: FileDocument {
 /// reads the instructions and note; HUB keeps the note up to date as you work.
 struct HubProjectSettingsView: View {
     let project: HubProject
+    var pushed = false
     let save: (HubProjectChange) async throws -> HubProjectsSnapshot?
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
@@ -3335,8 +3551,9 @@ struct HubProjectSettingsView: View {
     @State private var saving = false
     @State private var failure: String?
 
-    init(project: HubProject, save: @escaping (HubProjectChange) async throws -> HubProjectsSnapshot?) {
+    init(project: HubProject, pushed: Bool = false, save: @escaping (HubProjectChange) async throws -> HubProjectsSnapshot?) {
         self.project = project
+        self.pushed = pushed
         self.save = save
         _name = State(initialValue: project.name)
         _instructions = State(initialValue: project.instructions)
@@ -3348,7 +3565,7 @@ struct HubProjectSettingsView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubForm {
                 Section("Name") {
                     TextField("Project name", text: $name).accessibilityIdentifier("hub.project.name")
@@ -3386,15 +3603,16 @@ struct HubProjectSettingsView: View {
             .navigationTitle(project.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                // As a page: the back button leaves; with unsaved changes, Cancel replaces it.
+                ToolbarItem(placement: .cancellationAction) { if !pushed || changed { Button("Cancel") { dismiss() } } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await commit() } }
                         .disabled(!changed || saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            .navigationBarBackButtonHidden(pushed && changed)
             .interactiveDismissDisabled(changed)
         }
-        .navigationViewStyle(.stack)
     }
 
     private func commit() async {
@@ -3479,6 +3697,7 @@ struct HubConversationPicturesStrip: View {
 @MainActor
 struct HubScheduleView: View {
     let api: HubConversationAPI
+    var pushed = false
     var load: () async throws -> HubWorkspaceTasks
     let openChat: (HubConversationChoice) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -3497,7 +3716,7 @@ struct HubScheduleView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubList {
                 if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                 if let schedule {
@@ -3530,7 +3749,7 @@ struct HubScheduleView: View {
             .navigationTitle("Schedule")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { dismiss() } } }
                 ToolbarItem(placement: .primaryAction) {
                     Button { editing = Editing(draft: HubScheduleDraft()) } label: { Image(systemName: "plus") }
                         .accessibilityLabel("Add a reminder or job")
@@ -3547,9 +3766,8 @@ struct HubScheduleView: View {
                     HubHeartbeatEditor(heartbeat: schedule.heartbeat) { await change($0) }
                 }
             }
-            .sheet(isPresented: $olderOpen) { HubTasksView(load: load, api: api, openChat: openChat) }
+            .hubPage(isPresented: $olderOpen) { pushed in HubTasksView(load: load, api: api, openChat: openChat, pushed: pushed) }
         }
-        .navigationViewStyle(.stack)
     }
 
     private func heartbeatRow(_ heartbeat: HubSchedule.Heartbeat) -> some View {
@@ -4031,12 +4249,13 @@ struct HubLibraryPlanView: View {
     let plan: HubHomeKnowledge.Library.Plan
     let busy: Bool
     let error: String?
+    var pushed = false
     let apply: () -> Void
     let notNow: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             List {
                 Section {
                     Text(plan.note).font(.body)
@@ -4053,7 +4272,7 @@ struct HubLibraryPlanView: View {
             .navigationTitle("Library Plan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .navigationBarLeading) { if !pushed { Button("Close") { dismiss() } } }
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button("Not Now", role: .destructive) { notNow() }.disabled(busy)
                     Spacer()
@@ -4065,6 +4284,5 @@ struct HubLibraryPlanView: View {
                 }
             }
         }
-        .navigationViewStyle(.stack)
     }
 }

@@ -60,6 +60,18 @@ extension View {
                                                        startPoint: .top, endPoint: .bottom), lineWidth: 0.7))
     }
 
+    /// A see-through card for Home: frosted glass over the knowledge graph,
+    /// tinted just enough to read on, with the same lit hairline edge.
+    func hubGlassCard(cornerRadius: CGFloat = HubTheme.cardRadius, padding: CGFloat = 16) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .padding(padding)
+            .background(shape.fill(HubWorkspacePalette.card.opacity(0.34)))
+            .background(shape.fill(.ultraThinMaterial))
+            .overlay(shape.strokeBorder(LinearGradient(colors: [HubWorkspacePalette.border.opacity(0.22), HubWorkspacePalette.border.opacity(0.05)],
+                                                       startPoint: .top, endPoint: .bottom), lineWidth: 0.8))
+    }
+
     /// Strikes through finished items (iOS 16+; earlier systems just dim them).
     @ViewBuilder func hubStrikethrough(_ active: Bool) -> some View {
         if #available(iOS 16.0, *) { strikethrough(active) } else { opacity(active ? 0.6 : 1) }
@@ -264,5 +276,77 @@ extension View {
         if #available(iOS 16.1, *) {
             fontDesign(style == .rounded ? .rounded : style == .serif ? .serif : .default)
         } else { self }
+    }
+}
+
+
+// MARK: - Pages
+
+/// Every page in HUB opens the same way: it slides in from the right with a
+/// back button and an edge swipe back (iOS 16 and later). A page shown as a
+/// sheet elsewhere still gets its own navigation bar.
+struct HubNavigation<Content: View>: View {
+    var pushed = false
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if pushed {
+            content()
+        } else if #available(iOS 16.0, *) {
+            NavigationStack { content() }
+        } else {
+            NavigationView { content() }.navigationViewStyle(.stack)
+        }
+    }
+}
+
+/// The navigation stack under Home and every chat; its own bar stays hidden.
+struct HubNavigationRoot<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if #available(iOS 16.0, *) {
+            NavigationStack { content().toolbar(.hidden, for: .navigationBar) }
+        } else {
+            content()
+        }
+    }
+}
+
+private struct HubItemPage<Item: Identifiable, Page: View>: ViewModifier {
+    @Binding var item: Item?
+    let page: (Item, Bool) -> Page
+    /// Kept while the page slides away after `item` is cleared.
+    @State private var shown: Item?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content
+                .navigationDestination(isPresented: Binding(get: { item != nil }, set: { if !$0 { item = nil } })) {
+                    if let value = item ?? shown { page(value, true) }
+                }
+                .onAppear { if item != nil { shown = item } }
+                .onChange(of: item?.id) { _ in if let item { shown = item } }
+        } else {
+            content.sheet(item: $item) { page($0, false) }
+        }
+    }
+}
+
+extension View {
+    /// Opens `page` as a page that slides in from the right. `pushed` tells the
+    /// page whether it is inside the navigation stack (so it needs no bar or
+    /// Done button of its own).
+    @ViewBuilder
+    func hubPage<Page: View>(isPresented: Binding<Bool>, @ViewBuilder page: @escaping (_ pushed: Bool) -> Page) -> some View {
+        if #available(iOS 16.0, *) {
+            navigationDestination(isPresented: isPresented) { page(true) }
+        } else {
+            sheet(isPresented: isPresented) { page(false) }
+        }
+    }
+
+    func hubPage<Item: Identifiable, Page: View>(item: Binding<Item?>, @ViewBuilder page: @escaping (_ item: Item, _ pushed: Bool) -> Page) -> some View {
+        modifier(HubItemPage(item: item, page: page))
     }
 }

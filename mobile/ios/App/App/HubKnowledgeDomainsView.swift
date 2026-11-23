@@ -4,6 +4,7 @@ import HubNative
 @MainActor
 struct HubKnowledgeDomainsView: View {
     let api: HubConversationAPI
+    var pushed = false
     let changed: () async -> Void
     let openNote: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -87,7 +88,7 @@ struct HubKnowledgeDomainsView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubForm {
                 if loading || saving { ProgressView() }
                 if let notice {
@@ -113,17 +114,19 @@ struct HubKnowledgeDomainsView: View {
             .disabled(saving)
             .navigationTitle(memberDomain?.title ?? organization?.source.title ?? "Knowledge domains")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(pushed && (isEditing || saving))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(isEditing ? "Cancel" : "Done") {
-                        if isEditing { draft = nil; memberDomain = nil; organization = nil; preview = nil }
-                        else { dismiss() }
+                    if !pushed || isEditing {
+                        Button(isEditing ? "Cancel" : "Done") {
+                            if isEditing { draft = nil; memberDomain = nil; organization = nil; preview = nil }
+                            else { dismiss() }
+                        }
+                        .disabled(saving)
                     }
-                    .disabled(saving)
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .interactiveDismissDisabled(isEditing || saving)
         .alert(item: $confirmation) { action in
             Alert(title: Text(action.title), message: Text(action.detail),

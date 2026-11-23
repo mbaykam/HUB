@@ -153,6 +153,7 @@ struct HubKnowledgeFilePreview: View {
 struct HubKnowledgeOriginalSourceView: View {
     let api: HubConversationAPI
     let source: HubKnowledgeNote.Source
+    var pushed = false
     @Environment(\.dismiss) private var dismiss
     @State private var original: HubKnowledgeOriginalSource?
     @State private var failed = false
@@ -165,7 +166,7 @@ struct HubKnowledgeOriginalSourceView: View {
     @State private var previewing = false
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubList {
                 if let original {
                     Text(original.content).textSelection(.enabled)
@@ -197,26 +198,24 @@ struct HubKnowledgeOriginalSourceView: View {
             }
             .navigationTitle("Original source")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { dismiss() } } } }
         }
-        .navigationViewStyle(.stack)
         .task(id: attempt) {
             failed = false
             do { original = try await api.knowledgeOriginalSource(id: source.id) }
             catch { if !Task.isCancelled { failed = true } }
         }
-        .sheet(isPresented: $previewing) {
+        .hubPage(isPresented: $previewing) { pushed in
             if let selected, let originalFile {
-                NavigationView {
+                HubNavigation(pushed: pushed) {
                     HubKnowledgeFilePreview(name: selected.name, mediaType: selected.mediaType, data: originalFile)
                         .navigationTitle(selected.name)
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
-                            ToolbarItem(placement: .cancellationAction) { Button("Done") { previewing = false } }
+                            ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { previewing = false } } }
                             ToolbarItem(placement: .primaryAction) { HubShareFileButton(bytes: originalFile, name: selected.name, label: "Share or save file") }
                         }
                 }
-                .navigationViewStyle(.stack)
             }
         }
         .fileExporter(isPresented: $export, document: originalFile.map { HubFileDocument(bytes: $0) },
@@ -247,6 +246,7 @@ struct HubKnowledgeOriginalSourceView: View {
 @MainActor
 struct HubKnowledgeAssetsView: View {
     let api: HubConversationAPI
+    var pushed = false
     @State private var note: HubKnowledgeNote?
     let changed: (HubKnowledgeNote?) async -> Void
     @Environment(\.dismiss) private var dismiss
@@ -263,27 +263,30 @@ struct HubKnowledgeAssetsView: View {
         let data: Data
     }
 
-    init(api: HubConversationAPI, note: HubKnowledgeNote?, changed: @escaping (HubKnowledgeNote?) async -> Void) {
+    init(api: HubConversationAPI, note: HubKnowledgeNote?, pushed: Bool = false, changed: @escaping (HubKnowledgeNote?) async -> Void) {
         self.api = api
+        self.pushed = pushed
         self.changed = changed
         _note = State(initialValue: note)
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             Group {
                 if let preview { attachment(preview) }
                 else { library }
             }
             .navigationTitle(preview?.asset.name ?? "Attachments")
             .navigationBarTitleDisplayMode(.inline)
+            // As a page, the system back button leaves; inside a preview this button goes back to the list.
+            .navigationBarBackButtonHidden(pushed && preview != nil)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(preview == nil ? "Done" : "Back") {
+                    if !pushed || preview != nil { Button(preview == nil ? "Done" : "Back") {
                         if preview == nil { dismiss() }
                         else { preview = nil; notice = nil }
                     }
-                    .disabled(busy)
+                    .disabled(busy) }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if preview != nil { Button("Save to Files") { export = true } }
@@ -291,7 +294,6 @@ struct HubKnowledgeAssetsView: View {
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy)
         .task { await load() }
         .fileImporter(isPresented: $chooseFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -420,6 +422,7 @@ private struct HubKnowledgePDFView: UIViewRepresentable {
 @MainActor
 struct HubKnowledgeSkillsView: View {
     let api: HubConversationAPI
+    var pushed = false
     let changed: () async -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var catalog: HubKnowledgeSkillCatalog?
@@ -433,7 +436,7 @@ struct HubKnowledgeSkillsView: View {
     @State private var customName = false
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             Group {
                 if let draft { editor(draft) }
                 else { library }
@@ -441,9 +444,10 @@ struct HubKnowledgeSkillsView: View {
             .navigationTitle(draft == nil ? "Skills" : baseline?.expectedHash == nil ? "New skill" : "Edit skill")
             .navigationBarTitleDisplayMode(.inline)
             .disabled(busy)
+            .navigationBarBackButtonHidden(pushed && draft != nil)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(draft == nil ? "Done" : "Cancel") { close() }.disabled(busy)
+                    if !pushed || draft != nil { Button(draft == nil ? "Done" : "Cancel") { close() }.disabled(busy) }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if let draft {
@@ -458,7 +462,6 @@ struct HubKnowledgeSkillsView: View {
                 Button("Keep editing", role: .cancel) {}
             }
         }
-        .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy || draft != baseline)
         .task { await load() }
     }
@@ -616,6 +619,7 @@ struct HubKnowledgeConnectionsView: View {
 
     let api: HubConversationAPI
     let note: HubKnowledgeNote
+    var pushed = false
     let openRecord: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var items: [HubKnowledgeRelationship] = []
@@ -640,7 +644,7 @@ struct HubKnowledgeConnectionsView: View {
     private var search: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubList {
                 Section(note.title) {
                     if let total {
@@ -678,16 +682,15 @@ struct HubKnowledgeConnectionsView: View {
             }
             .navigationTitle("Connections")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { dismiss() } } } }
         }
-        .navigationViewStyle(.stack)
         .task { await loadPage("") }
         .task(id: search) { await findTargets(search) }
         .task(id: target.map { "\($0.id)/\(traceAttempt)" }) {
             if let target { await findPath(target.id) }
         }
-        .sheet(item: $selectedEvidence) { selection in
-            NavigationView {
+        .hubPage(item: $selectedEvidence) { selection, pushed in
+            HubNavigation(pushed: pushed) {
                 HubList {
                     if let evidence {
                         Section(evidence.sourceTitle) {
@@ -706,9 +709,8 @@ struct HubKnowledgeConnectionsView: View {
                 }
                 .navigationTitle("Source evidence")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { selectedEvidence = nil } } }
+                .toolbar { ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { selectedEvidence = nil } } } }
             }
-            .navigationViewStyle(.stack)
             .task(id: evidenceAttempt) { await loadEvidence(selection) }
         }
     }
@@ -831,6 +833,7 @@ struct HubKnowledgeConnectionsView: View {
 @MainActor
 struct HubKnowledgeArchivesView: View {
     let api: HubConversationAPI
+    var pushed = false
     let changed: () async -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var batches: [HubKnowledgeArchive] = []
@@ -857,7 +860,7 @@ struct HubKnowledgeArchivesView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubList {
                 if busy { ProgressView("Working with the archive on HUB…") }
                 if let notice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
@@ -868,14 +871,16 @@ struct HubKnowledgeArchivesView: View {
             .disabled(busy)
             .navigationTitle("Conversation archives")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(pushed && (record != nil || preview != nil))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(record != nil ? "Archive" : preview != nil ? "All archives" : "Done") { goBack() }
-                        .disabled(busy)
+                    if !pushed || record != nil || preview != nil {
+                        Button(record != nil ? "Archive" : preview != nil ? "All archives" : "Done") { goBack() }
+                            .disabled(busy)
+                    }
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .task { await loadBatches() }
         .task { knowledgePricing = try? await api.knowledgeStatus().settings }
         .interactiveDismissDisabled(busy || !selected.isEmpty)
@@ -1151,6 +1156,7 @@ struct HubKnowledgeArchivesView: View {
 @MainActor
 struct HubKnowledgeBackupsView: View {
     let api: HubConversationAPI
+    var pushed = false
     @Environment(\.dismiss) private var dismiss
     @State private var copies: [HubKnowledgeBackups.Copy] = []
     @State private var page: HubKnowledgeBackups?
@@ -1174,7 +1180,7 @@ struct HubKnowledgeBackupsView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             HubList {
                 Section {
                     Button("Create verified backup") { Task { await createBackup() } }
@@ -1216,10 +1222,9 @@ struct HubKnowledgeBackupsView: View {
             .navigationTitle("Knowledge backups")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .cancellationAction) { if !pushed { Button("Done") { dismiss() }.disabled(busy) } }
             }
         }
-        .navigationViewStyle(.stack)
         .interactiveDismissDisabled(busy)
         .task { await refresh() }
         .alert("Resume saved Knowledge work?", isPresented: $confirmResume) {
@@ -1783,6 +1788,7 @@ struct HubChipRow<Item: Identifiable, Content: View>: View {
 @MainActor
 struct HubKnowledgeActivityView: View {
     let api: HubConversationAPI
+    var pushed = false
     var openRecord: ((String) -> Void)? = nil
     var openConversation: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
@@ -1801,21 +1807,27 @@ struct HubKnowledgeActivityView: View {
         var id: String { rawValue }
     }
 
+    private var actionsMenu: some View {
+        Menu {
+            Button("Refresh activity") { Task { await load(0) } }
+            Button(QueueAction.process.rawValue) { confirmation = .process }.disabled(page?.enabled != true)
+            Button(QueueAction.retry.rawValue) { confirmation = .retry }.disabled(page?.enabled != true)
+        } label: {
+            Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("Knowledge AI actions")
+        .disabled(acting || loading)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Knowledge AI Activity").font(.headline)
-                Spacer()
-                Menu {
-                    Button("Refresh activity") { Task { await load(0) } }
-                    Button(QueueAction.process.rawValue) { confirmation = .process }.disabled(page?.enabled != true)
-                    Button(QueueAction.retry.rawValue) { confirmation = .retry }.disabled(page?.enabled != true)
-                } label: {
-                    Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+            if !pushed {
+                HStack {
+                    Text("Knowledge AI Activity").font(.headline)
+                    Spacer()
+                    actionsMenu
+                    Button("Done") { dismiss() }
                 }
-                .accessibilityLabel("Knowledge AI actions")
-                .disabled(acting || loading)
-                Button("Done") { dismiss() }
             }
             if acting { ProgressView() }
             if let actionMessage { Text(actionMessage).font(.footnote).foregroundStyle(.secondary) }
@@ -1837,10 +1849,15 @@ struct HubKnowledgeActivityView: View {
             if failed { Button("Retry") { Task { await load(0) } } }
         }
         .task { await load(0) }
-        .padding(18)
+        .padding(.horizontal, 18)
+        .padding(.top, pushed ? 4 : 18)
+        .padding(.bottom, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.primary)
         .hubBackdrop()
+        .navigationTitle("Knowledge AI Activity")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .navigationBarTrailing) { if pushed { actionsMenu } } }
         .sheet(item: $reviewEntry, onDismiss: { Task { await load(0) } }) { entry in
             HubKnowledgeCurationReviewView(api: api, entry: entry)
         }

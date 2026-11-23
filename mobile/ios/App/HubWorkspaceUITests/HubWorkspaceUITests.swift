@@ -10,7 +10,7 @@ final class HubWorkspaceUITests: XCTestCase {
         app.launchArguments = ["--hub-native-home-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        XCTAssertTrue(app.staticTexts["Knowledge"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["hub.home.graphToggle"].waitForExistence(timeout: 20))
         XCTAssertEqual(app.webViews.count, 0)
         let add = app.buttons["More actions"]
         let voice = app.buttons["Speak"]
@@ -84,9 +84,7 @@ final class HubWorkspaceUITests: XCTestCase {
     @MainActor
     func testNativeKnowledgeShowsNoteSourceAndCurationEvidence() {
         let app = readFixtureApp()
-        let explore = app.buttons["Explore knowledge"]
-        XCTAssertTrue(explore.waitForExistence(timeout: 20))
-        explore.tap()
+        openKnowledge(app)
 
         let graph = app.buttons["Graph view"]
         XCTAssertTrue(graph.waitForExistence(timeout: 5))
@@ -128,14 +126,14 @@ final class HubWorkspaceUITests: XCTestCase {
         app.buttons["Import"].tap()
         XCTAssertTrue(app.navigationBars["Original source"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["The release plan starts with a sketch."].waitForExistence(timeout: 5))
-        app.navigationBars["Original source"].buttons["Done"].tap()
+        app.navigationBars["Original source"].buttons.firstMatch.tap()
         if !app.buttons["Local graph"].isHittable { app.scrollViews.firstMatch.swipeDown() }
         app.buttons["Local graph"].tap()
         let allKnowledge = app.buttons["hub.knowledge.leave-local-graph"]
         XCTAssertTrue(allKnowledge.waitForExistence(timeout: 5))
         capture("Knowledge local graph")
         allKnowledge.tap()
-        app.buttons["Done"].tap()
+        backToHome(app)
 
         app.buttons["Workspace tools"].tap()
         app.buttons["Activity"].tap()
@@ -244,7 +242,10 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.textViews["hub.project.note"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Folder on your PC"].exists)
         capture("Project instructions and note")
-        app.buttons["Cancel"].tap()
+        // The project page slides in over Home; its back button returns.
+        backToHome(app)
+        app.buttons["Chat history"].tap()
+        XCTAssertTrue(app.buttons["hub.projects.toggle"].waitForExistence(timeout: 5))
         app.buttons["hub.projects.toggle"].tap()
         XCTAssertFalse(project.waitForExistence(timeout: 1))
     }
@@ -306,10 +307,10 @@ final class HubWorkspaceUITests: XCTestCase {
     @MainActor
     func testNativeKnowledgeSkillsFindsExistingWorkflows() {
         let app = readFixtureApp()
-        let explore = app.buttons["Explore knowledge"]
-        XCTAssertTrue(explore.waitForExistence(timeout: 20))
-        explore.tap()
-        app.buttons["Manage Knowledge"].tap()
+        openKnowledge(app)
+        let manage = app.buttons["Manage Knowledge"].firstMatch
+        XCTAssertTrue(manage.waitForExistence(timeout: 5))
+        manage.tap()
         app.buttons["Skills"].tap()
         let search = app.textFields["Find a skill"]
         XCTAssertTrue(search.waitForExistence(timeout: 8))
@@ -394,7 +395,7 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["New chat"].waitForExistence(timeout: 5))
         capture("History over a chat")
         edgeSwipe(from: 0.005, to: 0.7)
-        XCTAssertTrue(app.buttons["Explore knowledge"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["hub.home.graphToggle"].waitForExistence(timeout: 5))
     }
 
     /// Screenshots of the task and settings screens for visual review. A
@@ -410,9 +411,7 @@ final class HubWorkspaceUITests: XCTestCase {
             tasks.tap()
             sleep(3)
             capture("Schedule")
-            let done = app.buttons["Done"].firstMatch
-            guard done.exists, done.isHittable else { return }
-            done.tap()
+            backToHome(app)
             guard waitUntilHittable(tools, timeout: 6) else { return }
             tools.tap()
         }
@@ -464,6 +463,32 @@ final class HubWorkspaceUITests: XCTestCase {
         lastRequest.tap()
         sleep(3)
         capture("Last model request")
+    }
+
+    /// Knowledge opens from Graph mode: the Graph button hides Home's cards,
+    /// then Explore opens the Knowledge page.
+    @MainActor
+    private func openKnowledge(_ app: XCUIApplication) {
+        let toggle = app.buttons["hub.home.graphToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20))
+        toggle.tap()
+        let explore = app.buttons["Explore knowledge"]
+        XCTAssertTrue(explore.waitForExistence(timeout: 5))
+        explore.tap()
+        XCTAssertTrue(app.navigationBars["Knowledge"].waitForExistence(timeout: 5))
+    }
+
+    /// Pages slide in from the right; their back buttons lead Home again.
+    @MainActor
+    private func backToHome(_ app: XCUIApplication) {
+        let tools = app.buttons["Workspace tools"]
+        for _ in 0..<5 {
+            if tools.exists && tools.isHittable { return }
+            let back = app.navigationBars.buttons.firstMatch
+            guard back.exists else { return }
+            back.tap()
+            sleep(1)
+        }
     }
 
     @MainActor

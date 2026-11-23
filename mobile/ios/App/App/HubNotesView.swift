@@ -131,6 +131,8 @@ struct HubNotesView: View {
     var startNew = false
     /// Opens straight into this note (from Home).
     var openID: String? = nil
+    /// Inside HUB's page stack, where the back button closes Notes.
+    var pushed = false
 
     @State private var folder: HubNotesFolder = .all
     @State private var query = ""
@@ -147,22 +149,23 @@ struct HubNotesView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HubNavigation(pushed: pushed) {
             ZStack {
                 if folder == .deleted { deletedList } else if gallery { galleryView } else { list }
-                NavigationLink(isActive: Binding(get: { open != nil }, set: { if !$0 { open = nil } })) {
-                    if let open {
-                        HubNoteEditorView(model: model, noteID: open.id, isNew: open.isNew,
-                                          folder: { if case .folder(let name) = folder { return name } else { return "" } }())
-                    }
-                } label: { EmptyView() }
-                .hidden()
             }
             .navigationTitle(folder.title)
+            .hubPage(item: $open) { open, pushed in
+                HubNavigation(pushed: pushed) {
+                    HubNoteEditorView(model: model, noteID: open.id, isNew: open.isNew,
+                                      folder: { if case .folder(let name) = folder { return name } else { return "" } }())
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button { close() } label: { Image(systemName: "xmark").font(.body.weight(.semibold)) }
-                        .accessibilityLabel("Close Notes")
+                    if !pushed {
+                        Button { close() } label: { Image(systemName: "xmark").font(.body.weight(.semibold)) }
+                            .accessibilityLabel("Close Notes")
+                    }
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button { foldersOpen = true } label: { Image(systemName: "folder") }
@@ -178,7 +181,6 @@ struct HubNotesView: View {
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .tint(HubWorkspacePalette.accent)
         .sheet(isPresented: $foldersOpen) { HubNoteFoldersView(model: model, selected: $folder) }
         .sheet(item: $movingNote) { note in

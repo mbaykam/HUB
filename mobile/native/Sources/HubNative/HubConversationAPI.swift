@@ -2344,6 +2344,12 @@ public final class HubConversationAPI {
         ])
     }
 
+    /// Renames the assistant (the main character); it uses the new name everywhere it introduces itself.
+    public func renameAssistant(_ name: String, revision: Int) async throws -> HubCharacterSettings {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 60, revision >= 0 else { throw HubAttachmentError.invalidResponse }
+        return try await characterCommand(["action": "name", "revision": revision, "name": trimmed])
+    }
     public func changeCharacterRole(_ action: HubCharacterRoleAction, id: String, revision: Int) async throws -> HubCharacterSettings {
         guard UUID(uuidString: id) != nil, revision >= 0 else { throw HubAttachmentError.invalidResponse }
         return try await characterCommand(["action": action.rawValue, "id": id, "revision": revision])

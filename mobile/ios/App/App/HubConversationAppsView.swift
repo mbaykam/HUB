@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct HubConversationAppsView: View {
     let api: HubConversationAPI
     let sessionID: String
+    var pushed = false
     @Environment(\.dismiss) private var dismiss
     @State private var artifacts: [HubConversationApp]?
     @State private var files: [HubConversationFile]?
@@ -25,18 +26,35 @@ struct HubConversationAppsView: View {
     @State private var attempt = 0
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                if selected != nil || selectedFile != nil {
-                    Button { clearSelection() } label: {
-                        Label("Outputs", systemImage: "chevron.left")
+        content
+            .navigationTitle(selected?.name ?? selectedFile?.name ?? "Conversation outputs")
+            .navigationBarTitleDisplayMode(.inline)
+            // Inside an output, its own back button returns to the list of outputs.
+            .navigationBarBackButtonHidden(pushed && (selected != nil || selectedFile != nil))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if pushed && (selected != nil || selectedFile != nil) {
+                        Button { clearSelection() } label: { Label("Outputs", systemImage: "chevron.left").labelStyle(.titleAndIcon) }
                     }
                 }
-                Text(selected?.name ?? selectedFile?.name ?? "Conversation outputs").font(.headline).lineLimit(1)
-                Spacer()
-                Button("Done") { dismiss() }
             }
-            .padding(.horizontal, 16)
+    }
+
+    private var content: some View {
+        VStack(spacing: 12) {
+            if !pushed {
+                HStack {
+                    if selected != nil || selectedFile != nil {
+                        Button { clearSelection() } label: {
+                            Label("Outputs", systemImage: "chevron.left")
+                        }
+                    }
+                    Text(selected?.name ?? selectedFile?.name ?? "Conversation outputs").font(.headline).lineLimit(1)
+                    Spacer()
+                    Button("Done") { dismiss() }
+                }
+                .padding(.horizontal, 16)
+            }
             if let selectedFile {
                 fileDetail(selectedFile)
             } else if let document {
