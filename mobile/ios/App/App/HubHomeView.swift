@@ -469,20 +469,23 @@ struct HubHomeView: View {
     /// modifier chain its SwiftUI type nests so deeply that resolving it at
     /// launch overflowed the iPhone's 1 MB main-thread stack (build 13).
     private var mainLayers: some View {
-        // Pages slide in from the right over Home or a chat; the call bar
-        // stays at the bottom of every page.
+        // Pages slide in from the right over Home or a chat. The call bar sits
+        // inside Home and the chat (which make room for it above their message
+        // box) and, while a page is open, at the bottom of that page.
         HubNavigationRoot { presentationsAndListeners(sheets(AnyView(callLayers))) }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if let call = model.voiceCall {
-                    HubVoiceCallBar(call: call, inThisChat: call.sessionID != nil && call.sessionID == selectedChat?.request.choice.sessionId) { control in
-                        composerFocused = false
-                        todoFocused = false
-                        voiceControl(control)
-                    }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { if pageOpen { callBar } }
             .animation(.easeInOut(duration: 0.2), value: model.voiceCall == nil)
+    }
+
+    @ViewBuilder private var callBar: some View {
+        if let call = model.voiceCall {
+            HubVoiceCallBar(call: call, inThisChat: call.sessionID != nil && call.sessionID == selectedChat?.request.choice.sessionId) { control in
+                composerFocused = false
+                todoFocused = false
+                voiceControl(control)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     /// A page is open over Home or the chat (the side panels stay closed then).
@@ -513,6 +516,8 @@ struct HubHomeView: View {
                     .background(HubChatPalette.background.ignoresSafeArea())
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { if !pageOpen { callBar } }
+        .animation(.easeInOut(duration: 0.2), value: model.voiceCall == nil)
         .foregroundStyle(.primary)
         .tint(accent)
         .hubBackdrop()
