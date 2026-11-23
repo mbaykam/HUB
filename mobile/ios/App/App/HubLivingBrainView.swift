@@ -91,11 +91,47 @@ final class HubBrainSimulation: @unchecked Sendable {
 
         // One hub per top domain that has notes on screen.
         var hubIndex: [String: Int] = [:]
+        var subHubs: [(Int, Int)] = []
         for root in roots where root.id != HubKnowledgeLayout.unassignedID && chosen.contains(where: { rootOf[$0.id]?.id == root.id }) {
             hubIndex[root.id] = nodes.count
             nodes.append(Node(id: "hub:" + root.id, title: root.title, tone: HubKnowledgeGraphView.tone(root.hue, id: root.id),
                               radius: 7.5, mass: 5, gravity: 0.018, kind: .hub, phase: Self.unit(root.id) * 6.28, hub: nil))
             x.append(root.planeX); y.append(root.planeY)
+        }
+        // Subdomains: a smaller hub of their own, tied to their parent's hub.
+        // Each note hangs on the most specific domain it belongs to.
+        let groupByID = Dictionary(layout.groups.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        func depth(_ group: HubKnowledgeLayout.Group) -> Int {
+            var level = 0, parent = group.parentID
+            while let id = parent, level < 6 { level += 1; parent = groupByID[id]?.parentID }
+            return level
+        }
+        let subs = layout.groups.filter { $0.parentID != nil && $0.id != HubKnowledgeLayout.archiveID && $0.id != HubKnowledgeLayout.unassignedID }
+        var deepest: [String: HubKnowledgeLayout.Group] = [:]
+        for sub in subs.sorted(by: { depth($0) > depth($1) }) {
+            for member in sub.members where deepest[member] == nil { deepest[member] = sub }
+        }
+        let shown = Set(chosen.map(\.id))
+        func nearestHub(_ id: String?) -> Int? {
+            var current = id
+            for _ in 0..<6 {
+                guard let value = current else { return nil }
+                if let hub = hubIndex[value] { return hub }
+                current = groupByID[value]?.parentID
+            }
+            return nil
+        }
+        for sub in subs.sorted(by: { depth($0) < depth($1) }) where sub.members.contains(where: shown.contains) {
+            guard let parentHub = nearestHub(sub.parentID) else { continue }
+            let root = rootOf[sub.members.first { rootOf[$0] != nil } ?? ""]
+            let at = nodes.count
+            hubIndex[sub.id] = at
+            nodes.append(Node(id: "hub:" + sub.id, title: sub.title, tone: HubKnowledgeGraphView.tone(root?.hue ?? sub.hue, id: root?.id ?? sub.id),
+                              radius: 5.2, mass: 3, gravity: 0.015, kind: .hub, phase: Self.unit(sub.id) * 6.28, hub: parentHub))
+            let drawn = sub.planeRadius > 0
+            x.append(drawn ? sub.planeX : x[parentHub] + Self.unit(sub.id + "x") * 40 - 20)
+            y.append(drawn ? sub.planeY : y[parentHub] + Self.unit(sub.id + "y") * 40 - 20)
+            subHubs.append((at, parentHub))
         }
         var index: [String: Int] = [:]
         for point in chosen {
@@ -108,7 +144,7 @@ final class HubBrainSimulation: @unchecked Sendable {
             nodes.append(Node(id: point.id, title: titles[point.id] ?? "Untitled", tone: tone,
                               radius: chat ? 2.1 : 3.1 + CGFloat(weight) * 0.35, mass: chat ? 0.6 : 1 + weight * 0.15,
                               gravity: chat ? 0.014 : 0.012, kind: chat ? .chat : .note,
-                              phase: Self.unit(point.id) * 6.28, hub: root.flatMap { hubIndex[$0.id] }))
+                              phase: Self.unit(point.id) * 6.28, hub: nearestHub(deepest[point.id]?.id) ?? root.flatMap { hubIndex[$0.id] }))
             x.append(point.x + Self.unit(point.id + "x") * 4); y.append(point.y + Self.unit(point.id + "y") * 4)
         }
         var seen = Set<Int>()
@@ -121,6 +157,7 @@ final class HubBrainSimulation: @unchecked Sendable {
         for (offset, node) in nodes.enumerated() where node.kind == .note {
             if let hub = node.hub { link(offset, hub, length: 26 + Self.unit(node.id + "l") * 16, strength: 0.09) }
         }
+        for (sub, parent) in subHubs { link(sub, parent, length: 44 + Self.unit(nodes[sub].id + "l") * 12, strength: 0.08) }
         for edge in graph.edges {
             guard let a = index[edge.source], let b = index[edge.target] else { continue }
             let same = nodes[a].hub != nil && nodes[a].hub == nodes[b].hub
