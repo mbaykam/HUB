@@ -16,7 +16,7 @@ import {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 import {withKnowledgeAssetExcerpts} from "./knowledge-assets.ts";
 import {isArchivedConversation} from "../knowledge-record-scope.ts";
 import {parseStewardPlan,stewardDue,stewardPrompt,stewardSnapshot,type StewardReview} from "./knowledge-steward.ts";
-import {describeLibraryPlan,libraryDue,libraryPrompt,librarySnapshot,parseLibraryPlan,type LibraryPlan,type LibraryState} from "./knowledge-library.ts";
+import {crowdedDomains,describeLibraryPlan,libraryDue,libraryPrompt,librarySnapshot,parseLibraryPlan,type LibraryPlan,type LibraryState} from "./knowledge-library.ts";
 export {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limits?:{maxTokens:number})=>Promise<string>;
@@ -210,12 +210,12 @@ export class KnowledgeCurator {
     const live=new Set(state.domains.filter(d=>d.status!=="merged").map(d=>d.id));
     const filed=new Set(state.memberships.filter(m=>live.has(m.domainId)).map(m=>m.nodeId)),unfiled=notes.filter(n=>!filed.has(n.id)).length;
     const organized=[...this.jobs.values()].filter(j=>j.outcome==="organized"&&(j.finishedAt??j.updatedAt)>(library.lastRunAt??0)).length;
-    if(!libraryDue(library,{notes:notes.length,unfiled,organizedSince:organized}))return;
+    if(!libraryDue(library,{notes:notes.length,unfiled,organizedSince:organized,crowded:crowdedDomains(state,notes.map(n=>n.id)).length}))return;
     if(await this.gate?.reason(settings.provider))return;
     const groups:Record<string,string[]>={};for(const m of state.memberships)if(live.has(m.domainId))(groups[m.nodeId]??=[]).push(m.domainId);
     const digest=await this.store.digest?.(notes,groups).catch(()=>undefined);
     const list=notes.map(n=>({id:n.id,title:n.title,modifiedAt:n.modifiedAt}));
-    const {snapshot,keys}=librarySnapshot(state,list,digest);
+    const {snapshot,keys,moves}=librarySnapshot(state,list,digest);
     const prompt=libraryPrompt(snapshot,settings.language,library.lastError);
     const reserve=((Buffer.byteLength(prompt)+4000)*settings.inputPrice+6000*settings.outputPrice)/1e6;
     if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget)return;
@@ -224,7 +224,7 @@ export class KnowledgeCurator {
     const plan:LibraryPlan={id:randomUUID(),at:Date.now(),note:"",operations:[],changes:[],basedOnRevision:state.revision,status:library.approvedAt?"applied":"proposed"};
     try{
       const text=await this.generate(prompt,settings,this.lifetime.signal,{maxTokens:8000});
-      const parsed=parseLibraryPlan(text,state,keys);plan.note=parsed.note;plan.operations=parsed.operations;plan.changes=describeLibraryPlan(parsed.operations,state,list);
+      const parsed=parseLibraryPlan(text,state,keys,moves);plan.note=parsed.note;plan.operations=parsed.operations;plan.changes=describeLibraryPlan(parsed.operations,state,list);
       if(!parsed.operations.length){plan.status="applied";library.lastError=undefined;}
       else if(library.approvedAt){await this.store.organization.stewardDomains(state.revision,parsed.operations,plan.id);library.lastError=undefined;}
       else library.plan=plan;

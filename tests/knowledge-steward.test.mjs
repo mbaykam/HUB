@@ -61,7 +61,8 @@ test("the daily review cannot invent domains or retire full ones; the library re
   assert.throws(() => parseStewardPlan('{"operations":[]}', state), /structured answer/);
   const opened = changeKnowledgeDomains(state, [{type: "create", ref: "new-x", title: "X", parentId: id("Computer Setup")}], {expectedRevision: state.revision, actor: "curator", steward: true, knownNodeIds: [], revisionId: "r"});
   assert.ok(opened.domains.some(d => d.title === "X" && d.parentId === id("Computer Setup")), "the library review opens subdomains");
-  assert.throws(() => changeKnowledgeDomains(state, [{type: "unassign", nodeId: "n", domainId: id("Misc")}], {expectedRevision: state.revision, actor: "curator", steward: true, knownNodeIds: ["n"], revisionId: "r"}), /may only open/);
+  // The library review may move notes out of a crowded domain (a user's own filing stays; see knowledge-library tests), but not split or propose.
+  assert.doesNotThrow(() => changeKnowledgeDomains(state, [{type: "unassign", nodeId: "n", domainId: id("Misc")}], {expectedRevision: state.revision, actor: "curator", steward: true, knownNodeIds: ["n"], revisionId: "r"}));
   // Ordinary curator passes still cannot rename without review.
   assert.throws(() => changeKnowledgeDomains(state, [{type: "rename", id: id("Misc"), title: "Other"}], {expectedRevision: state.revision, actor: "curator", knownNodeIds: [], revisionId: "r"}), /human review|source evidence/);
   assert.deepEqual(parseStewardPlan('{"note":"Raflar düzenli.","operations":[]}', state).operations, []);

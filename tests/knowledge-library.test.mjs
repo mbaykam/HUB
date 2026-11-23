@@ -68,3 +68,28 @@ test('the review runs only for a real library with something to do; a plan waiti
  assert.equal(libraryDue({history:[],lastRunAt:now-LIBRARY_RETRY_MS},{notes:40,unfiled:3,organizedSince:0},now),false,'before approval, at most one plan a day');
  assert.equal(libraryDue({history:[],approvedAt:1,lastRunAt:now-LIBRARY_RETRY_MS},{notes:40,unfiled:3,organizedSince:0},now),true,'after approval, unfiled notes are handled every half hour');
 });
+
+test('a crowded domain lists its own notes, and the plan moves them into new subdomains (a note the user filed stays)',async()=>{
+ const {crowdedDomains,LIBRARY_CROWDED}=await import('../packages/harness-overlay/src/host/knowledge-library.ts');
+ let state=emptyKnowledgeDomains();
+ const notes=Array.from({length:LIBRARY_CROWDED+2},(_,i)=>({id:`h${i}`,title:`HUB note ${i}`,modifiedAt:1000+i}));
+ state=changeKnowledgeDomains(state,[{type:'create',ref:'new-hub',title:'HUB System'},...notes.map(n=>({type:'assign',nodeId:n.id,domainId:'new-hub'}))],
+  {expectedRevision:0,actor:'curator',steward:true,knownNodeIds:notes.map(n=>n.id),revisionId:'r0'});
+ const hub=state.domains[0].id;
+ state=changeKnowledgeDomains(state,[{type:'assign',nodeId:'h1',domainId:hub}],{expectedRevision:state.revision,actor:'user',knownNodeIds:notes.map(n=>n.id),revisionId:'r1'});
+ assert.deepEqual(crowdedDomains(state,notes.map(n=>n.id)),[hub]);
+ assert.equal(libraryDue({approvedAt:1,lastRunAt:0},{notes:notes.length,unfiled:0,organizedSince:0,crowded:1},LIBRARY_INTERVAL_MS+1),true);
+ const {snapshot,keys,moves}=librarySnapshot(state,notes);
+ const entry=snapshot.domains.find(d=>d.id===hub);
+ assert.equal(entry.crowded.length,notes.length);assert.equal(moves.get('c1'),hub);
+ assert.match(libraryPrompt(snapshot,'en'),/crowded/);
+ const first=entry.crowded.find(c=>c.title==='HUB note 0').key,user=entry.crowded.find(c=>c.title==='HUB note 1').key;
+ const plan=parseLibraryPlan(JSON.stringify({note:'Split.',operations:[{type:'create',ref:'new-voice',title:'Voice',parentId:hub},{type:'assign',domainId:'new-voice',items:[first,user]}]}),state,keys,moves);
+ assert.deepEqual(plan.operations.filter(o=>o.type==='unassign').map(o=>o.nodeId).sort(),['h0','h1']);
+ assert.ok(describeLibraryPlan(plan.operations,state,notes).some(line=>/Move 2 notes out of "HUB System"/.test(line)));
+ const after=changeKnowledgeDomains(state,plan.operations,{expectedRevision:state.revision,actor:'curator',steward:true,knownNodeIds:notes.map(n=>n.id),revisionId:'r2'});
+ const voice=after.domains.find(d=>d.title==='Voice').id;
+ assert.ok(after.memberships.some(m=>m.nodeId==='h0'&&m.domainId===voice));
+ assert.ok(!after.memberships.some(m=>m.nodeId==='h0'&&m.domainId===hub),'Moved out of the crowded domain');
+ assert.ok(after.memberships.some(m=>m.nodeId==='h1'&&m.domainId===hub),'The user\'s own filing stays');
+});

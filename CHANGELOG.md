@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.34
+
+- Library review splits crowded domains: a domain holding more than 12 notes directly lists all of them for the review, which opens subdomains by topic and moves the notes into them (a note the user filed by hand stays). A crowded domain also makes the daily review due.
+
 ## 1.10.33
 
 - Your assistant has its own name, which you set on the phone (Settings → Assistant). It introduces itself with it in chats, voice and Telegram; HUB stays the name of the app and the PC system.

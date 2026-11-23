@@ -46,7 +46,7 @@ export function changeKnowledgeDomains(current:KnowledgeDomainState|undefined,op
   if(context.expectedRevision!==state.revision)throw Object.assign(Error("Domains changed; refresh and replan before saving"),{code:"DOMAIN_REVISION_CONFLICT"});
   if(!Array.isArray(operations)||operations.length>(context.steward?300:context.actor==="curator"?8:100))throw Error("Too many domain operations");
   // The library review sees the whole shelf, so it may also open domains and file notes.
-  if(context.steward&&(context.actor!=="curator"||operations.some(o=>!["rename","reparent","status","merge","create","assign"].includes(o.type))))throw Error("The domain review may only open, rename, nest, retire or merge domains and file notes");
+  if(context.steward&&(context.actor!=="curator"||operations.some(o=>!["rename","reparent","status","merge","create","assign","unassign"].includes(o.type))))throw Error("The domain review may only open, rename, nest, retire or merge domains and file or move notes");
   if(context.actor==="curator"&&!context.steward&&(operations.filter(o=>o.type==="create").length>2||operations.filter(o=>o.type==="assign").length>4||operations.filter(o=>o.type==="propose").length>2||context.maxActiveDomains!==undefined))throw Error("Curator domain allowance exceeded");
   const before=structuredClone(state),refs=new Map<string,string>(),now=context.now??Date.now(),known=new Set(context.knownNodeIds);
   const domain=(id:string)=>{const d=state.domains.find(d=>d.id===(refs.get(id)??id));if(!d||d.status==="merged")throw Error("Domain target missing or merged");return d;};
@@ -69,7 +69,9 @@ export function changeKnowledgeDomains(current:KnowledgeDomainState|undefined,op
       const proposed=structuredClone(op.operation);if('id'in proposed)proposed.id=domain(proposed.id).id;else {proposed.domainId=domain(proposed.domainId).id;if(!known.has(proposed.nodeId))throw Error("Proposal record is not admitted");}if(proposed.type==="merge")proposed.targetId=domain(proposed.targetId).id;if(proposed.type==="reparent"&&proposed.parentId)proposed.parentId=domain(proposed.parentId).id;
       state.proposals.push({id:randomUUID(),sourceId:context.source!.id,at:now,evidence:op.evidence,operation:proposed,basedOnRevision:state.revision+1,status:"pending"});
     }else if(op.type==="unassign"){
-      domain(op.domainId);state.memberships=state.memberships.filter(m=>!(m.nodeId===op.nodeId&&m.domainId===op.domainId));
+      // The library review moves notes it filed itself; a filing the user made stays.
+      domain(op.domainId);if(context.actor==="curator"&&state.memberships.some(m=>m.nodeId===op.nodeId&&m.domainId===op.domainId&&m.origin==="user"))continue;
+      state.memberships=state.memberships.filter(m=>!(m.nodeId===op.nodeId&&m.domainId===op.domainId));
     }else{
       const d=domain(op.id);
       if(op.type==="rename"&&d.title===op.title.trim()&&JSON.stringify(d.aliases)===JSON.stringify(op.aliases??d.aliases)||op.type==="reparent"&&d.parentId===op.parentId||op.type==="status"&&d.status===op.status)continue;
