@@ -31,7 +31,20 @@ export class CharacterStore {
     const command=characterCommandSchema.parse(value);
     const update=this.#queue.then(async()=>{
       const s=this.snapshot();if(s.revision!==command.revision)throw new CharacterConflict("Characters changed on another screen. Reload before saving.");
-      if(command.action==="save" || command.action==="create"){
+      if(command.action==="name"){
+        // The assistant's own name. Another (hidden) character with the same
+        // name gives way, since names stay unique.
+        const main=s.characters.find(c=>c.id===s.mainId)!,old=main.name,name=command.name;
+        const taken=(value:string,except:string)=>s.characters.some(c=>c.id!==except&&c.name.toLowerCase()===value.toLowerCase());
+        for(const c of s.characters){
+          if(c.id===main.id||c.name.toLowerCase()!==name.toLowerCase())continue;
+          const base=`${c.name.slice(0,40)} (${c.id===s.voiceId?"voice":c.id===s.unrestrictedId?"unrestricted":"specialist"})`;let next=base,n=2;
+          while(taken(next,c.id)||next.toLowerCase()===name.toLowerCase())next=`${base} ${n++}`;
+          c.name=next;
+        }
+        main.instructions=main.instructions.replace(new RegExp(`^You are ${old.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\b`),`You are ${name}`);
+        main.name=name;
+      }else if(command.action==="save" || command.action==="create"){
         const character=command.action==="create"?{...command.character,id:randomUUID()}:command.character;
         await validate(character);
         if(command.action==="save"){if(!s.characters.some(c=>c.id===character.id))throw new Error("Character no longer exists");s.characters=s.characters.map(c=>c.id===character.id?character:c);}

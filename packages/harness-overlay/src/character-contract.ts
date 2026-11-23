@@ -29,6 +29,8 @@ export const characterCommandSchema=z.discriminatedUnion("action",[
   z.object({action:z.literal("save"),revision,character:characterSchema}).strict(),
   z.object({action:z.literal("create"),revision,character:characterSchema.omit({id:true})}).strict(),
   z.object({action:z.literal("delete"),revision,id}).strict(),
+  /** Renames the assistant (the main character) everywhere it introduces itself. */
+  z.object({action:z.literal("name"),revision,name:z.string().trim().min(1).max(60)}).strict(),
   z.object({action:z.literal("main"),revision,id}).strict(),
   z.object({action:z.literal("voice"),revision,id}).strict(),
   z.object({action:z.literal("unrestricted"),revision,id}).strict(),

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.33
+
+- Your assistant has its own name, which you set on the phone (Settings → Assistant). It introduces itself with it in chats, voice and Telegram; HUB stays the name of the app and the PC system.
+- Daily briefing for Home: headlines on the topics you follow, read from news feeds on the PC (no model tokens). You add, remove and reorder topics on the phone; the assistant can follow or drop a topic itself when your interests change (hub_briefing_topics), and marks those.
+- Watching videos: a YouTube, Instagram, TikTok, X or Vimeo link, or a video you attach (MP4, MOV, WebM), is first watched as a whole: one or two contact sheets of the moments where the picture changes, labelled with their times, plus the words from the platform's captions or local speech recognition, shortened evenly. That is about 1-2k image tokens plus a small transcript for the whole video (up to three hours); the assistant looks closer at a time range only when it needs to.
 ## 1.10.32
 
 - Library review: Knowledge AI looks at the whole library, not one chat at a time, and keeps it in order: a few broad main domains (up to 10), specific topics as subdomains, every note filed, domains renamed when what they hold changes. The local embedding model summarizes the library first (typical and newest notes per domain, groups of unfiled notes with their nearest domain), so a review reads about 4-5k tokens whatever the library's size. The first plan waits for the user's approval on the phone; later reviews apply directly and stay undoable in the domain history.

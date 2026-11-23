@@ -43,6 +43,7 @@ import {installChatQuestions} from "./host/chat-questions.ts";
 import {installClaudeCodeProvider} from "./host/claude-code-provider.ts";
 import {installOpenRouterSpeed} from "./host/openrouter-speed.ts";
 import {installNotes,NOTE_TOOLS} from "./host/notes-web.ts";
+import {installBriefing,BRIEFING_TOOLS} from "./host/briefing.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
 
 /**
@@ -203,7 +204,7 @@ export class HubCharacters extends Service {
           :mode==="unrestricted"?`Mode: unrestricted${this.voiceCalls.has(agent.id)?" voice call. Answer briefly and naturally for speech":""}. The user switched this chat to an uncensored model on purpose; help with requests the normal model would refuse.${character.instructions.trim()?"\nUnrestricted mode instructions (keep the name and personality above; ignore any other name or identity in them):\n"+character.instructions.trim():""}`:mode==="specialist"?`Mode: ${character.name}.\n${character.instructions}`:"Mode: chat.";
         // One identity: no roster of characters to switch between, only the
         // model that is answering. Helpers are started by model, not by name.
-        const persona=`You are ${main.name}, the user's personal assistant: one assistant with one memory, whichever model answers (Chat, Voice or Unrestricted). Descriptions elsewhere of an "AI agent", "coding agent" or "Claude" are the software you run on, not who you are.\n${main.instructions}\n${modeNote}\nCurrent model: ${character.route?.provider}/${character.route?.model}.\nUse hub_delegate to start a helper in the background; pick its model (chat, fast or unrestricted). The user switches this chat's model with the model button at the top of the chat; models are set in HUB → Settings → Models.\nNotes: the user keeps their own notes in HUB's Notes (their Apple Notes replacement, separate from Knowledge). Find and read them with hub_notes_find and hub_note_read when they matter; create or change a note with hub_note_write only when the user asks.\n`;
+        const persona=`You are ${main.name}, the user's personal assistant: one assistant with one memory, whichever model answers (Chat, Voice or Unrestricted). Descriptions elsewhere of an "AI agent", "coding agent" or "Claude" are the software you run on, not who you are.${main.name.toLowerCase()==="hub"?"":` Your name is ${main.name}; HUB is the app and PC system you live in, not your name. Answer to ${main.name} and introduce yourself as ${main.name}.`}\n${main.instructions}\n${modeNote}\nCurrent model: ${character.route?.provider}/${character.route?.model}.\nUse hub_delegate to start a helper in the background; pick its model (chat, fast or unrestricted). The user switches this chat's model with the model button at the top of the chat; models are set in HUB → Settings → Models.\nNotes: the user keeps their own notes in HUB's Notes (their Apple Notes replacement, separate from Knowledge). Find and read them with hub_notes_find and hub_note_read when they matter; create or change a note with hub_note_write only when the user asks.\n`;
         const coordinator=coordinatesTelegram(s,character)?"\nYou are the Telegram conversation coordinator. For source-backed research, call hub_research directly and summarize the completed result notice without starting more work. Acknowledge other substantial browser, filesystem or multi-step work, then start it with hub_delegate and end your turn promptly. Stay available for follow-up conversation while the helper runs. Report only observed task status. Do not wait for a background task or claim its completion early.":"";
         return persona+coordinator;
       };
@@ -221,7 +222,7 @@ export class HubCharacters extends Service {
         // Advertise the same character policy enforced at execution. Keep the
         // Explicit user navigation is available in both text and voice. It
         // changes identity, not the character's saved tool permissions.
-        let tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||(tool.name==="hub_switch_character"||tool.name==="hub_research"||tool.name==="hub_find_chat"||(NOTE_TOOLS as readonly string[]).includes(tool.name))):assembly.tools;
+        let tools=allowed?assembly.tools.filter((tool:any)=>allowed.has(tool.name)||(tool.name==="hub_switch_character"||tool.name==="hub_research"||tool.name==="hub_find_chat"||(NOTE_TOOLS as readonly string[]).includes(tool.name)||(BRIEFING_TOOLS as readonly string[]).includes(tool.name))):assembly.tools;
         // Text and unrestricted chats get one tool per job; voice keeps its own list.
         if(selected.id!==s.voiceId)tools=tools.filter((tool:any)=>!hiddenInChat(tool.name));
         const offered=new Set(tools.map((tool:any)=>tool.name)),hidden=new Set<string>(assembly.tools.map((tool:any)=>tool.name).filter((name:string)=>!offered.has(name)));
@@ -242,7 +243,7 @@ export class HubCharacters extends Service {
       agent.ctx.tools.guard((exec:any)=>{
         if(exec.agent===agent){const stop=repeatedToolFailure(agent,exec.name);if(stop)return stop;}
         if(exec.agent!==agent || this.voiceCalls.has(agent.id) || (this.dispatches.has(exec.callId) && this.dispatches.get(exec.callId)===exec.parent))return;
-        if(exec.name==="hub_switch_character"||exec.name==="hub_research"||exec.name==="hub_find_chat"||(NOTE_TOOLS as readonly string[]).includes(exec.name))return; // Explicit user navigation has its own authorization check.
+        if(exec.name==="hub_switch_character"||exec.name==="hub_research"||exec.name==="hub_find_chat"||(NOTE_TOOLS as readonly string[]).includes(exec.name)||(BRIEFING_TOOLS as readonly string[]).includes(exec.name))return; // Explicit user navigation has its own authorization check.
         const policy=selected?.tools;
         if(policy?.mode==="allow" && !policy.names.includes(exec.name))return "This tool is disabled for this character.";
         if(coordinatesTelegram(mount.turnSnapshot??this.store.snapshot(),selected)&&!new Set(["hub_present","hub_switch_character","hub_delegate","hub_automation_manage","hub_goals_manage","hub_planner","hub_work_plan","hub_conversation_usage","hub_knowledge_write_note","hub_memory_index","hub_skill_read","hub_skill_save","list_agents","send_message","interrupt_agent","ask_user"]).has(exec.name)&&!/^(minke_memory|hub_memory|memory_|mcp__hub_memory__|hub_knowledge_(?:search|read)$)/.test(exec.name))return "Keep the Telegram conversation available: delegate this work with hub_delegate, then end your turn promptly. This operation was not started.";
@@ -300,6 +301,7 @@ export class HubCharacters extends Service {
     ctx.effect(()=>installConversationUsage(ctx as unknown as Parameters<typeof installConversationUsage>[0]),"HUB conversation usage receipts");
     ctx.effect(()=>installDailyUseWeb(ctx),"HUB durable activity and generated applications");
     ctx.effect(()=>installNotes(ctx),"HUB Notes");
+    ctx.effect(()=>installBriefing(ctx),"HUB briefing");
     ctx.effect(()=>installConversationTitles(ctx),"HUB conversation topic titles");
     ctx.effect(()=>{
       let renderer:Promise<string>|undefined;
