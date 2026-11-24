@@ -1,0 +1,52 @@
+name: iOS TestFlight assign existing build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Existing iOS build number (1-9999; no build or upload)
+        required: true
+        type: string
+      existing_group_id:
+        description: Exact existing private internal group ID from read-only discovery
+        required: true
+        type: string
+      confirmation:
+        description: Type ADD_EXISTING_BUILD_TO_EXISTING_GROUP
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight-existing-group-assignment
+  cancel-in-progress: false
+
+jobs:
+  assign:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.confirmation == 'ADD_EXISTING_BUILD_TO_EXISTING_GROUP'
+    environment: ios-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - name: Check synthetic fixtures without credentials
+        run: node --test mobile/scripts/testflight-status.test.mjs mobile/scripts/testflight-assign.test.mjs
+      - name: Assign only existing VALID iOS build to existing private internal group
+        run: node mobile/scripts/testflight-assign.mjs
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          EXISTING_GROUP_ID: ${{ inputs.existing_group_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_ASC_PRIVATE_KEY_P8_BASE64: ${{ secrets.IOS_ASC_PRIVATE_KEY_P8_BASE64 }}
+          IOS_ASC_APP_ID: ${{ secrets.IOS_ASC_APP_ID }}
+      # No group/tester creation, invitations, beta review, production, credential files, or artifacts.

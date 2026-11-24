@@ -41,7 +41,8 @@ function fakeFetch(responses = [fixture(), detail(), testers]) {
     assert.equal(options.method, 'GET');
     assert.equal(options.redirect, 'error');
     assert.ok(options.signal);
-    const item = responses.shift();
+    const item = responses.length === 0 && url.pathname === `/v1/apps/${env.IOS_ASC_APP_ID}/betaGroups`
+      ? { data: [] } : responses.shift();
     assert.notEqual(item, undefined, 'Unexpected API request');
     if (item instanceof Error) throw item;
     return item?.status ? { ok: false, status: item.status, json() { throw new Error('PRIVATE_BODY'); } } :
@@ -166,6 +167,34 @@ test('output is inert JSON, redacts email-like group names and marks bounded gro
   assert.equal(report.betaGroupCountIsExact, false);
   assert.doesNotMatch(lines[0], /PRIVATE_EMAIL/);
   assert.ok(lines[0].split('\n').every(line => !line.startsWith('::')));
+});
+
+test('existing app group discovery is distinct, bounded, GET-only and excludes tester identities', async () => {
+  const b = fixture();
+  b.data[0].relationships.betaGroups.data = [];
+  const inventory = { data: [{ type: 'betaGroups', id: 'existing-private', attributes: {
+    name: 'Private\nPRIVATE_EMAIL@example.com', isInternalGroup: true, publicLinkEnabled: null,
+  } }], links: { next: 'https://untrusted.invalid/next' }, meta: { paging: { total: 51 } } };
+  const { fetch, calls } = fakeFetch([b, detail(), inventory, testers]);
+  const report = await checkStatus(env, fetch, now);
+  assert.deepEqual(report.betaGroups, []);
+  assert.equal(report.betaGroupCount, 0);
+  assert.equal(report.existingAppGroupCount, 1);
+  assert.equal(report.existingAppGroupCountIsExact, false);
+  assert.deepEqual(report.existingAppGroups, [{ id: 'existing-private', name: 'Private [redacted]',
+    isInternalGroup: true, publicLinkEnabled: null, testerCount: 4 }]);
+  assert.equal(calls[2].url.pathname, '/v1/apps/123456/betaGroups');
+  assert.equal(calls[2].url.searchParams.get('limit'), '50');
+  assert.equal(calls.length, 4);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_EMAIL|PRIVATE_NAME|private-tester-id/);
+});
+
+test('discovery permission failure preserves build status but reports unknown inventory', async () => {
+  const report = await checkStatus(env, fakeFetch([fixture(), detail(), testers, { status: 403 }]).fetch, now);
+  assert.equal(report.processedValid, true);
+  assert.equal(report.existingAppGroups, null);
+  assert.equal(report.existingAppGroupCount, null);
+  assert.match(report.limitations.join(), /Existing app groups:.*insufficient API role/);
 });
 
 test('workflow is protected, manual main-only, minimum permission and no deployment actions', () => {
