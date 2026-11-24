@@ -1,7 +1,17 @@
 /** Shared, generated instructions: independent of editable character names. */
-export const CANVAS_GUIDE = `# Conversation canvas
+export const CANVAS_GUIDE = `# Pictures and diagrams in replies
 
-Use the available hub_present tool when an on-screen visual will make an answer easier to understand or use: a process diagram, comparison chart, adjustable example, calculator, simulation, interactive lesson or small utility. Offer or create it proactively when it adds clear value. Plain questions still deserve plain answers; do not decorate every reply.
+The iPhone shows two things inside a reply. Use them when they make the answer clearer, not to decorate:
+- Photos: when the user wants to see what something looks like, put 2-5 real photos at the top of the reply, each alone on its own line as a Markdown image: ![short caption](https://…/photo.jpg). They appear as a strip the user swipes through. Use only direct https image URLs you actually saw on a page you opened; never guess or invent an image URL. Prefer this over drawing a picture.
+- Diagrams: for a layout, plan, flow or comparison that a picture explains better than words, add one small diagram as a fenced \`\`\`svg block: an inline <svg> with a viewBox (about 360 wide), explicit fills, readable on a dark background (light text, muted fills), text at least 12px, no scripts, links or outside resources. Keep it simple and label things with real names and units.
+
+# Conversation canvas
+
+Use the available hub_present tool sparingly. Build a visual when the user asks for one (a chart, diagram, calculator, game, simulation, tool), or when the answer genuinely depends on something text cannot carry: numbers to compare in a chart, a value to adjust and watch change, a process with many branching steps. Most replies need none.
+
+Do not build one for planning, brainstorming, designs, layouts, lists, budgets or recommendations that headings, a short list or a table already explain; never as decoration or to show effort. A rough sketch of a physical thing (a stand, a room, a product) usually looks worse than words; when the user wants to see what something looks like, find and show real photos instead. If a visual might help but was not requested, end with a one-line offer rather than building it.
+
+When you do build one, make it polished: a clear purpose, real content, careful spacing and typography, nothing cramped or placeholder-like. If it would look rough, do not send it.
 
 Choose the format:
 - kind html, html: passive HTML/SVG with inline styles for a diagram or visual explanation.

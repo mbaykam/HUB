@@ -54,6 +54,8 @@ export class KnowledgeStore {
   readonly mutations=new KnowledgeMutationGate();
   rank?: (query:string,notes:Stored[],limit:number)=>Promise<KnowledgeSemanticHit[]>;
   similarities?:(notes:Stored[])=>Promise<NonNullable<KnowledgeGraph["similarities"]>|SemanticLayout>;
+  /** The whole library in numbers from the local embeddings (see knowledge-library.ts). */
+  digest?:(notes:Stored[],groups:Record<string,string[]>)=>Promise<import("./knowledge-library.ts").LibraryDigest>;
   private topicCache?:{key:string;at:number;retryable:boolean;value:Promise<SemanticLayout>};
   private readonly lexicalIndex=new KnowledgeLexicalIndex();
   private communityIndex?:KnowledgeCommunities;
@@ -99,9 +101,27 @@ export class KnowledgeStore {
       const path=await this.file(n.path);if(await readFile(path,"utf8")!==n.raw)throw new Error("Legacy note changed during migration");const tmp=path+`.${randomUUID()}.tmp`;await writeFile(tmp,raw);await rename(tmp,path);
     }
     await this.refreshInventory();
-    await this.organization.repairPending();
+    // Deferred metadata must not reject readiness for canonical read tools.
+    // repairPending keeps its pending receipts and still rejects explicit repair.
+    try{await this.organization.repairPending();}catch(e){if((e as NodeJS.ErrnoException).code!=="KNOWLEDGE_PROJECTION_DEFERRED")throw e;}
   }
-  async scan(coverage?:ScanCoverage,includeHeld=false): Promise<Stored[]> {
+  private scanning=new Map<boolean,Promise<{notes:Stored[];seen:ScanCoverage}>>();
+  /** Searches that ask at the same moment share one pass over the vault (an
+   * automatic recall asks three times before every reply, ~110 ms each).
+   * Writers always read the vault themselves. */
+  async scan(coverage?:ScanCoverage,includeHeld=false,share=false): Promise<Stored[]> {
+    if(!share)return this.scanOnce(coverage??{files:0,noteSize:0,recordSize:0},includeHeld);
+    let pending=this.scanning.get(includeHeld);
+    if(!pending){
+      const seen:ScanCoverage={files:0,noteSize:0,recordSize:0},started=this.scanOnce(seen,includeHeld).then(notes=>({notes,seen}));
+      pending=started;this.scanning.set(includeHeld,started);
+      void started.finally(()=>{if(this.scanning.get(includeHeld)===started)this.scanning.delete(includeHeld);}).catch(()=>{});
+    }
+    const {notes,seen}=await pending;
+    if(coverage){coverage.files=seen.files;coverage.noteSize=seen.noteSize;coverage.recordSize=seen.recordSize;}
+    return [...notes];
+  }
+  private async scanOnce(coverage:ScanCoverage,includeHeld:boolean): Promise<Stored[]> {
     const notes: Stored[] = [];
     const held=includeHeld?new Set<string>():await this.admission.blocked();
     if(coverage){coverage.files=0;coverage.noteSize=0;coverage.recordSize=0;}
@@ -188,10 +208,18 @@ export class KnowledgeStore {
     const sourceMap = await this.sourcedMetadata();
     const incoming=new Set<string>(),outgoing=new Set<string>();for(const edge of graph.edges){if(edge.target===id)incoming.add(edge.source);if(edge.source===id)outgoing.add(edge.target);}
     await this.admission.assert({conversationId:id});
-    let assets:import("../knowledge-contract.ts").KnowledgeAsset[]|undefined;
-    if(found.kind==="conversation")try{assets=[...new Map((await this.archive.read(id)).messages.flatMap(m=>m.assets??[]).map(a=>[a.id,a])).values()];}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+    let assets:import("../knowledge-contract.ts").KnowledgeAsset[]|undefined,sessionId:string|undefined;
+    if(found.kind==="conversation")try{const archived=await this.archive.read(id);assets=[...new Map(archived.messages.flatMap(m=>m.assets??[]).map(a=>[a.id,a])).values()];
+      // A HUB chat's photos and screenshots live in its session; the phone loads them from there.
+      if(typeof (archived as any).sessionId==="string"&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test((archived as any).sessionId))sessionId=(archived as any).sessionId;}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+    // A brain note shows the pictures of the chats it was learned from.
+    const sourceSessions:string[]=[];
+    if(found.kind!=="conversation")for(const conversationId of new Set((sourceMap[id]?.sources??[]).map(s=>s.conversationId).filter((c):c is string=>typeof c==="string"))){
+      if(sourceSessions.length>=5)break;
+      try{const archived:any=await this.archive.read(conversationId);if(typeof archived.sessionId==="string"&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(archived.sessionId))sourceSessions.push(archived.sessionId);}catch{/* archive gone */}
+    }
     return { id, title: found.title, permalink: found.permalink, hash: found.hash, modifiedAt: found.modifiedAt,kind:found.kind,protected:found.protected, content: found.body,
-      ...(assets?{assets}:{}),
+      ...(assets?{assets}:{}),...(sessionId?{sessionId}:{}),...(sourceSessions.length?{sourceSessions}:{}),
       backlinks: graph.nodes.filter(n => incoming.has(n.id)),
       links: graph.nodes.filter(n => outgoing.has(n.id)), sources: (sourceMap[id]?.sources??[]).map(({conversationId,...ref})=>({...ref,...(conversationId&&graph.nodes.some(n=>n.id===conversationId&&n.kind==="conversation")?{conversationId}:{})})) };
   }
@@ -202,7 +230,7 @@ export class KnowledgeStore {
   }
   async organizationSource(id:string,offset=0){const source=(await this.scan()).find(n=>n.id===id);if(!source)throw Error("Source is not admitted or available");if(!Number.isSafeInteger(offset)||offset<0||offset>=source.body.length)throw Error("Choose an existing source passage");let start=offset;if(start&&/[\uDC00-\uDFFF]/.test(source.body[start]!))start--;let end=Math.min(source.body.length,start+12000);if(end<source.body.length&&/[\uDC00-\uDFFF]/.test(source.body[end]!))end--;return {nodeId:id,title:source.title,hash:digest(source.body),totalChars:source.body.length,start,end,content:source.body.slice(start,end),nextOffset:end<source.body.length?end:null};}
   async search(query: string, limit = 12,coverage?:ScanCoverage,scope:KnowledgeRecordScope="all") {
-    const notes=(await this.scan(coverage)).filter(n=>n.body.trim()&&matchesKnowledgeScope(n,scope)),registry=await this.organization.domains();if(coverage)coverage.indexed=notes.length;let semantic:KnowledgeSemanticHit[]=[];
+    const notes=(await this.scan(coverage,false,true)).filter(n=>n.body.trim()&&matchesKnowledgeScope(n,scope)),registry=await this.organization.domains();if(coverage)coverage.indexed=notes.length;let semantic:KnowledgeSemanticHit[]=[];
     if(this.rank)try{semantic=await boundedKnowledgeRecall(this.rank(query,notes,Math.max(24,limit)),AbortSignal.timeout(850));}catch{/* Lexical fallback is bounded independently of a late local index. */}
     const result=await this.lexicalIndex.withSnapshot(notes,()=>fuseKnowledgeRanks(notes,query,registry,semantic,limit,this.lexicalIndex)),blocked=await this.admission.blocked();return result.filter(n=>!blocked.has(n.id));
   }
@@ -216,7 +244,7 @@ export class KnowledgeStore {
   }
   /** Small relevant memory, stable human preferences and one-hop real links. */
   async recall(query:string,topicContext="",coverage?:ScanCoverage){
-    const [direct,context,notes,meta]=await Promise.all([this.search(query,4,coverage),topicContext.trim()?this.search(topicContext,3):Promise.resolve([]),this.scan(),this.metadata()]);
+    const [direct,context,notes,meta]=await Promise.all([this.search(query,4,coverage),topicContext.trim()?this.search(topicContext,3):Promise.resolve([]),this.scan(undefined,false,true),this.metadata()]);
     const selected:{note:Stored;reason:string}[]=[];
     const add=(note:Stored,reason:string)=>{if(note.body.trim()&&!selected.some(n=>n.note.id===note.id))selected.push({note,reason});};
     for(const n of notes.filter(n=>meta[n.id]?.category==="preferences"&&!meta[n.id]?.deleted).sort((a,b)=>(meta[b.id]?.completedAt??0)-(meta[a.id]?.completedAt??0)).slice(0,2))add(n,"personal-preference");
@@ -290,7 +318,8 @@ export class KnowledgeStore {
         const filename=change.title.normalize("NFC").replace(/[\u0000-\u001f<>:"/\\|?*#\[\]^]/g," ").trim().replace(/[. ]+$/g,"");
         if (!filename || /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(filename)) throw new Error("Invalid note title");
         const path=existing?.path ?? `Notes/${filename}.md`;
-        if (notes.some(n=>n.path.toLowerCase()===path.toLowerCase() && n.id!==change.id)) throw new Error("Existing title: reuse its identity");
+        const same=notes.find(n=>n.path.toLowerCase()===path.toLowerCase() && n.id!==change.id);
+        if (same) throw new Error(`A note titled "${change.title}" already exists (id ${same.id}). Update that note with its id instead of creating a second one.`);
         return {change,existing,path,permalink:path.slice(0,-3)};
       });
       if(new Set(reserved.map(n=>n.path.toLowerCase())).size!==reserved.length) throw new Error("Duplicate paths in plan");

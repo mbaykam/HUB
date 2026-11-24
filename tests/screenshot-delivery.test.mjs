@@ -55,10 +55,13 @@ test("desktop capture works in any turn the user started, never from background 
   assert.deepEqual(requests[0].payload, {});
   assert.equal(result.name, "desktop-screenshot.png");
   const callId = "desktop-fixture";
-  assert.equal(conversationScreenshots([
+  const listed = conversationScreenshots([
     {type: "tool/call", data: {name: tool.name, callId}},
-    {type: "tool/result", data: {turn: 1, meta: result, message: {content: [{type: "tool-result", toolCallId: callId, isError: false}]}}},
-  ]).length, 1);
+    {type: "tool/result", seq: 42, data: {turn: 1, meta: result, message: {content: [{type: "tool-result", toolCallId: callId, isError: false}]}}},
+  ]);
+  assert.equal(listed.length, 1);
+  // Its position in the conversation travels with it, so it stays in place after the reply.
+  assert.equal(listed[0].seq, 42);
 });
 
 test("a running screen saver is closed before the real screen is captured", async t => {
@@ -106,7 +109,7 @@ test("workspace screenshot persists in the settled chat turn and renders through
   const stored = new Map();
   let tool;
   const ctx = {
-    tools: {register(value) { tool = value; return () => {}; }},
+    tools: {register(value) { if (value.name === "hub_show_screenshot") tool = value; return () => {}; }},
     webServer: {register(value) { routes.set(value.path, value.handler); return () => routes.delete(value.path); }},
     connection: {requestRejection(req) { return req.headers.authorization === "fixture" ? undefined : 401; }},
     sessionQuery: {async observeSession(session) { return {events: session === "session-a" ? events : [], [Symbol.dispose]() {}}; }},

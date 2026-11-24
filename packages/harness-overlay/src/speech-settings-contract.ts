@@ -5,8 +5,9 @@ export const speechSettingsSchema=z.object({revision:z.number().int().nonnegativ
 export type SpeechSettings=z.infer<typeof speechSettingsSchema>;
 /** Engines, languages and quality belong to HUB. Characters only contribute a
  * compatible voice. Older character engine settings are retained for rollback. */
-export function characterSpeech(shared:LocalSpeechConfig,character:LocalSpeechConfig|null):LocalSpeechConfig {
-  if(!character||character.tts.engine!==shared.tts.engine)return structuredClone(shared);
-  const candidate=localSpeechSchema.safeParse({...shared,tts:{...shared.tts,voice:character.tts.voice}});
-  return candidate.success?candidate.data:structuredClone(shared);
+/** One assistant, one voice: the voice chosen in Speech settings is the one
+ * every call uses. A voice saved on a model slot no longer overrides it (that
+ * made the user's choice in Speech have no effect). */
+export function characterSpeech(shared:LocalSpeechConfig,_character:LocalSpeechConfig|null):LocalSpeechConfig {
+  return structuredClone(shared);
 }

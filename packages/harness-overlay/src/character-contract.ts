@@ -10,12 +10,14 @@ export const characterSchema = z.object({
 }).strict();
 export const charactersStateSchema = z.object({
   revision: z.number().int().nonnegative(), mainId: z.string().uuid(), voiceId: z.string().uuid(),
+  /** The model a chat switches to when the user unlocks it or retries a refusal. */
+  unrestrictedId: z.string().uuid().nullable().optional(),
   characters: z.array(characterSchema).min(2).max(50),
   bindings: z.record(z.string().max(200), z.string().uuid()),
 }).strict().superRefine((s,c) => {
   const ids = new Set(s.characters.map(x=>x.id));
   if(new Set(s.characters.map(x=>x.name.toLowerCase())).size!==s.characters.length)c.addIssue({code:"custom",message:"Character names must be unique"});
-  if(ids.size!==s.characters.length || !ids.has(s.mainId) || !ids.has(s.voiceId)) c.addIssue({code:"custom",message:"Invalid character selection"});
+  if(ids.size!==s.characters.length || !ids.has(s.mainId) || !ids.has(s.voiceId) || (s.unrestrictedId && !ids.has(s.unrestrictedId))) c.addIssue({code:"custom",message:"Invalid character selection"});
   for(const x of s.characters) if(x.delegateTo && (!ids.has(x.delegateTo) || x.delegateTo===x.id)) c.addIssue({code:"custom",message:"Invalid delegation target"});
   for(const id of Object.values(s.bindings)) if(!ids.has(id)) c.addIssue({code:"custom",message:"Invalid conversation character"});
   if(!s.characters.find(x=>x.id===s.mainId)?.route) c.addIssue({code:"custom",message:"Main character needs a model"});
@@ -27,8 +29,11 @@ export const characterCommandSchema=z.discriminatedUnion("action",[
   z.object({action:z.literal("save"),revision,character:characterSchema}).strict(),
   z.object({action:z.literal("create"),revision,character:characterSchema.omit({id:true})}).strict(),
   z.object({action:z.literal("delete"),revision,id}).strict(),
+  /** Renames the assistant (the main character) everywhere it introduces itself. */
+  z.object({action:z.literal("name"),revision,name:z.string().trim().min(1).max(60)}).strict(),
   z.object({action:z.literal("main"),revision,id}).strict(),
   z.object({action:z.literal("voice"),revision,id}).strict(),
+  z.object({action:z.literal("unrestricted"),revision,id}).strict(),
   z.object({action:z.literal("select"),revision,id,sessionId:z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)}).strict(),
 ]);
 export type HubCharacter=z.infer<typeof characterSchema>;

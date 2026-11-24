@@ -10,3 +10,6 @@ export class BackgroundAdmission {
   }
   canContinue(owner:string){return this.holder===owner&&!this.foregroundBusy();}
 }
+
+/** True while an agent produced an event within the last ten minutes (or its activity is unknown). */
+export function recentlyActive(agent:any,now=Date.now(),windowMs=10*60_000):boolean{const last=agent?.session?.snapshotEvents?.()?.at?.(-1)?.time;return typeof last!=="number"||now-last<windowMs;}

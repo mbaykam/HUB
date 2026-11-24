@@ -37,7 +37,7 @@ test('cache survives restart, ignores nonstructural hash changes and keeps origi
 
 test('curator receives bounded suggestions as hints while original-evidence and domain-cap rules remain explicit',()=>{
  const graph=fixture(),groups=discoverKnowledgeCommunities(graph),source={id:'fixture',conversationId:'a0',channel:'pwa',completedAt:1,content:'A real original sentence.'},prompt=organizationPrompt(source,[{id:'a1',title:'Read source',body:'A second original sentence.'}],defaultKnowledgeSettings,undefined,groups);
- assert.match(prompt,/STRUCTURAL GROUP SUGGESTIONS/);assert.match(prompt,/derived, not factual domains/);assert.match(prompt,/readCandidateIds.*a1/);assert.match(prompt,/ORIGINAL CONVERSATIONS AND HUMAN NOTES ARE READ-ONLY/);assert.match(prompt,/At most 7 ACTIVE main domains/);
+ assert.match(prompt,/STRUCTURAL GROUP SUGGESTIONS/);assert.match(prompt,/derived, not factual domains/);assert.match(prompt,/readCandidateIds.*a1/);assert.match(prompt,/ORIGINAL CONVERSATIONS AND HUMAN NOTES ARE READ-ONLY/);assert.match(prompt,/At most 10 ACTIVE main domains/);
 });
 
 test('source group paging is read-only and refuses a stale graph version',async t=>{

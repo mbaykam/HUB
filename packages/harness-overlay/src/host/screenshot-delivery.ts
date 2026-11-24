@@ -10,6 +10,7 @@ import pngjs from "pngjs";
 import {AGENT_BROWSER_IPC_VERSION_ENV, AGENT_BROWSER_PROTOCOL_VERSION, type AgentDesktopScreenshotResult} from "../agent-browser-contract.ts";
 import {AgentBrowserProcessClient, type AgentBrowserProcessPort} from "./agent-browser-process.ts";
 import {currentTurnHasUserRequest} from "./task-turn.ts";
+import {markScreenWatched} from "./camofox.ts";
 
 const toolName = "hub_show_screenshot";
 const desktopToolName = "hub_capture_desktop";
@@ -147,12 +148,37 @@ export function installScreenshotDelivery(ctx: any, desktopPort = windowsDesktop
     },
     save: data => ctx.attachments.saveImage({data, mediaType: "image/png", name: "Desktop look.png"}),
   }) : undefined;
+  // Live view of this PC's screen for the iPhone: one fresh frame per request,
+  // only while the phone has the view open. Concurrent viewers share a frame.
+  let latest: {at: number; data: Buffer} | undefined, inFlight: Promise<Buffer> | undefined;
+  const frame = async () => {
+    if (latest && Date.now() - latest.at < 700) return latest.data;
+    inFlight ??= captureScreen("hub-screen-view", AbortSignal.timeout(10_000)).then(({data}) => {
+      latest = {at: Date.now(), data};
+      return data;
+    }).finally(() => { inFlight = undefined; });
+    return inFlight;
+  };
+  const offView = desktop && ctx.webServer?.register?.({kind: "exact", path: "/api/hub/screen-view", async handler(req: any, res: any) {
+    const reply = (code: number, value: unknown) => { res.writeHead(code, {"content-type": "application/json", "cache-control": "no-store"}); res.end(JSON.stringify(value)); };
+    const rejection = ctx.connection?.requestRejection?.(req);
+    if (rejection || req.headers["sec-fetch-site"] === "cross-site" || req.headers["x-hub-screen-view"] !== "1") { reply(rejection ?? 403, {error: "unauthorized"}); return; }
+    if (req.method !== "GET") { reply(405, {error: "method-not-allowed"}); return; }
+    markScreenWatched();
+    try {
+      const data = await frame();
+      res.writeHead(200, {"content-type": "image/png", "content-length": data.length, "cache-control": "no-store, private", "x-content-type-options": "nosniff"});
+      res.end(data);
+    } catch (error) {
+      reply(503, {error: "screen-unavailable", detail: String((error as Error).message).slice(0, 200)});
+    }
+  }});
   const offGuide = ctx.systemPrompt?.section({
     name: "hub:screenshot-delivery",
     order: 92,
     text: "To show the user this PC's screen, use hub_capture_desktop: it captures and displays the primary screen in the chat in one call. Screenshots saved to a file by other tools (a Windows or PowerShell screenshot) do not appear in the chat, and a local path does not display anything; use hub_show_screenshot for an existing PNG in this conversation's workspace. Use browser_screenshot for a web page. If a capture fails, say so plainly instead of claiming the user can see it.",
   });
-  return () => { offGuide?.(); offControl?.(); offDesktop?.(); desktop?.dispose(); offTool(); };
+  return () => { offView?.(); offGuide?.(); offControl?.(); offDesktop?.(); desktop?.dispose(); offTool(); };
 }
 
 function windowsDesktopPort(): AgentBrowserProcessPort | undefined {
@@ -165,7 +191,7 @@ function windowsDesktopPort(): AgentBrowserProcessPort | undefined {
 /** Resolve only an image reference committed by this tool in this session. */
 export function conversationScreenshots(events: readonly any[]) {
   const pending = new Set<string>();
-  const images = new Map<string, {id: string; name: string; turn: number; attachment: any}>();
+  const images = new Map<string, {id: string; name: string; turn: number; seq?: number; attachment: any}>();
   for (const event of events) {
     if (event.type === "tool/call" && [toolName, desktopToolName].includes(event.data?.name) && typeof event.data.callId === "string") pending.add(event.data.callId);
     if (event.type !== "tool/result") continue;
@@ -176,7 +202,9 @@ export function conversationScreenshots(events: readonly any[]) {
         !/^sha256:[a-f0-9]{64}$/u.test(attachment.attachmentId) || !/^image\/(png|jpeg|webp)$/u.test(attachment.mediaType) ||
         !Number.isSafeInteger(attachment.bytes) || attachment.bytes < 1 || attachment.bytes > maxBytes) continue;
     const id = createHash("sha256").update(result.toolCallId).digest("hex");
-    images.set(id, {id, name, turn: event.data.turn, attachment});
+    // seq lets the phone keep the image between the messages around it once
+    // the reply has finished, instead of moving it after the whole reply.
+    images.set(id, {id, name, turn: event.data.turn, ...(Number.isSafeInteger(event.seq) ? {seq: event.seq} : {}), attachment});
   }
   return [...images.values()];
 }

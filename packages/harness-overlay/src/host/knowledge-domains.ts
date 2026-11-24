@@ -44,8 +44,9 @@ export function domainAncestors(state:Pick<KnowledgeDomainState,"domains">,id:st
 export function changeKnowledgeDomains(current:KnowledgeDomainState|undefined,operations:DomainOperation[],context:{expectedRevision:number;actor:"user"|"curator";source?:KnowledgeSource;knownNodeIds:string[];revisionId:string;maxActiveDomains?:number;now?:number;steward?:boolean}){
   const state=structuredClone(current??emptyKnowledgeDomains());validateDomainState(state);
   if(context.expectedRevision!==state.revision)throw Object.assign(Error("Domains changed; refresh and replan before saving"),{code:"DOMAIN_REVISION_CONFLICT"});
-  if(!Array.isArray(operations)||operations.length>(context.actor==="curator"?8:100))throw Error("Too many domain operations");
-  if(context.steward&&(context.actor!=="curator"||operations.length>4||operations.some(o=>!["rename","reparent","status","merge"].includes(o.type))))throw Error("The domain review may only rename, nest, retire or merge domains");
+  if(!Array.isArray(operations)||operations.length>(context.steward?300:context.actor==="curator"?8:100))throw Error("Too many domain operations");
+  // The library review sees the whole shelf, so it may also open domains and file notes.
+  if(context.steward&&(context.actor!=="curator"||operations.some(o=>!["rename","reparent","status","merge","create","assign","unassign"].includes(o.type))))throw Error("The domain review may only open, rename, nest, retire or merge domains and file or move notes");
   if(context.actor==="curator"&&!context.steward&&(operations.filter(o=>o.type==="create").length>2||operations.filter(o=>o.type==="assign").length>4||operations.filter(o=>o.type==="propose").length>2||context.maxActiveDomains!==undefined))throw Error("Curator domain allowance exceeded");
   const before=structuredClone(state),refs=new Map<string,string>(),now=context.now??Date.now(),known=new Set(context.knownNodeIds);
   const domain=(id:string)=>{const d=state.domains.find(d=>d.id===(refs.get(id)??id));if(!d||d.status==="merged")throw Error("Domain target missing or merged");return d;};
@@ -59,7 +60,7 @@ export function changeKnowledgeDomains(current:KnowledgeDomainState|undefined,op
       if(state.domains.some(d=>d.status!=="merged"&&d.parentId===parent?.id&&[d.title,...d.aliases].some(t=>t.normalize('NFKC').toLocaleLowerCase()===op.title.trim().normalize('NFKC').toLocaleLowerCase())))throw Error("An equivalent domain already exists; reuse its identity");
       const id=randomUUID();refs.set(op.ref,id);state.domains.push({id,title:op.title.trim(),aliases:op.aliases??[],...(parent?{parentId:parent.id}:{}),status:parent?.status==="inactive"?"inactive":"active",createdAt:now,updatedAt:now});
     }else if(op.type==="assign"){
-      const d=domain(op.domainId),nodeId=op.nodeId??context.source?.conversationId;if(!nodeId||!known.has(nodeId)||context.actor==="curator"&&nodeId!==context.source?.conversationId)throw Error("Assignment must reference an admitted current source record");
+      const d=domain(op.domainId),nodeId=op.nodeId??context.source?.conversationId;if(!nodeId||!known.has(nodeId)||context.actor==="curator"&&!context.steward&&nodeId!==context.source?.conversationId)throw Error("Assignment must reference an admitted current source record");
       const evidence=context.source&&op.evidence?[sourceReference(context.source,op.evidence)]:[];
       const existing=state.memberships.find(m=>m.nodeId===nodeId&&m.domainId===d.id);if(existing){if(context.actor==="curator"&&existing.origin==="user")continue;if(context.actor==="user"&&existing.origin!=="user"){existing.origin="user";existing.revisionId=context.revisionId;}for(const e of evidence)if(!existing.evidence.some(v=>v.sourceId===e.sourceId&&v.quote===e.quote))existing.evidence.push(e);}
       else state.memberships.push({nodeId,domainId:d.id,evidence,origin:context.actor,revisionId:context.revisionId});
@@ -68,7 +69,9 @@ export function changeKnowledgeDomains(current:KnowledgeDomainState|undefined,op
       const proposed=structuredClone(op.operation);if('id'in proposed)proposed.id=domain(proposed.id).id;else {proposed.domainId=domain(proposed.domainId).id;if(!known.has(proposed.nodeId))throw Error("Proposal record is not admitted");}if(proposed.type==="merge")proposed.targetId=domain(proposed.targetId).id;if(proposed.type==="reparent"&&proposed.parentId)proposed.parentId=domain(proposed.parentId).id;
       state.proposals.push({id:randomUUID(),sourceId:context.source!.id,at:now,evidence:op.evidence,operation:proposed,basedOnRevision:state.revision+1,status:"pending"});
     }else if(op.type==="unassign"){
-      domain(op.domainId);state.memberships=state.memberships.filter(m=>!(m.nodeId===op.nodeId&&m.domainId===op.domainId));
+      // The library review moves notes it filed itself; a filing the user made stays.
+      domain(op.domainId);if(context.actor==="curator"&&state.memberships.some(m=>m.nodeId===op.nodeId&&m.domainId===op.domainId&&m.origin==="user"))continue;
+      state.memberships=state.memberships.filter(m=>!(m.nodeId===op.nodeId&&m.domainId===op.domainId));
     }else{
       const d=domain(op.id);
       if(op.type==="rename"&&d.title===op.title.trim()&&JSON.stringify(d.aliases)===JSON.stringify(op.aliases??d.aliases)||op.type==="reparent"&&d.parentId===op.parentId||op.type==="status"&&d.status===op.status)continue;

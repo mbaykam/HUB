@@ -21,7 +21,7 @@ test('long automation results produce accepted Telegram previews without replaci
 test('automation HTTP service owns its character profile directory and authenticates before all mutations',async t=>{
  const root=await mkdtemp(join(tmpdir(),'hub-automation-host-'));t.after(()=>rm(root,{recursive:true,force:true}));let route,creates=0;
  const characters={ready:Promise.resolve(),quota:new ProviderGate(join(root,'provider-health')),validate:async()=>{},store:{root:join(root,'hub-characters'),snapshot:()=>({characters:[{id:'configured-id',name:'Fixture',route:{provider:'fixture',model:'small'},tools:{mode:'inherit'}}]})}};
- const ctx={webServer:{register:r=>{route=r;return ()=>{};}},connection:{requestRejection:req=>req.headers.auth==='fixture'?undefined:401},on:()=>()=>{},agents:{list:()=>[],create:()=>{creates++;throw Error('Not an execution test');}}};
+ const ctx={webServer:{register:r=>{if(r.path==='/api/hub/automations')route=r;return ()=>{};}},connection:{requestRejection:req=>req.headers.auth==='fixture'?undefined:401},on:()=>()=>{},agents:{list:()=>[],create:()=>{creates++;throw Error('Not an execution test');}}};
  const dispose=installAutomations(ctx,characters);t.after(dispose);
  const call=(method,body,headers={})=>new Promise((resolve,reject)=>{const req=Readable.from(body?[Buffer.from(JSON.stringify(body))]:[]);Object.assign(req,{method,headers:{'x-hub-automations':'1','content-type':'application/json',auth:'fixture',...headers}});let status;Promise.resolve(route.handler(req,{writeHead:code=>status=code,end:text=>resolve({status,data:JSON.parse(text)})})).catch(reject);});
  const state=await call('GET');assert.equal(state.status,200);assert.deepEqual(state.data.automations,[]);

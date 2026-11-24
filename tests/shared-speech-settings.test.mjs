@@ -8,21 +8,21 @@ import {characterSpeech} from '../packages/harness-overlay/src/speech-settings-c
 import {voiceAttentionSchema} from '../packages/harness-overlay/src/voice-profile-contract.ts';
 const speech={stt:{engine:'nemotron',model:'3.5-560ms',language:'auto'},tts:{engine:'supertonic',model:'supertonic-3',voice:'F5',language:'auto',steps:6}};
 test('a punctuation-only wake phrase cannot match every background sentence',()=>{assert.equal(voiceAttentionSchema.safeParse({idleSeconds:180,wakePhrases:['---'],contextSeconds:60}).success,false);});
-test('wake settings are shared and a character cannot override idle, phrase or context policy',()=>{
+test('wake settings are shared and a model slot cannot override idle, phrase, context or voice',()=>{
  const attention={idleSeconds:180,wakePhrases:['Mira','Hey assistant'],contextSeconds:0};const global={...speech,attention};
  const character={...speech,attention:{...attention,idleSeconds:0,contextSeconds:120},tts:{...speech.tts,voice:'M1'}};
- assert.deepEqual(characterSpeech(global,character),{...global,tts:{...speech.tts,voice:'M1'}});
+ assert.deepEqual(characterSpeech(global,character),global);
 });
-test('characters only override the voice; global recognition, engine, language and quality win',()=>{
+test('the voice chosen in Speech settings is the one every call uses',()=>{
  const legacy={stt:{engine:'whisper',model:'base.en',language:'en'},tts:{...speech.tts,voice:'M2',language:'tr',steps:4}};
- const result=characterSpeech(speech,legacy);assert.deepEqual(result,{...speech,tts:{...speech.tts,voice:'M2'}});assert.equal(legacy.tts.steps,4);
+ const result=characterSpeech(speech,legacy);assert.deepEqual(result,speech);assert.equal(legacy.tts.steps,4);
  assert.deepEqual(characterSpeech(speech,{stt:legacy.stt,tts:{engine:'kokoro',model:'82m',voice:'af_heart'}}),speech);
  assert.deepEqual(characterSpeech(speech,null),speech);result.stt.language='tr';assert.equal(speech.stt.language,'auto');
 });
 test('global speech seeds once, fences stale edits, validates before writing and preserves an admitted call snapshot',async()=>{
  const root=await mkdtemp(join(tmpdir(),'hub-eval-speech-'));
  try{const store=new SharedSpeechSettings(root);await store.load(()=>speech);const call=characterSpeech(store.snapshot().speech,{...speech,tts:{...speech.tts,voice:'F2'}});
- const [a,b]=await Promise.allSettled([store.change({revision:0,speech:{...speech,tts:{...speech.tts,steps:4}}},()=>{}),store.change({revision:0,speech},()=>{})]);assert.equal(a.status,'fulfilled');assert.ok(b.reason instanceof SpeechSettingsConflict);assert.equal(call.tts.steps,6);assert.equal(call.tts.voice,'F2');
+ const [a,b]=await Promise.allSettled([store.change({revision:0,speech:{...speech,tts:{...speech.tts,steps:4}}},()=>{}),store.change({revision:0,speech},()=>{})]);assert.equal(a.status,'fulfilled');assert.ok(b.reason instanceof SpeechSettingsConflict);assert.equal(call.tts.steps,6);assert.equal(call.tts.voice,'F5');
  const before=await readFile(join(root,'speech-settings.json'),'utf8');await assert.rejects(store.change({revision:1,speech},()=>{throw Error('Not installed')}));assert.equal(await readFile(join(root,'speech-settings.json'),'utf8'),before);
  const resumed=new SharedSpeechSettings(root);await resumed.load(()=>{throw Error('Do not reseed when voice character changes')});assert.equal(resumed.snapshot().speech.tts.steps,4);
  }finally{assert.equal(dirname(root),tmpdir());await rm(root,{recursive:true,force:true});}

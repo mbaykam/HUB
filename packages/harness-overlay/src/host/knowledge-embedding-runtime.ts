@@ -23,12 +23,22 @@ db=sqlite3.connect(os.path.join(root,'embeddings.db'))
 db.execute('CREATE TABLE IF NOT EXISTS vectors (id TEXT PRIMARY KEY, hash TEXT, data TEXT)')
 print(json.dumps({'ready':True,'fingerprint':fingerprint}),flush=True)
 def units(text):return len(text.encode('utf-16-le','surrogatepass'))//2
+# Parsed vectors stay in memory: reloading and decoding every stored vector took
+# about 0.75 s per search, longer than the search deadline, so answers waited
+# for semantic results that then arrived too late to be used.
+memo={};cache={}
+def loaded(note_id,version,entry):
+ m=np.asarray(entry['vectors'],dtype=np.float32);item=(entry['chunks'],m,np.linalg.norm(m,axis=1));cache[note_id]=(version,item);return item
 for line in sys.stdin:
  try:
   r=json.loads(line);notes=r['notes'];total=r.get('total',len(notes));vectors=[];layout=r.get('op')=='layout'
   for n in notes:
+   key=(n.get('hash'),n['title'],len(n['body']));known=memo.get(n['id'])
+   if known and known[0]==key and key[0]:version=known[1]
+   else:version=hashlib.sha256((n['title']+'\0'+n['body']).encode('utf8','surrogatepass')).hexdigest()+':'+fingerprint;memo[n['id']]=(key,version)
+   hit=cache.get(n['id'])
+   if hit and hit[0]==version:vectors.append((n['id'],)+hit[1]);continue
    old=db.execute('SELECT hash,data FROM vectors WHERE id=?',(n['id'],)).fetchone()
-   version=hashlib.sha256((n['title']+'\0'+n['body']).encode('utf8','surrogatepass')).hexdigest()+':'+fingerprint
    if old and old[0]==version:entry=json.loads(old[1])
    elif layout:continue
    else:
@@ -42,11 +52,41 @@ for line in sys.stdin:
     values=[v.tolist() for v in model.embed([c['text'] or ' ' for c in chunks])]
     entry={'chunks':[{k:v for k,v in c.items() if k!='text'} for c in chunks],'vectors':values}
     db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(n['id'],version,json.dumps(entry)));db.commit()
-   vectors.append((n['id'],entry))
+   vectors.append((n['id'],)+loaded(n['id'],version,entry))
+  if r.get('op')=='digest':
+   # The whole library in a few numbers, computed here for free: each domain's
+   # most typical notes and how tightly they belong together, the nearest
+   # domain of every unfiled note, and groups of unfiled notes about the same thing.
+   groups=r.get('groups',{});threshold=float(r.get('threshold',0.6));centers={}
+   for note_id,chunks,matrix,norms in vectors:
+    v=matrix.mean(axis=0);centers[note_id]=v/(np.linalg.norm(v)+1e-9)
+   members={}
+   for note_id,ids in groups.items():
+    if note_id in centers:
+     for d in ids:members.setdefault(d,[]).append(note_id)
+   domains={};dcenter={}
+   for d,ids in members.items():
+    m=np.asarray([centers[i] for i in ids]);c=m.mean(axis=0);c=c/(np.linalg.norm(c)+1e-9);dcenter[d]=c
+    sims=m@c;order=np.argsort(-sims)
+    domains[d]={'typical':[ids[int(k)] for k in order[:5]],'coherence':round(float(sims.mean()),3)}
+   loose=[i for i in centers if i not in groups];nearest={}
+   for i in loose:
+    best=None;score=-1.0
+    for d,c in dcenter.items():
+     s=float(centers[i]@c)
+     if s>score:best=d;score=s
+    nearest[i]={'domain':best,'score':round(score,3)}
+   clusters=[];left=list(loose)
+   while left:
+    seed=left.pop(0);group=[seed]
+    for j in list(left):
+     if float(centers[seed]@centers[j])>=threshold:group.append(j);left.remove(j)
+    clusters.append(group)
+   print(json.dumps({'id':r['id'],'scores':{'domains':domains,'nearest':nearest,'clusters':clusters}}),flush=True);continue
   if layout:
    centers=[]
-   for note_id,entry in vectors:
-    vector=np.asarray(entry['vectors']).mean(axis=0);centers.append(vector/(np.linalg.norm(vector)+1e-9))
+   for note_id,chunks,matrix,norms in vectors:
+    vector=matrix.mean(axis=0);centers.append(vector/(np.linalg.norm(vector)+1e-9))
    matrix=np.asarray(centers);pairs=[];truncated=False
    if len(vectors)>1:
     # Bounded blocks, thresholded candidates; there is no top-three rule.
@@ -67,12 +107,13 @@ for line in sys.stdin:
    print(json.dumps({'id':r['id'],'scores':pairs,'coverage':coverage}),flush=True);continue
   query=r['query'];queries=[v for v in model.embed([query[i:i+900] for i in range(0,min(len(query),8000),700)] or [' '])]
   scores=[]
-  for note_id,entry in vectors:
-   matrix=np.asarray(entry['vectors']);best=-1.;index=0
-   for q in queries:
-    values=matrix@q/(np.linalg.norm(matrix,axis=1)*np.linalg.norm(q)+1e-9);candidate=int(np.argmax(values))
+  queries=[(np.asarray(q,dtype=np.float32),float(np.linalg.norm(q))) for q in queries]
+  for note_id,chunks,matrix,norms in vectors:
+   best=-1.;index=0
+   for q,qnorm in queries:
+    values=matrix@q/(norms*qnorm+1e-9);candidate=int(np.argmax(values))
     if float(values[candidate])>best:best=float(values[candidate]);index=candidate
-   scores.append({'id':note_id,'score':best,'chunk':entry['chunks'][index]})
+   scores.append({'id':note_id,'score':best,'chunk':chunks[index]})
   scores.sort(key=lambda x:(-x['score'],x['id']));print(json.dumps({'id':r['id'],'scores':scores[:r.get('limit',12)]}),flush=True)
  except Exception:
   print(json.dumps({'id':r.get('id'),'error':'embedding-failed'}),flush=True)

@@ -17,7 +17,7 @@ export function validateMemories(value:unknown,source:KnowledgeSource){
   for(const m of value){
     const fromAsset=m?.assetId!==undefined;
     const validAsset=fromAsset&&typeof m.assetId==="string"&&source.assets?.some(a=>a.id===m.assetId)&&source.assetExcerpts?.some(e=>e.assetId===m.assetId&&e.text.includes(m.evidence))&&["learning","projects"].includes(m.category);
-    if(!m||Object.keys(m).some(k=>!["title","category","evidence","assetId"].includes(k))||typeof m.title!=="string"||m.title.trim().length<3||m.title.length>120||/[\[\]<>\r\n]/.test(m.title)||!["preferences","decisions","projects","learning"].includes(m.category)||typeof m.evidence!=="string"||m.evidence.trim().length<12||m.evidence.length>1200||(fromAsset?!validAsset:!quotes.some(q=>q.includes(m.evidence))))throw Error("Memory must quote a genuine user passage or a verified attachment excerpt; document claims and assistant guesses are not user facts");
+    if(!m||Object.keys(m).some(k=>!["title","category","evidence","assetId"].includes(k))||typeof m.title!=="string"||m.title.trim().length<3||m.title.length>120||/[\[\]<>\r\n]/.test(m.title)||!["preferences","decisions","projects","learning","people","life"].includes(m.category)||typeof m.evidence!=="string"||m.evidence.trim().length<12||m.evidence.length>1200||(fromAsset?!validAsset:!quotes.some(q=>q.includes(m.evidence))))throw Error("Memory must quote a genuine user passage or a verified attachment excerpt; document claims and assistant guesses are not user facts");
     if(redactKnowledgeSecrets(m.evidence)!==m.evidence||redactKnowledgeSecrets(m.title)!==m.title||/\[REDACTED[_A-Z]*\]/.test(m.evidence))throw Error("Credentials do not belong in extracted memory notes");
   }
 }

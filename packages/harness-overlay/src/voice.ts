@@ -96,7 +96,7 @@ export function apply(ctx: Context, config: Config): void {
     history = await openConversationHistory(ctx.storageDomain);
     if (lifetime.signal.aborted) return;
     offTitles=installVoiceTitles(ctx,history);
-    screenTools=installVoiceScreenTools(ctx,{current:sessionId=>web?.screenIdentity(sessionId),frame:sessionId=>web?.screenFrame(sessionId),highlight:(sessionId,regions,note)=>{if(!web)throw new Error("Voice is unavailable.");return web.screenHighlight(sessionId,regions,note);},
+    screenTools=installVoiceScreenTools(ctx,{current:sessionId=>web?.screenIdentity(sessionId),frame:sessionId=>web?.screenFrame(sessionId),highlight:(sessionId,regions,note,shapes)=>{if(!web)throw new Error("Voice is unavailable.");return web.screenHighlight(sessionId,regions,note,shapes);},
       overlay:(sessionId,items,note,sequence,clear)=>{if(!web)throw new Error("Voice is unavailable.");return web.screenOverlay(sessionId,items,note,sequence,clear);},
       transform:cropScreenFrame});
     const localProfiles = await openVoiceProfiles(ctx.storageDomain, {

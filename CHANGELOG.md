@@ -1,5 +1,122 @@
 # Changelog
 
+## 1.10.34
+
+- Library review splits crowded domains: a domain holding more than 12 notes directly lists all of them for the review, which opens subdomains by topic and moves the notes into them (a note the user filed by hand stays). A crowded domain also makes the daily review due.
+
+## 1.10.33
+
+- Your assistant has its own name, which you set on the phone (Settings → Assistant). It introduces itself with it in chats, voice and Telegram; HUB stays the name of the app and the PC system.
+- Daily briefing for Home: headlines on the topics you follow, read from news feeds on the PC (no model tokens). You add, remove and reorder topics on the phone; the assistant can follow or drop a topic itself when your interests change (hub_briefing_topics), and marks those.
+- Watching videos: a YouTube, Instagram, TikTok, X or Vimeo link, or a video you attach (MP4, MOV, WebM), is first watched as a whole: one or two contact sheets of the moments where the picture changes, labelled with their times, plus the words from the platform's captions or local speech recognition, shortened evenly. That is about 1-2k image tokens plus a small transcript for the whole video (up to three hours); the assistant looks closer at a time range only when it needs to.
+## 1.10.32
+
+- Library review: Knowledge AI looks at the whole library, not one chat at a time, and keeps it in order: a few broad main domains (up to 10), specific topics as subdomains, every note filed, domains renamed when what they hold changes. The local embedding model summarizes the library first (typical and newest notes per domain, groups of unfiled notes with their nearest domain), so a review reads about 4-5k tokens whatever the library's size. The first plan waits for the user's approval on the phone; later reviews apply directly and stay undoable in the domain history.
+- Chats and the user's own notes (My Notes) are their own sections in Knowledge, apart from the knowledge domains.
+- Automatic recall also offers the user's own notes that share words with the message (read-only).
+
+## 1.10.31
+
+- Notes: your own notes in HUB, apart from Knowledge. Each note is a Markdown file in Documents\HUB Notes, folders are folders, deleted notes stay in Recently Deleted for 30 days, and every change keeps the earlier version. The iPhone app reads and writes them (and works offline); an edit made on an older version is kept as a second note instead of overwriting.
+- The assistant can find and read your notes (hub_notes_find, hub_note_read) and creates or changes one only when you ask (hub_note_write); its change can be undone from the note's history. Voice can use them too.
+
+## 1.10.30
+
+- When Smart's Claude subscription reaches its limit (for example the 5-hour window), the fast model answers the message instead of the chat showing an error, and says Smart is back at the reset time. Claude Code is not started again until then.
+
+## 1.10.29
+
+- Pictures HUB showed in a chat (web photos in its replies) appear in the Home graph as pictures linked to that chat, next to the files.
+
+## 1.10.28
+
+- Smart (Claude Code) no longer compacts the chat before nearly every reply. The CLI reports the sum of all model calls in a turn (about 700k tokens for a six-step turn on a 100k chat), which HUB read as a full context and compacted twice, about 60 s, before 13 of the last 33 Smart replies. Each step now reports its own call.
+- Smart gets every tool call of one answer at once (three web pages fetched together instead of one per round trip).
+- Every reply starts about 0.7 s sooner, with any model: the automatic note recall before each answer re-read and decoded all 34 MB of stored note vectors on every search (~0.75 s, past its own deadline, so its results were dropped). Vectors now stay in memory (a search takes ~0.1 s, recall ~0.4 s, same notes found), and the recall's three vault scans share one pass.
+- Models through OpenRouter (GLM 5.3 Flash, Fable) go to the model's fastest hosts instead of the cheapest: GLM was writing about 22 tokens a second with ~2.8 s before the first word; its fastest hosts write 120-200 a second. This costs a little more per token (about $2-3 a month at current use).
+- The chat list and Your work reuse the last listing until a chat changes, instead of listing every conversation (1.4 s) on each request.
+- Smart shows a finished paragraph at once instead of holding its last words until the next tool call.
+- Web guidance: a simple question is one search, then the best two or three pages read together, then the answer.
+- A tool that fails four times in a row, or is called 40 times in one turn, stops with a message instead of looping; hub_research explains what it needs when called without a question.
+- The Home knowledge graph lists pictures and files with the chats they came from.
+- Closing a browser tab no longer holds a turn up (it finishes in the background after 5 s).
+
+## 1.10.27
+
+- hub_web_search: fast search without a browser (DuckDuckGo, then Bing); pages are read with web_fetch first. Camofox is used only when a fetch fails, a page needs clicking, or the user is watching the PC screen, and its window is visible only while they watch.
+- Skill headers whose long values were folded onto several lines by the vault sync are read whole.
+
+## 1.10.26
+
+- Backend for the iPhone's live Your work: running items report the tool in use and when they started; /api/hub/screen-view serves the PC screen while the phone's live view is open; Camofox runs with a visible window so browsing shows on that screen.
+- hub_send_file sends any file HUB made (up to 20 MB) to the phone through the chat's outputs; 3D models open in the phone's 3D viewer.
+- Skill learning: HUB saves a skill by itself after a reusable multi-step task and the skill list says when to use each one. A 3D-modeling skill is included.
+- Calls use the voice chosen in Speech settings; a voice stored on the voice model no longer overrides it.
+
+## 1.10.25
+
+- hub_find_chat: when you mention something discussed before, HUB finds that chat (titles and the chat archive) and offers a button back to it; voice can use it too.
+- Research reads pages with a fast plain fetch first and uses the browser only for blocked or script-only pages (a browser read takes about 5 s, a fetch about 0.5 s).
+
+## 1.10.24
+
+- Schedule replaces Tasks, modelled on OpenClaw: reminders (your own words sent at a time, no AI run), jobs HUB runs at a time, and a heartbeat that checks a short list during your active hours and stays silent unless something needs you. HUB manages them with one tool, hub_schedule.
+- One identity in every chat: no character roster, the iPhone app is "this app", one working folder, and tools that duplicate another (other web searches and browsers, extra delegation and scheduling routes, ask_user_question) are no longer offered in chat.
+- Camofox is the main web search and falls back from Google to Bing and DuckDuckGo when an engine blocks. Research runs several searches and reads at once, retries a blocked page through a plain fetch and an archived copy, and follows a plan, read, find-gaps loop.
+- Profile facts you state are added to USER.md automatically, dated and sourced; each can be undone on its own. Notes can be updated in place (hub_knowledge_update_note) instead of duplicated.
+- Automatic recall searches with your latest message, not the start of the chat, so it stops pulling the same notes into every reply.
+- HUB can ask you to share your screen or camera (hub_request_share); the chat shows a button that starts the call.
+- Skills whose header was rewritten as YAML by another editor load again.
+## 1.10.23
+
+- Knowledge notes list the chats they were learned from, so the iPhone shows those chats' photos, screenshots and web pictures with the note.
+- Your work on Home includes every chat used in the last day, not only ones that ran tools.
+
+## 1.10.22
+
+- Several Gmail accounts: search one or all of them; a draft names the account it should be sent from.
+- A voice call in a chat switched to Unrestricted keeps the unrestricted model.
+- Replies can show real photos as a swipeable strip and small SVG diagrams inline (iPhone build 22).
+- Knowledge: a weekly pass looks for links between the least-connected notes; chat archives name their chat so the phone can show its photos and screenshots.
+
+## 1.10.21
+
+- One assistant, three models: Smart (chat), Fast (voice) and Unrestricted. A chat switches between them with one button; every mode keeps HUB's personality and memory.
+- Helpers (hub_delegate) choose a model instead of a character; the unrestricted model only runs for a chat the user switched to it. The iPhone can read a helper's brief, steps and replies.
+- Gmail, read-only: the Smart model can search and read mail over IMAP with an app password, leaving everything unread. HUB cannot send mail; hub_mail_draft shows a draft the user sends from their own mail app.
+
+## 1.10.20
+
+- Instagram reels can be watched again: when the only combined video is over 25 MB, HUB takes the small picture and sound tracks separately.
+- Chats build visuals and small apps only when asked or when a chart or adjustable tool is really needed; plans and designs stay in text, and real photos are preferred over sketches.
+- A chat can open a new chat with a starting brief (hub_new_chat) and create projects or move chats into and out of them (hub_projects), when the user asks.
+## 1.10.19
+
+- Chat screenshots carry their position in the conversation, so the iPhone app keeps each one between the messages around it after the reply finishes.
+
+## 1.10.18
+
+- Projects: group chats under a named project. Creating one only asks for a name; HUB makes its folder in Documents\HUB Projects on this PC.
+- Each project has instructions and a shared note that every chat in it reads; the assistant keeps the note current with the new hub_project_note tool.
+- Any existing chat can be added to, moved between or removed from projects; removing a project keeps its chats, folder and note.
+
+## 1.10.17
+
+- Knowledge learns the people in your life and what you do: new memory categories 'people' and 'life', on by default; small asides count.
+- A Knowledge AI model call gives up after five minutes instead of freezing the queue.
+- A chat with no activity for ten minutes no longer holds back Knowledge, Goals and Automations.
+
+## 1.10.16
+
+- Delegating to a character with an allowed-tools list works; lists naming conversation-scoped tools (Knowledge) no longer fail every delegation.
+- hub_highlight_screen draws aim lines and routes (paths of 2-6 points: arrow, line or dashed) and target circles, besides boxes - enough to show a pool shot on a shared phone screen.
+
+## 1.10.15
+
+- Questions to the user are asked in the conversation: ask_user_question no longer waits on a prompt only HUB's desktop window shows, which hung chats on the phone, Telegram and voice.
+- Automation tool errors say what to send (trigger kinds, epoch-millisecond times, the current revision); a new automation needs no exact revision.
+- A duplicate Knowledge note title names the existing note's id.
+
 ## 1.10.14
 
 - hub_capture_desktop works in any conversation turn the user started, whatever the wording; it no longer matches screenshot keywords. Background work still cannot capture.

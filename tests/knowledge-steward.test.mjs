@@ -53,13 +53,16 @@ test("a review merges duplicates, renames and retires empty domains, and can be 
   assert.equal(undone.domains.find(d => d.id === id("Coding Projects")).title, "Coding Projects");
 });
 
-test("a review cannot invent domains, retire full ones, or create and assign", () => {
+test("the daily review cannot invent domains or retire full ones; the library review alone may open domains and file notes", () => {
   const {state, id} = shelves();
   assert.throws(() => parseStewardPlan('{"note":"x","operations":[{"type":"rename","id":"nope","title":"A"}]}', state), /does not exist/);
   assert.throws(() => parseStewardPlan(JSON.stringify({note: "x", operations: [{type: "status", id: id("Computer Setup"), status: "inactive"}]}), state), /merge it instead/);
   assert.throws(() => parseStewardPlan(JSON.stringify({note: "x", operations: [{type: "create", ref: "new-a", title: "A"}]}), state), /only rename/);
   assert.throws(() => parseStewardPlan('{"operations":[]}', state), /structured answer/);
-  assert.throws(() => changeKnowledgeDomains(state, [{type: "create", ref: "new-x", title: "X"}], {expectedRevision: state.revision, actor: "curator", steward: true, knownNodeIds: [], revisionId: "r"}), /only rename/);
+  const opened = changeKnowledgeDomains(state, [{type: "create", ref: "new-x", title: "X", parentId: id("Computer Setup")}], {expectedRevision: state.revision, actor: "curator", steward: true, knownNodeIds: [], revisionId: "r"});
+  assert.ok(opened.domains.some(d => d.title === "X" && d.parentId === id("Computer Setup")), "the library review opens subdomains");
+  // The library review may move notes out of a crowded domain (a user's own filing stays; see knowledge-library tests), but not split or propose.
+  assert.doesNotThrow(() => changeKnowledgeDomains(state, [{type: "unassign", nodeId: "n", domainId: id("Misc")}], {expectedRevision: state.revision, actor: "curator", steward: true, knownNodeIds: ["n"], revisionId: "r"}));
   // Ordinary curator passes still cannot rename without review.
   assert.throws(() => changeKnowledgeDomains(state, [{type: "rename", id: id("Misc"), title: "Other"}], {expectedRevision: state.revision, actor: "curator", knownNodeIds: [], revisionId: "r"}), /human review|source evidence/);
   assert.deepEqual(parseStewardPlan('{"note":"Raflar düzenli.","operations":[]}', state).operations, []);

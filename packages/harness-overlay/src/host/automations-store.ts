@@ -24,7 +24,10 @@ export class AutomationsStore {
   }
   snapshot(){return structuredClone({revision:this.committed.revision,automations:this.committed.automations,hostRunsOnlyWhileOnline:true as const,blockedRoutes:Object.entries(this.committed.blocked).map(([route,message])=>({route,message}))});}
   async change(command:any){return this.exclusive(async()=>{
-    if(command.revision!==this.state.revision)throw Error("Automations changed; refresh before editing");
+    // The revision guards edits of existing tasks against stale copies; a new
+    // task cannot conflict with anything, so it needs no exact revision.
+    const creating=command.action==="save"&&!this.state.automations.some(j=>j.id===command.id);
+    if(!creating&&command.revision!==this.state.revision)throw Error(`Automations changed since you last read them; the current revision is ${this.state.revision}. Call list, review the task, and retry with revision ${this.state.revision}.`);
     const now=this.ports.now(),job=this.state.automations.find(j=>j.id===command.id);
     if(command.action==="save"){
       const input=validateAutomation(command.automation);await this.ports.route(input.characterId);
@@ -43,6 +46,7 @@ export class AutomationsStore {
       if(command.action==="pause"||command.action==="cancel"){if(this.active?.id===job.id)this.active.abort.abort();job.state=command.action==="pause"?"paused":"cancelled";job.status=job.state;}
       else if(command.action==="resume"){if(job.state==="cancelled")throw Error("Edit a cancelled task to reactivate it");job.state="active";job.status="scheduled";job.nextAt=nextOccurrence(job.trigger,now);}
       else if(command.action==="run-once"){if(job.status==="running"||job.status==="checking")throw Error("Already running");if(job.state==="cancelled")throw Error("Cancelled task");job.state="active";job.status="scheduled";job.pendingEvent="Manual test requested by the user";job.nextAt=now;}
+      else if(command.action==="delete"){if(this.active?.id===job.id)this.active.abort.abort();this.state.automations.splice(this.state.automations.indexOf(job),1);await this.save();return this.snapshot();}
       else throw Error("Unknown automation command");job.revision++;job.updatedAt=now;
     }
     await this.save();return this.snapshot();
@@ -82,6 +86,13 @@ export class AutomationsStore {
         const current=this.state.automations.find(j=>j.id===job.id)!;if(current.state!=="active"||signal.aborted)return;
         if(watchValue!==undefined){current.lastValue=digest(watchValue);current.lastMatch=watchMatch;current.lastCheckAt=now;}
         if(!fire){current.nextAt=nextOccurrence(job.trigger,now);current.status="scheduled";await this.save();return;}
+        // Outside its active hours a recurring check is skipped without a model
+        // call or a receipt; a one-time job waits for the next active minute.
+        if(job.activeHours&&!job.pendingEvent?.startsWith("Manual test")&&!withinActiveHours(job.activeHours,now)){
+          let next=job.trigger.kind==="once"?now+60000:nextOccurrence(job.trigger,now);
+          for(let guard=0;next!==undefined&&guard<2880&&!withinActiveHours(job.activeHours,next);guard++)next=job.trigger.kind==="once"?next+60000:nextOccurrence(job.trigger,next);
+          current.nextAt=next;current.status="scheduled";await this.save();return;
+        }
         const estimate=job.goalId?0:job.maxSteps*((Buffer.byteLength(job.prompt+(job.pendingEvent??""))+32000)*job.inputPrice+job.maxOutputTokens*job.outputPrice)/1e6;
         const today=new Date(now).toISOString().slice(0,10),runs=current.runs.filter(r=>new Date(r.at).toISOString().slice(0,10)===today);
         if(runs.length>=job.dailyMaxRuns||runs.reduce((s,r)=>s+r.estimatedCost,0)+estimate>job.dailyBudget){current.status="budget-paused";current.lastError="Daily task budget/run limit reached; original task retained.";current.nextAt=Date.parse(today+"T00:00:00Z")+86400000;await this.save();return;}
@@ -107,14 +118,14 @@ export class AutomationsStore {
 export function validateAutomation(value:any):AutomationInput {
   if(!value||typeof value.title!=="string"||!value.title.trim()||value.title.length>160||typeof value.prompt!=="string"||!value.prompt.trim()||value.prompt.length>12000||typeof value.characterId!=="string"||value.characterId.length>100)throw Error("Task needs a title, purpose and configured character");
   if(!["skip","catch-up"].includes(value.missed)||typeof value.allowWrites!=="boolean"||!Array.isArray(value.tools)||value.tools.length>50||value.tools.some((n:any)=>typeof n!=="string"||!n||n.length>160))throw Error("Invalid task permissions");
-  const readOnly=new Set(["web_search","web_fetch","camofox_search","camofox_open","camofox_snapshot","camofox_close","hub_knowledge_search","hub_knowledge_read"]);
+  const readOnly=new Set(["hub_web_search","web_search","web_fetch","camofox_search","camofox_open","camofox_snapshot","camofox_close","hub_knowledge_search","hub_knowledge_read"]);
   if(!value.allowWrites&&value.tools.some((n:string)=>!readOnly.has(n)))throw Error("Additional tools require explicit external-action permission");
   for(const [key,min,max]of [["maxOutputTokens",256,8192],["maxSteps",1,6],["dailyMaxRuns",1,48]] as const)if(!Number.isInteger(value[key])||value[key]<min||value[key]>max)throw Error("Invalid task limit: "+key);
   for(const key of ["dailyBudget","inputPrice","outputPrice"])if(!Number.isFinite(value[key])||value[key]<=0||value[key]>100)throw Error("Invalid usage estimate");
   if(!["pwa","telegram"].includes(value.notification)||value.notification==="telegram"&&!/^minke-im-telegram-[a-f0-9]{32}$/.test(value.sourceSessionId??""))throw Error("Telegram notifications require the originating authorized Telegram chat");
   if(value.goalId!==undefined&&(typeof value.goalId!=="string"||!/^[-a-f0-9]{36}$/.test(value.goalId)))throw Error("Invalid linked goal ID");
-  const t=value.trigger;if(!t||!["once","interval","calendar","watch","event"].includes(t.kind))throw Error("Choose a trigger");
-  if(t.kind==="once"&&(!Number.isSafeInteger(t.at)||t.at<=0))throw Error("Invalid execution time");
+  const t=value.trigger;if(!t||!["once","interval","calendar","watch","event"].includes(t.kind))throw Error("Set trigger.kind to one of: once {at: epoch milliseconds}, interval {seconds >= 300}, calendar {hour, minute, days 0-6, timezone}, watch {url, rule, seconds}, event {event}.");
+  if(t.kind==="once"&&(!Number.isSafeInteger(t.at)||t.at<=0))throw Error("trigger.at must be a time in epoch milliseconds (for example "+(Date.now()+3*86400000)+" is three days from now).");
   if(["interval","watch"].includes(t.kind)&&(!Number.isInteger(t.seconds)||t.seconds<300||t.seconds>31536000))throw Error("Intervals must be at least five minutes");
   if(t.kind==="calendar"){if(!Number.isInteger(t.hour)||t.hour<0||t.hour>23||!Number.isInteger(t.minute)||t.minute<0||t.minute>59||!Array.isArray(t.days)||!t.days.length||t.days.some((d:any)=>!Number.isInteger(d)||d<0||d>6))throw Error("Invalid calendar rule");new Intl.DateTimeFormat("en",{timeZone:t.timezone}).format(0);}
   if(t.kind==="watch"){const url=new URL(t.url);if(url.protocol!=="https:"||url.username||url.password||url.port&&url.port!=="443")throw Error("Watch a public HTTPS source");if(!["changed","contains","not-contains","above","below"].includes(t.rule)||typeof (t.value??"")!=="string"||(t.value??"").length>1000)throw Error("Invalid watch condition");}
@@ -123,7 +134,18 @@ export function validateAutomation(value:any):AutomationInput {
   if(comparison&&(typeof t.value!=="string"||!t.value.trim()||t.value.length>1000||["above","below"].includes(comparison)&&!Number.isFinite(Number(t.value))))throw Error("Set a nonempty valid comparison value");
   if(t.kind==="event"&&t.operator&&!t.path)throw Error("Choose the event field to compare");
   if(t.jsonPath||t.path)if(typeof (t.jsonPath??t.path)!=="string"||!/^[a-zA-Z0-9_.-]{1,100}$/.test(t.jsonPath??t.path))throw Error("Use a simple JSON field path");
-  return structuredClone({title:value.title.trim(),prompt:value.prompt,characterId:value.characterId,trigger:t,missed:value.missed,tools:[...new Set(value.tools)] as string[],allowWrites:value.allowWrites,maxOutputTokens:value.maxOutputTokens,maxSteps:value.maxSteps,dailyMaxRuns:value.dailyMaxRuns,dailyBudget:value.dailyBudget,inputPrice:value.inputPrice,outputPrice:value.outputPrice,notification:value.notification,sourceSessionId:value.sourceSessionId,goalId:value.goalId});
+  if(value.kind!==undefined&&!["task","reminder","heartbeat"].includes(value.kind))throw Error("kind is task, reminder or heartbeat");
+  if(value.kind==="heartbeat"&&t.kind!=="interval")throw Error("A heartbeat repeats on an interval");
+  const hours=value.activeHours;
+  if(hours!==undefined){if(!hours||![hours.start,hours.end].every(m=>Number.isInteger(m)&&m>=0&&m<1440)||hours.start===hours.end||typeof hours.timezone!=="string")throw Error("Active hours need start and end minutes and a timezone");new Intl.DateTimeFormat("en",{timeZone:hours.timezone}).format(0);}
+  return structuredClone({title:value.title.trim(),prompt:value.prompt,characterId:value.characterId,trigger:t,missed:value.missed,tools:[...new Set(value.tools)] as string[],allowWrites:value.allowWrites,maxOutputTokens:value.maxOutputTokens,maxSteps:value.maxSteps,dailyMaxRuns:value.dailyMaxRuns,dailyBudget:value.dailyBudget,inputPrice:value.inputPrice,outputPrice:value.outputPrice,notification:value.notification,sourceSessionId:value.sourceSessionId,goalId:value.goalId,
+    ...(value.kind&&value.kind!=="task"?{kind:value.kind}:{}),...(hours?{activeHours:{start:hours.start,end:hours.end,timezone:hours.timezone}}:{})});
+}
+/** Whether `at` falls inside the active hours, in their own timezone. */
+export function withinActiveHours(hours:{start:number;end:number;timezone:string},at:number){
+  const parts=Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:hours.timezone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(at).map(p=>[p.type,p.value]));
+  const minute=Number(parts.hour)*60+Number(parts.minute);
+  return hours.start<hours.end?minute>=hours.start&&minute<hours.end:minute>=hours.start||minute<hours.end;
 }
 export function nextOccurrence(trigger:AutomationTrigger,after:number):number|undefined{
   if(trigger.kind==="once")return trigger.at;

@@ -89,10 +89,14 @@ test('profile suggestions require current genuine user evidence and never write 
  const files=new InstructionFiles(join(store.root,'instructions'));await files.load();await files.save('USER.md',digest(''),'Operator content stays.');const ports={read:async id=>({content:files.text(id),hash:digest(files.text(id))}),save:(id,hash,content)=>files.save(id,hash,content)};
  const s=(await store.organization.snapshot()).suggestions[0];assert.equal(files.text('USER.md'),'Operator content stays.');await store.organization.decideProfile(s.id,'approve',ports);assert.ok(files.text('USER.md').startsWith('Operator content stays.'));assert.equal(files.text('SOUL.md'),'');await store.organization.decideProfile(s.id,'undo',ports);assert.equal(files.text('USER.md'),'Operator content stays.');
 });
-test('prepared profile receipt recovers exactly once and newer human changes block undo',async t=>{
+test('prepared profile receipt recovers exactly once; undo removes only its own lines and refuses a hand-edited one',async t=>{
  const {store}=await fixture(t),c=original();await store.archive.put(c);await store.organization.apply(proposal({profileSuggestions:[{target:'USER.md',text:'Uses Telegram.',evidence:'I use Telegram.'}]}),conversationSources(c)[0]);
  const state=await store.organization.state(),s=state.suggestions[0];s.before='Human';s.after='Human\nAlready added';await atomicJson(join(store.root,'organization.json'),state);let text=s.after,writes=0;
- const ports={read:async()=>({content:text,hash:digest(text)}),save:async(_target,_hash,next)=>{writes++;text=next;}};await store.organization.decideProfile(s.id,'approve',ports);assert.equal(writes,0);text+='\nHuman edited';await assert.rejects(store.organization.decideProfile(s.id,'undo',ports),/Newer profile/);
+ const ports={read:async()=>({content:text,hash:digest(text)}),save:async(_target,_hash,next)=>{writes++;text=next;}};await store.organization.decideProfile(s.id,'approve',ports);assert.equal(writes,0);
+ // Newer lines after this change are kept; only its own lines come out.
+ text+='\nHuman edited';await store.organization.decideProfile(s.id,'undo',ports);assert.equal(text,'Human\nHuman edited');assert.equal(writes,1);
+ const again=await store.organization.state(),r=again.suggestions[0];r.status='applied';await atomicJson(join(store.root,'organization.json'),again);
+ text='Human\nAlready changed by hand';await assert.rejects(store.organization.decideProfile(s.id,'undo',ports),/edited by hand/);
 });
 test('QUOTA holds the entire curator route without repeated calls; sources survive restart and explicit recovery',async t=>{
  const {store}=await fixture(t);let calls=0;const c=new KnowledgeCurator(store,async()=>{calls++;throw Object.assign(Error('Out of credits'),{code:'QUOTA'});});await c.initialize();const source={id:'quota-one',channel:'pwa',completedAt:at,content:'Original evidence.'};await c.enqueue(source);await c.enqueue({...source,id:'quota-two'});await c.tick(true);await c.tick(true);assert.equal(calls,1);assert.equal(c.jobs.get('quota-one').status,'waiting-credit');assert.equal(c.jobs.get('quota-two').status,'queued');await c.dispose();

@@ -15,32 +15,55 @@ import {distillMemories} from "./knowledge-distillation.ts";
 import {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 import {withKnowledgeAssetExcerpts} from "./knowledge-assets.ts";
 import {isArchivedConversation} from "../knowledge-record-scope.ts";
-import {parseStewardPlan,stewardDue,stewardPrompt,stewardSnapshot,type StewardReview} from "./knowledge-steward.ts";
+import type {StewardReview} from "./knowledge-steward.ts";
+import {crowdedDomains,describeLibraryPlan,libraryDue,libraryPrompt,librarySnapshot,parseLibraryPlan,type LibraryPlan,type LibraryState} from "./knowledge-library.ts";
 export {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
 type Generate=(prompt:string,settings:KnowledgeSettings,signal:AbortSignal,limits?:{maxTokens:number})=>Promise<string>;
 const defaults=defaultKnowledgeSettings;
+export const RELINK_EVERY=7*24*60*60*1000;
+/** Up to ten brain notes with at most one link, least linked and newest first. */
+export function pickForRelink(notes:{id:string;degree:number;modifiedAt:number}[]):string[]{
+  return notes.filter(n=>n.degree<=1).sort((a,b)=>a.degree-b.degree||b.modifiedAt-a.modifiedAt).slice(0,10).map(n=>n.id);
+}
 const day=()=>new Date().toISOString().slice(0,10);
 const quotaRetryDelay=15*60*1000;
+/** People and life details were added after the original four categories;
+ * settings that still hold exactly the original four gain them, a choice the
+ * user narrowed on purpose is kept. */
+export function withLifeCategories<T extends {categories?:string[]}>(settings:T):T{
+  const original=["preferences","decisions","projects","learning"];
+  const current=settings.categories??[];
+  return current.length===original.length&&original.every(c=>current.includes(c))?{...settings,categories:[...current,"people","life"]}:settings;
+}
+/** The longest one Knowledge AI model call may take. */
+export const KNOWLEDGE_CALL_TIMEOUT_MS=5*60_000;
 export class KnowledgeCurator {
   readonly store: KnowledgeStore; private generate:Generate; readonly lifetime=new AbortController();
+  /** Runs after a pass that proposed profile facts (HUB applies them itself). */
+  afterOrganize?:()=>Promise<void>;
   settings:KnowledgeSettings={...defaults};jobs=new Map<string,KnowledgeJob>(); status="starting"; embedding="Keyword search · local embeddings not installed";
   recalls:KnowledgeRecall[]=[];
   private costs:Record<string,number>={}; private running?:Promise<void>; private writing:Promise<unknown>=Promise.resolve();
   private checked?:{key:string;at:number};
   private blockedRoute?:{key:string;message:string;quota?:boolean;retryAt?:number;failures?:number};
   restoredWork?:KnowledgeRestoreHold;
-  constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate,readonly admit?:()=>undefined|(()=>void)){this.store=store;this.generate=generate;}
+  constructor(store:KnowledgeStore,generate:Generate,readonly gate?:ProviderGate,readonly admit?:()=>undefined|(()=>void),callTimeoutMs=KNOWLEDGE_CALL_TIMEOUT_MS){this.store=store;
+    // One model call that never returns must not freeze learning: jobs run one
+    // at a time, so a hung request held every later chat in the queue until HUB
+    // restarted (seen 2026-11-18). Each call now gives up after a few minutes.
+    this.generate=((prompt:any,settings:any,signal:AbortSignal,options?:any)=>generate(prompt,settings,AbortSignal.any([signal,AbortSignal.timeout(callTimeoutMs)]),options)) as Generate;}
   async initialize(){
     await this.store.initialize();
-    await this.store.organization.syncObsidianLinks();
-    try{const settings=JSON.parse(await readFile(join(this.store.root,"settings.json"),"utf8"));this.settings=validateSettings({...defaults,...settings});}catch(e:any){if(e.code!=="ENOENT")throw e;}
+    let projectionDeferred=false;
+    try{await this.store.organization.syncObsidianLinks();}catch(e){if((e as NodeJS.ErrnoException).code!=="KNOWLEDGE_PROJECTION_DEFERRED")throw e;projectionDeferred=true;}
+    try{const settings=JSON.parse(await readFile(join(this.store.root,"settings.json"),"utf8"));this.settings=validateSettings(withLifeCategories({...defaults,...settings}));}catch(e:any){if(e.code!=="ENOENT")throw e;}
     try{this.costs=JSON.parse(await readFile(join(this.store.root,"costs.json"),"utf8"));}catch(e:any){if(e.code!=="ENOENT")throw e;}
     try{this.blockedRoute=JSON.parse(await readFile(join(this.store.root,"model-health.json"),"utf8"))??undefined;}catch(e:any){if(e.code!=="ENOENT")throw e;}
     const files=await readdir(join(this.store.root,"jobs")).catch((e:any)=>{if(e.code!=="ENOENT")throw e;return [] as string[];});
     for(const file of files) {if(!file.endsWith(".json"))continue;const j=JSON.parse(await readFile(join(this.store.root,"jobs",file),"utf8")) as KnowledgeJob;if(j.status==="working"){j.status="failed";j.reason="HUB restarted during model processing; retry explicitly to avoid a duplicate charge.";}this.jobs.set(j.id,j);}
     this.restoredWork=await knowledgeRestoreHold(this.store);
-    this.status=this.restoredWork?.state==="needs-review"?"restored-work-paused":[...this.jobs.values()].some(j=>j.status==="failed")?"needs-attention":"ready";
+    this.status=this.restoredWork?.state==="needs-review"?"restored-work-paused":projectionDeferred?"projection-pending":[...this.jobs.values()].some(j=>j.status==="failed")?"needs-attention":"ready";
   }
   private jobFile(id:string){return join(this.store.root,"jobs",`${digest(id)}.json`);}
   private async saveJob(job:KnowledgeJob){
@@ -78,6 +101,26 @@ export class KnowledgeCurator {
     return {passId,queued:ids.length,jobIds:ids,automatic:this.settings.enabled&&this.settings.mode!=="manual"};
   }
   async repairProjections(){await this.store.organization.repairPending();for(const job of this.jobs.values())if(job.error?.code==="KNOWLEDGE_PROJECTION_PENDING"){job.error=undefined;job.reason="Saved organization and Obsidian projection repaired; no model call needed.";await this.saveJob(job);}this.status="ready";}
+  /** Once a week, the least-connected brain notes get one more organizing
+   * pass, so links between older notes are found after the fact. Same rules
+   * as any pass: links need evidence in both notes; prose is never rewritten. */
+  async relinkWeekly(now=Date.now()){
+    const file=join(this.store.root,"relink.json");
+    let last:number|undefined;try{last=JSON.parse(await readFile(file,"utf8")).at;}catch{}
+    // First sighting: start the clock so the first pass runs a day later, not at install.
+    if(last===undefined){await atomicJson(file,{at:now-RELINK_EVERY+24*60*60*1000,noteIds:[]});return {queued:0,skipped:"not-due" as const};}
+    if(now-last<RELINK_EVERY)return {queued:0,skipped:"not-due" as const};
+    // Only when Knowledge has nothing else to do.
+    if([...this.jobs.values()].some(j=>j.status==="queued"||j.status==="working"||j.status==="waiting-credit"))return {queued:0,skipped:"busy" as const};
+    const notes=(await this.store.scan()).filter(n=>n.kind!=="conversation"&&n.body.trim()&&n.body.length<=23500);
+    const graph=await this.store.graph(),degree=new Map<string,number>();
+    for(const e of graph.edges){degree.set(e.source,(degree.get(e.source)??0)+1);degree.set(e.target,(degree.get(e.target)??0)+1);}
+    const chosen=pickForRelink(notes.map(n=>({id:n.id,degree:degree.get(n.id)??0,modifiedAt:n.modifiedAt})));
+    await atomicJson(file,{at:now,noteIds:chosen});
+    if(!chosen.length)return {queued:0};
+    const result=await this.reorganize(chosen);
+    return {queued:result.queued};
+  }
   /** Read-only passes for admitted brain notes missing a domain. The source
    * version is the durable identity, so a skipped/reviewed/failed version is
    * not charged again on each scan or restart. Chat originals stay separate. */
@@ -153,30 +196,61 @@ export class KnowledgeCurator {
   tick(force=false){if(this.restoredWork?.state==="needs-review"){this.status="restored-work-paused";return;}if(this.running||!this.settings.enabled||this.settings.mode==="manual"&&!force||this.lifetime.signal.aborted)return;const release=this.admit?.();if(this.admit&&!release)return;this.running=this.run(force).catch(()=>{this.status="needs-attention";}).finally(()=>{release?.();this.running=undefined;});return this.running;}
   /** Saved domain reviews, newest last. */
   async domainReviews():Promise<StewardReview[]>{try{const value=JSON.parse(await readFile(join(this.store.root,"domain-reviews.json"),"utf8"));return Array.isArray(value.reviews)?value.reviews:[];}catch(e:any){if(e.code!=="ENOENT")throw e;return [];}}
-  /** After the queue is empty, at most about once a day and only when new notes were filed, tidy the domains. */
-  private async reviewDomainsIfDue(){
+  private libraryFile(){return join(this.store.root,"library.json");}
+  /** The library review's state: whether its first plan was approved, the plan waiting for approval, recent runs. */
+  async library():Promise<LibraryState>{try{const value=JSON.parse(await readFile(this.libraryFile(),"utf8"));return {history:[],...value};}catch(e:any){if(e.code!=="ENOENT")throw e;return {history:[]};}}
+  private async saveLibrary(state:LibraryState){state.history=state.history.slice(-20);await atomicJson(this.libraryFile(),state);}
+  /** When the queue is empty: look at the whole library and keep it in order.
+   * The first plan waits for the user's approval; later ones apply directly
+   * and stay undoable in the domain history. */
+  private async reviewLibraryIfDue(){
     const settings={...this.settings};
     if(!settings.enabled||settings.mode!=="automatic"||this.lifetime.signal.aborted)return;
-    const reviews=await this.domainReviews(),last=reviews.at(-1)?.at;
-    const organized=[...this.jobs.values()].filter(j=>j.outcome==="organized"&&(j.finishedAt??j.updatedAt)>(last??0)).length;
-    const state=await this.store.organization.domains();
-    if(!stewardDue(last,organized,state.domains.filter(d=>d.status!=="merged").length))return;
+    const library=await this.library(),state=await this.store.organization.domains();
+    const notes=(await this.store.scan()).filter(n=>!isArchivedConversation(n)&&n.kind!=="conversation"&&n.body.trim());
+    const live=new Set(state.domains.filter(d=>d.status!=="merged").map(d=>d.id));
+    const filed=new Set(state.memberships.filter(m=>live.has(m.domainId)).map(m=>m.nodeId)),unfiled=notes.filter(n=>!filed.has(n.id)).length;
+    const organized=[...this.jobs.values()].filter(j=>j.outcome==="organized"&&(j.finishedAt??j.updatedAt)>(library.lastRunAt??0)).length;
+    if(!libraryDue(library,{notes:notes.length,unfiled,organizedSince:organized,crowded:crowdedDomains(state,notes.map(n=>n.id)).length}))return;
     if(await this.gate?.reason(settings.provider))return;
-    const notes=(await this.store.scan()).filter(n=>!isArchivedConversation(n)).map(n=>({id:n.id,title:n.title}));
-    const prompt=stewardPrompt(stewardSnapshot(state,notes),settings.language);
-    const reserve=((Buffer.byteLength(prompt)+4000)*settings.inputPrice+3000*settings.outputPrice)/1e6;
+    const groups:Record<string,string[]>={};for(const m of state.memberships)if(live.has(m.domainId))(groups[m.nodeId]??=[]).push(m.domainId);
+    const digest=await this.store.digest?.(notes,groups).catch(()=>undefined);
+    const list=notes.map(n=>({id:n.id,title:n.title,modifiedAt:n.modifiedAt}));
+    const {snapshot,keys,moves}=librarySnapshot(state,list,digest);
+    const prompt=libraryPrompt(snapshot,settings.language,library.lastError);
+    const reserve=((Buffer.byteLength(prompt)+4000)*settings.inputPrice+6000*settings.outputPrice)/1e6;
     if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget)return;
     this.costs[day()]=(this.costs[day()]??0)+reserve;await atomicJson(join(this.store.root,"costs.json"),this.costs);
-    const review:StewardReview={id:randomUUID(),at:Date.now(),status:"done",changed:false,note:"",operations:[]};
+    library.lastRunAt=Date.now();
+    const plan:LibraryPlan={id:randomUUID(),at:Date.now(),note:"",operations:[],changes:[],basedOnRevision:state.revision,status:library.approvedAt?"applied":"proposed"};
     try{
-      const text=await this.generate(prompt,settings,this.lifetime.signal,{maxTokens:3000});
-      const plan=parseStewardPlan(text,state);review.note=plan.note;review.operations=plan.operations;
-      if(plan.operations.length){const after=await this.store.organization.stewardDomains(state.revision,plan.operations,review.id);review.changed=after.revision!==state.revision;if(review.changed)review.revisionId=review.id;}
-    }catch(e:any){review.status="failed";review.error=redactKnowledgeSecrets(String(e?.message??e)).slice(0,300);if(!review.note)review.note="The domain review could not finish, so the domains were left as they were.";}
-    await atomicJson(join(this.store.root,"domain-reviews.json"),{version:1,reviews:[...reviews,review].slice(-30)});
-  }  private async run(force:boolean){
+      const text=await this.generate(prompt,settings,this.lifetime.signal,{maxTokens:8000});
+      const parsed=parseLibraryPlan(text,state,keys,moves);plan.note=parsed.note;plan.operations=parsed.operations;plan.changes=describeLibraryPlan(parsed.operations,state,list);
+      if(!parsed.operations.length){plan.status="applied";library.lastError=undefined;}
+      else if(library.approvedAt){await this.store.organization.stewardDomains(state.revision,parsed.operations,plan.id);library.lastError=undefined;}
+      else library.plan=plan;
+    }catch(e:any){plan.status="failed";plan.error=redactKnowledgeSecrets(String(e?.message??e)).slice(0,300);library.lastError=plan.error;}
+    if(plan.status!=="proposed")library.history.push(plan);
+    await this.saveLibrary(library);
+  }
+  /** The user's answer to the plan waiting for approval. Approving also lets
+   * later library reviews apply their changes directly. */
+  async decideLibrary(id:string,approve:boolean){
+    const library=await this.library(),plan=library.plan;
+    if(!plan||plan.id!==id||plan.status!=="proposed")throw Error("This plan is no longer waiting for approval");
+    library.plan=undefined;
+    if(approve){
+      library.approvedAt=Date.now();
+      try{const state=await this.store.organization.domains();await this.store.organization.stewardDomains(state.revision,plan.operations,plan.id);plan.status="applied";library.lastError=undefined;}
+      catch(e:any){plan.status="failed";plan.error=redactKnowledgeSecrets(String(e?.message??e)).slice(0,300);library.lastError=plan.error;library.lastRunAt=undefined;}
+    }else{plan.status="rejected";library.lastRunAt=Date.now();}
+    library.history.push(plan);await this.saveLibrary(library);this.tick();
+    return plan;
+  }
+  private async run(force:boolean){
     await this.store.refreshInventory();
     if(!force&&this.settings.mode!=="manual")await this.enqueueUnassigned();
+    if(!force&&this.settings.enabled&&this.settings.mode!=="manual")await this.relinkWeekly().catch(()=>{});
     if([...this.jobs.values()].some(j=>j.status==="queued"||j.status==="waiting-credit")){
       if(this.blockedRoute?.quota&&this.blockedRoute.key===this.routeKey()){
         if(!await this.recoverQuota())return;
@@ -185,7 +259,7 @@ export class KnowledgeCurator {
     const family=(j:KnowledgeJob)=>j.source.id.split("-turn-")[0]!;
     const latest=new Map<string,number>();for(const j of this.jobs.values())latest.set(family(j),Math.max(latest.get(family(j))??0,j.queuedAt??j.updatedAt));
     const job=[...this.jobs.values()].filter(j=>j.status==="queued" && (force||Date.now()-(latest.get(family(j))??j.updatedAt)>=this.settings.idleSeconds*1000)).sort((a,b)=>a.source.completedAt-b.source.completedAt)[0];
-    if(!job){await this.reviewDomainsIfDue().catch(()=>undefined);return;}const settings={...this.settings};
+    if(!job){await this.reviewLibraryIfDue().catch(()=>undefined);return;}const settings={...this.settings};
     if(!await this.store.admission.allows(job.source)){job.status="done";job.outcome="skipped";job.reason="Source admission was withdrawn or replaced; no model call made.";job.updatedAt=Date.now();await this.saveJob(job);return;}
     if(job.pass){const current=(await this.store.scan()).find(n=>n.id===job.source.conversationId);if(!current||digest(current.body)!==job.pass.sourceHash){job.status="failed";job.reason="Selected source changed; queue a fresh pass after reading it.";job.error={phase:"source validation",code:"KNOWLEDGE_SOURCE_CHANGED",message:job.reason};job.updatedAt=Date.now();await this.saveJob(job);this.status="needs-attention";return;}}
     if(this.blockedRoute?.key===this.routeKey()){this.status=this.blockedRoute.quota?"waiting-credit":"model-unavailable";return;}
@@ -227,6 +301,7 @@ export class KnowledgeCurator {
       job.revision=revision??undefined;await this.saveJob(job);
       await atomicJson(join(this.store.root,"distill",`${digest(job.id)}.json`),{plan,source:job.source,settings});
       phase="memory extraction";const memories=await distillMemories(this.store,plan,job.source,settings,job.pass?.id??job.id);job.memoryRevision=memories.revision;job.memoryCount=memories.count;
+      if(plan.profileSuggestions?.length)void this.afterOrganize?.().catch(()=>{});
       job.status="done";job.outcome=revision?"organized":plan.decision==="archive-only"?"archive-only":"skipped";job.revision=revision??undefined;job.error=undefined;job.reason=plan.reason;this.status="ready";
     }catch(error){
       const e=error as {code?:string;message?:string;revision?:string};if(phase==="model response")this.checked=undefined;
@@ -287,7 +362,7 @@ export function bindKnowledgePlan(value:any,candidates:{id:string;hash:string;bo
   const references=new Map<string,string>(),known=new Set(index.map(n=>n.id));
   const changes=value.changes.map((c:any,i:number)=>{
     if(!c||typeof c!=="object")throw new Error("Invalid note change");const ref=typeof c.id==="string"&&c.id?c.id:`new-${i}`;
-    if(c.category!==undefined&&!["preferences","decisions","projects","learning","summaries"].includes(c.category))throw new Error("Invalid knowledge category");
+    if(c.category!==undefined&&!["preferences","decisions","projects","learning","people","life","summaries"].includes(c.category))throw new Error("Invalid knowledge category");
     if(references.has(ref))throw new Error("Duplicate note references");
     const old=candidates.find(n=>n.id===ref);
     if(known.has(ref)&&!old)throw new Error("Existing note was not read before the proposed update");
@@ -312,7 +387,7 @@ export function validateSettings(value:KnowledgeSettings){
   if(!value || typeof value.enabled!=="boolean" || ![value.provider,value.model].every(x=>typeof x==="string"&&x.length>0&&x.length<200&&!/[\u0000-\u0020]/.test(x)) || typeof value.reasoningEffort!=="string" || value.reasoningEffort.length>200 || /[\u0000-\u0020]/.test(value.reasoningEffort) || ![value.dailyBudget,value.monthlyBudget,value.inputPrice,value.outputPrice].every(x=>typeof x==="number"&&Number.isFinite(x)&&x>0&&x<=100) || !Number.isInteger(value.idleSeconds)||value.idleSeconds<10||value.idleSeconds>86400)throw new Error("Invalid Knowledge AI settings");
   const options:[[string,string[]],... [string,string[]][]]=[["mode",["automatic","manual","review"]],["detail",["concise","balanced","detailed"]],["language",["auto","tr","en"]],["assistantEvidence",["confirmed-only","useful-explanations"]],["linking",["inline","off"]],["duplicatePolicy",["merge","new-subjects"]]];
   for(const [key,allowed]of options)if(!allowed.includes((value as any)[key]))throw new Error("Invalid memory policy");
-  for(const [items,allowed]of [[value.channels,["pwa","telegram","voice","workers","imports"]],[value.categories,["preferences","decisions","projects","learning","summaries"]]])if(!Array.isArray(items)||!items.length||items.some(x=>!allowed.includes(x))||new Set(items).size!==items.length)throw new Error("Choose valid memory categories/channels");
+  for(const [items,allowed]of [[value.channels,["pwa","telegram","voice","workers","imports"]],[value.categories,["preferences","decisions","projects","learning","people","life","summaries"]]])if(!Array.isArray(items)||!items.length||items.some(x=>!allowed.includes(x))||new Set(items).size!==items.length)throw new Error("Choose valid memory categories/channels");
   if(!Number.isInteger(value.maxLinks)||value.maxLinks<1||value.maxLinks>12||typeof value.instructions!=="string"||value.instructions.length>4000)throw new Error("Invalid note rules");return {...value};
 }
 export function sourceChannel(source:KnowledgeSource){return source.channel==="telegram"?"telegram":source.channel==="voice"?"voice":source.channel==="hub-worker-result"?"workers":source.channel==="hub"||source.channel==="pwa"?"pwa":"imports";}

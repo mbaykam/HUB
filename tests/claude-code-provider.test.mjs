@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ClaudeCodeAdapter,findClaude,conversationPrompt,trailingToolResults,CLAUDE_CODE_MODELS,parseClaudeCodeLimits} from '../packages/harness-overlay/src/host/claude-code-provider.ts';
+import {ClaudeCodeAdapter,findClaude,conversationPrompt,trailingToolResults,CLAUDE_CODE_MODELS,parseClaudeCodeLimits,claudeCodeBlockedUntil} from '../packages/harness-overlay/src/host/claude-code-provider.ts';
 
 // A stand-in for the claude CLI: reads the prompt, optionally calls one tool on
 // the MCP server it was given, then reports a result, like the real CLI does.
@@ -16,10 +16,15 @@ let input='';process.stdin.on('data',d=>input+=d);process.stdin.on('end',async()
   await rpc({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18'}});
   const tools=(await rpc({jsonrpc:'2.0',id:2,method:'tools/list'})).result.tools;
   if(prompt.includes('use the tool')){
+    out({type:'stream_event',event:{type:'message_start',message:{usage:{input_tokens:10,cache_read_input_tokens:90000,cache_creation_input_tokens:5000,output_tokens:1}}}});
     out({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Checking. '}}});
+    out({type:'stream_event',event:{type:'message_delta',usage:{output_tokens:40}}});
     const result=await rpc({jsonrpc:'2.0',id:3,method:'tools/call',params:{name:tools[0].name,arguments:{q:1}}});
+    out({type:'stream_event',event:{type:'message_start',message:{usage:{input_tokens:20,cache_read_input_tokens:95000,cache_creation_input_tokens:0,output_tokens:1}}}});
     out({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Got: '+result.result.content[0].text}}});
+    out({type:'stream_event',event:{type:'message_delta',usage:{output_tokens:30}}});
   }else if(prompt.includes('crash')){process.stderr.write('boom');process.exit(3);}
+  else if(prompt.includes('out of quota')){out({type:'rate_limit_event',rate_limit_info:{rateLimitType:'five_hour',utilization:1,resetsAt:Math.floor(Date.now()/1000)+3600,status:'rejected'}});out({type:'result',subtype:'success',is_error:true,result:"You've hit your 5-hour limit · resets 3:30pm",usage:{input_tokens:1,output_tokens:0}});return;}
   else out({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Echo: '+prompt+' | args: '+args.filter(a=>a.startsWith('--')).join(',')}}});
   out({type:'result',subtype:'success',is_error:false,result:'done',usage:{input_tokens:5,output_tokens:7,cache_read_input_tokens:100}});
 });`;
@@ -30,6 +35,10 @@ async function fake(){
   return {adapter,dir};
 }
 globalThis.__spawn=await import('node:child_process');
+// Do not consult the user's real persisted subscription receipt in unit tests.
+const testHome=await mkdtemp(join(tmpdir(),'hub-claude-tests-')),originalHome=process.env.DSH_HOME;
+process.env.DSH_HOME=testHome;
+test.after(async()=>{if(originalHome===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=originalHome;await rm(testHome,{recursive:true,force:true});});
 const user=text=>({role:'user',source:{kind:'user'},content:[{type:'text',text}]});
 const collect=async iterable=>{const out=[];for await(const c of iterable)out.push(c);return out;};
 const text=chunks=>chunks.filter(c=>c.type==='text-delta').map(c=>c.text).join('');
@@ -61,6 +70,9 @@ test('a tool call goes to HUB, and its result goes back to the waiting CLI',asyn
    {role:'user',source:{kind:'tool',callId:call.id},content:[{type:'tool-result',toolCallId:call.id,content:[{type:'text',text:'Moda'}]}]}];
   const second=await collect(adapter.stream({model:'haiku',sessionId:'s2',messages:history,tools}));
   assert.equal(text(second),'Got: Moda');assert.equal(second.at(-1).reason.kind,'stop');
+  // Each step reports its own model call, not the CLI's running total for the run.
+  assert.deepEqual(first.find(c=>c.type==='usage').usage,{inputTokens:95010,outputTokens:40,cacheReadTokens:90000,cacheWriteTokens:5000});
+  assert.deepEqual(second.find(c=>c.type==='usage').usage,{inputTokens:95020,outputTokens:30,cacheReadTokens:95000});
  }finally{adapter.dispose();await rm(dir,{recursive:true,force:true});}
 });
 
@@ -104,4 +116,25 @@ test('subscription limits come from the CLI rate-limit event and fit the usage c
  assert.match(parseClaudeCodeLimits({unifiedWindows:{five_hour:{utilization:1,status:"rejected"}}}).warning,/reached this limit/);
  assert.equal(parseClaudeCodeLimits({status:"allowed"}),undefined);
  assert.deepEqual(parseClaudeCodeUsage({state:"waiting"}),{state:"waiting"});
+});
+
+test('subscription limit emits typed reset metadata, never invokes configured fallback, and blocks early model probes',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'hub-cc-limit-'));const saved=process.env.DSH_HOME;process.env.DSH_HOME=home;
+ const dir=await mkdtemp(join(tmpdir(),'hub-fake-claude-')),script=join(dir,'claude.mjs');await writeFile(script,FAKE);
+ let launches=0;const asked=[];
+ const fallback={route:()=>({provider:'openrouter',model:'z-ai/glm-5.3-flash',reasoningEffort:'low'}),
+  async *stream(options){asked.push(options);yield {type:'block-start',index:0,blockType:'text'};yield {type:'text-delta',index:0,text:'Fast answer'};yield {type:'finish',reason:{kind:'stop'}};}};
+ const adapter=new ClaudeCodeAdapter(process.execPath,(command,args,options)=>{launches++;return globalThis.__spawn.spawn(command,[script,...args],{...options,stdio:['pipe','pipe','pipe']});},fallback);
+ try{
+  const first=await collect(adapter.stream({model:'opus',sessionId:'limit',messages:[user('we are out of quota')],system:'Be HUB.'}));
+  assert.equal(text(first),'');assert.equal(first.at(-1).reason.kind,'error');
+   assert.equal(first.at(-1).reason.failure.code,'subscription-limit');
+   assert.equal(first.at(-1).reason.failure.subscriptionLimit.model,'opus');
+   assert.ok(first.at(-1).reason.failure.subscriptionLimit.resetsAt>Date.now());
+  assert.deepEqual(asked,[],'no paid or alternate subscription route is called');
+  assert.equal(first.at(-1).reason.failure.subscriptionLimit.provider,'claude-code');
+  assert.ok(claudeCodeBlockedUntil()>Date.now());
+  const second=await collect(adapter.stream({model:'opus',sessionId:'limit-2',messages:[user('hello again')]}));
+  assert.equal(text(second),'');assert.equal(second.at(-1).reason.failure.code,'subscription-limit');assert.equal(launches,1,'no model probe before the actual reset');
+ }finally{adapter.dispose();if(saved===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=saved;await rm(dir,{recursive:true,force:true});await rm(home,{recursive:true,force:true});}
 });

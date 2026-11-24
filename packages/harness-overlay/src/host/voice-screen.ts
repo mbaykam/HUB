@@ -6,7 +6,39 @@ export const SCREEN_MAX_BYTES = 2_000_000, SCREEN_MAX_AGE_MS = 5000;
 export interface ScreenOwner { callId: string; sessionId: string }
 /** Normalized to the shared frame: 0,0 is the top left, 1,1 the bottom right. */
 export interface ScreenRegion { x: number; y: number; width: number; height: number; label?: string }
-export interface ScreenHighlight { id: string; regions: ScreenRegion[]; note: string; sequence: number; createdAt: number }
+/** A line or bent path across the screen, for aim lines and routes (fractions of the frame). */
+export interface ScreenPath { points: [number, number][]; style: "arrow" | "line" | "dashed"; label?: string }
+/** A ring around a spot, for a target such as where a cue ball should hit. */
+export interface ScreenCircle { x: number; y: number; radius: number; label?: string }
+export interface ScreenShapes { paths?: ScreenPath[]; circles?: ScreenCircle[] }
+export interface ScreenHighlight { id: string; regions: ScreenRegion[]; paths?: ScreenPath[]; circles?: ScreenCircle[]; note: string; sequence: number; createdAt: number }
+const fraction = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+const shortLabel = (v: unknown) => typeof v === "string" && v.trim() ? v.trim().slice(0, 40) : undefined;
+export function parseScreenShapes(paths: unknown, circles: unknown): ScreenShapes {
+  const out: ScreenShapes = {};
+  if (paths !== undefined) {
+    if (!Array.isArray(paths) || paths.length > 4) throw new Error("Give at most four paths.");
+    out.paths = paths.map(p => {
+      if (!p || typeof p !== "object" || !Array.isArray(p.points) || p.points.length < 2 || p.points.length > 6 ||
+          p.points.some((q: unknown) => !Array.isArray(q) || q.length !== 2 || !fraction(q[0]) || !fraction(q[1])))
+        throw new Error("Each path needs 2 to 6 points, each [x, y] between 0 and 1.");
+      const style = p.style === undefined ? "arrow" : p.style;
+      if (!["arrow", "line", "dashed"].includes(style)) throw new Error("A path style is arrow, line or dashed.");
+      const label = shortLabel(p.label);
+      return { points: p.points.map((q: number[]) => [q[0], q[1]] as [number, number]), style, ...(label ? { label } : {}) };
+    });
+  }
+  if (circles !== undefined) {
+    if (!Array.isArray(circles) || circles.length > 6) throw new Error("Give at most six circles.");
+    out.circles = circles.map(c => {
+      if (!c || typeof c !== "object" || !fraction(c.x) || !fraction(c.y) || typeof c.radius !== "number" || !(c.radius > 0 && c.radius <= 0.5))
+        throw new Error("Each circle needs x and y between 0 and 1 and a radius above 0, up to 0.5 of the frame width.");
+      const label = shortLabel(c.label);
+      return { x: c.x, y: c.y, radius: c.radius, ...(label ? { label } : {}) };
+    });
+  }
+  return out;
+}
 export function parseScreenRegions(value: unknown): ScreenRegion[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 6) throw new Error("Give one to six regions.");
   return value.map(r => {
@@ -158,10 +190,10 @@ export class VoiceScreenFrames {
     return this.overlaid.id;
   }
   /** An assistant marks regions of the shared screen; the phone shows them. */
-  highlight(sessionId: string, regions: ScreenRegion[], note: string) {
+  highlight(sessionId: string, regions: ScreenRegion[], note: string, shapes: ScreenShapes = {}) {
     const lease = this.lease;
     if (!lease || lease.sessionId !== sessionId) throw new Error("Screen sharing is not active.");
-    this.marked = { id: randomUUID(), regions, note, sequence: lease.sequence, createdAt: this.now(), shareId: lease.shareId };
+    this.marked = { id: randomUUID(), regions, ...shapes, note, sequence: lease.sequence, createdAt: this.now(), shareId: lease.shareId };
     return this.marked.id;
   }
   status(owner: ScreenOwner) {
@@ -169,7 +201,7 @@ export class VoiceScreenFrames {
     const owned = this.owns(owner), marked = owned && this.marked && this.marked.shareId === this.lease?.shareId && this.now() - this.marked.createdAt < 60_000 ? this.marked : undefined;
     const overlay = owned && this.overlaid && this.overlaid.shareId === this.lease?.shareId && this.now() - this.overlaid.createdAt < 600_000 ? this.overlaid : undefined;
     return { sharing: owned && Boolean(this.lease), hasFrame: owned && Boolean(this.frame(owner.sessionId)), maxAgeMs: SCREEN_MAX_AGE_MS,
-      ...(marked ? { highlight: { id: marked.id, regions: marked.regions, note: marked.note, sequence: marked.sequence } } : {}),
+      ...(marked ? { highlight: { id: marked.id, regions: marked.regions, ...(marked.paths ? { paths: marked.paths } : {}), ...(marked.circles ? { circles: marked.circles } : {}), note: marked.note, sequence: marked.sequence } } : {}),
       ...(overlay ? { overlay: { id: overlay.id, items: overlay.items, note: overlay.note, sequence: overlay.sequence, clear: overlay.clear } } : {}) };
   }
 }
