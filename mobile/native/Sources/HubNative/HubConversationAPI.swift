@@ -883,6 +883,7 @@ public struct HubChatSnapshot {
     public let lastTurnEndSequence: Int?
     public let lastTurnWasStopped: Bool
     public let latestScreenshotSequence: Int?
+    public let sentFiles: [HubChatSentFile]
     public let historyCursor: Int?
     public let firstSequence: Int?
     public let activity: [HubChatActivity]
@@ -996,6 +997,83 @@ public struct HubChatHistoryPage {
     public let firstSequence: Int?
     public let activity: [HubChatActivity]
     public let usageByTurn: [Int: HubChatTurnUsage]
+    public let sentFiles: [HubChatSentFile]
+}
+
+/// Older pages belong to one opening cursor and a unique in-flight request.
+public struct HubChatHistoryWindow {
+    public struct Request: Equatable {
+        public let cursor: Int
+        public let before: Int
+        fileprivate let generation: Int
+    }
+    public private(set) var messages: [HubChatMessage] = []
+    public private(set) var activity: [HubChatActivity] = []
+    public private(set) var usageByTurn: [Int: HubChatTurnUsage] = [:]
+    public private(set) var sentFiles: [HubChatSentFile] = []
+    public private(set) var hasMore = false
+    public private(set) var failed = false
+    public private(set) var loading: Request?
+    public private(set) var firstSequence: Int?
+    public private(set) var restoring = false
+    private var cursor: Int?
+    private var restoreBefore: Int?
+    private var generation = 0
+    public init() {}
+
+    public mutating func follow(_ snapshot: HubChatSnapshot) {
+        if cursor != snapshot.historyCursor {
+            // Re-page the old visible extent against the new authoritative cut,
+            // rather than joining possibly disjoint or overlapping windows.
+            if let firstSequence { restoreBefore = min(restoreBefore ?? firstSequence, firstSequence) }
+            messages = []; activity = []; usageByTurn = [:]; sentFiles = []
+            firstSequence = snapshot.firstSequence
+            hasMore = snapshot.hasMore
+            failed = false; loading = nil; generation += 1
+            cursor = snapshot.historyCursor
+        }
+        settleRestore()
+    }
+
+    public mutating func begin() -> Request? {
+        guard loading == nil, hasMore, let cursor, let firstSequence,
+              firstSequence > 0, cursor >= firstSequence else { return nil }
+        generation += 1
+        let request = Request(cursor: cursor, before: firstSequence, generation: generation)
+        failed = false
+        loading = request
+        return request
+    }
+
+    @discardableResult
+    public mutating func receive(_ page: HubChatHistoryPage, for request: Request) -> Bool {
+        guard loading == request, cursor == request.cursor, firstSequence == request.before else { return false }
+        guard page.firstSequence.map({ $0 >= 0 && $0 < request.before }) ?? !page.hasMore else {
+            fail(request); return false
+        }
+        messages.insert(contentsOf: page.messages, at: 0)
+        activity.insert(contentsOf: page.activity, at: 0)
+        sentFiles.insert(contentsOf: page.sentFiles, at: 0)
+        usageByTurn.merge(page.usageByTurn) { $0.combining($1) }
+        firstSequence = page.firstSequence
+        hasMore = page.hasMore
+        loading = nil
+        settleRestore()
+        return true
+    }
+
+    public mutating func fail(_ request: Request) {
+        guard loading == request else { return }
+        loading = nil; failed = true
+    }
+    public mutating func cancel(_ request: Request) {
+        if loading == request { loading = nil }
+    }
+    private mutating func settleRestore() {
+        if !hasMore { restoreBefore = nil }
+        if let firstSequence, let restoreBefore, firstSequence <= restoreBefore { self.restoreBefore = nil }
+        restoring = restoreBefore != nil
+    }
 }
 
 public struct HubChatActivity: Identifiable {
@@ -1040,12 +1118,27 @@ public struct HubConversationAppDocument: Decodable {
     public let document: String
 }
 
-public struct HubConversationFile: Decodable, Identifiable {
+public struct HubConversationFile: Decodable, Identifiable, Equatable {
     public let id: String
     public let name: String
     public let bytes: Int
     public let sha256: String
 }
+
+/// A successful delivery receipt, not a tool-call claim or a mutable filename.
+public struct HubChatSentFile: Identifiable, Equatable {
+    public let file: HubConversationFile
+    public let turn: Int
+    public let sequence: Int
+    public var id: String { file.id }
+
+    public static func anchor(of receipt: HubChatSentFile, in messages: [HubChatMessage]) -> String? {
+        let replies = messages.filter { $0.role == "assistant" && $0.turn == receipt.turn }
+        return replies.last { (Int($0.id) ?? .max) < receipt.sequence }?.id ?? replies.first?.id
+    }
+}
+
+public enum HubConversationFileError: Error { case versionUnavailable }
 
 public struct HubChatPresentation: Decodable, Equatable, Identifiable {
     public enum Kind: String, Decodable { case html, vega, app }
@@ -1590,10 +1683,17 @@ struct HubChatStreamFrame: Decodable {
                     let type: String
                     let text: String?
                     let attachment: HubChatMessage.Photo?
+                    let toolCallId: String?
+                    let isError: Bool?
                 }
                 struct Message: Decodable { let content: [Block]? }
                 struct Source: Decodable { let kind: String }
-                struct Metadata: Decodable { let kind: String? }
+                struct Metadata: Decodable {
+                    let kind: String?
+                    let name: String?
+                    let bytes: Int?
+                    let sha256: String?
+                }
                 struct Chunk: Decodable {
                     let type: String
                     let index: Int?
@@ -1645,6 +1745,7 @@ struct HubChatStreamFrame: Decodable {
             let failure: String?
             let wasStopped: Bool
             let announcesScreenshot: Bool
+            let sentFile: HubChatSentFile?
             let activity: HubChatActivity?
             let replacement: Replacement?
             let title: String?
@@ -1680,6 +1781,17 @@ struct HubChatStreamFrame: Decodable {
                 failure = type == "turn/end" && payload?.reason?.kind == "error"
                     ? (payload?.reason?.message ?? "This turn failed.") : nil
                 announcesScreenshot = type == "tool/result" && payload?.meta?.kind == "hub-screenshot"
+                if type == "tool/result", let payload, payload.meta?.kind == "hub-file",
+                   let result = payload.message?.content?.first, result.type == "tool-result", result.isError == false,
+                   let callID = result.toolCallId, !callID.isEmpty, callID.utf8.count <= 1_024,
+                   callID.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+                   let turn = payload.turn, turn > 0,
+                   let name = payload.meta?.name, let count = payload.meta?.bytes, let sha = payload.meta?.sha256 {
+                    let file = HubConversationFile(id: HubAttachmentStore.digest(Data(("sent:" + callID).utf8)),
+                                                   name: name, bytes: count, sha256: sha)
+                    sentFile = HubConversationAPI.validConversationFile(file)
+                        ? HubChatSentFile(file: file, turn: turn, sequence: seq) : nil
+                } else { sentFile = nil }
                 let activityTitle: String?
                 let detail: String?
                 switch type {
@@ -1775,6 +1887,7 @@ struct HubChatStreamFrame: Decodable {
 
 struct HubChatTimeline {
     private var messages: [HubChatMessage] = []
+    private var sentFiles: [HubChatSentFile] = []
     private var blocks: [Int: String] = [:]
     private var running = false
     private var failure: String?
@@ -1812,10 +1925,12 @@ struct HubChatTimeline {
                 return sequence >= replace.start && sequence < replace.end
             }
             activity.removeAll { $0.sequence >= replace.start && $0.sequence < replace.end }
+            sentFiles.removeAll { $0.sequence >= replace.start && $0.sequence < replace.end }
             usageReceipts = usageReceipts.filter { !(replace.start..<replace.end).contains($0.key) }
             blocks.removeAll()
         }
         if event.announcesScreenshot { latestScreenshotSequence = event.seq }
+        if let file = event.sentFile, !sentFiles.contains(where: { $0.id == file.id }) { sentFiles.append(file) }
         if let entry = event.activity { activity.append(entry) }
         if let usage = event.usage { usageReceipts[event.seq] = usage }
         if let title = event.title { self.title = title }
@@ -1857,7 +1972,7 @@ struct HubChatTimeline {
         return HubChatSnapshot(messages: messages, hasMore: hasMore, running: running,
                         partial: blocks.keys.sorted().compactMap { blocks[$0] }.joined(), failure: failure,
                         lastTurnEndSequence: lastTurnEndSequence, lastTurnWasStopped: lastTurnWasStopped,
-                        latestScreenshotSequence: latestScreenshotSequence, historyCursor: historyCursor,
+                        latestScreenshotSequence: latestScreenshotSequence, sentFiles: sentFiles, historyCursor: historyCursor,
                         firstSequence: firstSequence, activity: activity, title: title, model: model, usageByTurn: totals)
     }
 }
@@ -1959,6 +2074,8 @@ public final class HubConversationAPI {
         switch response.statusCode {
         case 200: break
         case 300...399, 401, 403: throw HubAttachmentError.signInRequired
+        case 410 where path == "api/hub/artifacts" && headers["x-hub-artifact-format"] == "file":
+            throw HubConversationFileError.versionUnavailable
         default: throw HubAttachmentError.unavailable
         }
         guard let mimeType = response.mimeType, mediaTypes.contains(mimeType), data.count <= maxBytes else {
@@ -3464,7 +3581,7 @@ public final class HubConversationAPI {
         return bytes
     }
 
-    private static func validConversationFile(_ file: HubConversationFile) -> Bool {
+    fileprivate static func validConversationFile(_ file: HubConversationFile) -> Bool {
         Self.isScreenshotID(file.id) && Self.isScreenshotID(file.sha256) && (0...20_971_520).contains(file.bytes) &&
             !file.name.isEmpty && file.name.utf8.count <= 1_024 && file.name != "." && file.name != ".." &&
             !file.name.contains("/") && !file.name.contains("\\") &&
@@ -3963,7 +4080,7 @@ public final class HubConversationAPI {
         for event in events { timeline.apply(event) }
         let snapshot = timeline.snapshot
         return HubChatHistoryPage(messages: snapshot.messages, hasMore: page.hasMore,
-                                  firstSequence: events.first?.seq, activity: snapshot.activity, usageByTurn: snapshot.usageByTurn)
+                                  firstSequence: events.first?.seq, activity: snapshot.activity, usageByTurn: snapshot.usageByTurn, sentFiles: snapshot.sentFiles)
     }
 
     private func rpc(_ method: String, request payload: [String: Any], maxBytes: Int = 65_536) async throws -> [String: Any] {

@@ -605,6 +605,18 @@ final class HubConversationTests: XCTestCase {
         } catch HubAttachmentError.invalidResponse {}
     }
 
+    func testOverwrittenFileVersionReportsGoneWithoutSubstitutingBytes() async throws {
+        let api = try client()
+        let file = HubConversationFile(id: String(repeating: "a", count: 64), name: "report.pdf", bytes: 8,
+                                       sha256: String(repeating: "b", count: 64))
+        CatalogFixture.responder = { _ in (410, Data(#"{"error":"file-changed-or-removed"}"#.utf8)) }
+        do {
+            _ = try await api.conversationFileBytes(sessionID: "fixture-chat", file: file)
+            XCTFail("The original version is unavailable; never preview replacement bytes")
+        } catch HubConversationFileError.versionUnavailable {}
+        XCTAssertEqual(CatalogFixture.requests.count, 1)
+    }
+
     func testScreenshotCatalogUsesBoundedConversationRoute() async throws {
         let api = try client()
         let id = String(repeating: "a", count: 64)

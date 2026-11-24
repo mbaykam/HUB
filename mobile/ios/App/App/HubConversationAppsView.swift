@@ -5,6 +5,7 @@ import SceneKit.ModelIO
 import ModelIO
 import HubNative
 import UniformTypeIdentifiers
+import PDFKit
 
 @MainActor
 struct HubConversationAppsView: View {
@@ -24,16 +25,26 @@ struct HubConversationAppsView: View {
     @State private var document: HubConversationAppDocument?
     @State private var failed = false
     @State private var attempt = 0
+    @State private var fileFailureMessage: String?
+    private let directFile: Bool
+
+    init(api: HubConversationAPI, sessionID: String, pushed: Bool = false, initialFile: HubConversationFile? = nil) {
+        self.api = api
+        self.sessionID = sessionID
+        self.pushed = pushed
+        directFile = initialFile != nil
+        _selectedFile = State(initialValue: initialFile)
+    }
 
     var body: some View {
         content
             .navigationTitle(selected?.name ?? selectedFile?.name ?? "Conversation outputs")
             .navigationBarTitleDisplayMode(.inline)
             // Inside an output, its own back button returns to the list of outputs.
-            .navigationBarBackButtonHidden(pushed && (selected != nil || selectedFile != nil))
+            .navigationBarBackButtonHidden(pushed && !directFile && (selected != nil || selectedFile != nil))
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    if pushed && (selected != nil || selectedFile != nil) {
+                    if pushed && !directFile && (selected != nil || selectedFile != nil) {
                         Button { clearSelection() } label: { Label("Outputs", systemImage: "chevron.left").labelStyle(.titleAndIcon) }
                     }
                 }
@@ -44,7 +55,7 @@ struct HubConversationAppsView: View {
         VStack(spacing: 12) {
             if !pushed {
                 HStack {
-                    if selected != nil || selectedFile != nil {
+                    if !directFile && (selected != nil || selectedFile != nil) {
                         Button { clearSelection() } label: {
                             Label("Outputs", systemImage: "chevron.left")
                         }
@@ -104,11 +115,22 @@ struct HubConversationAppsView: View {
         .task(id: LoadRequest(appID: selected?.id, fileID: selectedFile?.id, attempt: attempt)) {
             if let selectedFile {
                 fileError = false
+                fileFailureMessage = nil
                 do {
                     let value = try await api.conversationFileBytes(sessionID: sessionID, file: selectedFile)
                     if !Task.isCancelled { fileBytes = value }
                 } catch {
-                    if !Task.isCancelled { fileError = true }
+                    if !Task.isCancelled {
+                        fileError = true
+                        switch error {
+                        case HubConversationFileError.versionUnavailable:
+                            fileFailureMessage = "This version is no longer available: the original file was changed or removed. A newer file will not be substituted."
+                        case HubAttachmentError.signInRequired:
+                            fileFailureMessage = "Sign in to HUB again, then retry this file."
+                        default:
+                            fileFailureMessage = "Could not download and verify this file. Check the connection and retry."
+                        }
+                    }
                 }
                 return
             }
@@ -161,7 +183,18 @@ struct HubConversationAppsView: View {
                 HubShareFileButton(bytes: fileBytes, name: file.name, label: "Share output")
             }.padding(.horizontal, 16)
             if exportError { Text("Could not save this output.").font(.footnote) }
-            if HubModel3DView.canShow(file.name) {
+            if (file.name as NSString).pathExtension.lowercased() == "pdf" {
+                if let document = PDFDocument(data: fileBytes), document.pageCount > 0 {
+                    HubPDFDocumentView(document: document)
+                        .id(file.sha256)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityIdentifier("hub.output.pdf")
+                } else {
+                    Text("This file could not be opened as a PDF. You can still save or share the verified original.")
+                        .foregroundStyle(.secondary).padding()
+                    Spacer()
+                }
+            } else if HubModel3DView.canShow(file.name) {
                 HubModel3DView(bytes: fileBytes, name: file.name)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if fileBytes.count <= 400_000, let preview = String(data: fileBytes, encoding: .utf8) {
@@ -172,7 +205,10 @@ struct HubConversationAppsView: View {
                 Spacer()
             }
         } else if fileError {
-            Button("Reload output list") { clearSelection(); artifacts = nil; files = nil; attempt += 1 }
+            Text(fileFailureMessage ?? "Could not load this output.")
+                .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16)
+            Button("Retry download") { attempt += 1 }
+                .frame(minHeight: 44)
             Spacer()
         } else {
             ProgressView("Loading file…").frame(maxHeight: .infinity)
@@ -184,6 +220,22 @@ struct HubConversationAppsView: View {
         let fileID: String?
         let attempt: Int
     }
+}
+
+@MainActor
+private struct HubPDFDocumentView: UIViewRepresentable {
+    let document: PDFDocument
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.document = document
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        return view
+    }
+
+    func updateUIView(_ view: PDFView, context: Context) {}
 }
 
 /// HTML deliverables get a throwaway WebKit document with no HUB origin,

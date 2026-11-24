@@ -49,12 +49,13 @@ struct HubLiveChatView: View {
     @State private var deliveryUncertain = false
     @State private var stopRequest: StopRequest?
     @State private var error: String?
-    @State private var olderMessages: [HubChatMessage] = []
-    @State private var olderActivity: [HubChatActivity] = []
-    @State private var olderUsage: [Int: HubChatTurnUsage] = [:]
-    @State private var olderPage: HubChatHistoryPage?
-    @State private var historyLoading = false
-    @State private var historyError = false
+    @State private var history = HubChatHistoryWindow()
+    @State private var openedOutput: HubChatSentFile?
+    private var olderMessages: [HubChatMessage] { history.messages }
+    private var olderActivity: [HubChatActivity] { history.activity }
+    private var olderUsage: [Int: HubChatTurnUsage] { history.usageByTurn }
+    private var historyLoading: Bool { history.loading != nil }
+    private var historyError: Bool { history.failed }
     @State private var historyRequest = 0
     @State private var historyAnchor: String?
     @State private var readingLatest = true
@@ -265,6 +266,9 @@ struct HubLiveChatView: View {
             }
         }
         .hubPage(isPresented: $appsOpen) { pushed in HubConversationAppsView(api: api, sessionID: chat.sessionId, pushed: pushed) }
+        .hubPage(item: $openedOutput) { receipt, pushed in
+            HubConversationAppsView(api: api, sessionID: chat.sessionId, pushed: pushed, initialFile: receipt.file)
+        }
         .sheet(isPresented: $commandsOpen, onDismiss: {
             if focusAfterCommandPick {
                 focusAfterCommandPick = false
@@ -622,7 +626,7 @@ struct HubLiveChatView: View {
     private var trajectory: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                if olderPage?.hasMore ?? snapshot?.hasMore ?? false {
+                if history.hasMore {
                     Button(historyError ? "Retry loading earlier activity" : "Load earlier activity") {
                         historyRequest += 1
                     }
@@ -676,10 +680,9 @@ struct HubLiveChatView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if let snapshot {
-                            if olderPage?.hasMore ?? snapshot.hasMore {
-                                // Scrolling up to the top loads the earlier
-                                // messages by itself; a button appears only to
-                                // retry after a failure.
+                            if history.hasMore {
+                                // Top-of-viewport loading also works when a sparse
+                                // opening window is shorter than the screen.
                                 Group {
                                     if historyError {
                                         Button("Retry loading earlier messages") {
@@ -691,20 +694,29 @@ struct HubLiveChatView: View {
                                         ProgressView()
                                             .accessibilityLabel("Loading earlier messages")
                                     } else {
-                                        // A still marker: a spinner that never stops
-                                        // would keep the app from ever going idle.
-                                        Color.clear.frame(height: 24)
+                                        Button("Load earlier messages") {
+                                            readingLatest = false
+                                            historyRequest += 1
+                                        }
+                                        .disabled(connectionLost)
+                                        .accessibilityIdentifier("hub.chat.history.earlier")
                                     }
                                 }
                                 .frame(maxWidth: .infinity)
-                                .onAppear { historyTopVisible = true; autoLoadEarlier() }
-                                .onDisappear { historyTopVisible = false }
+                                .background {
+                                    GeometryReader { geometry in
+                                        Color.clear.preference(key: EarlierChatOffset.self,
+                                            value: geometry.frame(in: .named("chatViewport")).maxY)
+                                    }
+                                }
                             }
                             let messages = olderMessages + snapshot.messages
                             let activity = Dictionary(grouping: olderActivity + snapshot.activity, by: \.turn)
                             let usage = olderUsage.merging(snapshot.usageByTurn) { $0.combining($1) }
                             let currentTurn = snapshot.running ? snapshot.latestMessageTurn : nil
+                            let sentFiles = history.sentFiles + snapshot.sentFiles
                             ForEach(messages) { message in
+                                VStack(alignment: .leading, spacing: 8) {
                                 if message.role == "user" {
                                     HStack {
                                         Spacer(minLength: 48)
@@ -772,6 +784,11 @@ struct HubLiveChatView: View {
                                         }
                                     }
                                 }
+                                ForEach(sentFiles.filter { HubChatSentFile.anchor(of: $0, in: messages) == message.id }) { receipt in
+                                    sentFileCard(receipt)
+                                }
+                                }
+                                .id(message.id)
                             }
                             // A screenshot from a turn with no reply yet (still running) shows
                             // at the end. One from an earlier turn whose messages are not
@@ -815,27 +832,12 @@ struct HubLiveChatView: View {
                                 }
                                 .disabled(connectionLost)
                             }
-                            // Files HUB sent to the phone this turn: one tap to open them.
-                            ForEach(sentFiles(in: snapshot, messages: messages), id: \.self) { name in
-                                Button {
-                                    composerFocused = false
-                                    appsOpen = true
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: HubModel3DView.canShow(name) ? "cube.transparent" : "doc.fill")
-                                            .font(.title3).foregroundStyle(HubWorkspacePalette.accent)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("HUB sent you a file").font(.caption).foregroundStyle(.secondary)
-                                            Text(name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                        }
-                                        Spacer(minLength: 0)
-                                        Text("Open").font(.footnote.weight(.semibold)).foregroundStyle(HubWorkspacePalette.accent)
-                                    }
-                                    .padding(14)
-                                    .background(HubWorkspacePalette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("hub.chat.sentFile")
+                            // A successful file receipt can arrive before the turn's first reply.
+                            ForEach(sentFiles.filter { receipt in
+                                HubChatSentFile.anchor(of: receipt, in: messages) == nil &&
+                                    (oldestLoadedTurn.map { receipt.turn >= $0 } ?? true)
+                            }) { receipt in
+                                sentFileCard(receipt)
                             }
                             // HUB found the earlier chat the user meant: continue there.
                             if let earlier = earlierChat(in: snapshot, messages: messages) {
@@ -890,6 +892,12 @@ struct HubLiveChatView: View {
                     }
                 }
                 .coordinateSpace(name: "chatViewport")
+                .onPreferenceChange(EarlierChatOffset.self) { offset in
+                    let visible = offset.map { $0 >= 0 && $0 <= viewport.size.height } ?? false
+                    let appeared = visible && !historyTopVisible
+                    historyTopVisible = visible
+                    if appeared { autoLoadEarlier() }
+                }
                 .onPreferenceChange(LatestChatOffset.self) { offset in
                     latestVisible = offset.map { $0 <= viewport.size.height + 24 && $0 >= 0 } ?? false
                     // When content gets shorter (the "Sending…" bubble, the steps or
@@ -1003,6 +1011,11 @@ struct HubLiveChatView: View {
         .foregroundStyle(.secondary)
     }
 
+    private struct EarlierChatOffset: PreferenceKey {
+        static let defaultValue: CGFloat? = nil
+        static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
+    }
+
     private struct LatestChatOffset: PreferenceKey {
         static let defaultValue: CGFloat? = nil
         static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
@@ -1110,30 +1123,32 @@ struct HubLiveChatView: View {
         }
     }
 
-    /// Loads the previous page once the user has scrolled up to the top.
+    /// A short opening window can show both ends at once. Reading the latest
+    /// message must not prevent reaching earlier pages in that case.
     private func autoLoadEarlier() {
-        if historyTopVisible && !readingLatest && !historyLoading && !historyError && !connectionLost {
+        if (historyTopVisible || history.restoring) && history.hasMore && !historyLoading && !historyError && !connectionLost {
             historyRequest += 1
         }
     }
 
     private func loadEarlierMessages() async {
-        guard !historyLoading, let snapshot, let cursor = snapshot.historyCursor,
-              let sequence = olderPage?.firstSequence ?? snapshot.firstSequence else { return }
-        historyLoading = true
-        historyError = false
-        defer { historyLoading = false }
-        do {
-            let page = try await api.chatHistory(sessionID: chat.sessionId, through: cursor, before: sequence)
-            guard !Task.isCancelled, self.snapshot?.historyCursor == cursor else { return }
-            let anchor = olderMessages.first?.id ?? snapshot.messages.first?.id
-            olderMessages.insert(contentsOf: page.messages, at: 0)
-            olderActivity.insert(contentsOf: page.activity, at: 0)
-            olderUsage.merge(page.usageByTurn) { $0.combining($1) }
-            olderPage = page
-            historyAnchor = anchor
-        } catch {
-            if !Task.isCancelled { historyError = true }
+        // Hidden context/tool-only pages still advance the journal boundary.
+        // Bound each automatic batch; the explicit load control remains available.
+        for _ in 0..<8 {
+            guard !Task.isCancelled, let request = history.begin() else { return }
+            let anchor = olderMessages.first?.id ?? snapshot?.messages.first?.id
+            do {
+                let page = try await api.chatHistory(sessionID: chat.sessionId, through: request.cursor, before: request.before)
+                guard !Task.isCancelled else { history.cancel(request); return }
+                guard history.receive(page, for: request) else { return }
+                if readingLatest { bottomRequest += 1 }
+                else { historyAnchor = anchor }
+            } catch {
+                if Task.isCancelled { history.cancel(request) }
+                else { history.fail(request) }
+                return
+            }
+            if !history.restoring && !historyTopVisible { return }
         }
     }
 
@@ -1290,18 +1305,28 @@ struct HubLiveChatView: View {
             }
         }
     }
-    /// Names of files HUB sent with hub_send_file since the user last wrote.
-    private func sentFiles(in snapshot: HubChatSnapshot, messages: [HubChatMessage]) -> [String] {
-        let asked = messages.last(where: { $0.role == "user" }).flatMap { Int($0.id) } ?? -1
-        var names: [String] = []
-        for call in snapshot.activity where call.title == "hub_send_file" && call.sequence > asked && !call.failed {
-            guard let data = call.detail?.data(using: .utf8),
-                  let arguments = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let path = arguments["path"] as? String else { continue }
-            let name = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? path
-            if !names.contains(name) { names.append(name) }
+    private func sentFileCard(_ receipt: HubChatSentFile) -> some View {
+        Button {
+            composerFocused = false
+            openedOutput = receipt
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: HubModel3DView.canShow(receipt.file.name) ? "cube.transparent" : "doc.fill")
+                    .font(.title3).foregroundStyle(accent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(receipt.file.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(receipt.file.bytes), countStyle: .file) +
+                         " · Version " + String(receipt.file.sha256.prefix(8)))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 44).padding(14)
+            .background(panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        return names
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hub.chat.sentFile.\(receipt.id)")
     }
     /// The earlier chat HUB offered to go back to since the user last wrote.
     private func earlierChat(in snapshot: HubChatSnapshot, messages: [HubChatMessage]) -> (id: String, title: String)? {
@@ -1530,16 +1555,11 @@ struct HubLiveChatView: View {
             }) { value in
                 guard !Task.isCancelled else { return }
                 let completed = snapshot?.running == true && !value.running
-                if snapshot?.historyCursor != value.historyCursor {
-                    olderMessages = []
-                    olderActivity = []
-                    olderUsage = [:]
-                    olderPage = nil
-                    historyError = false
-                }
+                history.follow(value)
                 snapshot = value
                 connectionLost = false
                 reconnecting = false
+                autoLoadEarlier()
                 if let request = stopRequest, let end = value.lastTurnEndSequence,
                    end > (request.priorEnd ?? -1) {
                     stopRequest = nil
