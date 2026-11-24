@@ -155,7 +155,7 @@ struct HubHelperTransparencyView: View {
     @MainActor private func stop() async {
         stopping = true
         do { try await api.cancelChat(sessionID: helper.id); stopRequested = true; error = nil; await load() }
-        catch { error = "Could not stop this helper. It may still be running. Try again." }
+        catch { self.error = "Could not stop this helper. It may still be running. Try again." }
         stopping = false
     }
 }

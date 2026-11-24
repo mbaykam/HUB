@@ -16,6 +16,8 @@ test('helper routes and recorded progress are reachable even before a helper sta
   assert.ok(helpers.includes('work?.actualRoute'));
   assert.ok(helpers.includes('work.routing'));
   assert.ok(helpers.includes('Stop requested'));
+  assert.ok(helpers.includes('catch { self.error = "Could not stop this helper.'));
+  assert.ok(!helpers.includes('catch { error ='));
   assert.ok(helpers.includes('private reasoning'));
   assert.equal((project.match(/HubHelperTransparencyView.swift in Sources/g) ?? []).length, 2);
   assert.ok(project.includes('path = HubHelperTransparencyView.swift'));
