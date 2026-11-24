@@ -1,0 +1,39 @@
+name: iOS TestFlight status (read only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Existing iOS build number to inspect (1-9999; does not build or upload)
+        required: true
+        type: string
+        default: '33'
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    if: github.repository == 'mbaykam/HUB' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    environment: ios-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - name: Check status tool fixtures without credentials
+        run: node --test mobile/scripts/testflight-status.test.mjs
+      - name: Read Apple processing and beta availability
+        run: node mobile/scripts/testflight-status.mjs
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_ASC_PRIVATE_KEY_P8_BASE64: ${{ secrets.IOS_ASC_PRIVATE_KEY_P8_BASE64 }}
+          IOS_ASC_APP_ID: ${{ secrets.IOS_ASC_APP_ID }}
+      # No signing, build, upload, credential files, or artifacts.
