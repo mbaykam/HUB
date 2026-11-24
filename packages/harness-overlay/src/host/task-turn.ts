@@ -4,7 +4,13 @@ export function currentTurnHasUserRequest(agent: { session: { snapshotEvents(): 
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]!;
     if (event.type === "turn/end" || event.type === "turn/start") return false;
-    if (event.type === "user/message" && (event.data as { source?: { kind?: string } } | undefined)?.source?.kind === "user") return true;
+    if (event.type === "user/message") {
+      const source = (event.data as { source?: { kind?: string; rpcId?: string } } | undefined)?.source;
+      // Controller continuations carry a user-shaped message for the native
+      // queue, but never grant fresh authority to create commitments or act.
+      if (source?.rpcId?.startsWith("hub-quota-resume-")) return false;
+      if (source?.kind === "user") return true;
+    }
   }
   return false;
 }

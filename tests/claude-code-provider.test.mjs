@@ -35,6 +35,10 @@ async function fake(){
   return {adapter,dir};
 }
 globalThis.__spawn=await import('node:child_process');
+// Do not consult the user's real persisted subscription receipt in unit tests.
+const testHome=await mkdtemp(join(tmpdir(),'hub-claude-tests-')),originalHome=process.env.DSH_HOME;
+process.env.DSH_HOME=testHome;
+test.after(async()=>{if(originalHome===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=originalHome;await rm(testHome,{recursive:true,force:true});});
 const user=text=>({role:'user',source:{kind:'user'},content:[{type:'text',text}]});
 const collect=async iterable=>{const out=[];for await(const c of iterable)out.push(c);return out;};
 const text=chunks=>chunks.filter(c=>c.type==='text-delta').map(c=>c.text).join('');
@@ -114,7 +118,7 @@ test('subscription limits come from the CLI rate-limit event and fit the usage c
  assert.deepEqual(parseClaudeCodeUsage({state:"waiting"}),{state:"waiting"});
 });
 
-test('at the subscription limit the fast model answers, says why, and Claude Code is not started again until the reset',async()=>{
+test('subscription limit emits typed reset metadata, never invokes configured fallback, and blocks early model probes',async()=>{
  const home=await mkdtemp(join(tmpdir(),'hub-cc-limit-'));const saved=process.env.DSH_HOME;process.env.DSH_HOME=home;
  const dir=await mkdtemp(join(tmpdir(),'hub-fake-claude-')),script=join(dir,'claude.mjs');await writeFile(script,FAKE);
  let launches=0;const asked=[];
@@ -123,11 +127,14 @@ test('at the subscription limit the fast model answers, says why, and Claude Cod
  const adapter=new ClaudeCodeAdapter(process.execPath,(command,args,options)=>{launches++;return globalThis.__spawn.spawn(command,[script,...args],{...options,stdio:['pipe','pipe','pipe']});},fallback);
  try{
   const first=await collect(adapter.stream({model:'opus',sessionId:'limit',messages:[user('we are out of quota')],system:'Be HUB.'}));
-  assert.equal(text(first),'Fast answer');assert.equal(first.at(-1).reason.kind,'stop');
-  assert.equal(asked[0].provider,'openrouter');assert.equal(asked[0].model,'z-ai/glm-5.3-flash');
-  assert.match(asked[0].system,/^Be HUB\.[\s\S]*used up its subscription limit until \d\d:\d\d/);
+  assert.equal(text(first),'');assert.equal(first.at(-1).reason.kind,'error');
+   assert.equal(first.at(-1).reason.failure.code,'subscription-limit');
+   assert.equal(first.at(-1).reason.failure.subscriptionLimit.model,'opus');
+   assert.ok(first.at(-1).reason.failure.subscriptionLimit.resetsAt>Date.now());
+  assert.deepEqual(asked,[],'no paid or alternate subscription route is called');
+  assert.equal(first.at(-1).reason.failure.subscriptionLimit.provider,'claude-code');
   assert.ok(claudeCodeBlockedUntil()>Date.now());
   const second=await collect(adapter.stream({model:'opus',sessionId:'limit-2',messages:[user('hello again')]}));
-  assert.equal(text(second),'Fast answer');assert.equal(launches,1,'no new Claude Code run while the limit lasts');
+  assert.equal(text(second),'');assert.equal(second.at(-1).reason.failure.code,'subscription-limit');assert.equal(launches,1,'no model probe before the actual reset');
  }finally{adapter.dispose();if(saved===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=saved;await rm(dir,{recursive:true,force:true});await rm(home,{recursive:true,force:true});}
 });

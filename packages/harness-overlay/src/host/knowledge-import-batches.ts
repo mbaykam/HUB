@@ -134,7 +134,15 @@ export class KnowledgeImportBatches {
     }return queued;
   });}
   async finishWithdrawals(id:string){const ids=Object.entries((await this.store.admission.read()).records).filter(([,entry])=>entry.batchId===id&&entry.state==="withdrawn").map(([recordId])=>recordId);return ids.length?this.store.organization.withdrawImported(ids):{domainReviewRequired:[] as string[]};}
-  async recover(){for(const id of new Set(Object.values((await this.store.admission.read()).records).filter(e=>e.state==="withdrawn").map(e=>e.batchId)))await this.finishWithdrawals(id);return this.resumePendingQueue();}
+  async recover(onProjectionDeferred?:()=>void){
+    for(const id of new Set(Object.values((await this.store.admission.read()).records).filter(e=>e.state==="withdrawn").map(e=>e.batchId)))try{await this.finishWithdrawals(id);}catch(e){
+      // Withdrawal's canonical changes are already saved; only its readable
+      // metadata may be deferred. Startup must still resume other batches.
+      if(!onProjectionDeferred||(e as NodeJS.ErrnoException).code!=="KNOWLEDGE_PROJECTION_DEFERRED")throw e;
+      onProjectionDeferred();
+    }
+    return this.resumePendingQueue();
+  }
   async withdraw(id:string){
     const records=await this.store.exclusive(async()=>{
       await this.manifest(id);const ledger=await this.store.admission.read(),ids=Object.entries(ledger.records).filter(([,e])=>e.batchId===id&&e.state!=="withdrawn").map(([recordId])=>recordId),state=await this.store.organization.state();

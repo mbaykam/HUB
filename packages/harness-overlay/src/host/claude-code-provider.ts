@@ -118,7 +118,7 @@ class Queue<T>{
   }
 }
 
-interface Run {key:string;token:string;secret:string;proc?:ChildProcess;events:Queue<Event>;tools:Tool[];pending:Map<string,(result:any)=>void>;dir?:string;done:boolean;touched:number;call?:CallUsage}
+interface Run {key:string;token:string;secret:string;proc?:ChildProcess;events:Queue<Event>;tools:Tool[];pending:Map<string,(result:any)=>void>;dir?:string;done:boolean;touched:number;call?:CallUsage;limits?:ClaudeCodeLimits}
 interface CallUsage {input:number;cacheRead:number;cacheWrite:number;output:number}
 
 /** HUB measures the conversation from each model call's usage. The CLI's
@@ -138,10 +138,14 @@ export function claudeCodeBlockedUntil(now=Date.now(),limits=latestLimits){
   const until=(limits?.windows??[]).filter(w=>w.status==="rejected"&&typeof w.resetsAt==="number"&&w.resetsAt*1000>now).map(w=>w.resetsAt!*1000);
   return until.length?Math.max(...until):undefined;
 }
-const LIMIT_MESSAGE=/hit your .*limit|usage limit|limit reached|rate.?limit/i;
+const LIMIT_MESSAGE=/hit your .*limit|usage limit|limit reached/i;
 
-/** Another model that answers while Claude Code is at its subscription limit,
- * so a message gets a reply instead of an error. */
+export function subscriptionLimitFailure(model:string,resetsAt?:number,message="Claude Code has reached its subscription limit."){
+  return {code:"subscription-limit",message,subscriptionLimit:{provider:CLAUDE_CODE_PROVIDER,model,kind:"subscription-quota",...(resetsAt?{resetsAt}:{}),resetSource:resetsAt?"cli":"unknown"}};
+}
+
+/** Legacy registration shape retained for compatibility. Automatic fallback
+ * is disabled; no route or stream callback is invoked. */
 export interface ClaudeCodeFallback {
   route():{provider:string;model:string;reasoningEffort?:string}|undefined;
   stream(options:any):AsyncIterable<any>;
@@ -151,18 +155,7 @@ export class ClaudeCodeAdapter {
   #runs=new Map<string,Run>();#byToken=new Map<string,Run>();#server?:Promise<{server:Server;port:number}>;#sweeper?:ReturnType<typeof setInterval>;
   constructor(readonly command:string,readonly launch:SpawnClaude=(command,args,options)=>spawn(command,args,{...options,stdio:["pipe","pipe","pipe"],windowsHide:true}),readonly fallback?:ClaudeCodeFallback){}
 
-  /** Answers with the fallback model, telling the user why and until when. */
-  async *#fallbackStream(options:Options,until?:number,message?:string):AsyncGenerator<any>{
-    const route=this.fallback?.route();
-    if(!route||route.provider===CLAUDE_CODE_PROVIDER){
-      yield {type:"finish",reason:{kind:"error",failure:{message:message??"Claude Code has reached its subscription limit.",code:"claude-code-limit"}}};return;
-    }
-    const time=until?new Intl.DateTimeFormat("en-GB",{hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(until)):undefined;
-    const note=`\n\nFor this reply: Smart (Claude) has used up its subscription limit${time?` until ${time}`:" for now"}, so you, a faster model, are answering in its place. If you have not already said so in this turn, say this in one short sentence at the start, in the user's language; then help as usual.`;
-    yield* this.fallback!.stream({provider:route.provider,model:route.model,...(route.reasoningEffort?{reasoningEffort:route.reasoningEffort}:{}),
-      system:(options.system??"")+note,messages:options.messages,...(options.tools?.length?{tools:options.tools}:{}),
-      ...(options.signal?{signal:options.signal}:{}),...(options.sessionId?{sessionId:options.sessionId}:{})});
-  }
+  // Legacy fallback argument is accepted for source compatibility, never invoked.
 
   providerInfo(provider:string){return {id:provider,name:"Claude Code"};}
   providerRetryPolicy(){return undefined;}
@@ -185,8 +178,10 @@ export class ClaudeCodeAdapter {
       for(const result of results){const respond=run.pending.get(result.toolCallId)!;run.pending.delete(result.toolCallId);respond(result);}
     }else{
       if(run)this.#finish(run);
-      const until=this.fallback?claudeCodeBlockedUntil():undefined;
-      if(until){yield* this.#fallbackStream(options,until);return;}
+      await readClaudeCodeUsage();
+      const until=claudeCodeBlockedUntil();
+      const unknown=(latestLimits?.windows??[]).some(w=>w.status==="rejected"&&!w.resetsAt);
+      if(until||unknown){yield {type:"finish",reason:{kind:"error",failure:subscriptionLimitFailure(options.model,unknown?undefined:until)}};return;}
       run=await this.#start(key,options);
     }
     run.tools=options.tools??[];run.touched=Date.now();
@@ -203,7 +198,7 @@ export class ClaudeCodeAdapter {
       if(open?.type!==type){yield* close();open={index:index++,type,text:""};yield {type:"block-start",index:open.index,blockType:type};}
       open.text+=text;yield {type:type==="text"?"text-delta":"reasoning-delta",index:open.index,text};
     };
-    let calls=0,shown=false;
+    let calls=0;
     while(true){
       if(options.signal?.aborted){yield* close();yield {type:"finish",reason:{kind:"aborted",failure:{message:"Stopped.",code:"aborted"}}};return;}
       const event=await run.events.next(calls?150:undefined);
@@ -212,11 +207,11 @@ export class ClaudeCodeAdapter {
         yield {type:"usage",usage:run.call?callUsage(run.call):{inputTokens:0,outputTokens:0}};
         yield {type:"finish",reason:{kind:"tool-calls"}};return;
       }
-      if(event.kind==="text"||event.kind==="thinking"){shown=true;yield* write(event.kind==="text"?"text":"reasoning",event.text);continue;}
+      if(event.kind==="text"||event.kind==="thinking"){yield* write(event.kind==="text"?"text":"reasoning",event.text);continue;}
       // The model finished this block: show it whole now, not when the next block starts.
       if(event.kind==="blockEnd"){yield* close();continue;}
       if(event.kind==="tool"){
-        yield* close();const at=index++;calls++;shown=true;
+        yield* close();const at=index++;calls++;
         yield {type:"block-start",index:at,blockType:"tool-call"};
         yield {type:"tool-call-delta",index:at,id:event.id,name:event.name,argumentsDelta:event.args};
         yield {type:"block-end",index:at,block:{type:"tool-call",id:event.id,name:event.name,arguments:event.args}};
@@ -229,10 +224,8 @@ export class ClaudeCodeAdapter {
         else yield {type:"usage",usage:{inputTokens:Number(u.input_tokens??0)+Number(u.cache_read_input_tokens??0)+Number(u.cache_creation_input_tokens??0),outputTokens:Number(u.output_tokens??0),
           ...(u.cache_read_input_tokens?{cacheReadTokens:Number(u.cache_read_input_tokens)}:{}),...(u.cache_creation_input_tokens?{cacheWriteTokens:Number(u.cache_creation_input_tokens)}:{})}};
         this.#finish(run);
-        // The subscription ran out before Claude said anything: the fallback
-        // model answers this message instead of the chat showing an error.
-        if(!event.ok&&this.fallback&&!shown&&(LIMIT_MESSAGE.test(event.message??"")||claudeCodeBlockedUntil())){
-          yield* this.#fallbackStream(options,claudeCodeBlockedUntil(),event.message);return;
+        if(!event.ok&&LIMIT_MESSAGE.test(event.message??"")){
+          yield {type:"finish",reason:{kind:"error",failure:subscriptionLimitFailure(options.model,run.limits?claudeCodeBlockedUntil(Date.now(),run.limits):undefined,event.message)}};return;
         }
         yield event.ok?{type:"finish",reason:{kind:"stop"}}:{type:"finish",reason:{kind:"error",failure:{message:event.message??"Claude Code could not finish.",code:"claude-code-error"}}};
         return;
@@ -269,7 +262,7 @@ export class ClaudeCodeAdapter {
         else if(value.event?.type==="content_block_stop")run.events.push({kind:"blockEnd"});
         else if(value.event?.type==="content_block_delta"&&delta?.type==="text_delta"&&delta.text)run.events.push({kind:"text",text:delta.text});
         else if(value.event?.type==="content_block_delta"&&delta?.type==="thinking_delta"&&delta.thinking)run.events.push({kind:"thinking",text:delta.thinking});}
-      else if(value.type==="rate_limit_event")noteClaudeCodeLimits(value.rate_limit_info);
+      else if(value.type==="rate_limit_event"){run.limits=parseClaudeCodeLimits(value.rate_limit_info);noteClaudeCodeLimits(value.rate_limit_info);}
       else if(value.type==="result"){result=true;run.events.push({kind:"result",ok:!value.is_error,message:typeof value.result==="string"&&value.is_error?value.result:undefined,usage:value.usage});}
     });
     proc.on("close",code=>{if(!result&&!run.done)run.events.push({kind:"exit",code,stderr});});
@@ -341,11 +334,10 @@ export class ClaudeCodeAdapter {
 }
 
 /** Registers Claude Code when the CLI is installed on this PC. */
-export function installClaudeCodeProvider(ctx:any,fallbackRoute?:ClaudeCodeFallback["route"]){
+export function installClaudeCodeProvider(ctx:any,_fallbackRoute?:ClaudeCodeFallback["route"]){
   const command=findClaude();
   if(!command||typeof ctx.llm?.registerAdapter!=="function")return ()=>{};
-  const fallback=fallbackRoute&&typeof ctx.llm?.stream==="function"?{route:fallbackRoute,stream:(options:any)=>ctx.llm.stream(options)}:undefined;
-  const adapter=new ClaudeCodeAdapter(command,undefined,fallback);
+  const adapter=new ClaudeCodeAdapter(command);
   let off:(()=>void)|undefined;
   try{off=ctx.llm.registerAdapter([CLAUDE_CODE_PROVIDER],adapter as any);}catch{adapter.dispose();return ()=>{};}
   return ()=>{off?.();adapter.dispose();};

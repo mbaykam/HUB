@@ -212,7 +212,7 @@ export function userAskedNow(agent: any): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event.type === "turn/end") return false;
-    if (event.type === "user/message") return event.data?.source?.kind === "user";
+    if (event.type === "user/message") return event.data?.source?.kind === "user" && !event.data?.source?.rpcId?.startsWith("hub-quota-resume-");
   }
   return false;
 }
@@ -284,7 +284,7 @@ function installChatTools(ctx: any, characters: any, store: ProjectsStore, ready
         if (!chat) throw Error("No such chat; search first and use a returned sessionId.");
         return {open: true, sessionId: chat.sessionId, title: chat.title, notice: "The user now sees a button that opens this chat. Tell them in one line."};
       }
-      const query = typeof args.query === "string" ? args.query.trim().slice(0, 300) : "";
+      const query: string = typeof args.query === "string" ? args.query.trim().slice(0, 300) : "";
       if (!query) throw Error("Say what the earlier chat was about.");
       const words = query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 2);
       const score = new Map<string, number>();
@@ -293,7 +293,7 @@ function installChatTools(ctx: any, characters: any, store: ProjectsStore, ready
         if (hits) score.set(chat.sessionId, hits * 2);
       }
       // The archive knows what was said, not only the title.
-      const archiveOf = new Map(chats.map((c: any) => ["conversation-" + createHash("sha256").update("hub:" + c.sessionId).digest("hex").slice(0, 32), c.sessionId]));
+      const archiveOf = new Map<string, string>(chats.map((c: any): [string, string] => ["conversation-" + createHash("sha256").update("hub:" + c.sessionId).digest("hex").slice(0, 32), c.sessionId]));
       try {
         const result = await exec.agent.ctx.tools.execute({agent: exec.agent, name: "hub_knowledge_search", arguments: {query}, callId: `${exec.callId ?? "find"}:archive`, signal: exec.signal ?? AbortSignal.timeout(15_000)});
         const text = (result.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");

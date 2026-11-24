@@ -75,8 +75,8 @@ export function installDailyUseWeb(ctx:any){
         const {items}=await listSessions(),item=items.find((s:any)=>s.sessionId===session);
         if(!item||item.origin!=="subagent"){send(404,{error:"helper-unavailable"});return;}
         const observation=await observe();
-        try{const work=helperWork([...observation.events]),running=item.running===true;
-          send(200,{sessionId:session,title:typeof item.projections?.values?.title==="string"?item.projections.values.title.slice(0,240):"Helper",...work,running,outcome:running?"running":work.outcome==="running"?"done":work.outcome});}
+        try{const work=helperWork([...observation.events],item.running===true);
+          send(200,{sessionId:session,title:typeof item.projections?.values?.title==="string"?item.projections.values.title.slice(0,240):"Helper",...work});}
         finally{observation[Symbol.dispose]();}
         return;
       }

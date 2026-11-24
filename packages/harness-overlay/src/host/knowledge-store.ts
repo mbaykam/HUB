@@ -101,7 +101,9 @@ export class KnowledgeStore {
       const path=await this.file(n.path);if(await readFile(path,"utf8")!==n.raw)throw new Error("Legacy note changed during migration");const tmp=path+`.${randomUUID()}.tmp`;await writeFile(tmp,raw);await rename(tmp,path);
     }
     await this.refreshInventory();
-    await this.organization.repairPending();
+    // Deferred metadata must not reject readiness for canonical read tools.
+    // repairPending keeps its pending receipts and still rejects explicit repair.
+    try{await this.organization.repairPending();}catch(e){if((e as NodeJS.ErrnoException).code!=="KNOWLEDGE_PROJECTION_DEFERRED")throw e;}
   }
   private scanning=new Map<boolean,Promise<{notes:Stored[];seen:ScanCoverage}>>();
   /** Searches that ask at the same moment share one pass over the vault (an

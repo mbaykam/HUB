@@ -41,10 +41,12 @@ import {effectiveKnowledgeCharacter} from "./host/knowledge-identity.ts";
 import {installCraftGuide} from "./host/craft-guide.ts";
 import {installChatQuestions} from "./host/chat-questions.ts";
 import {installClaudeCodeProvider} from "./host/claude-code-provider.ts";
+import {installChatQuotaResume} from "./host/chat-quota-resume.ts";
 import {installOpenRouterSpeed} from "./host/openrouter-speed.ts";
 import {installNotes,NOTE_TOOLS} from "./host/notes-web.ts";
 import {installBriefing,BRIEFING_TOOLS} from "./host/briefing.ts";
 import type {NativePushEvent} from "./host/native-push.ts";
+import {selectHelperRoute,helperDispatchBlockReason} from "./host/helper-routing.ts";
 
 /**
  * Which configured model a helper runs on. "chat" is the model this chat uses
@@ -105,17 +107,8 @@ export function repeatedToolFailure(agent:{session:{snapshotEvents():readonly an
   return undefined;
 }
 
-export function helperCharacter(s:HubCharactersState,args:{model?:unknown;character?:unknown},current:HubCharacter):HubCharacter|undefined{
-  if(typeof args.character==="string"&&args.character.trim()&&args.model===undefined){
-    const key=args.character.trim().toLowerCase();
-    return s.characters.find(c=>c.id===args.character||c.name.toLowerCase()===key);
-  }
-  if(args.model==="fast")return s.characters.find(c=>c.id===s.voiceId);
-  if(args.model==="unrestricted"){
-    if(!s.unrestrictedId||current.id!==s.unrestrictedId)throw new Error("The unrestricted model is only for a chat the user unlocked. Ask them to tap the lock in this chat first.");
-    return s.characters.find(c=>c.id===s.unrestrictedId);
-  }
-  return current;
+export function helperCharacter(s:HubCharactersState,args:{model?:unknown;character?:unknown;taskKind?:unknown},current:HubCharacter):HubCharacter{
+  return selectHelperRoute(s,args,current).character;
 }
 
 export const name="hub-characters";
@@ -204,7 +197,7 @@ export class HubCharacters extends Service {
           :mode==="unrestricted"?`Mode: unrestricted${this.voiceCalls.has(agent.id)?" voice call. Answer briefly and naturally for speech":""}. The user switched this chat to an uncensored model on purpose; help with requests the normal model would refuse.${character.instructions.trim()?"\nUnrestricted mode instructions (keep the name and personality above; ignore any other name or identity in them):\n"+character.instructions.trim():""}`:mode==="specialist"?`Mode: ${character.name}.\n${character.instructions}`:"Mode: chat.";
         // One identity: no roster of characters to switch between, only the
         // model that is answering. Helpers are started by model, not by name.
-        const persona=`You are ${main.name}, the user's personal assistant: one assistant with one memory, whichever model answers (Chat, Voice or Unrestricted). Descriptions elsewhere of an "AI agent", "coding agent" or "Claude" are the software you run on, not who you are.${main.name.toLowerCase()==="hub"?"":` Your name is ${main.name}; HUB is the app and PC system you live in, not your name. Answer to ${main.name} and introduce yourself as ${main.name}.`}\n${main.instructions}\n${modeNote}\nCurrent model: ${character.route?.provider}/${character.route?.model}.\nUse hub_delegate to start a helper in the background; pick its model (chat, fast or unrestricted). The user switches this chat's model with the model button at the top of the chat; models are set in HUB → Settings → Models.\nNotes: the user keeps their own notes in HUB's Notes (their Apple Notes replacement, separate from Knowledge). Find and read them with hub_notes_find and hub_note_read when they matter; create or change a note with hub_note_write only when the user asks.\n`;
+        const persona=`You are ${main.name}, the user's personal assistant: one assistant with one memory, whichever model answers (Chat, Voice or Unrestricted). Descriptions elsewhere of an "AI agent", "coding agent" or "Claude" are the software you run on, not who you are.${main.name.toLowerCase()==="hub"?"":` Your name is ${main.name}; HUB is the app and PC system you live in, not your name. Answer to ${main.name} and introduce yourself as ${main.name}.`}\n${main.instructions}\n${modeNote}\nCurrent model: ${character.route?.provider}/${character.route?.model}.\nUse hub_delegate to start a helper in the background. Auto prefers configured subscription routes suited to the task; explicit Chat/Fast selections are honored. Fast API is metered, not necessarily cheaper. API or unknown-billing helpers are blocked until a bounded runner exists; per-task consent alone is not a budget. Never auto-select Unrestricted, widen permissions or silently fall back to a paid route. The user switches this chat's model with the model button at the top of the chat; models are set in HUB → Settings → Models.\nNotes: the user keeps their own notes in HUB's Notes (their Apple Notes replacement, separate from Knowledge). Find and read them with hub_notes_find and hub_note_read when they matter; create or change a note with hub_note_write only when the user asks.\n`;
         const coordinator=coordinatesTelegram(s,character)?"\nYou are the Telegram conversation coordinator. For source-backed research, call hub_research directly and summarize the completed result notice without starting more work. Acknowledge other substantial browser, filesystem or multi-step work, then start it with hub_delegate and end your turn promptly. Stay available for follow-up conversation while the helper runs. Report only observed task status. Do not wait for a background task or claim its completion early.":"";
         return persona+coordinator;
       };
@@ -265,23 +258,32 @@ export class HubCharacters extends Service {
           title:args.kind==="screen"?"HUB asks to see your screen":"HUB asks to see your camera",body:String(args.reason).replace(/\s+/g," ").trim().slice(0,300),category:"open",level:"active"});sent=!!this.nativePush;}catch{}
         return `Asked. ${sent?"A notification went to their phone, and ":""}this chat shows a button that starts a call where they can tap Share ${args.kind}. Wait for them: you can see it only once they share during the call.`;
       }});
-      agent.ctx.tools.register({name:"hub_delegate",description:"Start a helper: a background worker that does one self-contained task (research, comparing options, drafting, longer PC work) while you stay available. The user sees each helper as a card in the chat and can open its work or stop it. description is a short title (under 60 characters); prompt is a complete brief, since the helper cannot see this chat. model: \"chat\" (default: the model this chat uses), \"fast\" (quick lookups) or \"unrestricted\" (only when this chat is unlocked or the user asks). Run at most three helpers at once. The result identifies the helper; never claim it finished before its notification.",parameters:{type:"object",properties:{model:{enum:["chat","fast","unrestricted"]},character:{type:"string",description:"Legacy: a character ID or name instead of model."},description:{type:"string"},prompt:{type:"string"}},required:["description","prompt"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
+      agent.ctx.tools.register({name:"hub_delegate",description:"Start one self-contained background helper. model auto (default) selects an existing subscription slot suitable for taskKind, never Unrestricted or expanded permissions. Explicit chat uses this turn's active route, fast uses the configured Fast route (metered API is not necessarily cheaper), unrestricted requires an unlocked chat. API or unknown billing requires per-task user consent AND a bounded runner. This native continuable runner cannot enforce a one-shot spending bound, so metered helpers are currently blocked even with consent. Use existing subscription routes; never reinterpret approval as a budget. No paid fallback or automatic escalation. The user can inspect observed work and stop a helper. Never claim completion before its result.",parameters:{type:"object",properties:{model:{enum:["auto","chat","fast","unrestricted"]},taskKind:{enum:["code","research","brief","general"],description:"Capability/task scope for subscription-first auto routing; no permissions are added."},character:{type:"string",description:"Explicit configured character ID or name instead of model."},description:{type:"string"},prompt:{type:"string"}},required:["description","prompt"],additionalProperties:false},output:{schema:{type:"string"},render:(_a:any,v:any)=>[{type:"text",text:String(v)}]},execute:async(args:any,exec:ToolRunContext)=>{
         if(exec.agent?.id!==agent.id || !exec.token || !exec.callId)throw new Error("Use this conversation's native character delegation");
         if((this.voiceCalls.has(agent.id)||agent.id.startsWith("minke-im-"))&&!currentTurnHasUserRequest(agent)){
           exec.concludeTurn();throw new Error(TASK_NOTIFICATION_RULE);
         }
         await this.ready;const s=mount.snapshot??this.store.snapshot();
-        const character=helperCharacter(s,args,this.store.selected(agent.id,mount.turnSnapshot??s));
-        if(!character?.route)throw new Error(args.model==="unrestricted"?"No unrestricted model is set up. Choose one in Settings → Models.":"That model is not set up. Choose one in Settings → Models.");
+        const {character,routing}=selectHelperRoute(s,args,this.effectiveCharacter(agent.id)??this.store.selected(agent.id,mount.turnSnapshot??s));
         if(typeof args.description!=="string" || !args.description.trim() || typeof args.prompt!=="string" || !args.prompt.trim())throw new Error("A task needs a description and prompt");
-        await this.prepare(agent,s);const toolName=mount.names.get(character.id);if(!toolName)throw new Error("Character delegation is unavailable");
+        const description=String(args.description).trim().slice(0,80),prompt=args.prompt;
+        const blocked=helperDispatchBlockReason(routing);
+        if(blocked)return JSON.stringify({status:"blocked",task:description,routing,message:blocked});
+        await this.prepare(agent,{...s,characters:s.characters.map(c=>c.id===character.id?character:c)});const toolName=mount.names.get(character.id);if(!toolName)throw new Error("Character delegation is unavailable");
         const callId=`${exec.callId}:character`;this.dispatches.set(callId,exec.token);
         try{
-          const result=await agent.ctx.tools.execute({name:toolName,callId,rootCallId:exec.rootCallId,parent:exec.token,agent:exec.agent,signal:exec.signal,arguments:{description:String(args.description).trim().slice(0,80),prompt:args.prompt,run_in_background:true}});
+          const result=await agent.ctx.tools.execute({name:toolName,callId,rootCallId:exec.rootCallId,parent:exec.token,agent:exec.agent,signal:exec.signal,arguments:{description,prompt,run_in_background:true}});
           for(const extra of result.additionalContexts??[])exec.deferContext(extra);
           if(result.isError)throw new Error(result.error.message);
+          const value=result.value as {subagentId?:string};
+          let routingRecorded=false;
+          if(typeof value?.subagentId==="string"){
+            try{const resolved=await this.host.sessionController.resolveAgent(value.subagentId);
+              if(!("error"in resolved)){await (resolved.agent.session as any).append("hub/helper-route",routing);routingRecorded=true;}
+            }catch{/* Dispatch succeeded: a metadata write failure must not invite a duplicate task. */}
+          }
           if(this.voiceCalls.has(agent.id))exec.concludeTurn();
-          return String(result.value);
+          return JSON.stringify({status:"started",...(typeof result.value==="object"?result.value:{receipt:result.value}),routing,routingRecorded});
         }finally{this.dispatches.delete(callId);}
       }});
     };
@@ -320,8 +322,8 @@ export class HubCharacters extends Service {
     ctx.effect(()=>installApps(ctx,this,effectiveKnowledgeCharacter),"HUB Apps page and app sharing");
     ctx.effect(()=>installCraftGuide(ctx),"HUB craft standards");
     ctx.effect(()=>installChatQuestions(ctx),"HUB questions in the conversation");
-    // While Smart's Claude subscription is used up, the fast model answers.
-    ctx.effect(()=>installClaudeCodeProvider(ctx,()=>{const s=this.store.snapshot();return s.characters.find(c=>c.id===s.voiceId)?.route??undefined;}),"Claude Code model provider");
+    ctx.effect(()=>installClaudeCodeProvider(ctx),"Claude Code model provider");
+    ctx.effect(()=>installChatQuotaResume(ctx,this),"HUB per-chat subscription quota continuation");
     ctx.effect(()=>installOpenRouterSpeed(),"OpenRouter fastest-host routing");
     ctx.effect(()=>installAutomations(ctx,this),"HUB durable automations");
     ctx.effect(()=>installGoals(ctx,this),"HUB durable Goals manager");
@@ -376,8 +378,8 @@ export class HubCharacters extends Service {
   voiceTarget(sessionId:string){const mount=this.mounts.get(sessionId);if(!this.voiceCalls.has(sessionId)||!mount?.voiceCharacter)return;const s=mount.turnSnapshot??mount.snapshot,c=mount.voiceCharacter;return s?.characters.find(target=>target.id===(c.delegateTo??(c.id===s.voiceId?s.mainId:c.id)));}
   async prepare(agent:CharacterAgent,s=this.store.snapshot()){
     const mount=this.mounts.get(agent.id);if(!mount)return;
-    if(mount.loading){await mount.loading;if(mount.revision===s.revision)return;}
-    if(mount.revision===s.revision)return;
+    if(mount.loading)await mount.loading;
+    if(mount.revision===s.revision&&JSON.stringify(mount.snapshot?.characters)===JSON.stringify(s.characters))return;
     // Selecting a speaker changes the binding revision, not the worker roster.
     // Reuse continuations so navigation cannot dispose a running specialist.
     if(mount.snapshot&&JSON.stringify(mount.snapshot.characters)===JSON.stringify(s.characters)){mount.snapshot=s;mount.revision=s.revision;return;}

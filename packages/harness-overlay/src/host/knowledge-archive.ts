@@ -66,7 +66,7 @@ export class KnowledgeArchive {
   projectRelations(id:string,links:string[]){return this.mutations.run(()=>this.projectRecordRelations(id,links));}
   private projectRecordRelations(id:string,links:string[]){const task=this.writes.then(async()=>{
     const original=await this.read(id),path=await this.projectionPath(id);if((await lstat(path)).isSymbolicLink())throw Error("Linked archive file");const current=await readFile(path,"utf8");
-    if(!sameArchiveBody(current,original))throw Error("Original body edited externally; relation projection deferred");
+    if(!sameArchiveBody(current,original))throw Object.assign(Error("Original body edited externally; relation projection deferred"),{code:"KNOWLEDGE_PROJECTION_DEFERRED",recordId:id});
     if(links.some(l=>/[\[\]|\r\n]/.test(l)))throw Error("Invalid Obsidian target");
     const next=withArchiveLinks(current,"hub_related: "+JSON.stringify(links.map(l=>"[["+l+"]]")));if(next===current)return;
     const temp=path+"."+randomUUID()+".tmp";await writeFile(temp,next,{mode:0o600});if(await readFile(path,"utf8")!==current)throw Error("Conversation metadata changed during projection");await rename(temp,path);

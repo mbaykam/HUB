@@ -120,7 +120,7 @@ export class NotesStore {
   }
   setPinned(id:string,pinned:boolean){return this.exclusive(async()=>{const note=await this.read(id);const file=(await this.files()).get(id)!;
     await this.write(file.path,serialize({id,created:note.createdAt,updated:note.updatedAt,pinned},note.body));return this.read(id);});}
-  move(id:string,folder:string){return this.exclusive(async()=>{const note=await this.read(id);const file=(await this.files()).get(id)!;const target=join(this.folderPath(folder),id+".md");
+  move(id:string,folder:string){return this.exclusive(async()=>{await this.read(id);const file=(await this.files()).get(id)!;const target=join(this.folderPath(folder),id+".md");
     if(target!==file.path){await this.write(target,await readFile(file.path,"utf8"));await rm(file.path,{force:true});}return this.read(id);});}
   /** Moves a note to Recently Deleted. */
   remove(id:string){return this.exclusive(async()=>{const file=(await this.files()).get(id);if(!file)return;

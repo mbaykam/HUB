@@ -42,7 +42,19 @@ export class KnowledgeOrganization {
     return activeRelations(records,state.revisions.map(r=>({...r,undone:r.undone||!knowledgeSourceAdmitted(admission,r.source)})));
   }
   async relations(){return (await this.canonicalRelations()).map(r=>({source:r.sourceId,target:r.targetId,label:r.predicate}));}
-  async syncObsidianLinks(){const notes=await this.store.scan(),relations=await this.relations();for(const n of notes.filter(n=>n.kind==="conversation")){const targets=[...new Set(relations.filter(r=>r.source===n.id||r.target===n.id).map(r=>notes.find(t=>t.id===(r.source===n.id?r.target:r.source))?.permalink).filter((p):p is string=>!!p))];if(targets.length||/^hub_related:/m.test(n.front))await this.store.archive.projectRelations(n.id,targets);}}
+  async syncObsidianLinks(){
+    const notes=await this.store.scan(),relations=await this.relations(),deferred:string[]=[];
+    for(const n of notes.filter(n=>n.kind==="conversation")){
+      const targets=[...new Set(relations.filter(r=>r.source===n.id||r.target===n.id).map(r=>notes.find(t=>t.id===(r.source===n.id?r.target:r.source))?.permalink).filter((p):p is string=>!!p))];
+      if(targets.length||/^hub_related:/m.test(n.front))try{await this.store.archive.projectRelations(n.id,targets);}catch(e){
+        if((e as NodeJS.ErrnoException).code!=="KNOWLEDGE_PROJECTION_DEFERRED")throw e;
+        deferred.push(n.id);
+      }
+    }
+    // A stale readable projection must not starve the other records, nor be
+    // reported as repaired. Canonical relations remain available separately.
+    if(deferred.length)throw Object.assign(Error("Original bodies edited externally; relation projections deferred"),{code:"KNOWLEDGE_PROJECTION_DEFERRED",recordIds:deferred});
+  }
   async apply(plan:KnowledgeCuration,source:KnowledgeSource,passId=source.id){return this.store.exclusive(async()=>{
     await this.store.admission.assert(source);
     validateCuration(plan,source,(await this.store.scan()).map(n=>n.id));

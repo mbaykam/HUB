@@ -15,7 +15,7 @@ import {distillMemories} from "./knowledge-distillation.ts";
 import {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 import {withKnowledgeAssetExcerpts} from "./knowledge-assets.ts";
 import {isArchivedConversation} from "../knowledge-record-scope.ts";
-import {parseStewardPlan,stewardDue,stewardPrompt,stewardSnapshot,type StewardReview} from "./knowledge-steward.ts";
+import type {StewardReview} from "./knowledge-steward.ts";
 import {crowdedDomains,describeLibraryPlan,libraryDue,libraryPrompt,librarySnapshot,parseLibraryPlan,type LibraryPlan,type LibraryState} from "./knowledge-library.ts";
 export {redactKnowledgeSecrets} from "./knowledge-secrets.ts";
 export interface OrganizationWindow {nodeId:string;hash:string;start:number;end:number}
@@ -55,14 +55,15 @@ export class KnowledgeCurator {
     this.generate=((prompt:any,settings:any,signal:AbortSignal,options?:any)=>generate(prompt,settings,AbortSignal.any([signal,AbortSignal.timeout(callTimeoutMs)]),options)) as Generate;}
   async initialize(){
     await this.store.initialize();
-    await this.store.organization.syncObsidianLinks();
+    let projectionDeferred=false;
+    try{await this.store.organization.syncObsidianLinks();}catch(e){if((e as NodeJS.ErrnoException).code!=="KNOWLEDGE_PROJECTION_DEFERRED")throw e;projectionDeferred=true;}
     try{const settings=JSON.parse(await readFile(join(this.store.root,"settings.json"),"utf8"));this.settings=validateSettings(withLifeCategories({...defaults,...settings}));}catch(e:any){if(e.code!=="ENOENT")throw e;}
     try{this.costs=JSON.parse(await readFile(join(this.store.root,"costs.json"),"utf8"));}catch(e:any){if(e.code!=="ENOENT")throw e;}
     try{this.blockedRoute=JSON.parse(await readFile(join(this.store.root,"model-health.json"),"utf8"))??undefined;}catch(e:any){if(e.code!=="ENOENT")throw e;}
     const files=await readdir(join(this.store.root,"jobs")).catch((e:any)=>{if(e.code!=="ENOENT")throw e;return [] as string[];});
     for(const file of files) {if(!file.endsWith(".json"))continue;const j=JSON.parse(await readFile(join(this.store.root,"jobs",file),"utf8")) as KnowledgeJob;if(j.status==="working"){j.status="failed";j.reason="HUB restarted during model processing; retry explicitly to avoid a duplicate charge.";}this.jobs.set(j.id,j);}
     this.restoredWork=await knowledgeRestoreHold(this.store);
-    this.status=this.restoredWork?.state==="needs-review"?"restored-work-paused":[...this.jobs.values()].some(j=>j.status==="failed")?"needs-attention":"ready";
+    this.status=this.restoredWork?.state==="needs-review"?"restored-work-paused":projectionDeferred?"projection-pending":[...this.jobs.values()].some(j=>j.status==="failed")?"needs-attention":"ready";
   }
   private jobFile(id:string){return join(this.store.root,"jobs",`${digest(id)}.json`);}
   private async saveJob(job:KnowledgeJob){
@@ -110,7 +111,7 @@ export class KnowledgeCurator {
     if(last===undefined){await atomicJson(file,{at:now-RELINK_EVERY+24*60*60*1000,noteIds:[]});return {queued:0,skipped:"not-due" as const};}
     if(now-last<RELINK_EVERY)return {queued:0,skipped:"not-due" as const};
     // Only when Knowledge has nothing else to do.
-    if([...this.jobs.values()].some(j=>j.status==="queued"||j.status==="running"||j.status==="waiting-credit"))return {queued:0,skipped:"busy" as const};
+    if([...this.jobs.values()].some(j=>j.status==="queued"||j.status==="working"||j.status==="waiting-credit"))return {queued:0,skipped:"busy" as const};
     const notes=(await this.store.scan()).filter(n=>n.kind!=="conversation"&&n.body.trim()&&n.body.length<=23500);
     const graph=await this.store.graph(),degree=new Map<string,number>();
     for(const e of graph.edges){degree.set(e.source,(degree.get(e.source)??0)+1);degree.set(e.target,(degree.get(e.target)??0)+1);}
@@ -246,28 +247,7 @@ export class KnowledgeCurator {
     library.history.push(plan);await this.saveLibrary(library);this.tick();
     return plan;
   }
-  /** After the queue is empty, at most about once a day and only when new notes were filed, tidy the domains. */
-  private async reviewDomainsIfDue(){
-    const settings={...this.settings};
-    if(!settings.enabled||settings.mode!=="automatic"||this.lifetime.signal.aborted)return;
-    const reviews=await this.domainReviews(),last=reviews.at(-1)?.at;
-    const organized=[...this.jobs.values()].filter(j=>j.outcome==="organized"&&(j.finishedAt??j.updatedAt)>(last??0)).length;
-    const state=await this.store.organization.domains();
-    if(!stewardDue(last,organized,state.domains.filter(d=>d.status!=="merged").length))return;
-    if(await this.gate?.reason(settings.provider))return;
-    const notes=(await this.store.scan()).filter(n=>!isArchivedConversation(n)).map(n=>({id:n.id,title:n.title}));
-    const prompt=stewardPrompt(stewardSnapshot(state,notes),settings.language);
-    const reserve=((Buffer.byteLength(prompt)+4000)*settings.inputPrice+3000*settings.outputPrice)/1e6;
-    if((this.costs[day()]??0)+reserve>settings.dailyBudget||this.monthCost()+reserve>settings.monthlyBudget)return;
-    this.costs[day()]=(this.costs[day()]??0)+reserve;await atomicJson(join(this.store.root,"costs.json"),this.costs);
-    const review:StewardReview={id:randomUUID(),at:Date.now(),status:"done",changed:false,note:"",operations:[]};
-    try{
-      const text=await this.generate(prompt,settings,this.lifetime.signal,{maxTokens:3000});
-      const plan=parseStewardPlan(text,state);review.note=plan.note;review.operations=plan.operations;
-      if(plan.operations.length){const after=await this.store.organization.stewardDomains(state.revision,plan.operations,review.id);review.changed=after.revision!==state.revision;if(review.changed)review.revisionId=review.id;}
-    }catch(e:any){review.status="failed";review.error=redactKnowledgeSecrets(String(e?.message??e)).slice(0,300);if(!review.note)review.note="The domain review could not finish, so the domains were left as they were.";}
-    await atomicJson(join(this.store.root,"domain-reviews.json"),{version:1,reviews:[...reviews,review].slice(-30)});
-  }  private async run(force:boolean){
+  private async run(force:boolean){
     await this.store.refreshInventory();
     if(!force&&this.settings.mode!=="manual")await this.enqueueUnassigned();
     if(!force&&this.settings.enabled&&this.settings.mode!=="manual")await this.relinkWeekly().catch(()=>{});

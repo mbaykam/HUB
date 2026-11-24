@@ -117,7 +117,7 @@ export function applyKnowledge(ctx:any,config:{vault:string;knowledgeRoot?:strin
   const embeddings=config.embeddingPython?new KnowledgeEmbeddings(config.embeddingPython,config.embeddingRoot??join(store.root,"runtime")):undefined;
   if(embeddings){store.rank=(query,notes,limit)=>embeddings.rank(query,notes,limit);store.similarities=notes=>embeddings.layout(notes);store.digest=(notes,groups)=>embeddings.digest(notes,groups);void embeddings.start().then(()=>{curator.embedding=embeddings.status;}).catch(()=>{curator.embedding="Local embeddings unavailable · keyword search active";});}
   const imports=new KnowledgeImportBatches(store,source=>curator.enqueue(source),()=>curator.settings);
-  const ready=curator.initialize().then(async()=>{await imports.recover();});void ready.catch(()=>{curator.status="unavailable";});
+  const ready=curator.initialize().then(async()=>{await imports.recover(()=>{curator.status="projection-pending";});});void ready.catch(()=>{curator.status="unavailable";});
   // Facts the user states about themself go into the always-loaded profile
   // (USER.md) by themselves, as the user asked; each one is dated, sourced and
   // undoable from Knowledge. Suggestions from before this started stay for review.
