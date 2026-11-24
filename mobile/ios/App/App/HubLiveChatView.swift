@@ -60,6 +60,12 @@ struct HubLiveChatView: View {
     @State private var historyAnchor: String?
     @State private var readingLatest = true
     @State private var historyTopVisible = false
+    @State private var historyAutoPaused = false
+    @State private var readingMessageID: String?
+    @State private var restoredPosition = false
+    @State private var readingOffset: CGFloat = 0
+    @State private var pendingReadingPosition: (id: String, offset: CGFloat)?
+    @State private var scrollAccess = ChatScrollAccess()
     /// The chat's normal and unrestricted models, for the lock and retry.
     @State private var modelSlots: HubChatCharacterPicker?
     @State private var slotBusy = false
@@ -67,6 +73,11 @@ struct HubLiveChatView: View {
     @State private var helpers: [HubHomeWork.Helper] = []
     @State private var helpersOpen = false
     @State private var openHelper: HubHomeWork.Helper?
+    @State private var quotaResume: HubChatQuotaResume?
+    @State private var quotaResumeBusy = false
+    @State private var quotaResumeUnavailable = false
+    @State private var quotaResumeError: String?
+    @State private var quotaResumeOpen = false
     /// Emails the assistant wrote for the user to send from their mail app.
     @State private var mailDrafts: [HubMailState.Draft] = []
     @State private var speedSentAt: Date?
@@ -192,11 +203,20 @@ struct HubLiveChatView: View {
             }
         }
         .task(id: attempt) { await follow() }
+        .onDisappear { saveTranscript() }
         .onChange(of: activity.isActive) { active in
+            if !active { saveTranscript() }
             if active && connectionLost { reconnect() }
         }
-        .task(id: historyRequest) {
-            if historyRequest != 0 { await loadEarlierMessages() }
+        .task(id: snapshot?.messages.last?.id) {
+            do {
+                try await Task.sleep(nanoseconds: 500_000_000)
+                try Task.checkCancellation()
+                saveTranscript()
+            } catch { }
+        }
+        .task(id: activity.isActive ? historyRequest : -1) {
+            if activity.isActive && historyRequest != 0 { await loadEarlierMessages() }
         }
         .task(id: snapshot?.running) { await loadModelSlots() }
         .task { await followHelpers() }
@@ -220,13 +240,39 @@ struct HubLiveChatView: View {
         .hubPage(isPresented: $helpersOpen) { pushed in
             HubHelpersSheet(api: api, helpers: helpers, opened: openHelper, stop: stopHelper, pushed: pushed)
         }
+        .hubPage(isPresented: $quotaResumeOpen) { pushed in
+            HubNavigation(pushed: pushed) {
+                Form { HubChatQuotaResumeView(api: api, sessionID: chat.sessionId).id(chat.sessionId) }
+                    .navigationTitle("Subscription continuation")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        if !pushed {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { quotaResumeOpen = false }
+                            }
+                        }
+                    }
+            }
+        }
+        .task(id: "quota-resume:\(chat.sessionId):\(activity.isActive)") {
+            guard activity.isActive else { return }
+            while !Task.isCancelled {
+                await refreshQuotaResume()
+                do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
+            }
+        }
         .task(id: ScreenshotLoad(sequence: snapshot?.latestScreenshotSequence, retry: screenshotRetry)) {
             await loadScreenshots()
         }
         .onChange(of: draft) { text in
             if openedInitialAction { HubChatDrafts.save(text, for: chat.sessionId) }
         }
-        .onChange(of: chat.sessionId) { id in draft = HubChatDrafts.load(id) }
+        .onChange(of: chat.sessionId) { id in
+            draft = HubChatDrafts.load(id)
+            quotaResume = nil
+            quotaResumeUnavailable = false
+            quotaResumeError = nil
+        }
         .task(id: requestID) {
             if !openedInitialAction {
                 openedInitialAction = true
@@ -448,6 +494,21 @@ struct HubLiveChatView: View {
                     } label: { Label("Model speed", systemImage: "speedometer") }
                     Button {
                         composerFocused = false
+                        openHelper = nil
+                        helpersOpen = true
+                    } label: { Label("Helpers", systemImage: "person.2") }
+                    Toggle("Resume when limit resets", isOn: Binding(
+                        get: { quotaResume?.enabled ?? false },
+                        set: { enabled in Task { await setQuotaResume(enabled) } }
+                    ))
+                    .disabled(quotaResumeBusy || quotaResumeUnavailable || quotaResume == nil || (quotaResume?.eligible != true && quotaResume?.enabled != true))
+                    .accessibilityIdentifier("hub.chat.quotaResume")
+                    Button {
+                        composerFocused = false
+                        quotaResumeOpen = true
+                    } label: { Label(quotaResumeUnavailable ? "Continuation unavailable · check status" : "Subscription continuation status", systemImage: "clock.arrow.circlepath") }
+                    Button {
+                        composerFocused = false
                         renameDraft = renamedTitle ?? snapshot?.title ?? chat.title
                         renameOpen = true
                     } label: { Label("Rename chat", systemImage: "pencil") }
@@ -462,6 +523,25 @@ struct HubLiveChatView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
+            if let quotaResume, [.waiting, .waitingUnknown, .dispatching, .needsReview].contains(quotaResume.state) {
+                HStack {
+                    Button {
+                        composerFocused = false
+                        quotaResumeOpen = true
+                    } label: {
+                        Label(quotaResume.state == .needsReview ? "Continuation needs review" : quotaResume.state == .dispatching ? "Subscription continuation · submitting" : "Subscription continuation · waiting", systemImage: "clock")
+                            .font(.caption).lineLimit(2)
+                    }
+                    Spacer()
+                    if quotaResume.state == .waiting || quotaResume.state == .waitingUnknown {
+                        Button("Cancel continuation") { Task { await cancelQuotaResume() } }
+                            .font(.caption).disabled(quotaResumeBusy).frame(minHeight: 44)
+                    }
+                }.padding(.horizontal, 12)
+            }
+            if let quotaResumeError {
+                Text(quotaResumeError).font(.caption).foregroundStyle(.orange).padding(.horizontal, 12)
+            }
             if !helpers.isEmpty {
                 let running = helpers.filter { $0.state == .running }.count
                 Button { composerFocused = false; openHelper = nil; helpersOpen = true } label: {
@@ -691,10 +771,13 @@ struct HubLiveChatView: View {
                                         }
                                         .disabled(historyLoading || connectionLost)
                                     } else if historyLoading {
-                                        ProgressView()
-                                            .accessibilityLabel("Loading earlier messages")
+                                        HStack {
+                                            ProgressView().accessibilityLabel("Loading earlier messages")
+                                            Button("Cancel") { historyRequest = 0 }
+                                                .frame(minHeight: 44)
+                                        }
                                     } else {
-                                        Button("Load earlier messages") {
+                                        Button(historyAutoPaused ? "Continue loading earlier messages" : "Load earlier messages") {
                                             readingLatest = false
                                             historyRequest += 1
                                         }
@@ -789,6 +872,12 @@ struct HubLiveChatView: View {
                                 }
                                 }
                                 .id(message.id)
+                                .background {
+                                    GeometryReader { geometry in
+                                        Color.clear.preference(key: ChatReadingRows.self,
+                                            value: [message.id: geometry.frame(in: .named("chatViewport"))])
+                                    }
+                                }
                             }
                             // A screenshot from a turn with no reply yet (still running) shows
                             // at the end. One from an earlier turn whose messages are not
@@ -817,11 +906,11 @@ struct HubLiveChatView: View {
                             }
                             // Helpers at work right now, each one tap from its steps.
                             ForEach(helpers.filter { $0.state == .running }) { helper in
-                                HubHelperCard(helper: helper, open: {
+                                HubHelperTransparencyCard(api: api, helper: helper) {
                                     composerFocused = false
                                     openHelper = helper
                                     helpersOpen = true
-                                }, stop: { Task { await stopHelper(helper) } })
+                                }
                             }
                             // HUB asked to see the screen or camera: one tap starts the call.
                             if let request = shareRequest(in: snapshot, messages: messages) {
@@ -886,14 +975,27 @@ struct HubLiveChatView: View {
                     .foregroundStyle(HubChatPalette.text)
                     .padding(16)
                     .background {
+                        ChatScrollProbe(access: scrollAccess)
                         GeometryReader { geometry in
                             Color.clear.preference(key: ChatContentHeight.self, value: geometry.size.height)
                         }
                     }
                 }
                 .coordinateSpace(name: "chatViewport")
+                .onPreferenceChange(ChatReadingRows.self) { rows in
+                    if let pending = pendingReadingPosition, let frame = rows[pending.id], let nativeScroll = scrollAccess.view {
+                        pendingReadingPosition = nil
+                        nativeScroll.setContentOffset(CGPoint(x: nativeScroll.contentOffset.x,
+                            y: nativeScroll.contentOffset.y + frame.minY - pending.offset), animated: false)
+                    } else if restoredPosition, !readingLatest,
+                              let row = rows.filter({ $0.value.maxY > 0 && $0.value.minY < viewport.size.height })
+                                .min(by: { $0.value.minY < $1.value.minY }) {
+                        readingMessageID = row.key
+                        readingOffset = row.value.minY
+                    }
+                }
                 .onPreferenceChange(EarlierChatOffset.self) { offset in
-                    let visible = offset.map { $0 >= 0 && $0 <= viewport.size.height } ?? false
+                    let visible = offset.map { $0 >= -320 && $0 <= viewport.size.height } ?? false
                     let appeared = visible && !historyTopVisible
                     historyTopVisible = visible
                     if appeared { autoLoadEarlier() }
@@ -903,7 +1005,7 @@ struct HubLiveChatView: View {
                     // When content gets shorter (the "Sending…" bubble, the steps or
                     // the thinking dots go away), the view can stay scrolled past
                     // its end and show an empty screen. Settle back on the last line.
-                    if let offset, !dragging, contentHeight > viewport.size.height,
+                    if let offset, readingLatest, !dragging, contentHeight > viewport.size.height,
                        offset < viewport.size.height - 40 {
                         scroll.scrollTo("latest", anchor: .bottom)
                     }
@@ -939,19 +1041,26 @@ struct HubLiveChatView: View {
                     else if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
                 }
                 .onChange(of: snapshot?.running) { running in
-                    // Keep the finished state of this chat on the phone for next time.
-                    if running == false, let messages = snapshot?.messages { api.cacheChat(messages, sessionID: chat.sessionId) }
+                    if running == false { saveTranscript() }
                 }
-                .task(id: chat.sessionId) {
-                    if cachedMessages == nil { cachedMessages = api.cachedChat(sessionID: chat.sessionId) }
-                    if cachedMessages != nil { scroll.scrollTo("latest", anchor: .bottom) }
+                .task(id: snapshot != nil || cachedMessages != nil) {
+                    guard !restoredPosition, snapshot != nil || cachedMessages != nil else { return }
+                    if !readingLatest, let readingMessageID {
+                        pendingReadingPosition = (readingMessageID, readingOffset)
+                        scroll.scrollTo(readingMessageID, anchor: .top)
+                    } else { scroll.scrollTo("latest", anchor: .bottom) }
+                    restoredPosition = true
                 }
                 .onChange(of: queuedMessages?.count) { _ in
                     if readingLatest { scroll.scrollTo("latest", anchor: .bottom) }
                 }
                 .onChange(of: bottomRequest) { _ in settleAtLatest(scroll) }
                 .onChange(of: historyAnchor) { anchor in
-                    if let anchor { scroll.scrollTo(anchor, anchor: .top); historyAnchor = nil }
+                    if let anchor {
+                        pendingReadingPosition = (anchor, readingOffset)
+                        scroll.scrollTo(anchor, anchor: .top)
+                        historyAnchor = nil
+                    }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if !readingLatest && !latestVisible {
@@ -1009,6 +1118,31 @@ struct HubLiveChatView: View {
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
+    }
+
+    private final class ChatScrollAccess {
+        weak var view: UIScrollView?
+    }
+
+    private struct ChatScrollProbe: UIViewRepresentable {
+        let access: ChatScrollAccess
+        func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
+        func updateUIView(_ view: UIView, context: Context) {
+            DispatchQueue.main.async {
+                var ancestor = view.superview
+                while let candidate = ancestor {
+                    if let scroll = candidate as? UIScrollView { access.view = scroll; return }
+                    ancestor = candidate.superview
+                }
+            }
+        }
+    }
+
+    private struct ChatReadingRows: PreferenceKey {
+        static var defaultValue: [String: CGRect] = [:]
+        static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+            value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+        }
     }
 
     private struct EarlierChatOffset: PreferenceKey {
@@ -1126,20 +1260,24 @@ struct HubLiveChatView: View {
     /// A short opening window can show both ends at once. Reading the latest
     /// message must not prevent reaching earlier pages in that case.
     private func autoLoadEarlier() {
-        if (historyTopVisible || history.restoring) && history.hasMore && !historyLoading && !historyError && !connectionLost {
+        if !historyAutoPaused && (historyTopVisible || history.restoring) && history.hasMore && !historyLoading && !historyError && !connectionLost {
             historyRequest += 1
         }
     }
 
     private func loadEarlierMessages() async {
-        // Hidden context/tool-only pages still advance the journal boundary.
-        // Bound each automatic batch; the explicit load control remains available.
-        for _ in 0..<8 {
+        let conversation = chat.sessionId
+        let initialCount = history.messages.count
+        let anchor = readingMessageID ?? olderMessages.first?.id ?? snapshot?.messages.first?.id
+        // A visible batch, not one prompt per tap. A sparse/tool-only journal
+        // gets at most 800 raw records per gesture, then an explicit continuation.
+        historyAutoPaused = true
+        defer { saveTranscript() }
+        for _ in 0..<4 {
             guard !Task.isCancelled, let request = history.begin() else { return }
-            let anchor = olderMessages.first?.id ?? snapshot?.messages.first?.id
             do {
-                let page = try await api.chatHistory(sessionID: chat.sessionId, through: request.cursor, before: request.before)
-                guard !Task.isCancelled else { history.cancel(request); return }
+                let page = try await api.chatHistory(sessionID: conversation, through: request.cursor, before: request.before)
+                guard !Task.isCancelled, conversation == chat.sessionId else { history.cancel(request); return }
                 guard history.receive(page, for: request) else { return }
                 if readingLatest { bottomRequest += 1 }
                 else { historyAnchor = anchor }
@@ -1148,8 +1286,18 @@ struct HubLiveChatView: View {
                 else { history.fail(request) }
                 return
             }
-            if !history.restoring && !historyTopVisible { return }
+            if !history.hasMore { return }
+            if !history.restoring && history.messages.count - initialCount >= 24 {
+                historyAutoPaused = false
+                return
+            }
         }
+    }
+
+    private func saveTranscript() {
+        guard let snapshot else { return }
+        api.cacheTranscript(history.transcript(snapshot), sessionID: chat.sessionId,
+                            readingMessageID: readingMessageID, readingLatest: readingLatest, readingOffset: Double(readingOffset))
     }
 
     private var composer: some View {
@@ -1539,6 +1687,18 @@ struct HubLiveChatView: View {
 
     private func follow() async {
         let conversation = chat.sessionId
+        if snapshot == nil {
+            if let cached = api.cachedTranscript(sessionID: conversation) {
+                readingLatest = cached.readingLatest
+                readingMessageID = cached.readingMessageID
+                readingOffset = CGFloat(cached.readingOffset)
+                snapshot = cached.snapshot
+                connectionLost = true
+                reconnecting = true
+            } else {
+                cachedMessages = api.cachedChat(sessionID: conversation)
+            }
+        }
         queuedMessages = nil
         queueAvailable = true
         do {
@@ -1555,8 +1715,9 @@ struct HubLiveChatView: View {
             }) { value in
                 guard !Task.isCancelled else { return }
                 let completed = snapshot?.running == true && !value.running
-                history.follow(value)
+                history.follow(value, previous: snapshot)
                 snapshot = value
+                cachedMessages = nil
                 connectionLost = false
                 reconnecting = false
                 autoLoadEarlier()
@@ -1727,6 +1888,55 @@ struct HubLiveChatView: View {
             } catch {
                 self.error = "Message could not be sent. Your text is still here."
             }
+        }
+    }
+
+    @MainActor private func refreshQuotaResume() async {
+        guard !quotaResumeBusy else { return }
+        let id = chat.sessionId
+        do {
+            let value = try await api.chatQuotaResume(sessionID: id)
+            guard !Task.isCancelled, chat.sessionId == id else { return }
+            quotaResume = value
+            quotaResumeUnavailable = false
+        } catch {
+            guard !Task.isCancelled, chat.sessionId == id else { return }
+            quotaResumeUnavailable = true
+        }
+    }
+
+    @MainActor private func setQuotaResume(_ enabled: Bool) async {
+        guard !quotaResumeBusy, let current = quotaResume,
+              current.sessionId == chat.sessionId, current.enabled != enabled else { return }
+        quotaResumeBusy = true
+        quotaResumeError = nil
+        defer { quotaResumeBusy = false }
+        do {
+            let value = try await api.setChatQuotaResume(sessionID: current.sessionId, revision: current.revision, enabled: enabled)
+            guard chat.sessionId == current.sessionId else { return }
+            quotaResume = value
+        } catch {
+            guard chat.sessionId == current.sessionId else { return }
+            quotaResumeError = "Could not confirm the continuation setting. Open its status before trying again."
+            if let value = try? await api.chatQuotaResume(sessionID: current.sessionId) { quotaResume = value }
+        }
+    }
+
+    @MainActor private func cancelQuotaResume() async {
+        guard !quotaResumeBusy else { return }
+        quotaResumeBusy = true
+        quotaResumeError = nil
+        let id = chat.sessionId
+        defer { quotaResumeBusy = false }
+        do {
+            let current = try await api.chatQuotaResume(sessionID: id)
+            let value = try await api.cancelChatQuotaResume(sessionID: id, revision: current.revision)
+            guard chat.sessionId == id else { return }
+            quotaResume = value
+        } catch {
+            guard chat.sessionId == id else { return }
+            quotaResumeError = "Could not confirm cancellation. Check continuation status; it may still be scheduled."
+            if let value = try? await api.chatQuotaResume(sessionID: id) { quotaResume = value }
         }
     }
 
@@ -2997,10 +3207,15 @@ struct HubHelpersSheet: View {
     var body: some View {
         HubNavigation(pushed: pushed) {
             List {
+                Section {
+                    Text("Helpers are separate tasks with their own recorded work and model. Open one to see its progress, findings and result.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    HubHelperRoutingPolicySection()
+                }
                 if helpers.isEmpty { Text("This chat has not started any helpers.").foregroundStyle(.secondary) }
                 ForEach(helpers) { helper in
                     NavigationLink(tag: helper.id, selection: $selection) {
-                        HubHelperWorkView(api: api, helper: helper, stop: stop)
+                        HubHelperTransparencyView(api: api, helper: helper)
                     } label: {
                         HStack(spacing: 10) {
                             HubHelperStateIcon(state: helper.state)

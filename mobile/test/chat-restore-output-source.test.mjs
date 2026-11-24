@@ -13,9 +13,10 @@ test('sparse top windows can load earlier even while reading latest', () => {
   assert.ok(!auto.includes('!readingLatest'));
   assert.ok(auto.includes('historyTopVisible || history.restoring'));
   assert.ok(view.includes('onPreferenceChange(EarlierChatOffset.self)'));
-  assert.ok(view.includes('Button("Load earlier messages")'));
+  assert.ok(view.includes('Button(historyAutoPaused ? "Continue loading earlier messages" : "Load earlier messages")'));
+  assert.ok(view.includes('Button("Cancel") { historyRequest = 0 }'));
   assert.ok(view.includes('.id(message.id)'));
-  assert.ok(view.includes('for _ in 0..<8'));
+  assert.ok(view.includes('for _ in 0..<4'));
   assert.ok(api.includes('loading == request, cursor == request.cursor, firstSequence == request.before'));
   assert.ok(api.includes('generation += 1\n        let request = Request'));
 });

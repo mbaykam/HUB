@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A21000000000000000000001 /* HubHelperTransparencyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A21000000000000000000002 /* HubHelperTransparencyView.swift */; };
 		A1E000000000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000002; };
 		A1D000000000000000000001 /* HubWorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000002; };
 		A1C000000000000000000011 /* HubSpeechSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C000000000000000000012 /* HubSpeechSettingsView.swift */; };
@@ -75,6 +76,7 @@ A17000000000000000000007 = {isa = PBXBuildFile; fileRef = A170000000000000000000
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A21000000000000000000002 /* HubHelperTransparencyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubHelperTransparencyView.swift; sourceTree = "<group>"; };
 		A1E000000000000000000003 /* zh */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh; path = zh.lproj/Localizable.strings; sourceTree = "<group>"; };
 		A1D000000000000000000002 /* HubWorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubWorkspaceUITests/HubWorkspaceUITests.swift; sourceTree = "<group>"; };
 		A1D000000000000000000003 /* HubWorkspaceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = HubWorkspaceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -207,6 +209,7 @@ A17000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 214
 				A1C00000000000000000001C /* HubRoutineEditorView.swift */,
 				A1C00000000000000000001E /* HubMarkdownText.swift */,
 				A1C000000000000000000004 /* HubLiveChatView.swift */,
+				A21000000000000000000002 /* HubHelperTransparencyView.swift */,
 				A1C000000000000000000020 /* HubDictation.swift */,
 				A1C000000000000000000022 /* HubAppActivity.swift */,
 				A1C000000000000000000024 /* HubPhoneSense.swift */,
@@ -384,6 +387,7 @@ A17000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 214748
 				A1C00000000000000000001B /* HubRoutineEditorView.swift in Sources */,
 				A1C00000000000000000001D /* HubMarkdownText.swift in Sources */,
 				A1C000000000000000000003 /* HubLiveChatView.swift in Sources */,
+				A21000000000000000000001 /* HubHelperTransparencyView.swift in Sources */,
 				A20000000000000000000001 /* HubNotesView.swift in Sources */,
 				A20000000000000000000010 /* HubBriefingView.swift in Sources */,
 				A20000000000000000000003 /* HubNoteEditor.swift in Sources */,

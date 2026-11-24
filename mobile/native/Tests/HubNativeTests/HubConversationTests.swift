@@ -1025,6 +1025,34 @@ final class HubConversationTests: XCTestCase {
         XCTAssertFalse(page.hasMore)
     }
 
+    func testOversizedHistoryResponsesReduceTheSameReadOnlyPageAndKeepTimeoutBounded() async throws {
+        let api = try client()
+        var sizes: [Int] = []
+        CatalogFixture.responder = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/page")
+            XCTAssertEqual(request.timeoutInterval, 15)
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.requestBody(request)) as? [String: Any])
+            let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
+            let args = try XCTUnwrap(payload["args"] as? [String: Any])
+            let query = try XCTUnwrap(args["request"] as? [String: Any])
+            sizes.append(try XCTUnwrap(query["maxMessages"] as? Int))
+            XCTAssertEqual(query["beforeSeq"] as? Int, 80)
+            XCTAssertEqual(query["throughSeq"] as? Int, 100)
+            if sizes.count < 3 { return (200, Data(repeating: 32, count: 4 * 1_024 * 1_024 + 1)) }
+            let record: [String: Any] = ["type": "event", "event": ["seq": 74, "type": "user/message", "data": [
+                "source": ["kind": "user"], "content": [["type": "text", "text": "One authoritative row"]],
+            ]]]
+            return (200, try JSONSerialization.data(withJSONObject: [
+                "type": "server-response", "rpcId": try XCTUnwrap(envelope["rpcId"] as? String),
+                "result": ["ok": true, "value": ["records": [record], "hasMore": false]],
+            ]))
+        }
+        let page = try await api.chatHistory(sessionID: "owned-chat", through: 100, before: 80)
+        XCTAssertEqual(sizes, [200, 40, 8])
+        XCTAssertEqual(page.messages.map(\.text), ["One authoritative row"])
+        XCTAssertEqual(CatalogFixture.requests.count, 3)
+    }
+
     func testPlannerWritesUseStableDraftIDAndServerItemVersion() async throws {
         let api = try client()
         let id = UUID()
