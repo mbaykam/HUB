@@ -397,6 +397,8 @@ struct HubDictationButton: View {
                 }
             }
             .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
         }
         .accessibilityLabel(dictation.isActive ? "Stop voice typing" : "Type with your voice")
         .accessibilityIdentifier(identifier)
