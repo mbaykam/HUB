@@ -280,6 +280,10 @@ final class HubWorkspaceUITests: XCTestCase {
             XCTAssertLessThanOrEqual(draft.frame.maxY, button.frame.minY, identifier)
         }
         capture("Full-width multiline chat composer")
+        // Fixture launches share saved drafts; do not leak this message into the Stop test.
+        draft.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: message.count))
+        let cleared = draft.value as? String
+        XCTAssertTrue(cleared == "" || cleared == "Chat…")
     }
 
     @MainActor
