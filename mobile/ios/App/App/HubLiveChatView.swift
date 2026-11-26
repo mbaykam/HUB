@@ -1381,7 +1381,10 @@ struct HubLiveChatView: View {
                                 appsOpen = true
                             } label: { Label("Conversation outputs", systemImage: "doc.richtext") }
                         } label: {
-                            Image(systemName: "plus").frame(width: 44, height: 44)
+                            Image(systemName: "plus")
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                                .accessibilityElement(children: .ignore)
                         }
                         .accessibilityLabel("More actions")
                         .accessibilityIdentifier("hub.chat.more")
@@ -1397,7 +1400,12 @@ struct HubLiveChatView: View {
                             dictation.cancel()
                             composerFocused = false
                             voice()
-                        } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
+                        } label: {
+                            Image(systemName: "waveform")
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                                .accessibilityElement(children: .ignore)
+                        }
                         .accessibilityLabel("Voice")
                         .accessibilityIdentifier("hub.chat.voice")
                     }
@@ -1408,6 +1416,8 @@ struct HubLiveChatView: View {
                                 .frame(width: 40, height: 40)
                                 .background(Circle().fill(accent))
                                 .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                                .accessibilityElement(children: .ignore)
                         }
                         .accessibilityLabel("Stop")
                         .accessibilityIdentifier("hub.chat.stop")
@@ -1420,6 +1430,8 @@ struct HubLiveChatView: View {
                                 .frame(width: 40, height: 40)
                                 .background(Circle().fill(canSend ? accent : accent.opacity(0.10)))
                                 .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                                .accessibilityElement(children: .ignore)
                                 .animation(.easeOut(duration: 0.15), value: canSend)
                         }
                         .accessibilityLabel("Send")

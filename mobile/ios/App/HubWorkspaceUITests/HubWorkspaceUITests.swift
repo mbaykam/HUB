@@ -272,12 +272,12 @@ final class HubWorkspaceUITests: XCTestCase {
         XCTAssertEqual(draft.value as? String, message)
         XCTAssertGreaterThan(draft.frame.height, idleHeight)
         XCTAssertGreaterThan(draft.frame.width, app.frame.width * 0.75)
-        for identifier in ["hub.chat.more", "hub.chat.dictate", "hub.chat.voice"] {
+        for identifier in ["hub.chat.more", "hub.chat.dictate", "hub.chat.voice", "hub.chat.stop"] {
             let button = app.buttons[identifier]
-            XCTAssertTrue(button.isHittable)
-            XCTAssertGreaterThanOrEqual(button.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(button.frame.height, 44)
-            XCTAssertLessThanOrEqual(draft.frame.maxY, button.frame.minY)
+            XCTAssertTrue(button.isHittable, identifier)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 44, identifier)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, identifier)
+            XCTAssertLessThanOrEqual(draft.frame.maxY, button.frame.minY, identifier)
         }
         capture("Full-width multiline chat composer")
     }
