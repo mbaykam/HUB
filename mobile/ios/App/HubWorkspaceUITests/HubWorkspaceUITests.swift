@@ -251,6 +251,38 @@ final class HubWorkspaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testChatComposerKeepsLongDraftAboveTheControls() {
+        let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture"])
+        let history = app.buttons["Chat history"]
+        XCTAssertTrue(history.waitForExistence(timeout: 20))
+        history.tap()
+        let conversation = app.buttons["hub.history.fixture-work"]
+        XCTAssertTrue(conversation.waitForExistence(timeout: 5))
+        conversation.tap()
+
+        let draft = app.descendants(matching: .any)["hub.chat.draft"].firstMatch
+        XCTAssertTrue(draft.waitForExistence(timeout: 6))
+        let more = app.buttons["hub.chat.more"]
+        let idleHeight = draft.frame.height
+        XCTAssertGreaterThan(draft.frame.width, app.frame.width * 0.75)
+        XCTAssertLessThanOrEqual(draft.frame.maxY, more.frame.minY)
+        draft.tap()
+        let message = "The text field should use the full width of the composer, with attachment, dictation, voice and send controls underneath rather than squeezing this message into the left half."
+        draft.typeText(message)
+        XCTAssertEqual(draft.value as? String, message)
+        XCTAssertGreaterThan(draft.frame.height, idleHeight)
+        XCTAssertGreaterThan(draft.frame.width, app.frame.width * 0.75)
+        for identifier in ["hub.chat.more", "hub.chat.dictate", "hub.chat.voice"] {
+            let button = app.buttons[identifier]
+            XCTAssertTrue(button.isHittable)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44)
+            XCTAssertLessThanOrEqual(draft.frame.maxY, button.frame.minY)
+        }
+        capture("Full-width multiline chat composer")
+    }
+
+    @MainActor
     func testNativeChatStopWaitsForTheTurnToEndAndKeepsTheDraft() {
         let app = readFixtureApp(extraArguments: ["--hub-native-chat-fixture"])
         let history = app.buttons["Chat history"]
