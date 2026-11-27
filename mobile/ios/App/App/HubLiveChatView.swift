@@ -1335,109 +1335,91 @@ struct HubLiveChatView: View {
                     }
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .bottom, spacing: 6) {
                 HubComposerField(text: $draft, focus: $composerFocused, identifier: "hub.chat.draft", live: dictation.isActive) {
                     send(fromKeyboard: true)
                 }
                 .submitLabel(.send)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-
-                // Keep controls below the field so long messages use the full width.
-                HStack(spacing: 6) {
-                    // While voice typing only the microphone (to stop) and Send stay.
-                    if !dictation.isActive {
-                        Menu {
-                            Button {
-                                composerFocused = false
-                                commandsOpen = true
-                            } label: { Label("Commands & skills", systemImage: "terminal") }
-                            .disabled(connectionLost)
-                            Button {
-                                composerFocused = false
-                                filePickerOpen = true
-                            } label: { Label("Files", systemImage: "paperclip") }
-                            .disabled(sending || connectionLost || attachmentBusy || deliveryUncertain)
-                            Button {
-                                composerFocused = false
-                                photoPickerOpen = true
-                            } label: { Label("Photos", systemImage: "photo") }
-                            .disabled(sending || connectionLost || attachmentBusy || deliveryUncertain)
-                            Button {
-                                composerFocused = false
-                                researchMode = .new
-                            } label: { Label("Research…", systemImage: "magnifyingglass") }
-                            .disabled(!fileDrafts.isEmpty)
-                            Button {
-                                composerFocused = false
-                                researchMode = .jobs
-                            } label: { Label("Research tasks", systemImage: "list.bullet.rectangle") }
-                            Button {
-                                composerFocused = false
-                                instructionsOpen = true
-                            } label: { Label("Instructions", systemImage: "doc.text") }
-                            Button {
-                                composerFocused = false
-                                appsOpen = true
-                            } label: { Label("Conversation outputs", systemImage: "doc.richtext") }
-                        } label: {
-                            Image(systemName: "plus")
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                                .accessibilityElement(children: .ignore)
-                        }
-                        .accessibilityLabel("More actions")
-                        .accessibilityIdentifier("hub.chat.more")
+                .padding(.leading, 12)
+                // While voice typing only the microphone (to stop) and Send stay.
+                if !dictation.isActive {
+                Menu {
+                    Button {
+                        composerFocused = false
+                        commandsOpen = true
+                    } label: { Label("Commands & skills", systemImage: "terminal") }
+                    .disabled(connectionLost)
+                    Button {
+                        composerFocused = false
+                        filePickerOpen = true
+                    } label: { Label("Files", systemImage: "paperclip") }
+                    .disabled(sending || connectionLost || attachmentBusy || deliveryUncertain)
+                    Button {
+                        composerFocused = false
+                        photoPickerOpen = true
+                    } label: { Label("Photos", systemImage: "photo") }
+                    .disabled(sending || connectionLost || attachmentBusy || deliveryUncertain)
+                    Button {
+                        composerFocused = false
+                        researchMode = .new
+                    } label: { Label("Research…", systemImage: "magnifyingglass") }
+                    .disabled(!fileDrafts.isEmpty)
+                    Button {
+                        composerFocused = false
+                        researchMode = .jobs
+                    } label: { Label("Research tasks", systemImage: "list.bullet.rectangle") }
+                    Button {
+                        composerFocused = false
+                        instructionsOpen = true
+                    } label: { Label("Instructions", systemImage: "doc.text") }
+                    Button {
+                        composerFocused = false
+                        appsOpen = true
+                    } label: { Label("Conversation outputs", systemImage: "doc.richtext") }
+                } label: {
+                    Image(systemName: "plus").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("More actions")
+                .accessibilityIdentifier("hub.chat.more")
+                }
+                HubDictationButton(dictation: dictation, identifier: "hub.chat.dictate") {
+                    if !dictation.isActive { dictationBase = draft }
+                    dictation.toggle(api: api)
+                }
+                .disabled(!dictation.isActive && connectionLost)
+                if !dictation.isActive {
+                    Button {
+                        dictation.cancel()
+                        composerFocused = false
+                        voice()
+                    } label: { Image(systemName: "waveform").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Voice")
+                    .accessibilityIdentifier("hub.chat.voice")
+                }
+                if snapshot?.running == true || awaitingAfter != nil {
+                    Button(action: stop) {
+                        Image(systemName: "stop.fill")
+                            .foregroundColor(HubWorkspacePalette.onAccent)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(accent))
+                            .frame(width: 44, height: 44)
                     }
-                    Spacer(minLength: 0)
-                    HubDictationButton(dictation: dictation, identifier: "hub.chat.dictate") {
-                        if !dictation.isActive { dictationBase = draft }
-                        dictation.toggle(api: api)
+                    .accessibilityLabel("Stop")
+                    .accessibilityIdentifier("hub.chat.stop")
+                    .disabled(stopRequest != nil)
+                } else {
+                    Button { send() } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.body.weight(.bold))
+                            .foregroundColor(canSend ? HubWorkspacePalette.onAccent : HubWorkspacePalette.muted)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(canSend ? accent : accent.opacity(0.10)))
+                            .frame(width: 44, height: 44)
+                            .animation(.easeOut(duration: 0.15), value: canSend)
                     }
-                    .disabled(!dictation.isActive && connectionLost)
-                    if !dictation.isActive {
-                        Button {
-                            dictation.cancel()
-                            composerFocused = false
-                            voice()
-                        } label: {
-                            Image(systemName: "waveform")
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                                .accessibilityElement(children: .ignore)
-                        }
-                        .accessibilityLabel("Voice")
-                        .accessibilityIdentifier("hub.chat.voice")
-                    }
-                    if snapshot?.running == true || awaitingAfter != nil {
-                        Button(action: stop) {
-                            Image(systemName: "stop.fill")
-                                .foregroundColor(HubWorkspacePalette.onAccent)
-                                .frame(width: 40, height: 40)
-                                .background(Circle().fill(accent))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                                .accessibilityElement(children: .ignore)
-                        }
-                        .accessibilityLabel("Stop")
-                        .accessibilityIdentifier("hub.chat.stop")
-                        .disabled(stopRequest != nil)
-                    } else {
-                        Button { send() } label: {
-                            Image(systemName: "arrow.up")
-                                .font(.body.weight(.bold))
-                                .foregroundColor(canSend ? HubWorkspacePalette.onAccent : HubWorkspacePalette.muted)
-                                .frame(width: 40, height: 40)
-                                .background(Circle().fill(canSend ? accent : accent.opacity(0.10)))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                                .accessibilityElement(children: .ignore)
-                                .animation(.easeOut(duration: 0.15), value: canSend)
-                        }
                         .accessibilityLabel("Send")
                         .accessibilityIdentifier("hub.chat.send")
                         .disabled(!canSend)
-                    }
                 }
             }
             .buttonStyle(.plain)
